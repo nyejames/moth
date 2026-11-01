@@ -50,7 +50,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::project_
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
-use crate::compiler_frontend::compiler_messages::{PreparedFailure, ProjectContextEscapeReason};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticDiscoveryStops, PreparedFailure, ProjectContextEscapeReason,
+};
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::{
     HirReachability, collect_reachability_from_function_link_facts,
@@ -1800,12 +1802,18 @@ impl BuildResult {
 /// should be emitted.
 /// The outer result transports only a builder's own error. The inner compiler result retains
 /// the canonical diagnosed, infrastructure and staged-warning ownership contract.
+///
+/// `discovery_stops` receives why optional diagnostic discovery stopped before every return
+/// that drops the owning accumulator. Pass a local slot and ignore it when the caller has no
+/// report owner for shortened checking.
 pub(crate) fn build_project<E>(
     backend: &dyn BackendBuilder<Error = E>,
     entry_path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
+    discovery_stops: &mut DiagnosticDiscoveryStops,
 ) -> Result<CompilationResult<BuildResult>, E> {
+    *discovery_stops = DiagnosticDiscoveryStops::NONE;
     let build_profile = BuildProfile::from_flags(flags);
     let valid_path = match check_if_valid_path(entry_path) {
         Ok(path) => path,
@@ -1849,11 +1857,15 @@ pub(crate) fn build_project<E>(
         FrontendCompilationMode::Canonical,
     ) {
         Ok(outcome) => outcome,
-        Err(errors) => return Ok(Err(errors)),
+        Err(errors) => {
+            *discovery_stops = warning_accumulator.discovery_stops();
+            return Ok(Err(errors));
+        }
     };
     let frontend_compilation = match frontend_outcome {
         CompilationOutcome::Success { value, .. } => value,
         CompilationOutcome::Diagnosed(reports) => {
+            *discovery_stops = warning_accumulator.discovery_stops();
             return Ok(Ok(CompilationOutcome::Diagnosed(reports)));
         }
     };
@@ -1861,6 +1873,7 @@ pub(crate) fn build_project<E>(
     let project_compilation = match ProjectCompilation::from_frontend(frontend_compilation) {
         Ok(project_compilation) => project_compilation,
         Err(error) => {
+            *discovery_stops = warning_accumulator.discovery_stops();
             let compiler_result = match finalize_project_assembly_failure(
                 error,
                 warning_accumulator,
@@ -1892,6 +1905,7 @@ pub(crate) fn build_project<E>(
     let project = match project_result {
         Ok(project) => project,
         Err(BackendInvocationFailure::Prepared(failure)) => {
+            *discovery_stops = warning_accumulator.discovery_stops();
             let compiler_result = match finalize_backend_failure(
                 failure,
                 warning_accumulator,
@@ -1903,6 +1917,7 @@ pub(crate) fn build_project<E>(
             return Ok(compiler_result);
         }
         Err(BackendInvocationFailure::Builder(error)) => {
+            *discovery_stops = warning_accumulator.discovery_stops();
             warning_accumulator.discard_successful_warnings();
             return Err(error);
         }
@@ -1933,6 +1948,7 @@ pub(crate) fn build_project<E>(
     // retained in the successful build result.
     config.config_resolution_records.clear();
     config.project_field_config_dependencies.clear();
+    *discovery_stops = warning_accumulator.discovery_stops();
     Ok(Ok(CompilationOutcome::Success {
         value: BuildResult {
             project,

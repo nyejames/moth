@@ -92,6 +92,8 @@ fn assert_has_diagnostic_code<T>(result: &CompilationResult<T>, expected_code: &
 mod package_materialisation_tests;
 #[path = "provider_sources_tests.rs"]
 mod provider_sources_tests;
+#[path = "scheduling_budget_tests.rs"]
+mod scheduling_budget_tests;
 #[path = "single_file_directory_discovery_tests.rs"]
 mod single_file_directory_discovery_tests;
 #[path = "source_identity_loading_tests.rs"]

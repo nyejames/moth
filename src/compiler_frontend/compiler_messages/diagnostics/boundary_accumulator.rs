@@ -17,7 +17,7 @@ use crate::compiler_frontend::compiler_messages::prepared_batch::{
     PreparedBatchIdentity, PreparedDiagnosticBatch, PreparedPathRow,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticCapacityResource, SourceSpanCapacityResource,
+    DiagnosticCapacityResource, DiagnosticDiscoveryStops, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::SourceDatabase;
@@ -130,11 +130,21 @@ impl SuccessfulWarningStore {
 }
 
 /// Borrowed command-owned sink for warnings staged during frontend publication.
+///
+/// It also carries the command accumulator's stop metadata so the boundary scheduler can record a
+/// project scheduling cutoff or a skipped check-only unit beside the results it returns, without
+/// owning a second accumulator or a per-module copy of the flags.
 pub(crate) struct SuccessfulWarningSink<'a> {
     store: &'a mut SuccessfulWarningStore,
+    discovery_stops: &'a mut DiagnosticDiscoveryStops,
 }
 
 impl SuccessfulWarningSink<'_> {
+    /// Union command-level stop metadata into the command accumulator.
+    pub(crate) fn merge_discovery_stops(&mut self, stops: DiagnosticDiscoveryStops) {
+        self.discovery_stops.insert(stops);
+    }
+
     pub(crate) fn set_source_package_identity(
         &mut self,
         boundary: SuccessfulWarningBoundary,
@@ -193,6 +203,8 @@ impl SuccessfulWarningSink<'_> {
 /// Empty construction has no allocations; the first local prepared append adopts its table.
 pub(crate) struct BoundaryAccumulator {
     state: Option<BoundaryAccumulatorState>,
+    /// Union of the stop metadata carried by appended prepared batches.
+    discovery_stops: DiagnosticDiscoveryStops,
     successful_warnings: SuccessfulWarningStore,
     #[cfg(test)]
     test_limits: Option<DiagnosticLimits>,
@@ -211,6 +223,7 @@ impl BoundaryAccumulator {
     pub(crate) fn new() -> Self {
         Self {
             state: None,
+            discovery_stops: DiagnosticDiscoveryStops::NONE,
             successful_warnings: SuccessfulWarningStore::default(),
             #[cfg(test)]
             test_limits: None,
@@ -230,6 +243,7 @@ impl BoundaryAccumulator {
                 path_rows: Vec::new(),
                 infrastructure_errors: None,
             }),
+            discovery_stops: DiagnosticDiscoveryStops::NONE,
             successful_warnings: SuccessfulWarningStore::default(),
             #[cfg(test)]
             test_limits: None,
@@ -251,10 +265,12 @@ impl BoundaryAccumulator {
             .as_mut()
             .expect("frontend compilation requires an initialized command string-table root");
         let warning_store = &mut self.successful_warnings;
+        let discovery_stops = &mut self.discovery_stops;
         (
             &mut state.string_table,
             SuccessfulWarningSink {
                 store: warning_store,
+                discovery_stops,
             },
         )
     }
@@ -384,7 +400,9 @@ impl BoundaryAccumulator {
         let PreparedDiagnosticBatch {
             mut prepared,
             identity,
+            discovery_stops,
         } = batch;
+        self.discovery_stops.insert(discovery_stops);
         let (string_table, mut path_rows) = match *identity {
             PreparedBatchIdentity::Local {
                 string_table,
@@ -466,6 +484,24 @@ impl BoundaryAccumulator {
             Some(existing) => existing.append(*errors),
             None => state.infrastructure_errors = Some(errors),
         }
+    }
+
+    /// Stop metadata merged from every appended prepared batch.
+    ///
+    /// WHAT: the union of module allowance and AST work-guard reasons.
+    /// WHY: report owners distinguish shortened discovery from complete checking without reading
+    ///      per-diagnostic state.
+    pub(crate) fn discovery_stops(&self) -> DiagnosticDiscoveryStops {
+        self.discovery_stops
+    }
+
+    /// Union stop metadata returned by a moved-out accumulator into this owner.
+    ///
+    /// WHAT: carries the aggregated stops back after a finish path replaces this accumulator.
+    /// WHY: the replacement owner is the one command report owners can still read, and stop
+    ///      metadata must survive the accumulator move even though the reports are already frozen.
+    pub(crate) fn merge_discovery_stops(&mut self, stops: DiagnosticDiscoveryStops) {
+        self.discovery_stops.insert(stops);
     }
 
     /// The number of drafts currently retained in this run.

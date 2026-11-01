@@ -119,6 +119,7 @@ fn boundary_validation_rejects_missing_successful_artefact_row() {
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: Vec::new(),
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     };
 
     let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

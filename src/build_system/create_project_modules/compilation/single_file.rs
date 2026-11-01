@@ -50,14 +50,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::super::FrontendCompilationMode;
-use super::super::compiled_boundary::ProjectFrontendCompilation;
+use super::super::compiled_boundary::{
+    CompiledGraphBoundary, ProjectDiagnosticBudget, ProjectFrontendCompilation,
+};
 use super::super::config_boundary;
 use super::super::file_reference_resolution::{
     SingleFileReferenceOutcome, SingleFileResolvedReference,
 };
-#[cfg(feature = "boracle")]
 use super::super::generated_store::BoundaryGeneratedFunctionStore;
-#[cfg(feature = "boracle")]
 use super::super::module_artifact_store::ModuleArtifactStore;
 use super::super::module_inventory::ModuleCompilationJob;
 use super::super::module_namespace::ModuleNamespaceSet;
@@ -474,6 +474,9 @@ fn compile_single_file_frontend_with_target(
         // Share the effective external package registry only after Stage 0 has finished every
         // provider-discovery operation that mutates it.
         let external_packages = Arc::new(builder_surface.binding_packages.clone());
+        // A synthetic single-file request still schedules source-package work and its own module,
+        // so it owns the same command-level project budget as a directory request.
+        let mut project_budget = ProjectDiagnosticBudget::from_config(config);
         let (completed_source_packages, transient_batches) = compile_source_package_inventories(
             config,
             build_profile,
@@ -481,6 +484,7 @@ fn compile_single_file_frontend_with_target(
             builder_surface,
             &external_packages,
             source_package_inventories,
+            &mut project_budget,
             &mut resource_inputs,
             string_table,
             warning_sink.as_deref_mut(),
@@ -529,11 +533,47 @@ fn compile_single_file_frontend_with_target(
             Path::new(""),
             ModuleRootRole::Normal,
         )?;
+        // The synthetic module is the graph's only consumer. Declare its slot before preparation
+        // so a command whose project threshold was already met by source-package work refuses its
+        // admission at boundary entry instead of preparing a module it could never compile.
+        let graph = ProjectModuleGraph::from_normal_roots(vec![(
+            stable_origin.clone(),
+            source_root,
+            entry_path.clone(),
+        )]);
+        let module_id = graph.entry_modules()[0];
+        if project_budget.is_exhausted() {
+            // The package diagnostics upstream stay retained. The unvisited slot is proven by the
+            // cutoff record and the command's stop flag; it never reports success or diagnosis.
+            let scheduling_cutoff = Some(canonical::refuse_scheduling_admission(
+                &project_budget,
+                warning_sink.as_deref_mut(),
+            ));
+            let boundary = CompiledGraphBoundary {
+                structure: graph,
+                modules: ModuleArtifactStore::new(1),
+                generated: BoundaryGeneratedFunctionStore::default(),
+                diagnosed: Vec::new(),
+                blocked: Vec::new(),
+                scheduling_cutoff,
+            };
+            return ProjectFrontendCompilation::new(
+                boundary,
+                completed_source_packages,
+                resource_inputs,
+                transient_batches,
+            )
+            .map(|compilation| SingleFileFrontendResult::Project(Box::new(compilation)))
+            .map_err(BoundaryPremergeFailure::from);
+        }
+
         let preparation_context = ModulePreparationContext {
             source_files,
             style_directives,
+            module_error_allowance: config.frontend_options().max_errors_per_module,
         };
 
+        #[cfg(test)]
         let graph_stable_origin = stable_origin.clone();
         #[cfg(feature = "timers")]
         let prepare_result = preparation_context.prepare_module(
@@ -582,12 +622,6 @@ fn compile_single_file_frontend_with_target(
             fallback_span,
             string_table,
         )?;
-        let graph = ProjectModuleGraph::from_normal_roots(vec![(
-            graph_stable_origin.clone(),
-            source_root,
-            entry_path,
-        )]);
-        let module_id = graph.entry_modules()[0];
         let boundary_context = canonical::BoundaryCompilationContext::new(
             config,
             build_profile,
@@ -687,6 +721,7 @@ fn compile_single_file_frontend_with_target(
             &mut resource_inputs,
             string_table,
             &mut path_interner,
+            &mut project_budget,
             warning_sink,
             SuccessfulWarningBoundary::Project,
         )?;

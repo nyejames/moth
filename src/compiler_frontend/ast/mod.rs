@@ -337,6 +337,11 @@ pub(in crate::compiler_frontend) struct AstBuildInput {
     pub module_symbols: ModuleSymbols,
     pub binding_environment: HeaderBindingEnvironment,
     pub top_level_const_fragments: Vec<TopLevelConstFragment>,
+    /// Recovery budgets for ordinary body diagnostics in this module.
+    ///
+    /// The project configuration owns the error count; the compiler owns the additional-body token
+    /// allowance. Carrying it here keeps the emitter from reading either owner.
+    pub recovery_policy: crate::compiler_frontend::module_compilation::AstRecoveryPolicy,
     /// Names of this module's own source `#Config` contracts.
     ///
     /// The boundary value map is project-wide, but source qualifier materialization must remain
@@ -371,6 +376,7 @@ impl Ast {
             module_symbols,
             binding_environment,
             top_level_const_fragments,
+            recovery_policy,
             source_build_config_contract_names,
         } = input;
         reset_ast_counters();
@@ -412,7 +418,7 @@ impl Ast {
                 path_fork,
                 source_token_owners,
             )
-            .emit(headers, string_table)?
+            .emit(headers, string_table, recovery_policy)?
         };
         let generic_instance_count = emitted.generic_instance_count;
         let build_result = {

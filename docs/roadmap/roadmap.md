@@ -29,8 +29,6 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 ## Sequenced work
 
-- [Compiler diagnostic recovery and budgets](./plans/compiler-diagnostic-recovery-and-budgets-plan.md) - Queued: measured ordinary concrete-body recovery, configurable per-module error allowances, a soft project scheduling cutoff and lightweight stop metadata. Preserve parallel preparation and future incremental compatibility without adding a scheduler or cache.
-
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked only on five-run benchmark evidence (Slice 0); investigation before narrow success-path fix
 
 - [Synthetic entry function identity](./plans/synthetic-entry-function-identity-plan.md) - Queued: replace the named implicit `start` with a typed AST entry and HIR `FunctionId`, freeing `start` as an ordinary user name. Preserve module activation, config diagnostics and JS/Wasm ABI.
@@ -106,6 +104,7 @@ Revisit these compiler representation and tooling capabilities only when their s
 | Broader compiler-wide ID bit packing | Each domain has a formal bound and measured retained-memory pressure. |
 | Cross-build or context diagnostic deduplication or caching | Repeated frozen reports are a material report-storage cost, with stable identity and invalidation specified. |
 | Full LSP protocol, incremental documents and cancellation | A separate tooling plan consumes the source, report and worker architecture. |
+| CLI/LSP diagnostic display limits and an all-generated-errors view | A separate presentation or tooling plan consumes the delivered bounded recovery, module allowance, work guard and stop metadata. [Build design](../build-system-design.md#diagnostic-budgets-and-scheduling-cutoff) and [project config](../src/docs/project-structure/project-config.mtf#diagnostic-limits) stay the permanent compiler contracts. Display limits stay separate from analysis, and a view never promises code the compiler skipped. |
 | Further path cold-store packing | A later retained-memory profile identifies cold path-node storage as a material owner; traversal layout remains a separate AoS/SoA question. |
 | Token cold-store packing | Formal token-record bounds and aggregate retained-memory evidence show that cold token data are material; keep the 8-byte token shape until both conditions hold. |
 | Extended-span deduplication | The verified `LocalSpan` split (`L=10`) remains the baseline (661,044 spans, 355 extended rows / 2,840 B); revisit only if a retained-memory profile shows repeated extended-span rows are still material. |

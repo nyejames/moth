@@ -40,7 +40,9 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     prepare_header_syntax,
 };
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
-use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
+use crate::compiler_frontend::module_compilation::{
+    AstRecoveryPolicy, DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+};
 use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, SortedHeaders, resolve_module_dependencies,
 };
@@ -856,6 +858,7 @@ fn fold_template_ast(
             module_symbols: sorted.module_symbols,
             binding_environment: sorted.binding_environment,
             top_level_const_fragments: sorted.top_level_const_fragments,
+            recovery_policy: AstRecoveryPolicy::configured_defaults(),
             source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {

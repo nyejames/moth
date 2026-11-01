@@ -39,6 +39,7 @@ use crate::projects::settings::Config;
 use rustc_hash::FxHashMap;
 
 use std::collections::{BTreeSet, VecDeque};
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -206,6 +207,8 @@ fn resolve_directory_dependency_path(
 struct ModuleDiscoveryContext<'a, 'sources> {
     project_path_resolver: &'a ProjectPathResolver,
     style_directives: &'a StyleDirectiveRegistry,
+    /// One module's configured primary-error allowance for Stage 0 preparation.
+    module_error_allowance: Option<NonZeroU32>,
     source_spans: &'a mut SourceSpanBuilders<'sources>,
     /// Snapshots selected by the reachability walk and retained after the walk completes.
     selected_source_texts: &'a mut SelectedSourceTextMap,
@@ -232,6 +235,8 @@ pub(crate) struct ModuleCompilationSchedule {
     source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
     /// Shared immutable source origins for this project or package boundary.
     source_module_origins: Arc<SourceModuleOriginTable>,
+    /// Stage 0's configured primary-error allowance for each module in this schedule.
+    module_error_allowance: Option<NonZeroU32>,
     /// Transient check-only units, kept separate from canonical publication lanes.
     check_only_jobs: Vec<CheckOnlyModuleCompilationJob>,
     /// Deferred transient source descriptors awaiting the final canonical provider state.
@@ -295,6 +300,7 @@ impl ModuleCompilationSchedule {
         let preparation_context = ModulePreparationContext {
             source_files: source_spans.sources(),
             style_directives,
+            module_error_allowance: self.module_error_allowance,
         };
         let fork_source = string_table.fork_source();
         let path_fork_source = path_interner.fork_source();
@@ -508,6 +514,7 @@ fn discover_all_modules_in_boundary(
         ));
     }
 
+    let module_error_allowance = config.frontend_options().max_errors_per_module;
     let ModuleCompilationJobBatch {
         drafts,
         resolved_edges,
@@ -518,6 +525,7 @@ fn discover_all_modules_in_boundary(
         ModuleDiscoveryContext {
             project_path_resolver,
             style_directives,
+            module_error_allowance,
             source_spans,
             selected_source_texts,
             directory_dependency_resolution,
@@ -555,6 +563,7 @@ fn discover_all_modules_in_boundary(
         source_package_dependencies,
         check_only_specs,
         source_module_origins,
+        module_error_allowance,
     )?;
     Ok(schedule)
 }
@@ -1126,6 +1135,7 @@ fn order_discovered_modules_by_compile_waves(
     source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
     check_only_specs: Vec<CheckOnlyModuleSpec>,
     source_module_origins: Arc<SourceModuleOriginTable>,
+    module_error_allowance: Option<NonZeroU32>,
 ) -> Result<ModuleCompilationSchedule, PreparedFailure> {
     let waves = project_module_graph.compile_waves()?;
 
@@ -1193,6 +1203,7 @@ fn order_discovered_modules_by_compile_waves(
         provider_bindings,
         source_package_dependencies,
         source_module_origins,
+        module_error_allowance,
         check_only_jobs: Vec::new(),
         check_only_specs,
     })
@@ -1224,6 +1235,7 @@ fn discover_modules_serial_provider_capable(
     let ModuleDiscoveryContext {
         project_path_resolver,
         style_directives,
+        module_error_allowance,
         source_spans,
         selected_source_texts,
         directory_dependency_resolution,
@@ -1240,6 +1252,7 @@ fn discover_modules_serial_provider_capable(
     let preparation_context = ModulePreparationContext {
         source_files,
         style_directives,
+        module_error_allowance,
     };
     let source_tree_index = directory_dependency_resolution.source_tree_index();
     for seed in seeds {

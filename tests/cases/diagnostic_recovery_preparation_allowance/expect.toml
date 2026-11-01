@@ -1,0 +1,20 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0039", "MOTH-RULE-0039"]
+
+# Three helper files exceed `max_errors_per_module = 2` during preparation. Only the first two
+# groups in canonical module file order survive, and the third file's group is discarded.
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0039"
+occurrence = 1
+path = "input/helper_a.moth"
+line = 1
+column = 1
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0039"
+occurrence = 2
+path = "input/helper_b.moth"
+line = 1
+column = 1

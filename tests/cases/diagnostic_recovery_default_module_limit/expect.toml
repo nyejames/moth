@@ -1,0 +1,41 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0034", "MOTH-RULE-0034", "MOTH-RULE-0034", "MOTH-RULE-0034", "MOTH-RULE-0034"]
+
+# The omitted limit defaults to five, so the first five independent bodies are retained and the
+# sixth body is never admitted.
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0034"
+occurrence = 1
+path = "input/@page.moth"
+line = 2
+column = 12
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0034"
+occurrence = 2
+path = "input/@page.moth"
+line = 6
+column = 12
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0034"
+occurrence = 3
+path = "input/@page.moth"
+line = 10
+column = 12
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0034"
+occurrence = 4
+path = "input/@page.moth"
+line = 14
+column = 12
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0034"
+occurrence = 5
+path = "input/@page.moth"
+line = 18
+column = 12

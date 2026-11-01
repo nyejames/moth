@@ -8,6 +8,7 @@
 use crate::compiler_frontend::compiler_errors::{
     CompilationResult, InfrastructureClass, InfrastructureErrors,
 };
+use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
 use crate::compiler_frontend::compiler_messages::render::terse::{
     format_terse_compilation_result, format_terse_diagnostic_reports,
@@ -33,12 +34,14 @@ pub enum ErrorKind {
 
 /// A builder SDK failure: its category, a summary, and any rendered compiler lines.
 ///
-/// `Display` writes the summary, then each rendered line on its own line.
+/// `Display` writes the summary, then each rendered line on its own line, and finally the
+/// discovery-stop explanation when diagnostic discovery ended early.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error {
     kind: ErrorKind,
     message: String,
     messages: Vec<String>,
+    discovery_stops: DiagnosticDiscoveryStops,
 }
 
 impl Error {
@@ -56,11 +59,15 @@ impl Error {
     }
 
     /// Converts diagnosed compiler reports without discarding their retained render contexts.
-    pub(crate) fn from_diagnostic_reports(reports: &DiagnosticReportSet) -> Self {
+    pub(crate) fn from_diagnostic_reports(
+        reports: &DiagnosticReportSet,
+        discovery_stops: DiagnosticDiscoveryStops,
+    ) -> Self {
         Self {
             kind: ErrorKind::Compilation,
             message: "The project failed to compile.".to_owned(),
             messages: format_terse_diagnostic_reports(reports),
+            discovery_stops,
         }
     }
 
@@ -85,6 +92,7 @@ impl Error {
             kind,
             message: summary.to_owned(),
             messages: format_terse_compilation_result(&compiler_result),
+            discovery_stops: DiagnosticDiscoveryStops::NONE,
         }
     }
 
@@ -93,6 +101,7 @@ impl Error {
             kind,
             message: message.into(),
             messages: Vec::new(),
+            discovery_stops: DiagnosticDiscoveryStops::NONE,
         }
     }
 
@@ -106,6 +115,13 @@ impl Error {
     pub fn messages(&self) -> &[String] {
         &self.messages
     }
+
+    /// Why optional diagnostic discovery stopped when this compilation failure was produced.
+    ///
+    /// Empty for complete checking and for failures that are not compiler diagnostics.
+    pub fn discovery_stops(&self) -> DiagnosticDiscoveryStops {
+        self.discovery_stops
+    }
 }
 
 impl fmt::Display for Error {
@@ -113,6 +129,9 @@ impl fmt::Display for Error {
         formatter.write_str(&self.message)?;
         for line in &self.messages {
             write!(formatter, "\n{line}")?;
+        }
+        if let Some(stop_line) = self.discovery_stops.stop_line() {
+            write!(formatter, "\n{stop_line}")?;
         }
         Ok(())
     }

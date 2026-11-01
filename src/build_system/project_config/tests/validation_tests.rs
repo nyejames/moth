@@ -26,16 +26,18 @@ use crate::builder_surface::config_schema::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
     InvalidConfigCode, InvalidConfigView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
+use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
     CompactDiagnosticBagForTest, compact_bag_for_test,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, DiagnosticDraft, InvalidConfigReason,
+    DiagnosticBag, DiagnosticDraft, DiagnosticSeverity, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplate, PublicConstTemplateKind,
@@ -43,7 +45,8 @@ use crate::compiler_frontend::folded_value::{
     PublicTemplateSlotKey,
 };
 use crate::compiler_frontend::single_source_compilation::{
-    CompiledConfigSource, ConfigCompilationRequest, FoldedConfigDeclaration, compile_config_source,
+    CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest,
+    FoldedConfigDeclaration, compile_config_source,
 };
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -52,6 +55,7 @@ use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::routing::{PageUrlStyle, parse_html_site_config};
 use crate::projects::settings::Config;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 // -------------------------
@@ -103,6 +107,41 @@ fn record(fields: Vec<(&str, PublicFoldedValue)>) -> PublicFoldedValue {
             })
             .collect(),
     )
+}
+
+/// One folded record whose fields carry explicit authored type identities.
+fn record_with_types(
+    fields: Vec<(&str, PublicFoldedValue, CanonicalTypeIdentity)>,
+) -> PublicFoldedValue {
+    PublicFoldedValue::Record(
+        fields
+            .into_iter()
+            .map(|(name, value, type_identity)| PublicFoldedField {
+                name: name.to_owned(),
+                type_identity,
+                value,
+            })
+            .collect(),
+    )
+}
+
+/// The folded identity a typed `#I32?` constant carries.
+fn optional_i32_type() -> CanonicalTypeIdentity {
+    CanonicalTypeIdentity::Option(Box::new(CanonicalTypeIdentity::Builtin(
+        CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+    )))
+}
+
+/// A grouped project record that explicitly disables one diagnostic limit.
+fn project_with_disabled_limit(field: &str) -> PublicFoldedValue {
+    record_with_types(vec![
+        (
+            "name",
+            text("docs"),
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+        ),
+        (field, PublicFoldedValue::OptionNone, optional_i32_type()),
+    ])
 }
 
 fn grouped_project() -> (&'static str, PublicFoldedValue) {
@@ -1885,6 +1924,218 @@ fn project_loop_limit_preserves_resource_bound_diagnostics() {
     assert_eq!(config.template_const_loop_iteration_limit, 1_000_000);
 }
 
+#[test]
+fn diagnostic_limits_defaults_and_none() {
+    let mut string_table = StringTable::new();
+
+    // Omitted settings take their documented defaults.
+    let (config, errors) = validate_and_apply(
+        vec![(
+            "project",
+            record(vec![("name", text("docs")), ("entry_root", text("src"))]),
+        )],
+        &mut string_table,
+    );
+    assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+    assert_eq!(config.max_errors_per_module, NonZeroU32::new(5));
+    assert_eq!(config.max_errors_per_project, NonZeroU32::new(30));
+
+    // An explicit `none` disables only its own setting.
+    let (config, errors) = validate_and_apply(
+        vec![(
+            "project",
+            project_with_disabled_limit("max_errors_per_module"),
+        )],
+        &mut string_table,
+    );
+    assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+    assert_eq!(config.max_errors_per_module, None);
+    assert_eq!(config.max_errors_per_project, NonZeroU32::new(30));
+
+    let (config, errors) = validate_and_apply(
+        vec![(
+            "project",
+            project_with_disabled_limit("max_errors_per_project"),
+        )],
+        &mut string_table,
+    );
+    assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+    assert_eq!(config.max_errors_per_module, NonZeroU32::new(5));
+    assert_eq!(config.max_errors_per_project, None);
+
+    // Both ends of the accepted range are valid.
+    for limit in [1, i32::MAX] {
+        let (config, errors) = validate_and_apply(
+            vec![(
+                "project",
+                record(vec![
+                    ("name", text("docs")),
+                    ("max_errors_per_module", int(limit)),
+                    ("max_errors_per_project", int(limit)),
+                ]),
+            )],
+            &mut string_table,
+        );
+        assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+        assert_eq!(config.max_errors_per_module, NonZeroU32::new(limit as u32));
+        assert_eq!(config.max_errors_per_project, NonZeroU32::new(limit as u32));
+    }
+}
+
+#[test]
+fn diagnostic_limits_invalid_values() {
+    let surface = BuilderSurface::with_mandatory_core();
+    let mut string_table = StringTable::new();
+
+    // A range failure underlines the authored initializer, not the record or declaration.
+    let zero_source = "project #= (\n    name = \"docs\",\n    max_errors_per_module = 0,\n)\n";
+    let compiled = compile_authored_config_source(zero_source, &surface, &mut string_table)
+        .result
+        .expect("the zero limit should fold before validation");
+    let project = compiled
+        .declarations
+        .iter()
+        .find(|declaration| string_table.resolve(declaration.name) == "project")
+        .expect("the source declares a grouped project record");
+    let expected_span = project.direct_field_spans[1];
+    assert!(
+        expected_span.is_some(),
+        "the authored limit initializer should retain a span"
+    );
+
+    let mut config = Config::new(PathBuf::from("project"));
+    let errors = test_diagnostics(
+        apply_result(validate_and_apply_config_declarations(
+            &mut config,
+            &compiled,
+            &surface.config_schemas,
+            &mut string_table,
+        ))
+        .expect_err("zero is outside the accepted range"),
+    );
+    let diagnostic = errors.first().expect("zero should be diagnosed");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("the range diagnostic should retain typed config facts");
+    assert_eq!(facts.reason, InvalidConfigCode::InvalidProjectSettingValue);
+    let primary_span = match diagnostic.primary_site() {
+        SiteRef::Local(span) => Some(span),
+        SiteRef::Absent => None,
+        SiteRef::Foreign { .. } => {
+            panic!("the range diagnostic should keep a local primary site")
+        }
+    };
+    assert_eq!(primary_span, expected_span);
+    assert_eq!(config.max_errors_per_module, NonZeroU32::new(5));
+    assert_eq!(config.max_errors_per_project, NonZeroU32::new(30));
+
+    // Each authored rejection keeps its stable reason.
+    let direct_setting =
+        |assignment: &str| format!("project #= (\n    name = \"docs\",\n    {assignment},\n)\n");
+    // A typed constant is the current way to author an explicit absence. A wrong optional type
+    // must not turn into a silently disabled limit.
+    let typed_absence = |declaration: &str| {
+        format!(
+            "limit {declaration} = none\nproject #= (\n    name = \"docs\",\n    max_errors_per_module = limit,\n)\n"
+        )
+    };
+    for (label, source, expected_reason) in [
+        (
+            "zero",
+            direct_setting("max_errors_per_module = 0"),
+            InvalidConfigCode::InvalidProjectSettingValue,
+        ),
+        (
+            "negative",
+            direct_setting("max_errors_per_module = -1"),
+            InvalidConfigCode::InvalidProjectSettingValue,
+        ),
+        (
+            "project zero",
+            direct_setting("max_errors_per_project = 0"),
+            InvalidConfigCode::InvalidProjectSettingValue,
+        ),
+        (
+            "string",
+            direct_setting("max_errors_per_module = \"5\""),
+            InvalidConfigCode::InvalidConfigValueShape,
+        ),
+        (
+            "float",
+            direct_setting("max_errors_per_module = 1.5"),
+            InvalidConfigCode::InvalidConfigValueShape,
+        ),
+        (
+            "bool",
+            direct_setting("max_errors_per_project = true"),
+            InvalidConfigCode::InvalidConfigValueShape,
+        ),
+        (
+            // An untyped `2147483648` literal defaults to `I32` and is rejected while folding, so
+            // the authored out-of-range value reaches the schema through an exact `I64` constant.
+            "above I32",
+            "limit #I64 = 2147483648\nproject #= (\n    name = \"docs\",\n    max_errors_per_module = limit,\n)\n".to_owned(),
+            InvalidConfigCode::InvalidConfigValueShape,
+        ),
+        (
+            "bool typed none",
+            typed_absence("#Bool?"),
+            InvalidConfigCode::InvalidConfigValueShape,
+        ),
+        (
+            "string typed none",
+            typed_absence("#String?"),
+            InvalidConfigCode::InvalidConfigValueShape,
+        ),
+    ] {
+        let (_, errors) = compile_and_apply_authored_config(&source, &surface, &mut string_table);
+        let facts = first_invalid_facts(&errors);
+        assert_eq!(
+            facts.reason, expected_reason,
+            "{label} should be rejected with its own reason"
+        );
+    }
+
+    // A wider integer is not an `I32?` value even when its numeric payload is in range.
+    let (_, errors) = validate_and_apply(
+        vec![(
+            "project",
+            record(vec![
+                ("name", text("docs")),
+                (
+                    "max_errors_per_module",
+                    PublicFoldedValue::FixedScalar(
+                        FixedScalarValue::signed(FixedScalar::I64, 5).expect("five fits I64"),
+                    ),
+                ),
+            ]),
+        )],
+        &mut string_table,
+    );
+    assert_eq!(
+        first_invalid_facts(&errors).reason,
+        InvalidConfigCode::InvalidConfigValueShape
+    );
+
+    // Both settings stay fixed-only, so `#Config` dependence is rejected before validation.
+    let outcome = compile_authored_config_source(
+        "module_limit #Config of I32? = 7\nproject #= (\n    name = \"docs\",\n    max_errors_per_module = module_limit,\n)\n",
+        &surface,
+        &mut string_table,
+    );
+    let failure = match outcome.result {
+        Ok(_) => panic!("fixed-only project fields must reject `#Config` dependence"),
+        Err(failure) => failure,
+    };
+    assert!(
+        config_failure_reasons(failure).contains(&(
+            "MOTH-CONFIG-0001".to_owned(),
+            Some("invalid_config.config_qualifier_fixed_field".to_owned()),
+        )),
+        "expected the fixed-field config diagnostic"
+    );
+}
+
 // -------------------------
 // Generic Builder Sections
 // -------------------------
@@ -1923,14 +2174,14 @@ fn surface_with_lappet_section() -> BuilderSurface {
     surface
 }
 
-/// Compile authored config source and apply it through the production entry point.
-fn apply_authored_config(
+/// Compile one authored config source through the compiler's config service.
+fn compile_authored_config_source(
     source_code: &str,
     surface: &BuilderSurface,
     string_table: &mut StringTable,
-) -> Config {
+) -> ConfigCompilationOutcome {
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let compiled = compile_config_source(
+    compile_config_source(
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
@@ -1948,18 +2199,59 @@ fn apply_authored_config(
         },
         string_table,
     )
-    .result
-    .expect("authored config should compile to folded declarations");
+}
+
+/// Compile authored config source and apply it through the production entry point.
+fn compile_and_apply_authored_config(
+    source_code: &str,
+    surface: &BuilderSurface,
+    string_table: &mut StringTable,
+) -> (Config, TestDiagnostics) {
+    let compiled = compile_authored_config_source(source_code, surface, string_table)
+        .result
+        .expect("authored config should compile to folded declarations");
 
     let mut config = Config::new(PathBuf::from("project"));
-    apply_result(validate_and_apply_config_declarations(
+    match apply_result(validate_and_apply_config_declarations(
         &mut config,
         &compiled,
         &surface.config_schemas,
         string_table,
-    ))
-    .expect("authored config should validate and apply");
+    )) {
+        Ok(()) => (config, test_diagnostics(Vec::new())),
+        Err(errors) => (config, test_diagnostics(errors)),
+    }
+}
+
+fn apply_authored_config(
+    source_code: &str,
+    surface: &BuilderSurface,
+    string_table: &mut StringTable,
+) -> Config {
+    let (config, errors) = compile_and_apply_authored_config(source_code, surface, string_table);
+    assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
     config
+}
+
+/// Freeze one config-service failure so tests can read its stable diagnostic identities.
+fn config_failure_reasons(failure: PreparedFailure) -> Vec<(String, Option<String>)> {
+    let mut accumulator = BoundaryAccumulator::new();
+    match failure {
+        PreparedFailure::Diagnosed(batch) => accumulator.append_prepared(batch, None),
+        PreparedFailure::Infrastructure(errors) => accumulator.append_infrastructure(errors),
+    }
+
+    accumulator
+        .finish(InstallMode::Unfrozen)
+        .expect("a diagnosed config failure must not raise an infrastructure error")
+        .iter_severity(DiagnosticSeverity::Error)
+        .map(|(_, view)| {
+            (
+                view.descriptor().code.to_owned(),
+                view.reason_key().map(str::to_owned),
+            )
+        })
+        .collect()
 }
 
 #[test]

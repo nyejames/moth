@@ -226,6 +226,26 @@ fn compiler_project_record_schema() -> ConfigSchema {
             ),
         )
         .expect("project schema is under construction");
+    // Diagnostic limits are compiler controls, so they stay fixed-only like the loop limit.
+    // No schema default: an omitted setting must stay distinguishable from an authored `none`.
+    schema
+        .register_field(
+            root,
+            ConfigSchemaField::optional(
+                "max_errors_per_module",
+                ConfigFieldShape::FixedScalar(FixedScalar::I32),
+            ),
+        )
+        .expect("project schema is under construction");
+    schema
+        .register_field(
+            root,
+            ConfigSchemaField::optional(
+                "max_errors_per_project",
+                ConfigFieldShape::FixedScalar(FixedScalar::I32),
+            ),
+        )
+        .expect("project schema is under construction");
     schema
         .validate_and_freeze()
         .expect("project schema is valid");

@@ -86,6 +86,9 @@ fn run_dev_server_with_messages(
             Yellow initial_build_report.clients_notified,
             Yellow " clients."
         );
+        if let Some(stop_line) = initial_build_report.discovery_stops.stop_line() {
+            say!(Yellow stop_line);
+        }
     }
     #[cfg(feature = "timers")]
     if let Some(snapshot) = &initial_build_report.timing_snapshot {

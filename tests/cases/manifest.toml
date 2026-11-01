@@ -3324,6 +3324,34 @@ contract = "language.functions.body_stray_comma_rejected"
 role = "primary"
 
 [[case]]
+id = "diagnostic_recovery_independent_bodies"
+path = "diagnostic_recovery_independent_bodies"
+tags = ["integration", "diagnostics", "functions"]
+contract = "language.diagnostics.ordinary_body_recovery_retains_independent_errors"
+role = "primary"
+
+[[case]]
+id = "diagnostic_recovery_module_limit_one"
+path = "diagnostic_recovery_module_limit_one"
+tags = ["integration", "diagnostics", "functions"]
+contract = "language.diagnostics.ordinary_body_recovery_module_limit"
+role = "primary"
+
+[[case]]
+id = "diagnostic_recovery_project_soft_cutoff"
+path = "diagnostic_recovery_project_soft_cutoff"
+tags = ["integration", "diagnostics", "functions"]
+contract = "language.diagnostics.project_soft_cutoff_retains_returned_module_diagnostics"
+role = "primary"
+
+[[case]]
+id = "diagnostic_recovery_repaired_source_success"
+path = "diagnostic_recovery_repaired_source_success"
+tags = ["integration", "functions"]
+contract = "language.functions.independent_concrete_bodies_execute"
+role = "primary"
+
+[[case]]
 id = "diagnostic_match_arrow_separator"
 path = "diagnostic_match_arrow_separator"
 tags = ["integration", "diagnostics"]
@@ -6355,6 +6383,13 @@ path = "template_const_loop_limit_above_hard_max_rejected"
 tags = ["integration","templates","diagnostics","config"]
 contract = "language.config.template_const_loop_iteration_limit_invalid_rejected"
 role = "boundary"
+
+[[case]]
+id = "diagnostic_limits_zero_rejected"
+path = "diagnostic_limits_zero_rejected"
+tags = ["integration","diagnostics","config"]
+contract = "language.config.diagnostic_limits_invalid_rejected"
+role = "primary"
 
 [[case]]
 id = "template_const_loop_limit_runtime_value_rejected"
@@ -18542,4 +18577,26 @@ id = "web_page_missing_import_rejected"
 path = "web_page_missing_import_rejected"
 tags = ["integration", "external-imports", "diagnostics", "html", "html-wasm"]
 contract = "language.dependencies.web_page_requires_import_rejected"
+role = "primary"
+
+[[case]]
+id = "diagnostic_recovery_preparation_allowance"
+path = "diagnostic_recovery_preparation_allowance"
+tags = ["integration", "diagnostics", "modules"]
+contract = "language.diagnostics.preparation_module_limit"
+role = "primary"
+
+
+[[case]]
+id = "diagnostic_recovery_default_module_limit"
+path = "diagnostic_recovery_default_module_limit"
+tags = ["integration", "diagnostics", "functions", "config"]
+contract = "language.diagnostics.ordinary_body_recovery_default_module_limit"
+role = "primary"
+
+[[case]]
+id = "diagnostic_recovery_unlimited_error_limits"
+path = "diagnostic_recovery_unlimited_error_limits"
+tags = ["integration", "diagnostics", "functions", "config"]
+contract = "language.diagnostics.ordinary_body_recovery_explicit_none_limits"
 role = "primary"

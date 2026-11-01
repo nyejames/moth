@@ -242,6 +242,7 @@ pub(crate) fn compile_project_frontend_with_inputs(
             warning_owner.discard_successful_warnings();
             warning_owner.append_prepared(prepared, None);
             let accumulator = std::mem::replace(warning_owner, BoundaryAccumulator::new());
+            warning_owner.merge_discovery_stops(accumulator.discovery_stops());
             Ok(CompilationOutcome::Diagnosed(
                 accumulator.finish(InstallMode::Unfrozen)?,
             ))

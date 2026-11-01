@@ -4,6 +4,7 @@
 //! remain connected to hot reload via the injected SSE client snippet.
 
 use crate::compiler_frontend::compiler_errors::CompilationResult;
+use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::compiler_messages::render::dev_server;
 use crate::projects::dev_server::dev_client::dev_client_snippet;
 use std::path::Path;
@@ -205,8 +206,9 @@ pub fn render_compiler_error_page(
     project_root: &Path,
     origin: &str,
     build_version: u64,
+    discovery_stops: DiagnosticDiscoveryStops,
 ) -> String {
-    let diagnostics_html = render_compiler_diagnostics(result, project_root);
+    let diagnostics_html = render_compiler_diagnostics(result, project_root, discovery_stops);
     render_error_page_shell("Build Failed", &diagnostics_html, origin, build_version)
 }
 
@@ -259,12 +261,21 @@ fn render_error_page_shell(
     )
 }
 
-fn render_compiler_diagnostics(result: &CompilationResult<()>, project_root: &Path) -> String {
+fn render_compiler_diagnostics(
+    result: &CompilationResult<()>,
+    project_root: &Path,
+    discovery_stops: DiagnosticDiscoveryStops,
+) -> String {
     let mut diagnostics_html = String::from("<section class=\"diagnostics\">");
     diagnostics_html.push_str(&dev_server::render_compilation_result_html(
         result,
         project_root,
     ));
+    if let Some(stop_line) = discovery_stops.stop_line() {
+        diagnostics_html.push_str("<p class=\"guidance\">");
+        diagnostics_html.push_str(&escape_html(&stop_line));
+        diagnostics_html.push_str("</p>");
+    }
     diagnostics_html.push_str("</section>");
     diagnostics_html
 }

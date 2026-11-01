@@ -130,6 +130,14 @@ fn project_policy_snapshot_preserves_known_policies_and_unknown_fallback() {
         ProjectFieldConfigPolicy::FixedOnly
     );
     assert_eq!(
+        policies.policy_for("max_errors_per_module"),
+        ProjectFieldConfigPolicy::FixedOnly
+    );
+    assert_eq!(
+        policies.policy_for("max_errors_per_project"),
+        ProjectFieldConfigPolicy::FixedOnly
+    );
+    assert_eq!(
         policies.policy_for("unregistered_metadata"),
         ProjectFieldConfigPolicy::Configurable
     );

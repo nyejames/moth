@@ -9,6 +9,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::project_
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidPathView;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use std::num::NonZeroU32;
 
 fn assert_project_config_identity(
     result: CompilationResult<()>,
@@ -84,6 +85,81 @@ fn parses_config_constant_declarations() {
         Some("release")
     );
     assert_eq!(config.template_const_loop_iteration_limit, 10001);
+}
+
+#[test]
+fn diagnostic_limits_reload_resets_state() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    let config_path = root.join(settings::CONFIG_FILE_NAME);
+    let style_directives = test_style_directives();
+    let mut config = Config::new(root);
+
+    let write_config = |source: &str| {
+        fs::write(&config_path, source).expect("should write config");
+    };
+    let load_config = |config: &mut Config| {
+        let result =
+            parse_project_config_for_test_with_html_keys(config, &config_path, &style_directives);
+        assert!(
+            matches!(result, Ok(CompilationOutcome::Success { .. })),
+            "expected a successful config load, got {result:?}"
+        );
+    };
+
+    write_config(
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_module = 7,\n    max_errors_per_project = 11,\n)\nhtml #= ()\n",
+    );
+    load_config(&mut config);
+    assert_eq!(config.max_errors_per_module, NonZeroU32::new(7));
+    assert_eq!(config.max_errors_per_project, NonZeroU32::new(11));
+
+    // Omitting both settings restores their defaults instead of keeping the reloaded values.
+    write_config("project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n");
+    load_config(&mut config);
+    assert_eq!(config.max_errors_per_module, NonZeroU32::new(5));
+    assert_eq!(config.max_errors_per_project, NonZeroU32::new(30));
+
+    // An explicit absence disables one count and leaves the other setting alone. The current
+    // grouped record has no field type context, so `none` arrives through a typed `I32?` constant.
+    write_config(
+        "module_error_limit #I32? = none\nproject #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_module = module_error_limit,\n)\nhtml #= ()\n",
+    );
+    load_config(&mut config);
+    assert_eq!(config.max_errors_per_module, None);
+    assert_eq!(config.max_errors_per_project, NonZeroU32::new(30));
+
+    write_config(
+        "project_error_limit #I32? = none\nproject #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = project_error_limit,\n)\nhtml #= ()\n",
+    );
+    load_config(&mut config);
+    assert_eq!(config.max_errors_per_module, NonZeroU32::new(5));
+    assert_eq!(config.max_errors_per_project, None);
+
+    // A rejected reload installs neither limit, even though its other value is acceptable.
+    write_config(
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_module = 0,\n    max_errors_per_project = 9,\n)\nhtml #= ()\n",
+    );
+    let result =
+        parse_project_config_for_test_with_html_keys(&mut config, &config_path, &style_directives);
+    let reports = diagnosed_reports(&result);
+    assert!(
+        reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| {
+                view.descriptor().code == "MOTH-CONFIG-0001"
+                    && view.reason_key() == Some("invalid_config.invalid_project_setting_value")
+            }),
+        "expected a rejected diagnostic limit, got {result:?}"
+    );
+    assert_eq!(config.max_errors_per_module, NonZeroU32::new(5));
+    assert_eq!(config.max_errors_per_project, NonZeroU32::new(30));
+
+    // The next valid reload starts from the defaults again.
+    write_config("project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n");
+    load_config(&mut config);
+    assert_eq!(config.max_errors_per_module, NonZeroU32::new(5));
+    assert_eq!(config.max_errors_per_project, NonZeroU32::new(30));
 }
 
 #[test]

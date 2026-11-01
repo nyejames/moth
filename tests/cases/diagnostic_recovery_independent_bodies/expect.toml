@@ -1,0 +1,19 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0034", "MOTH-RULE-0034"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0034"
+occurrence = 1
+path = "input/@page.moth"
+line = 3
+column = 12
+count = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0034"
+occurrence = 2
+path = "input/@page.moth"
+line = 7
+column = 12

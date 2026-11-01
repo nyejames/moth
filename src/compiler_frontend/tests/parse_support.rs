@@ -21,7 +21,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::report::Diagnostic
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, DiagnosticSeverity, InvalidCompileTimePathReason, PreparedFailure,
+    DiagnosticBag, DiagnosticDiscoveryStops, DiagnosticSeverity, InvalidCompileTimePathReason,
+    PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
@@ -29,7 +30,9 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderParseOptions, HeaderPreparationFailure, bind_module_headers, prepare_file_from_tokens,
     prepare_header_syntax,
 };
-use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
+use crate::compiler_frontend::module_compilation::{
+    AstRecoveryPolicy, DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+};
 use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, resolve_module_dependencies,
 };
@@ -169,6 +172,18 @@ pub(crate) fn parse_single_file_ast_build_result_with_registry(
     source: &str,
     registry: ExternalPackageRegistry,
 ) -> Result<(AstBuildResult, PathInternerFork, StringTable), PreparedFailure> {
+    parse_single_file_ast_build_result_with_recovery_policy(
+        source,
+        registry,
+        AstRecoveryPolicy::configured_defaults(),
+    )
+}
+
+pub(crate) fn parse_single_file_ast_build_result_with_recovery_policy(
+    source: &str,
+    registry: ExternalPackageRegistry,
+    recovery_policy: AstRecoveryPolicy,
+) -> Result<(AstBuildResult, PathInternerFork, StringTable), PreparedFailure> {
     let mut source_context = TestSourceContext::new("@page.moth");
 
     let mut path_fork = PathInternerFork::empty();
@@ -301,6 +316,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_registry(
             module_symbols: sorted.module_symbols,
             binding_environment: sorted.binding_environment,
             top_level_const_fragments: sorted.top_level_const_fragments,
+            recovery_policy,
             source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
@@ -341,6 +357,36 @@ pub(crate) fn parse_single_file_ast_diagnostic(source: &str) -> CompilationResul
     match parse_single_file_ast_result(source) {
         Ok(_) => panic!("source should fail during frontend parsing"),
         Err(failure) => freeze_ast_diagnostic_failure(failure),
+    }
+}
+
+/// Parses one fixture under an explicit recovery policy and reports its stop metadata.
+///
+/// WHAT: returns the frozen diagnosed result plus the stop set the AST batch carried.
+/// WHY: recovery tests need a synthetic token allowance and must observe stop flags, which the
+///      frozen report set deliberately does not store.
+pub(crate) fn parse_single_file_ast_diagnostic_with_policy(
+    source: &str,
+    recovery_policy: AstRecoveryPolicy,
+) -> (CompilationResult<()>, DiagnosticDiscoveryStops) {
+    match parse_single_file_ast_build_result_with_recovery_policy(
+        source,
+        ExternalPackageRegistry::new(),
+        recovery_policy,
+    ) {
+        Ok(_) => panic!("source should fail during frontend parsing"),
+        Err(PreparedFailure::Diagnosed(batch)) => {
+            let stops = batch.discovery_stops();
+            let mut accumulator = BoundaryAccumulator::new();
+            accumulator.append_prepared(batch, None);
+            let result = accumulator
+                .finish(InstallMode::Frozen)
+                .map(CompilationOutcome::Diagnosed);
+            (result, stops)
+        }
+        Err(PreparedFailure::Infrastructure(errors)) => {
+            (Err(*errors), DiagnosticDiscoveryStops::NONE)
+        }
     }
 }
 

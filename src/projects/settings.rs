@@ -18,11 +18,12 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::module_compilation::{
-    DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS, FrontendOptions,
+    DEFAULT_MAX_ERRORS_PER_MODULE, DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS, FrontendOptions,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::{BTreeMap, HashMap};
+use std::num::NonZeroU32;
 use std::path::PathBuf;
 
 /// The canonical language source file extension (without dot).
@@ -52,6 +53,12 @@ pub const TOP_LEVEL_CONST_TEMPLATE_NAME: &str = "#const_template";
 pub const IMPLICIT_START_FUNC_NAME: &str = "start";
 pub const TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY: &str = "template_const_loop_iteration_limit";
 pub const MAX_TEMPLATE_CONST_LOOP_ITERATIONS: usize = 1_000_000;
+
+/// Default soft command-wide threshold of returned primary errors that stops new scheduling.
+///
+/// Omission accepts the default and an explicit absence disables the threshold.
+pub const DEFAULT_MAX_ERRORS_PER_PROJECT: NonZeroU32 =
+    NonZeroU32::new(30).expect("the default project error threshold is non-zero");
 
 // Capacity heuristics for compiler-side vectors. They avoid repeated growth on typical input.
 pub const MINIMUM_STRING_TABLE_CAPACITY: usize = 32;
@@ -170,6 +177,16 @@ pub struct Config {
     pub entry_root: PathBuf,
     /// Per-loop expansion limit for compile-time template loops.
     pub template_const_loop_iteration_limit: usize,
+    /// Primary errors retained per module before optional diagnostic recovery stops.
+    ///
+    /// `None` disables the module allowance. Fixed-only project config supplies the value, and an
+    /// omitted setting uses the compiler-owned `DEFAULT_MAX_ERRORS_PER_MODULE`.
+    pub max_errors_per_module: Option<NonZeroU32>,
+    /// Soft command-wide threshold of returned primary errors that stops new compilation work.
+    ///
+    /// `None` disables the threshold. Fixed-only project config supplies the value, and an omitted
+    /// setting uses [`DEFAULT_MAX_ERRORS_PER_PROJECT`]. The threshold is not a maximum result count.
+    pub max_errors_per_project: Option<NonZeroU32>,
     pub version: Option<String>,
     pub author: Option<String>,
     pub license: Option<String>,
@@ -205,6 +222,8 @@ impl Config {
             entry_dir: user_specified_path,
             entry_root: PathBuf::from(""),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+            max_errors_per_module: Some(DEFAULT_MAX_ERRORS_PER_MODULE),
+            max_errors_per_project: Some(DEFAULT_MAX_ERRORS_PER_PROJECT),
             version: None,
             author: None,
             license: None,
@@ -221,10 +240,12 @@ impl Config {
     /// Project the settings the compiler frontend consumes.
     ///
     /// WHY: the frontend must not read this configuration container. The project tool owns the
-    ///      translation, so only the template loop ceiling crosses the boundary.
+    ///      translation, so only the template loop ceiling and module error allowance cross the
+    ///      boundary.
     pub(crate) fn frontend_options(&self) -> FrontendOptions {
         FrontendOptions {
             template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
+            max_errors_per_module: self.max_errors_per_module,
         }
     }
 
@@ -326,6 +347,8 @@ impl Default for Config {
             entry_dir: PathBuf::new(),
             entry_root: PathBuf::from("src"),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+            max_errors_per_module: Some(DEFAULT_MAX_ERRORS_PER_MODULE),
+            max_errors_per_project: Some(DEFAULT_MAX_ERRORS_PER_PROJECT),
             project_name: String::from("html_project"),
             version: None,
             author: None,

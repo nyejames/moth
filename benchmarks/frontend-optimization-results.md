@@ -7043,3 +7043,168 @@ the Phase 6 close.
   `RAYON_NUM_THREADS=1` and the default pool, and match the Phase 5 render baseline apart from the
   four accepted Phase 5 presentation changes.
 - `moth build docs --release` produced byte-identical output (83 files) serially and in parallel.
+
+## Diagnostic Recovery - Phase 2 Ordinary-Body Recovery (2026-11-01)
+
+Phase 2 of the diagnostic recovery and budgets plan lets the AST emitter continue after a failed ordinary concrete function body. It admits further eligible bodies within the module error allowance (default 5) and a compiler-owned token work guard. The baseline is activation commit `2ab2dde38`, which stopped at the first body error.
+
+- Toolchain: rustc/cargo `1.99.0 (b940084d7)`, Apple Silicon `aarch64-apple-darwin`, 10 logical CPUs, default threads.
+- Recovery timing: release `moth check --terse` wall time, one warm-up per pair, seven interleaved runs per binary and workload. Raw output stays under `tmp/`.
+- Clean-path timing: `just bench-frontend-check`, five interleaved runs per checkout.
+
+### Work-guard allowance selection
+
+Ordinary bodies across the docs project and the benchmark corpus (232 bodies) retain a median of 23 tokens, a mean of 52, p90 of 123 and a maximum of 714. The generated recovery workloads use 68-token bodies (about p75). `recovery-independent` places eight failing bodies eight valid bodies apart among 64 valid bodies. `recovery-suffix-N` has one failing body followed by N valid bodies.
+
+| workload | `2ab2dde38` ms | 1024 ms | 4096 ms | 16384 ms |
+| --- | ---: | ---: | ---: | ---: |
+| `recovery-suffix-64` | 8.29 | 8.71 | 9.94 | 9.84 |
+| `recovery-suffix-256` | 9.92 | 10.99 | 11.98 | 17.08 |
+| `recovery-suffix-1024` | 15.66 | 16.53 | 17.53 | 22.45 |
+| `recovery-independent` | 8.92 | 8.67 | 9.51 | 9.47 |
+| `clean-suffix-1024` (repaired control) | 491.00 | 495.91 | 493.60 | 492.73 |
+
+| allowance | errors found in `recovery-independent` | worst-case extra work over fail-fast |
+| ---: | ---: | ---: |
+| 1024 | 2 of 8 | about 0.9 ms |
+| 4096 | 5 of 8 (module allowance reached) | about 1.9 ms |
+| 16384 | 5 of 8 (module allowance reached) | about 6.8 ms |
+
+4096 tokens is the chosen `AST_RECOVERY_WORK_TOKENS`. It is the smallest candidate that reaches the default five-error allowance on the independent workload. 1024 lost three reachable independent errors. 16384 found nothing more and spent about 3.5 times the extra work on long suffixes. With 4096 the extra time over fail-fast stays near 2 ms from `recovery-suffix-256` to `recovery-suffix-1024` while whole-command time grows with the file, so the admitted work is bounded by the guard rather than by file size.
+
+### Limit modes
+
+| workload (directory project) | `2ab2dde38` ms | candidate ms | errors | stop reason |
+| --- | ---: | ---: | ---: | --- |
+| default limits, 1024-body suffix | 17.33 | 19.24 | 1 | work guard |
+| default limits, independent | 10.60 | 11.08 | 5 | module allowance |
+| `max_errors_per_module = 1`, 1024-body suffix | 17.33 (fail-fast) | 17.75 | 1 | module allowance |
+| `max_errors_per_module = 1`, independent | 10.60 (fail-fast) | 10.17 | 1 | module allowance |
+| both limits `none`, 1024-body suffix | n/a | 18.79 | 1 | work guard |
+| both limits `none`, independent | n/a | 12.15 | 8 | work guard |
+
+With allowance 1 the retained diagnostic matches the fail-fast baseline and the failure path stays within run spread. With both count limits disabled the work guard still ends discovery and nothing reserves storage in proportion to a limit.
+
+### Clean path
+
+| case | `2ab2dde38` median ms | candidate median ms | change |
+| --- | ---: | ---: | ---: |
+| `docs_frontend` | 968.131 | 958.245 | -1.0% |
+| `type_stress_frontend` | 28.948 | 28.555 | -1.4% |
+| `template_stress_frontend` | 24.478 | 23.353 | -4.6% |
+| `generic_scaling_160_frontend` | 814.083 | 798.006 | -2.0% |
+| `many_tiny_files_frontend` | 21.007 | 20.877 | -0.6% |
+| `one_module_kitchen_sink_frontend` | 29.633 | 29.385 | -0.8% |
+| `grouped_not_runtime_512_frontend` | 13.831 | 13.974 | +1.0% |
+| `numeric_grouped_arithmetic_32_frontend` | 9.607 | 9.685 | +0.8% |
+| suite average | 136.87 | 133.92 | -2.2% |
+
+Across all 76 frontend cases the largest median increase is +1.0% (`grouped_not_runtime_512_frontend`), inside its run spread, and no case repeats a regression. Each pair ran the baseline first, so small candidate gains are ordering noise rather than a speedup. The clean path allocates nothing for recovery: the emitter keeps one empty bag and scalar counters until a body fails.
+
+### Validation
+
+`just validate` passed on the Phase 2 tree (unit tests, integration 3087/3087, docs check). `just fmt-check` and `just clippy` were clean.
+
+## Diagnostic Recovery - Phase 3 Project Scheduling Cutoff (2026-11-01)
+
+Release binaries for `2ab2dde38` (activation baseline) and the Phase 3 candidate, `moth check --terse`, seven interleaved runs after one warm-up. Each generated project has 80 modules with eight valid functions per module. An erroneous module adds one unresolved start value, so it returns one primary error. The default project threshold is 30.
+
+| Workload | Baseline median ms | Candidate median ms | Modules admitted (baseline / candidate) | Errors | Stop line |
+| --- | ---: | ---: | --- | --- | --- |
+| 80 clean modules | 213.51 | 212.60 | 80 / 80 | 0 / 0 | no |
+| 80 erroneous modules (early cutoff) | 48.37 | 31.66 | 80 / 30 | 80 / 30 | yes |
+| errors in modules 45 to 76 (late cutoff) | 149.86 | 141.05 | 80 / 75 | 32 / 30 | yes |
+
+A separate fifteen-run interleave compared the uncapped failure path. The baseline on 80 erroneous modules took a median of 50.65 ms. The candidate with `max_errors_per_project` set to `none` took 50.73 ms and returned all 80 errors, so the budget plumbing adds no measurable cost when the threshold is disabled. The capped candidate took 33.00 ms in the same interleave.
+
+Admission happens between serial module jobs, so the only overshoot is the batch of the job already admitted. There is no parallel module scheduling to measure. Directory discovery still prepares every module before scheduling, so preparation work is not reduced by the cutoff. In the late-cutoff workload the remaining cost is that discovery plus the 75 admitted modules.
+
+The existing `benchmarks/data-layout/diagnosed` workload (40 modules with one error each) now stops at 30 errors with the project scheduling cutoff line under the default threshold.
+
+### Validation
+
+`just validate` passed on the Phase 3 tree (integration 3089/3089, docs clean). `just fmt-check` and `just clippy` were clean.
+
+## Diagnostic Recovery - Phase 4 Acceptance Matrix (2026-11-01)
+
+Release binaries for `2ab2dde38` (activation baseline, fail-fast) and the final candidate, `moth check --terse`, interleaved runs after one warm-up. Peak memory is the `maximum resident set size` reported by `/usr/bin/time -l`. The generators and raw captures stay in untracked `tmp/`.
+
+### Expensive bodies within the work guard
+
+Each heavy body instantiates generic functions for its own concrete type, completes numeric arithmetic through mutable locals and builds runtime templates over folded template constants. The suffix workload puts one failing body before 40 heavy bodies. The independent workload adds a failing body before every eighth heavy body. Nine runs.
+
+| Workload | Baseline median ms | Candidate median ms | Baseline peak MiB | Candidate peak MiB | Errors (baseline / candidate) | Stop |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| clean, 40 heavy bodies | 43.53 | 43.98 | 29.9 | 30.2 | 0 / 0 | none |
+| one failure then 40 heavy bodies | 10.79 | 12.49 | 13.0 | 14.6 | 1 / 1 | work guard |
+| failure before every eighth heavy body | 10.15 | 12.26 | 12.9 | 14.5 | 1 / 3 | work guard |
+
+Heavy bodies are about 160 tokens, so the 4096-token guard admits roughly 25 of them after the first failure. The admitted recovery work costs about 2 ms and 1.6 MiB over fail-fast on these workloads, which is under 5% of the clean full check of the same source. The guard, not the module allowance, ends the independent workload after three errors, which is the intended bound on expensive bodies.
+
+### Disabled limits
+
+The Phase 2 independent workload (eight failing bodies among 64 valid bodies), seven runs on the candidate:
+
+| Limits | Median ms | Peak MiB | Errors | Stop |
+| --- | ---: | ---: | --- | --- |
+| `max_errors_per_module = 1` | 12.21 | 15.31 | 1 | module allowance |
+| defaults | 13.12 | 15.89 | 5 | module allowance |
+| both `none` | 13.68 | 16.31 | 8 | work guard |
+
+Disabling both counts adds memory only for the extra bodies checked. Nothing reserves storage in proportion to a limit.
+
+### Incremental reuse
+
+The compiler has no module artefact reuse across requests, so the reuse row of the matrix is not applicable. `diagnostic_recovery_request_policy_isolation` covers per-request policy reset instead.
+
+### Final clean path
+
+`just bench-frontend-check` on `2ab2dde38` and the final production tree. Five pairs overlapped worker compilation and are not used. Six pairs ran on an otherwise idle machine, three with the baseline first and three with the candidate first.
+
+| Measure | Baseline first | Candidate first | All six |
+| --- | ---: | ---: | ---: |
+| suite average, baseline ms | 135.52 | 136.28 | 135.65 |
+| suite average, candidate ms | 135.25 | 133.93 | 135.06 |
+| suite change | -0.2% | -1.7% | -0.4% |
+
+Cases that were above 2% with the baseline first mostly reversed sign with the candidate first, so run order rather than the change explains them. The cases still above 2% across all six pairs, plus the largest order-sensitive ones, were rechecked with release binaries over 41 alternating-order `moth check` runs per binary, comparing the compiler-reported compile time:
+
+| Case | Baseline first | Candidate first | All six | Release compile time |
+| --- | ---: | ---: | ---: | ---: |
+| `many_tiny_files_frontend` | +6.0% | -1.8% | -0.6% | +0.2% |
+| `module_graph_frontend` | +3.8% | -5.0% | -1.4% | -0.3% |
+| `numeric_origin_fanout_32_frontend` | +3.1% | -3.2% | +1.8% | +0.2% |
+| `tiny_one_file_frontend` | +2.8% | -3.0% | +1.2% | +0.0% |
+| `numeric_copy_chain_32_frontend` | +2.8% | -2.3% | +2.3% | +1.4% |
+| `numeric_copy_chain_128_frontend` | +2.1% | +1.7% | +2.5% | +1.2% |
+| `environment_stress_frontend` | +1.0% | +3.9% | +2.4% | -0.8% |
+
+No rechecked workload is slower by more than 1.4% in release builds. The largest release difference is on the 2.7 ms numeric copy chain, roughly 40 µs, and the Phase 2 binary shows a similar difference there. That source has one function body, so per-body recovery bookkeeping cannot account for it and code layout is the likelier cause. A clean build adds one budget check per admitted module and allocates nothing for recovery.
+
+Three small cases remained above 2% across all six idle pairs of the opt-level 0 frontend bench: `numeric_copy_chain_128_frontend` +2.55% (6/6 pairs slower), `environment_stress_frontend` +2.39% (5/6) and `numeric_copy_chain_32_frontend` +2.33% (4/6). The absolute difference is 0.24 to 0.44 ms and does not grow with workload size (`numeric_copy_chain_512_frontend` is +0.27%). Release compile time for the same sources is within 1.4%. The maintainer explicitly accepted this result on 2026-11-01 rather than requiring further correction.
+
+### Validation
+
+`just validate-full` passed on the final tree.
+
+## Diagnostic Recovery - Merge Audit Follow-up (2026-11-02)
+
+The follow-up audit changed presentation only: the builder SDK error text and the dev server browser page now render the same discovery-stop line as the CLI, and the module error default moved to its compiler owner. The semantic recovery path, the work guard and the budget accounting are unchanged, so this section re-measures the accepted candidate `2bc1bbb8b` against the follow-up tree to confirm no movement rather than to re-derive the earlier matrix.
+
+Method as before: release binaries for both trees, interleaved runs on an idle machine. Success cases report the compiler-reported `Done in` time over 16 runs per binary. Error cases print no timing summary, so they report wall clock over 25 interleaved runs. The fixture generator, the run scripts and the raw output stay in untracked `tmp/`, so these figures are measured but not reproduced by a checked-in harness.
+
+| Workload | Accepted median ms | Follow-up median ms | Change |
+| --- | ---: | ---: | ---: |
+| clean, 40 heavy bodies | 35.87 | 35.85 | -0.07% |
+| `environment-stress.moth` | 3.84 | 3.82 | -0.52% |
+| `fold-stress.moth` | 4.88 | 4.86 | -0.52% |
+| one failure then 40 heavy bodies | 10.59 | 10.42 | -1.6% |
+| failure before every eighth heavy body | 10.39 | 10.35 | -0.4% |
+
+Peak memory is unchanged within run spread. The median `maximum resident set size` over five runs is 30.3 MiB for the clean workload, 14.7 MiB for the guarded workloads and no more than 0.2 MiB apart between the two trees. Retained error counts are also identical at one error for the guarded suffix workload and three for the independent workload, so the follow-up adds no retained AST state or typed diagnostic snapshots.
+
+The three small opt-level 0 cases the maintainer accepted on 2026-11-01 are unaffected: this follow-up adds one string format on a failure path and no work to a successful compile.
+
+### Validation
+
+`just validate` and `just validate-full` passed on the follow-up tree.

@@ -1201,6 +1201,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
     let preparation_context = super::module_preparation::ModulePreparationContext {
         source_files,
         style_directives: &style_directives,
+        module_error_allowance: config.frontend_options().max_errors_per_module,
     };
     let stable_origin = StableModuleOriginIdentity::from_relative_logical_path(
         StablePackageIdentity::project_local("synthetic-rebound-identity"),
@@ -1718,6 +1719,7 @@ pub(super) fn compiled_package(prefix: &str) -> CompiledSourcePackage {
             generated: BoundaryGeneratedFunctionStore::default(),
             diagnosed: Vec::new(),
             blocked: Vec::new(),
+            scheduling_cutoff: None,
         },
     }
 }

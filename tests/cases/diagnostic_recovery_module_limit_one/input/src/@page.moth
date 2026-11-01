@@ -1,0 +1,12 @@
+-- With a module allowance of one, only the first independent body failure is retained.
+first || -> I32:
+    return missing
+;
+
+second || -> I32:
+    return also_missing
+;
+
+valid || -> I32:
+    return 1
+;

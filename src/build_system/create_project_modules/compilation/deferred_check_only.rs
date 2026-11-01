@@ -5,13 +5,18 @@
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::SuccessfulWarningSink;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::module_compilation::ProviderMaterialisationRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
+use rustc_hash::FxHashMap;
+
+use super::super::compiled_boundary::ProjectDiagnosticBudget;
 use super::super::generated_store::BoundaryGeneratedFunctionStore;
 use super::super::module_artifact_store::ModuleArtifactStore;
+use super::super::module_identity::ModuleId;
 use super::super::module_inventory;
 use super::super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageDependency};
 use super::canonical::{BoundaryCompilationContext, compile_check_only_batches};
@@ -47,9 +52,14 @@ fn seed_boundary_materialisations(
 /// WHAT: stays in the prepared lane and calls the typed canonical batch helper directly.
 /// WHY: the deferred lane never constructs the final vessel; the source-owner tail appends
 ///      each prepared batch with its finalized snapshot.
+///
+/// The cutoff and allowance decisions share `compile_check_only_batches` and its classification
+/// with the project lane, where
+/// `diagnostic_recovery_stopped_check_only_unit_treats_unvisited_provider_as_stopped_work` covers
+/// them. No test reaches a cutoff inside this deferred package lane directly.
 #[allow(
     clippy::too_many_arguments,
-    reason = "deferred check-only compilation keeps boundary context, provider and generated stores, jobs, provider and package edges, and mutable string/path tables as separate borrows"
+    reason = "deferred check-only compilation keeps boundary context, provider and generated stores, jobs, provider and package edges, shared module allowance, command budget and stop sink, and mutable string/path tables as separate borrows"
 )]
 pub(super) fn compile_check_only_jobs_after_canonical(
     context: BoundaryCompilationContext<'_>,
@@ -58,6 +68,9 @@ pub(super) fn compile_check_only_jobs_after_canonical(
     check_only_jobs: Vec<module_inventory::CheckOnlyModuleCompilationJob>,
     provider_bindings: &[ResolvedDependencyEdge],
     source_package_dependencies: &[ResolvedSourcePackageDependency],
+    retained_module_errors: &mut FxHashMap<ModuleId, u32>,
+    budget: &mut ProjectDiagnosticBudget,
+    warning_sink: Option<&mut SuccessfulWarningSink<'_>>,
     string_table: &StringTable,
     path_interner: &PathInternerBuilder,
 ) -> Result<Vec<PreparedDiagnosticBatch>, PreparedFailure> {
@@ -70,6 +83,9 @@ pub(super) fn compile_check_only_jobs_after_canonical(
         build_source_package_dependency_index(&provider_binding_index, source_package_dependencies);
     let build_config_index = context.build_config_resolution_index();
 
+    // This package's canonical graph is already complete and published, so a refused deferred
+    // unit records only the command-level cutoff: there is no unvisited slot for it to explain.
+    let mut boundary_cutoff = None;
     compile_check_only_batches(
         &context,
         provider_store,
@@ -81,6 +97,10 @@ pub(super) fn compile_check_only_jobs_after_canonical(
         source_package_dependencies,
         &source_package_dependency_index,
         &build_config_index,
+        retained_module_errors,
+        budget,
+        &mut boundary_cutoff,
+        warning_sink,
         string_table,
         path_interner,
     )

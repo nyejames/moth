@@ -16,7 +16,8 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, DiagnosticDraft, PreparedFailure, SourceSpanCapacityResource,
+    DiagnosticBag, DiagnosticDiscoveryStops, DiagnosticDraft, DiagnosticSeverity, PreparedFailure,
+    SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole,
@@ -49,6 +50,7 @@ use super::source_discovery_error::{SourceDiscoveryError, file_prepare_failure_f
 use super::source_loading::{SelectedSourceTextMap, registered_source_read_error};
 
 use rayon::prelude::*;
+use std::num::NonZeroU32;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -191,6 +193,14 @@ impl FilePreparationStrategy {
 pub(super) struct ModulePreparationContext<'a> {
     pub(super) source_files: &'a SourceDatabase,
     pub(super) style_directives: &'a StyleDirectiveRegistry,
+    /// Primary errors this module may retain across preparation.
+    ///
+    /// WHAT: the configured `max_errors_per_module` allowance, or `None` when that limit is
+    ///       disabled. Warnings and notes never consume it.
+    /// WHY: parallel preparation may finish speculative file work whose diagnostics exceed the
+    ///      module allowance. The merge boundary owns the one canonical cut, so preparation and
+    ///      later semantic stages spend the same module allowance instead of each resetting it.
+    pub(super) module_error_allowance: Option<NonZeroU32>,
 }
 
 pub(super) fn source_is_moth_template(source_files: &SourceDatabase, source_id: SourceId) -> bool {
@@ -586,6 +596,10 @@ impl ModulePreparationContext<'_> {
     ///       produce the same per-file result records and share the same merge/remap aggregation.
     /// WHY: keeping scheduling separate from aggregation avoids Rayon overhead on tiny modules
     ///      without changing deterministic merge order or frontend ownership boundaries.
+    ///
+    /// Chunk admission is fixed before the merge starts: every planned chunk has already run or
+    /// is already scheduled when its results reach the merge. The module allowance therefore
+    /// cannot cancel or withhold a chunk; it bounds only what the merged batch retains.
     #[allow(
         clippy::too_many_arguments,
         reason = "module preparation keeps shared context, mutable string/path forks, prepared inputs, span builders, entry path, root role and size threshold as separate inputs"
@@ -669,6 +683,7 @@ impl ModulePreparationContext<'_> {
             preparation_chunks,
             module_file_count,
             base_len,
+            self.module_error_allowance,
         )
     }
 
@@ -676,7 +691,8 @@ impl ModulePreparationContext<'_> {
     ///
     /// WHAT: all scheduling strategies converge here after producing chunk records. String-table
     ///       deltas, warnings and diagnostics follow deterministic chunk order; prepared outputs
-    ///       are placed by `file_index` so header order follows the original module input.
+    ///       are placed by `file_index` so header order follows the original module input. The
+    ///       module allowance is applied only after every chunk delta has merged.
     /// WHY: chunk-local workers may finish in any order, but an unfilled slot means a selected
     ///      source was never prepared and an occupied slot means one was prepared twice.
     fn merge_file_preparation_chunks(
@@ -685,6 +701,7 @@ impl ModulePreparationContext<'_> {
         mut preparation_chunks: Vec<FilePreparationChunk>,
         module_file_count: usize,
         base_len: usize,
+        module_error_allowance: Option<NonZeroU32>,
     ) -> Result<(PreparedHeaderSyntax, Vec<DiagnosticDraft>), PreparedFailure> {
         // Completion order is a scheduler detail. Merge order is the module input order encoded
         // by deterministic chunk indexes; prepared outputs are then placed by `file_index`, so
@@ -831,12 +848,15 @@ impl ModulePreparationContext<'_> {
             // this diagnosed path, so no clone is needed to carry the diagnostics.
             let table = string_table.take_for_handoff();
             warnings.extend(diagnostics);
-            let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+            let discovery_stops =
+                retain_within_module_error_allowance(&mut warnings, module_error_allowance);
+            let mut batch = PreparedDiagnosticBatch::capture_with_required_paths(
                 DiagnosticBag::from_diagnostics(warnings),
                 table,
                 None,
                 || Some(Arc::new(path_fork.shared_table())),
             )?;
+            batch.set_discovery_stops(discovery_stops);
             return Err(PreparedFailure::Diagnosed(batch));
         }
         prepared_outputs
@@ -865,12 +885,17 @@ impl ModulePreparationContext<'_> {
                         // header aggregation failed, so the caller discards both without cloning.
                         let mut diagnostics = warnings;
                         diagnostics.extend(bag.into_diagnostics());
-                        let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                        let discovery_stops = retain_within_module_error_allowance(
+                            &mut diagnostics,
+                            module_error_allowance,
+                        );
+                        let mut batch = PreparedDiagnosticBatch::capture_with_required_paths(
                             DiagnosticBag::from_diagnostics(diagnostics),
                             string_table.take_for_handoff(),
                             None,
                             || Some(Arc::new(path_fork.shared_table())),
                         )?;
+                        batch.set_discovery_stops(discovery_stops);
                         PreparedFailure::Diagnosed(batch)
                     }
                     HeaderPreparationFailure::Infrastructure(error) => {
@@ -1244,6 +1269,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
     pub(super) fn finish(
         mut self,
     ) -> Result<(PreparedModule, Vec<DiagnosticDraft>), PreparedFailure> {
+        let module_error_allowance = self.context.module_error_allowance;
         let ordered_slots = self.prepared_outputs.into_ordered_outputs();
         let mut prepared_outputs: Vec<FileFrontendPrepareOutput> = ordered_slots
             .into_iter()
@@ -1274,12 +1300,17 @@ impl ModuleSyntaxDiscovery<'_, '_> {
                         // batch instead of cloning the local table to carry the diagnostics.
                         let mut diagnostics = self.warnings;
                         diagnostics.extend(bag.into_diagnostics());
-                        let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                        let discovery_stops = retain_within_module_error_allowance(
+                            &mut diagnostics,
+                            module_error_allowance,
+                        );
+                        let mut batch = PreparedDiagnosticBatch::capture_with_required_paths(
                             DiagnosticBag::from_diagnostics(diagnostics),
                             self.string_table,
                             None,
                             || Some(Arc::new(self.path_fork.shared_table())),
                         )?;
+                        batch.set_discovery_stops(discovery_stops);
                         PreparedFailure::Diagnosed(batch)
                     }
                     HeaderPreparationFailure::Infrastructure(error) => {
@@ -1370,6 +1401,43 @@ fn frontend_source<'a>(
             )
         }
     })
+}
+
+/// Apply one module's error allowance to the diagnostics ready for one prepared batch.
+///
+/// WHAT: keeps every warning or note and the first `allowance` error drafts in their existing
+///       canonical order, dropping later error drafts. Returns the stop metadata the batch must
+///       carry.
+/// WHY: parallel preparation may finish speculative file work that found more independent errors
+///      than the module may retain. The cut runs after canonical chunk ordering and after every
+///      chunk's string/path delta and span builder has been restored, so a discarded diagnostic
+///      still leaves its file's identity and span ownership complete.
+fn retain_within_module_error_allowance(
+    diagnostics: &mut Vec<DiagnosticDraft>,
+    allowance: Option<NonZeroU32>,
+) -> DiagnosticDiscoveryStops {
+    let Some(allowance) = allowance else {
+        return DiagnosticDiscoveryStops::NONE;
+    };
+    let mut retained_errors = 0u32;
+    let mut dropped_error = false;
+    diagnostics.retain(|diagnostic| {
+        if diagnostic.severity() != DiagnosticSeverity::Error {
+            return true;
+        }
+        if retained_errors < allowance.get() {
+            retained_errors += 1;
+            true
+        } else {
+            dropped_error = true;
+            false
+        }
+    });
+    if dropped_error {
+        DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE
+    } else {
+        DiagnosticDiscoveryStops::NONE
+    }
 }
 
 fn plan_file_preparation_chunks(

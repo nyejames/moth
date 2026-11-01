@@ -24,9 +24,10 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::names_de
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, DiagnosticDraft, DiagnosticSeverity, NamingConvention,
+    DiagnosticBag, DiagnosticDiscoveryStops, DiagnosticDraft, DiagnosticSeverity, NamingConvention,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::settings::Config;
 use std::cell::OnceCell;
@@ -146,6 +147,63 @@ fn build_command_writes_the_validated_directory_output_plan() {
     );
     assert!(temp.path().join("preview/index.html").is_file());
     assert!(!temp.path().join("dev/index.html").exists());
+}
+
+#[test]
+fn budget_stopped_build_writes_no_output_and_reports_the_cutoff() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("should create temporary project");
+    let root = temp.path();
+    let src = root.join("src");
+    fs::create_dir_all(src.join("first")).expect("should create first module directory");
+    fs::create_dir_all(src.join("second")).expect("should create second module directory");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 1,\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
+    )
+    .expect("should write project config");
+    fs::write(
+        src.join("first/@first.moth"),
+        "first || -> I32:\n    return missing_one\n;\n",
+    )
+    .expect("should write first failing module root");
+    fs::write(
+        src.join("second/@second.moth"),
+        "second || -> I32:\n    return missing_two\n;\n",
+    )
+    .expect("should write second failing module root");
+
+    let mut presented = None;
+    let completion = run_build_command(
+        &test_project_builder(),
+        root.to_str().expect("project path should be UTF-8"),
+        &[],
+        &BuildConfigInputSet::new(),
+        temp.path(),
+        |report| presented = Some(report),
+    );
+
+    assert_eq!(
+        completion.status,
+        crate::projects::ProjectCommandStatus::Failure
+    );
+    let report = presented.expect("build must present its report exactly once");
+    let Ok(CompilationOutcome::Diagnosed(reports)) = &report.outcome else {
+        panic!("a budget-stopped build must diagnose before writing output");
+    };
+    assert_eq!(
+        reports.counts().errors,
+        1,
+        "the admitted module keeps its returned diagnostic batch"
+    );
+    assert!(
+        report
+            .discovery_stops
+            .contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF),
+        "the build report must expose the project scheduling cutoff"
+    );
+    assert_path_missing(&root.join("preview"));
+    assert_path_missing(&root.join("release"));
 }
 
 #[test]

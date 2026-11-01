@@ -16,9 +16,10 @@ use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{
     CompilationOutcome, CompilationResult, InfrastructureFailure,
 };
-use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerStage, DiagnosticDiscoveryStops, PreparedFailure,
+};
 use crate::finish_command_timing;
 use crate::projects::{ProjectCommandCompletion, ProjectCommandStatus, ProjectDiagnosticCounts};
 use std::path::{Path, PathBuf};
@@ -27,6 +28,7 @@ use std::time::{Duration, Instant};
 /// One completed build command, ready for caller-owned terminal presentation.
 pub struct BuildCommandReport {
     pub duration: Duration,
+    pub discovery_stops: DiagnosticDiscoveryStops,
     pub outcome: CompilationResult<BuildCommandSuccess>,
 }
 
@@ -100,7 +102,7 @@ fn run_build_command_with_output_plan(
 ) -> ProjectCommandCompletion {
     command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Build);
     let started = Instant::now();
-    let outcome = build_command_outcome(
+    let (outcome, discovery_stops) = build_command_outcome(
         builder_selection,
         entry_path,
         flags,
@@ -110,7 +112,11 @@ fn run_build_command_with_output_plan(
     let completion = BuildCommandReport::completion(&outcome);
     let duration =
         capture_command_duration!(crate::timing::TimingMetric::CommandBuildTotal, started,);
-    let report = BuildCommandReport { duration, outcome };
+    let report = BuildCommandReport {
+        duration,
+        discovery_stops,
+        outcome,
+    };
 
     present(report);
 
@@ -127,21 +133,30 @@ fn build_command_outcome(
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
     output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, InfrastructureFailure>,
-) -> CompilationResult<BuildCommandSuccess> {
+) -> (
+    CompilationResult<BuildCommandSuccess>,
+    DiagnosticDiscoveryStops,
+) {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let build_result = match build_project(
         builder_selection.backend.as_ref(),
         entry_path,
         flags,
         build_config_inputs,
+        &mut discovery_stops,
     )
-    .unwrap_or_else(|never| match never {})?
+    .unwrap_or_else(|never| match never {})
     {
-        CompilationOutcome::Success { value, .. } => value,
-        CompilationOutcome::Diagnosed(reports) => {
-            return Ok(CompilationOutcome::Diagnosed(reports));
+        Ok(CompilationOutcome::Success { value, .. }) => value,
+        Ok(CompilationOutcome::Diagnosed(reports)) => {
+            return (Ok(CompilationOutcome::Diagnosed(reports)), discovery_stops);
         }
+        Err(errors) => return (Err(errors), discovery_stops),
     };
-    write_build_outputs_with_plan(build_result, output_plan_builder)
+    (
+        write_build_outputs_with_plan(build_result, output_plan_builder),
+        discovery_stops,
+    )
 }
 
 fn write_build_outputs_with_plan(

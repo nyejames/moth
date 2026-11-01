@@ -96,9 +96,9 @@ One closed `$project` invocation supplies project identity/settings. It creates 
 
 `name` and `version` are required Strings. The name is a valid Moth project identifier, never inferred from the checkout directory. Version has no default. A starter's `"0.1.0"` input fallback is not a project-field default, and a same-named input contract does not satisfy an omitted directive argument.
 
-Only predefined fields are accepted and published through `@project`. Arbitrary metadata, misspellings and `metadata = ...` are errors. Reusable project constants belong in ordinary source/support packages, not an open config record.
+Only predefined fields are accepted and published through `@project`. The compiler-control diagnostic limits `max_errors_per_module` and `max_errors_per_project` are predefined but never published. Arbitrary metadata, misspellings and `metadata = ...` are errors. Reusable project constants belong in ordinary source/support packages, not an open config record.
 
-Project identity, discovery and compiler-control fields are fixed-only. Reject `$config` dependence in `name`, `entry_root` and `template_const_loop_iteration_limit`, including indirect dependence through helpers. An equal folded literal does not erase input provenance. Ordinary input-independent constant expressions remain valid.
+Project identity, discovery and compiler-control fields are fixed-only. Reject `$config` dependence in `name`, `entry_root`, `template_const_loop_iteration_limit`, `max_errors_per_module` and `max_errors_per_project`, including indirect dependence through helpers. An equal folded literal does not erase input provenance. Ordinary input-independent constant expressions remain valid.
 
 `entry_root` defaults to `"src"` and obeys the containment rules under `Source indexing and source sets`. The loop limit uses one compiler-owned default and resource-bound validator, independently of source literal ranges and numeric type selection.
 
@@ -465,6 +465,26 @@ Operational failure aborts the owning compilation through the ordered `Infrastru
 which contains typed `InfrastructureFailure` causes. A proven compiler bug also ends it, using the
 compiler-bug boundary rather than an ordinary diagnosed outcome. Neither publishes partial semantic state.
 
+A budget-stopped request is distinct from a diagnosed or blocked module. Unvisited work is neither successful nor diagnosed, gains no manufactured source error and cannot satisfy a provider, linkability or backend gate. A stopped graph records request-level stop metadata and never becomes a `ProjectCompilation`. A stop is recorded only after a real user error and actually skipped work. Reaching a limit exactly on the last available unit claims no skipped work.
+
+### Diagnostic budgets and scheduling cutoff
+
+`$project` supplies two compiler-control settings, `max_errors_per_module` and `max_errors_per_project`. The project-config reference owns their syntax, defaults and validation. Config bootstrap validates both once and projects compact options. The frontend receives only the module allowance and the command scheduler owns the project threshold. Neither setting allocates storage in proportion to its value.
+
+Before valid project settings exist, bootstrap uses the compiler defaults and gives config/bootstrap diagnostics no manufactured semantic module owner. Invalid configuration cannot partially install its own limits. Before and during module discovery, the request's project threshold governs early errors without inventing module identities for them. Directory discovery currently prepares every module before semantic scheduling and ends the request at the first diagnosed preparation, which returns at most one module allowance, so the threshold first changes admission after discovery. A synthetic single-file request compiles its source packages first and prepares its one module only if the threshold has not been reached. Every request, including a development rebuild, starts with zero counts and recomputes omitted settings from defaults.
+
+After discovery, each module applies its own allowance under the compiler's `Diagnostic recovery and error budgets` rules. Check-only units attributed to one canonical module share its allowance. Generated failures belong to the requesting module transaction. A dependency package's module setting may govern its own modules, but its project threshold cannot reset the invoking command's total.
+
+The invoking command charges each returned primary error once at its aggregation boundary, across selected project and source-package work. At each normal admission boundary, if the accumulated total meets or exceeds the project threshold, the scheduler admits no new compilation work. Already-admitted jobs finish under their own policies and every module-bounded result they return is retained. The total may therefore exceed the threshold, even in serial execution. There is no hard project result cap, global error quota, project-level truncation or forced cancellation.
+
+For example, a returned total of 28 followed by a module with five retained errors yields 33. The scheduler admits no further modules and keeps all five of that module's errors.
+
+A budget-stopped `build`, `dev` or `check` request leaves the unadmitted remainder of its selected graph unvisited and remains failed. The command policies below describe the complete work of an unstopped request.
+
+The threshold is checked between actual admissions, not after eagerly enqueueing the remaining project. A cheap job description is not running semantic work. Parallel groups settle and merge canonically before any threshold-dependent admission. Semantic module compilation is serial today, so admissions happen at boundary entry, before each ready module after blocked dependants are classified, before each source package, before each check-only unit and before the synthetic single-file module is prepared. The only overshoot is the batch of the job already admitted. Directory discovery prepares files serially. File preparation runs in parallel only for a synthetic single-file module, and the module allowance is applied after its chunks settle in canonical order. A future parallel module scheduler must define deterministic group membership and admission independently of completion order. Sorting race-selected diagnostics afterwards is insufficient. Counting stays at the scheduler owner, never in tokenizer, expression or diagnostic hot paths.
+
+Stopped scheduling still returns and finalises every live span owner, identity delta and diagnostic context, including those of discarded diagnostics. Generated-request deduplication and atomic publication are unchanged. Successful scheduling adds only cheap policy state at its owner. CLI and editor display limits are separate tooling policy and never promise analysis the compiler skipped.
+
 ### Success-only `ProjectCompilation`
 
 A linkable `ProjectCompilation` contains the canonical structure, project globals, successful module artefacts, generated sidecars and selected entry/package assembly inputs. Every artefact required by those roots has succeeded.
@@ -805,6 +825,8 @@ The first development build compiles the full selected graph. Later builds reuse
 Entries relink or regenerate when their implementation, dormant-root, runtime-dependency, generated, entry-settings, project-field or relevant backend-config inputs change. A private body change need not recompile semantic consumers. Dormant root changes affect entries that activate that root. Runtime-dependency changes update capabilities, glue and resource planning.
 
 Configuration and exact typed-input dependence use existing fingerprint domains, including private implementation and compatibility. Fingerprints carry the canonical exact numeric type and value wherever those facts affect semantics; there is no numeric-profile dimension. Static Bool selection creates no new fingerprint family and never changes declaration identity. Project-field dependencies remain field-granular. Documentation-only changes update documentation/editor indexes without invalidating semantic consumers or executable variants.
+
+Diagnostic limits are request policy, not semantic reuse identity. Changing them invalidates no successful semantic artefact, and reused successful modules consume no error allowance. A changed module whose current compilation failed or was skipped never reuses an old success, and a failed request emits no partial project output. Future diagnostic replay must validate source/dependency identity, policy and coverage separately. A report truncated at one allowance is not complete after the allowance rises. A legitimately replayed diagnostic counts once in the new request.
 
 The cache-reuse validation gate requires evidence that a semantic or physical cache reused an artefact before testing invalidation. Cover private effect/body changes, public contracts, entry outcome changes, generated sidecars and backend/profile/ABI compatibility against that demonstrated reuse. A cold recompilation or a writer's skipped-unchanged result alone cannot satisfy this gate. Rebuild/write/serve tests prove current output freshness separately, including exact entry cause codes and diagnosed exports without treating old successful output as the new result.
 

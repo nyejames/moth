@@ -1,0 +1,11 @@
+first || -> I32:
+    return missing_one
+;
+
+second || -> I32:
+    return missing_two
+;
+
+third || -> I32:
+    return missing_three
+;

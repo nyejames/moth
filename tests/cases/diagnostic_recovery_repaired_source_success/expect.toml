@@ -1,0 +1,4 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains_exactly_once = ["diagnostic_recovery_repaired_source_success total=3"]

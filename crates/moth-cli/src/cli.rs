@@ -560,6 +560,7 @@ fn trigger_test_panic(path: &Path) {
 }
 
 fn render_build_outcome(report: BuildCommandReport) {
+    let stop_line = report.discovery_stops.stop_line();
     match report.outcome {
         Ok(CompilationOutcome::Success { value, warnings }) => {
             print_build_success_message(value.output_file_count, report.duration);
@@ -573,21 +574,34 @@ fn render_build_outcome(report: BuildCommandReport) {
         Ok(CompilationOutcome::Diagnosed(reports)) => print_diagnostic_reports(&reports),
         Err(errors) => print_infrastructure_errors(&errors),
     }
+    if let Some(stop_line) = stop_line {
+        println!("{stop_line}");
+    }
 }
 
 fn render_check_outcome(report: CheckCommandReport, terse: bool) {
+    let stop_line = report.discovery_stops.stop_line();
     if terse {
         print_terse_compilation_result(&report.messages);
+        // Tools read the summary as the final terse line, so the stop line precedes it.
+        if let Some(stop_line) = stop_line {
+            println!("{stop_line}");
+        }
         println!(
             "{}",
             format_terse_summary_line(report.duration, report.error_count, report.warning_count)
         );
-    } else if report.error_count == 0 && report.warning_count == 0 {
+        return;
+    }
+    if report.error_count == 0 && report.warning_count == 0 {
         say!(Dark White "---------------------");
         say!(success_message(report.duration));
         say!(Bold Green "No errors or warnings");
     } else {
         print_compilation_result(&report.messages);
+    }
+    if let Some(stop_line) = stop_line {
+        println!("{stop_line}");
     }
 }
 

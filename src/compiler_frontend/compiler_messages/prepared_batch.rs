@@ -7,7 +7,9 @@ use super::compiler_errors::InfrastructureFailure;
 use super::diagnostic_bag::DiagnosticBag;
 use super::diagnostics::draft::DiagnosticDraft;
 use super::diagnostics::prepared::{PreparedDiagnostic, prepare_draft};
-use crate::compiler_frontend::compiler_messages::{CompilerStage, DiagnosticSeverity};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerStage, DiagnosticDiscoveryStops, DiagnosticSeverity,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
@@ -39,6 +41,8 @@ pub(super) enum PreparedBatchIdentity {
 pub struct PreparedDiagnosticBatch {
     pub(super) prepared: Vec<PreparedDiagnostic>,
     pub(super) identity: Box<PreparedBatchIdentity>,
+    /// Why optional discovery stopped for this batch's owner; empty for complete work.
+    pub(super) discovery_stops: DiagnosticDiscoveryStops,
 }
 
 impl std::fmt::Debug for PreparedDiagnosticBatch {
@@ -156,6 +160,7 @@ impl PreparedDiagnosticBatch {
                 string_table,
                 path_rows,
             }),
+            discovery_stops: DiagnosticDiscoveryStops::NONE,
         }
     }
 
@@ -182,6 +187,7 @@ impl PreparedDiagnosticBatch {
         Ok(Self {
             prepared,
             identity: Box::new(PreparedBatchIdentity::Root { path_rows }),
+            discovery_stops: DiagnosticDiscoveryStops::NONE,
         })
     }
 
@@ -211,6 +217,7 @@ impl PreparedDiagnosticBatch {
                 string_table,
                 path_rows,
             }),
+            discovery_stops: DiagnosticDiscoveryStops::NONE,
         })
     }
     /// Capture ordered owner diagnostics with one shared local identity table.
@@ -241,6 +248,7 @@ impl PreparedDiagnosticBatch {
                 string_table,
                 path_rows,
             }),
+            discovery_stops: DiagnosticDiscoveryStops::NONE,
         })
     }
     pub(crate) fn rebind_source_ids(
@@ -306,6 +314,20 @@ impl PreparedDiagnosticBatch {
             .any(|diagnostic| diagnostic.severity() == DiagnosticSeverity::Error)
     }
 
+    /// Primary user errors in this batch; warnings, notes and labels never count.
+    ///
+    /// WHAT: the one bounded scan the command's project budget charges per returned batch.
+    /// WHY: the threshold counts retained primary errors only, so a batch's total diagnostic count
+    ///      would overcharge warning batches and mixed success lanes.
+    pub(crate) fn primary_error_count(&self) -> u32 {
+        let errors = self
+            .prepared
+            .iter()
+            .filter(|diagnostic| diagnostic.severity() == DiagnosticSeverity::Error)
+            .count();
+        u32::try_from(errors).unwrap_or(u32::MAX)
+    }
+
     pub(crate) fn attach_frozen_identity_handle_if_missing(
         &mut self,
         handle: FrozenIdentityHandle,
@@ -317,6 +339,25 @@ impl PreparedDiagnosticBatch {
 
     pub(crate) fn diagnostic_count(&self) -> usize {
         self.prepared.len()
+    }
+
+    /// Why optional diagnostic discovery stopped for this batch's owner.
+    ///
+    /// WHAT: the union of stop reasons recorded before the owner captured this batch.
+    /// WHY: report owners distinguish shortened discovery from successful complete checking
+    ///      without inventing an error or marking unvisited work successful.
+    pub(crate) fn discovery_stops(&self) -> DiagnosticDiscoveryStops {
+        self.discovery_stops
+    }
+
+    /// Attach the owner's stop metadata to a diagnosed batch.
+    pub(crate) fn set_discovery_stops(&mut self, stops: DiagnosticDiscoveryStops) {
+        self.discovery_stops = stops;
+    }
+
+    /// Union later stop metadata into this batch.
+    pub(crate) fn merge_discovery_stops(&mut self, stops: DiagnosticDiscoveryStops) {
+        self.discovery_stops.insert(stops);
     }
 
     #[cfg(feature = "data_layout_memory_probe")]

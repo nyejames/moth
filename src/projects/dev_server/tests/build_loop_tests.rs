@@ -30,10 +30,11 @@ use crate::compiler_frontend::compiler_messages::diagnostics::report::Diagnostic
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, DiagnosticDraft, DiagnosticSeverity, NamingConvention,
+    DiagnosticBag, DiagnosticDiscoveryStops, DiagnosticDraft, DiagnosticSeverity, NamingConvention,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::dev_server::dev_client::tests::run_client_test;
+use crate::projects::dev_server::error_page::escape_html;
 use crate::projects::dev_server::sse::tests::{close_sse, connect_sse, read_generations};
 use crate::projects::dev_server::state::{DevServerState, OutputCapturePoint};
 use crate::projects::dev_server::watch;
@@ -403,8 +404,8 @@ impl DevBuildWorker for FakeWorker {
         &self.request
     }
 
-    fn build(&mut self) -> CompilationResult<BuildResult> {
-        match self
+    fn build(&mut self) -> (CompilationResult<BuildResult>, DiagnosticDiscoveryStops) {
+        let result = match self
             .response
             .take()
             .expect("each fake worker builds exactly once")
@@ -419,7 +420,8 @@ impl DevBuildWorker for FakeWorker {
                 CompilerStage::DevelopmentServer,
                 "synthetic compiler bug during dev worker rebuild"
             ),
-        }
+        };
+        (result, DiagnosticDiscoveryStops::NONE)
     }
 
     fn write_outputs(
@@ -984,7 +986,7 @@ fn project_build_executor_preserves_non_utf8_entry_path_as_file_failure() {
         write_mode: WriteMode::SkipUnchanged,
     };
     let mut worker = executor.create_worker(request);
-    let failure = match worker.build() {
+    let failure = match worker.build().0 {
         Ok(_) => panic!("an unrepresentable entry path must not reach compilation"),
         Err(failure) => failure,
     };
@@ -1019,7 +1021,7 @@ fn project_build_executor_separates_warnings_from_output_write_failures() {
         write_mode: WriteMode::SkipUnchanged,
     };
     let mut worker = executor.create_worker(request);
-    let mut compiled = match worker.build() {
+    let mut compiled = match worker.build().0 {
         Ok(CompilationOutcome::Success {
             value,
             warnings: None,
@@ -1842,8 +1844,8 @@ impl DevBuildWorker for RecordingProjectWorker {
         self.inner.request()
     }
 
-    fn build(&mut self) -> CompilationResult<BuildResult> {
-        let result = self.inner.build();
+    fn build(&mut self) -> (CompilationResult<BuildResult>, DiagnosticDiscoveryStops) {
+        let (result, discovery_stops) = self.inner.build();
         if let Ok(CompilationOutcome::Diagnosed(messages)) = &result {
             let mut diagnostics = messages.iter_severity(DiagnosticSeverity::Error);
             let (report, diagnostic) = diagnostics
@@ -1874,7 +1876,7 @@ impl DevBuildWorker for RecordingProjectWorker {
                 "the builtin failure origin label should retain a resolvable source site"
             );
         }
-        result
+        (result, discovery_stops)
     }
 
     fn write_outputs(
@@ -2114,4 +2116,119 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
     );
     assert_eq!(get_bytes(&state, "/site.css"), supporting_asset);
     assert!(post_entry_error(&state, rejected.version).starts_with("HTTP/1.1 409 "));
+}
+
+/// Dev project config that retains one module error before discovery stops.
+const MODULE_LIMIT_CONFIG_SOURCE: &str = "project #= (name = \"diagnostic_stop\", entry_root = \"src\", max_errors_per_module = 1)\nhtml #= ()\n";
+
+/// Two independent ordinary bodies whose unknown names end discovery after the first error.
+const TWO_FAILING_BODIES_SOURCE: &str = "\
+first || -> I32:
+    return missing_one
+;
+
+second || -> I32:
+    return missing_two
+;
+";
+
+/// The same two bodies repaired, plus a page, so a later cycle can publish a successful build.
+const REPAIRED_BODIES_SOURCE: &str = "\
+first || -> I32:
+    return 1
+;
+
+second || -> I32:
+    return 2
+;
+
+#[:<main>repaired</main>]
+";
+
+#[test]
+fn real_module_allowance_stop_reaches_browser_error_page_and_clears_after_repair() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("create real stop project");
+    let root = temp.path();
+    let source = root.join("src");
+    fs::create_dir_all(&source).expect("create source directory");
+    fs::write(root.join("config.moth"), MODULE_LIMIT_CONFIG_SOURCE).expect("write config");
+    fs::write(source.join("@page.moth"), TWO_FAILING_BODIES_SOURCE).expect("write failing page");
+
+    let state = Arc::new(DevServerState::new(root.join("dev")));
+    let executor = ProjectBuildExecutor::new(
+        || BuilderSelection::new(HtmlProjectBuilder::new()),
+        BuildConfigInputSet::new(),
+    );
+
+    let stopped = run_single_build_cycle(&state, &executor, root, &[]);
+    assert!(
+        !stopped.build_ok,
+        "the real worker must report the module allowance stop as a failed build"
+    );
+    assert_eq!(
+        stopped.discovery_stops,
+        DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE,
+        "the real worker must retain the module allowance stop"
+    );
+    let served_error_page = get_page(&state);
+    let stop_line = DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE
+        .stop_line()
+        .expect("module allowance must provide a stop line");
+    let escaped_stop_line = escape_html(&stop_line);
+    let failed_error_html = {
+        let build = state.build_state.lock().expect("build state");
+        assert!(!build.last_build_ok);
+        assert_eq!(
+            build
+                .last_build_messages_summary
+                .matches(&stop_line)
+                .count(),
+            1,
+            "the terminal summary must explain the stop exactly once"
+        );
+        build
+            .last_error_html
+            .clone()
+            .expect("a diagnosed build must publish an error page")
+    };
+    assert_eq!(
+        served_error_page.matches(&escaped_stop_line).count(),
+        1,
+        "the served error page must explain the stop exactly once"
+    );
+    assert_eq!(
+        failed_error_html.matches(&escaped_stop_line).count(),
+        1,
+        "the stored browser error page must explain the stop exactly once"
+    );
+
+    fs::write(source.join("@page.moth"), REPAIRED_BODIES_SOURCE).expect("write repaired page");
+    let repaired = run_single_build_cycle(&state, &executor, root, &[]);
+    assert!(repaired.build_ok, "the repaired page must build");
+    let build = state.build_state.lock().expect("build state");
+    assert!(build.last_build_ok);
+    assert!(
+        build.last_error_html.is_none(),
+        "a successful rebuild must clear the stale error page"
+    );
+    assert_eq!(
+        build
+            .last_build_messages_summary
+            .matches(&stop_line)
+            .count(),
+        0,
+        "a complete build must not retain an earlier stop explanation"
+    );
+    drop(build);
+    let repaired_page = get_page(&state);
+    assert!(
+        repaired_page.contains("repaired"),
+        "the served page must come from the repaired build"
+    );
+    assert_eq!(
+        repaired_page.matches(&escaped_stop_line).count(),
+        0,
+        "a successful build must not retain the stop explanation"
+    );
 }

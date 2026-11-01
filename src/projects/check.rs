@@ -18,6 +18,7 @@ use crate::capture_command_duration;
 use crate::command_timing_scope;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::finish_command_timing;
 use crate::projects::{ProjectCommandCompletion, ProjectCommandStatus, ProjectDiagnosticCounts};
@@ -25,6 +26,7 @@ use std::time::{Duration, Instant};
 
 struct CheckOutcome {
     messages: CompilationResult<()>,
+    discovery_stops: DiagnosticDiscoveryStops,
 }
 
 /// One completed frontend-only check, ready for caller-owned terminal presentation.
@@ -33,6 +35,7 @@ pub struct CheckCommandReport {
     pub status: ProjectCommandStatus,
     pub error_count: usize,
     pub warning_count: usize,
+    pub discovery_stops: DiagnosticDiscoveryStops,
     pub messages: CompilationResult<()>,
 }
 
@@ -60,6 +63,7 @@ pub fn run_check_command(
         status: completion.status,
         error_count,
         warning_count,
+        discovery_stops: outcome.discovery_stops,
         messages: outcome.messages,
     };
 
@@ -97,6 +101,7 @@ fn run_check_for_tests(
         status: completion.status,
         error_count,
         warning_count,
+        discovery_stops: outcome.discovery_stops,
         messages: outcome.messages,
     };
     renderer(&report);
@@ -146,8 +151,11 @@ fn execute_check(
     build_config_inputs: &BuildConfigInputSet,
     builder_selection: &BuilderSelection,
 ) -> CheckOutcome {
+    let (messages, discovery_stops) =
+        execute_check_messages(path, build_config_inputs, builder_selection);
     CheckOutcome {
-        messages: execute_check_messages(path, build_config_inputs, builder_selection),
+        messages,
+        discovery_stops,
     }
 }
 
@@ -155,7 +163,7 @@ fn execute_check_messages(
     path: &str,
     build_config_inputs: &BuildConfigInputSet,
     builder_selection: &BuilderSelection,
-) -> CompilationResult<()> {
+) -> (CompilationResult<()>, DiagnosticDiscoveryStops) {
     execute_check_messages_with_warning_owner(
         path,
         build_config_inputs,
@@ -171,8 +179,11 @@ fn execute_check_messages_with_warning_owner(
     create_warning_owner: impl FnOnce(
         crate::compiler_frontend::symbols::string_interning::StringTable,
     ) -> BoundaryAccumulator,
-) -> CompilationResult<()> {
-    let valid_path = check_if_valid_path(normalize_entry_path(path))?;
+) -> (CompilationResult<()>, DiagnosticDiscoveryStops) {
+    let valid_path = match check_if_valid_path(normalize_entry_path(path)) {
+        Ok(path) => path,
+        Err(error) => return (Err(error.into()), DiagnosticDiscoveryStops::NONE),
+    };
     let bootstrap = match bootstrap_project_build(
         builder_selection.backend.as_ref(),
         valid_path,
@@ -180,9 +191,12 @@ fn execute_check_messages_with_warning_owner(
     ) {
         Ok(bootstrap) => bootstrap,
         Err(failure) => {
-            return failure
-                .into_diagnostic_reports()
-                .map(CompilationOutcome::Diagnosed);
+            return (
+                failure
+                    .into_diagnostic_reports()
+                    .map(CompilationOutcome::Diagnosed),
+                DiagnosticDiscoveryStops::NONE,
+            );
         }
     };
     let BuildBootstrap {
@@ -196,7 +210,7 @@ fn execute_check_messages_with_warning_owner(
     } = bootstrap;
     let mut project_source_files = None;
     let mut warning_owner = create_warning_owner(string_table);
-    match compile_project_frontend_with_inputs(
+    let frontend_outcome = match compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
         validated_directory_output_settings.as_ref(),
@@ -207,7 +221,12 @@ fn execute_check_messages_with_warning_owner(
         &mut project_source_builder,
         &build_config_inputs,
         FrontendCompilationMode::Check,
-    )? {
+    ) {
+        Ok(outcome) => outcome,
+        Err(errors) => return (Err(errors), warning_owner.discovery_stops()),
+    };
+    let discovery_stops = warning_owner.discovery_stops();
+    let messages = match frontend_outcome {
         CompilationOutcome::Diagnosed(reports) => Ok(CompilationOutcome::Diagnosed(reports)),
         CompilationOutcome::Success { value, .. } => {
             let project_source_database = value
@@ -228,7 +247,8 @@ fn execute_check_messages_with_warning_owner(
                 ),
             }
         }
-    }
+    };
+    (messages, discovery_stops)
 }
 #[cfg(test)]
 fn execute_check_messages_with_record_limit(
@@ -236,7 +256,7 @@ fn execute_check_messages_with_record_limit(
     build_config_inputs: &BuildConfigInputSet,
     builder_selection: &BuilderSelection,
     records: usize,
-) -> CompilationResult<()> {
+) -> (CompilationResult<()>, DiagnosticDiscoveryStops) {
     execute_check_messages_with_warning_owner(
         path,
         build_config_inputs,

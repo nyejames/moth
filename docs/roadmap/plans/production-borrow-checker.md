@@ -162,6 +162,14 @@ The historical review proposed: (1) put all root words in one contiguous state b
 
 None of these five approaches was prototyped or measured in the recorded investigation. Contiguity reduces allocator churn but may leave quadratic bytes and copying. Sparse storage can trade allocation savings for worse unions. A changed function's callers may need new summaries. No implementation approach should be locked before measuring these trade-offs and proving the cross-stage invariants.
 
+### Deferred function-boundary borrow recovery
+
+Function-boundary borrow recovery waits for the next suitable production driver or fact-lifetime change after per-function analysis inputs, publication and required call-summary dependencies are stable and measured. It need not wait for every future precision experiment or the whole memory model, and it does not promote Boracle into the production acceptance path.
+
+The follow-up would stop a function at its first final user-facing borrow conflict, discard or keep unreachable only its unpublished scratch and continue an independent function only with trustworthy required summaries. Recursive summary groups may need a coarser boundary. An unavailable summary blocks dependent checking without a fabricated source error or a falsely valid default summary. Conservative proof failure stays distinct from a proven conflict.
+
+Revisit the current writes into the shared borrow report and summary convergence before changing its `?` boundaries. No success report, effect summary, generated completion or lifetime validation may consume partial failed facts. Reuse the delivered module limits and stop metadata, measure valid-path costs and test repeated or converging analyses without duplicate diagnostics. Conflict-directed precision work improves acceptance evidence rather than within-function error enumeration. Boracle keeps its independent reference and oracle roles and activation gates.
+
 ## Open work - Boracle and the production handoff
 
 Keep reference-solver findings and downstream production relevance separate. Boracle's accepted research results belong in its permanent reference/oracle authorities. This tracker owns the decision to investigate, promote or reject their **production** implications and the practical tooling/issues that must be resolved.

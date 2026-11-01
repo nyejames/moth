@@ -57,7 +57,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::FrontendCompilationMode;
 use super::compiled_boundary::{
     CompiledSourcePackage, CompletedSourcePackageRegistry, PackageBoundaryId,
-    ProjectFrontendCompilation, TransientPreparedBatch,
+    ProjectDiagnosticBudget, ProjectFrontendCompilation, TransientPreparedBatch,
 };
 use super::config_boundary;
 use super::generated_store::BoundaryGeneratedFunctionStore;
@@ -475,6 +475,7 @@ pub(super) fn premerge_failure_to_reports(
     }
     // The accumulator must own the only source handles before it unwraps its source rows.
     drop(failure_source);
+    warning_owner.merge_discovery_stops(accumulator.discovery_stops());
     accumulator.finish(InstallMode::Unfrozen)
 }
 /// Append a boundary-wide finish cause, giving infrastructure precedence over diagnostics.
@@ -1131,6 +1132,7 @@ pub(super) fn compile_source_package_inventories(
     builder_surface: &BuilderSurface,
     external_packages: &Arc<ExternalPackageRegistry>,
     inventories: Vec<SourcePackageModuleInventory>,
+    budget: &mut ProjectDiagnosticBudget,
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
     mut warning_sink: Option<&mut SuccessfulWarningSink<'_>>,
@@ -1146,6 +1148,13 @@ pub(super) fn compile_source_package_inventories(
     // check-only dependencies out of canonical package ordering and gives each job the complete
     // immutable facade registry.
     for (package_index, inventory) in inventories.into_iter().enumerate() {
+        if budget.is_exhausted() {
+            // The invoking command's threshold stops new compilation work. Each remaining package
+            // inventory was discovered but never compiled, so it has no boundary to record and its
+            // source owner is simply dropped as unvisited work.
+            canonical::refuse_scheduling_admission(budget, warning_sink.as_deref_mut());
+            break;
+        }
         let SourcePackageModuleInventory {
             package_identity,
             root_module_id,
@@ -1215,6 +1224,7 @@ pub(super) fn compile_source_package_inventories(
                     resource_inputs,
                     string_table,
                     &mut path_interner,
+                    budget,
                     warning_sink.as_deref_mut(),
                     SuccessfulWarningBoundary::SourcePackage(package_index),
                 )?;
@@ -1290,6 +1300,13 @@ pub(super) fn compile_source_package_inventories(
                     )
                 })?;
             let package = completed_source_packages.package(package_id)?;
+            // Deferred check-only units keep sharing their canonical owner's allowance across
+            // package transitions; the owner's retained errors reset only with the request.
+            let mut retained_module_errors = if check_only_jobs.is_empty() {
+                FxHashMap::default()
+            } else {
+                canonical::retained_module_error_counts(&package.boundary.diagnosed)
+            };
             let check_only_batches = deferred_check_only::compile_check_only_jobs_after_canonical(
                 canonical::BoundaryCompilationContext::new(
                     config,
@@ -1313,6 +1330,9 @@ pub(super) fn compile_source_package_inventories(
                 check_only_jobs,
                 &provider_bindings,
                 &source_package_dependencies,
+                &mut retained_module_errors,
+                budget,
+                warning_sink.as_deref_mut(),
                 string_table,
                 &path_interner,
             )?;
@@ -1422,11 +1442,14 @@ pub(crate) fn compile_directory_frontend(
 ///       package snapshot beside package-scoped failures.
 /// WHY: the terminal wrapper above owns the single final boundary freeze; this lane keeps
 ///      prepared failures typed and avoids cloning a diagnostic table solely to transport them.
+///
+/// Visible to `create_project_modules` so boundary tests can inspect the retained graph before
+/// the terminal wrapper converts a diagnosed result into reports.
 #[allow(
     clippy::too_many_arguments,
     reason = "premerge directory orchestration keeps configuration, profile, output settings, directives, mutable builder/string/source owners, build-config inputs and mode separate"
 )]
-fn compile_directory_frontend_in_premerge_lane(
+pub(super) fn compile_directory_frontend_in_premerge_lane(
     config: &Config,
     build_profile: FrontendBuildProfile,
     validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
@@ -1767,6 +1790,10 @@ fn compile_directory_frontend_in_premerge_lane(
             timing_guard_stage0_directory_compile,
             crate::timing::TimingMetric::Stage0DirectoryCompile
         );
+        // One command-owned project budget spans every selected source package and the project
+        // graph. It charges each returned diagnosed batch once and a package transition never
+        // resets its total.
+        let mut project_budget = ProjectDiagnosticBudget::from_config(config);
         let (completed_source_packages, mut transient_batches) =
             compile_source_package_inventories(
                 config,
@@ -1775,6 +1802,7 @@ fn compile_directory_frontend_in_premerge_lane(
                 builder_surface,
                 &external_packages,
                 source_package_inventories,
+                &mut project_budget,
                 &mut resource_inputs,
                 string_table,
                 Some(warning_sink),
@@ -1813,6 +1841,7 @@ fn compile_directory_frontend_in_premerge_lane(
             &mut resource_inputs,
             string_table,
             &mut project_path_interner,
+            &mut project_budget,
             Some(warning_sink),
             SuccessfulWarningBoundary::Project,
         )?;

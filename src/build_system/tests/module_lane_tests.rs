@@ -3,7 +3,7 @@
 use crate::build_system::build::{ProjectAssemblyError, ProjectCompilation};
 use crate::build_system::create_project_modules::compiled_boundary::{
     BlockedModule, BlockedProvider, CompiledGraphBoundary, CompiledSourcePackage,
-    CompletedSourcePackageRegistry, DiagnosedModule, ProjectFrontendCompilation,
+    CompletedSourcePackageRegistry, DiagnosedModule, ProjectFrontendCompilation, SchedulingCutoff,
 };
 use crate::build_system::create_project_modules::generated_store::BoundaryGeneratedFunctionStore;
 use crate::build_system::create_project_modules::module_artifact_store::{
@@ -563,6 +563,7 @@ fn test_graph_boundary(
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: Vec::new(),
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     }
 }
 
@@ -894,6 +895,7 @@ fn boundary_outcome_sorting_is_independent_of_wave_order() {
                 required_provider: BlockedProvider::Module(ModuleId::from_index(2)),
             },
         ],
+        scheduling_cutoff: None,
     };
 
     boundary.sort_outcomes();
@@ -1604,6 +1606,7 @@ fn frontend_boundary_rejects_unfinished_module_slots() {
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: Vec::new(),
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     };
     let error = match ProjectFrontendCompilation::new(
         boundary,
@@ -1682,6 +1685,7 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
             module_id: ModuleId::from_index(2),
             required_provider: BlockedProvider::Module(ModuleId::from_index(1)),
         }],
+        scheduling_cutoff: None,
     };
 
     let frontend = ProjectFrontendCompilation::new(
@@ -1849,6 +1853,7 @@ fn boundary_validation_rejects_diagnosed_lane_mismatch_in_both_directions() {
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: Vec::new(),
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     };
     let error = boundary
         .validate_invariants()
@@ -1877,6 +1882,7 @@ fn boundary_validation_rejects_blocked_lane_mismatch_in_both_directions() {
             module_id: ModuleId::from_index(0),
             required_provider: BlockedProvider::Module(ModuleId::from_index(1)),
         }],
+        scheduling_cutoff: None,
     };
     let error = boundary
         .validate_invariants()
@@ -1897,6 +1903,7 @@ fn boundary_validation_rejects_blocked_lane_mismatch_in_both_directions() {
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: Vec::new(),
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     };
     let error = boundary
         .validate_invariants()
@@ -1950,6 +1957,7 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
             },
         ],
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     };
     let error = boundary
         .validate_invariants()
@@ -2001,6 +2009,7 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
                 required_provider: BlockedProvider::Module(ModuleId::from_index(1)),
             },
         ],
+        scheduling_cutoff: None,
     };
     let error = boundary
         .validate_invariants()
@@ -2027,6 +2036,7 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
             module_id: ModuleId::from_index(0),
             required_provider: BlockedProvider::Module(ModuleId::from_index(1)),
         }],
+        scheduling_cutoff: None,
     };
     let error = boundary
         .validate_invariants()
@@ -2050,6 +2060,7 @@ fn source_package_publication_rejects_unavailable_root_slot() {
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: Vec::new(),
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     };
     let mut registry = CompletedSourcePackageRegistry::new();
     let error = registry
@@ -2298,4 +2309,151 @@ fn generated_names_stay_stable_under_sidecar_publication_reordering() {
         names_for(&beta_first),
         "generated symbol names must depend only on stable identity order, not publication order"
     );
+}
+
+/// Build one three-slot boundary whose third module was never visited.
+fn boundary_with_unvisited_slot(
+    cutoff: Option<SchedulingCutoff>,
+    string_table: &mut StringTable,
+) -> CompiledGraphBoundary {
+    let graph = ProjectModuleGraph::from_normal_roots(
+        ["success", "diagnosed", "skipped"]
+            .into_iter()
+            .map(|path| {
+                let root = PathBuf::from(format!("@{path}.moth"));
+                (
+                    StableModuleOriginIdentity::from_portable_path(
+                        StablePackageIdentity::project_local("test"),
+                        path.to_owned(),
+                        ModuleRootRole::Normal,
+                    ),
+                    root.clone(),
+                    root,
+                )
+            })
+            .collect(),
+    );
+    let mut store = ModuleArtifactStore::new(3);
+    store
+        .publish_success(
+            ModuleId::from_index(0),
+            CompiledModuleArtifact {
+                module: minimal_lane_module(PathBuf::from("@success.moth"), true),
+                interface: empty_test_interface("success".to_owned()),
+            },
+        )
+        .expect("the retained success should publish");
+    store
+        .mark_diagnosed(ModuleId::from_index(1))
+        .expect("the diagnosed slot should transition");
+    CompiledGraphBoundary {
+        structure: graph,
+        modules: store,
+        generated: BoundaryGeneratedFunctionStore::default(),
+        diagnosed: vec![DiagnosedModule {
+            module_id: ModuleId::from_index(1),
+            diagnostics: test_prepared_diagnostics("diagnosed.moth", string_table),
+        }],
+        blocked: Vec::new(),
+        scheduling_cutoff: cutoff,
+    }
+}
+
+#[test]
+fn diagnostic_recovery_incomplete_graph_is_not_success() {
+    let _path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let boundary =
+        boundary_with_unvisited_slot(Some(SchedulingCutoff::for_test(3)), &mut string_table);
+
+    // The stopped graph is a valid retained result: the cutoff record proves the unvisited slot is
+    // intentional, while the diagnosed module keeps its authoritative batch.
+    let frontend = ProjectFrontendCompilation::new(
+        boundary,
+        CompletedSourcePackageRegistry::new(),
+        ResourceInputRegistry::new(),
+        Vec::new(),
+    )
+    .expect("an intentionally incomplete graph is a valid check result");
+    assert!(frontend.has_diagnosed_or_blocked());
+
+    // Skipped slots satisfy nothing: no interface, no artefact and no success-only compilation.
+    assert!(
+        frontend
+            .project
+            .modules
+            .interface(ModuleId::from_index(2))
+            .expect("slot lookup should resolve")
+            .is_none()
+    );
+    let successful = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .map(|artifact| {
+            artifact
+                .interface
+                .module_origin
+                .logical_module_path()
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(successful, vec!["success".to_owned()]);
+    let error = match ProjectCompilation::from_frontend(frontend) {
+        Ok(_) => panic!("a stopped graph must never become a linkable project"),
+        Err(ProjectAssemblyError::Infrastructure(error)) => error,
+        Err(ProjectAssemblyError::Diagnostic { .. }) => {
+            panic!("a stopped graph rejection must remain infrastructure")
+        }
+    };
+    assert!(
+        error.message.contains("project scheduling cutoff"),
+        "the success-only gate must name the cutoff: {error:?}"
+    );
+}
+
+#[test]
+fn cutoff_boundary_without_unvisited_slots_is_valid_but_never_success() {
+    let _path_fork = PathInternerFork::empty();
+    // A command can also stop after skipping check-only units, which own no graph slot. The
+    // canonical graph is complete then, but the request is still not linkable success.
+    let boundary = test_graph_boundary(
+        vec![minimal_lane_module(PathBuf::from("@single.moth"), true)],
+        "test",
+        "single",
+    );
+    let mut boundary = boundary;
+    boundary.scheduling_cutoff = Some(SchedulingCutoff::for_test(1));
+    boundary
+        .validate_invariants()
+        .expect("a cutoff record is valid without unvisited slots");
+    assert!(boundary.require_all_successful().is_err());
+}
+
+#[test]
+fn boundary_validation_rejects_cutoff_without_a_returned_error() {
+    let _path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let boundary =
+        boundary_with_unvisited_slot(Some(SchedulingCutoff::for_test(0)), &mut string_table);
+    let error = boundary
+        .validate_invariants()
+        .expect_err("a cutoff record must follow a real returned user error");
+    assert!(
+        error
+            .message
+            .contains("before returning any primary user error")
+    );
+}
+
+#[test]
+fn unvisited_slot_without_cutoff_record_is_rejected() {
+    let _path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let boundary = boundary_with_unvisited_slot(None, &mut string_table);
+    // Only a request-level cutoff record may explain an unvisited slot; without one the graph is
+    // still unfinished and boundary validation rejects it.
+    let error = boundary
+        .validate_invariants()
+        .expect_err("an unrecorded unvisited slot is still an internal error");
+    assert!(error.message.contains("never reached a completed outcome"));
 }

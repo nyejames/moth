@@ -72,6 +72,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathInternerBuilder, Path
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::Config;
 use crate::projects::settings::ProjectMetadataField;
+use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -563,6 +564,10 @@ fn effective_project_fields_exclude_internal_unschematized_defaults() {
     config.project_name = "docs".to_owned();
     config.entry_root = PathBuf::from("src");
     config.project_config_loaded = true;
+    // Diagnostic limits are compiler controls, so non-default values must not become project
+    // metadata, fixed contract facts or `@project` members.
+    config.max_errors_per_module = NonZeroU32::new(9);
+    config.max_errors_per_project = None;
     config.extra_project_fields.push(ProjectMetadataField {
         name: "DisplayName".to_owned(),
         type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
@@ -584,6 +589,30 @@ fn effective_project_fields_exclude_internal_unschematized_defaults() {
         .map(|fact| fact.name().as_str().to_owned())
         .collect::<Vec<_>>();
     assert_eq!(fixed_names, vec!["name", "entry_root"]);
+
+    let globals = super::config_boundary::build_project_globals_interface(&config, &fields)
+        .expect("the project-global provider should build")
+        .expect("a loaded config should publish project globals");
+    let public_names = globals
+        .interface()
+        .export_bindings
+        .iter()
+        .map(|binding| binding.public_name())
+        .collect::<Vec<_>>();
+    for limit_name in ["max_errors_per_module", "max_errors_per_project"] {
+        assert!(
+            !names.contains(&limit_name),
+            "{limit_name} must stay out of the effective project fields"
+        );
+        assert!(
+            !fixed_names.iter().any(|name| name.as_str() == limit_name),
+            "{limit_name} must stay out of the fixed contract facts"
+        );
+        assert!(
+            !public_names.contains(&limit_name),
+            "{limit_name} must stay out of @project"
+        );
+    }
 }
 
 #[test]
@@ -1106,6 +1135,7 @@ fn check_only_success_batches_render_local_paths_through_production_construction
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: Vec::new(),
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     };
     let frontend = ProjectFrontendCompilation::new(
         project,
@@ -1264,6 +1294,7 @@ fn canonical_tail_success_retains_warning_source_context() {
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: Vec::new(),
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     };
     let frontend = ProjectFrontendCompilation::new(
         project,
@@ -1588,6 +1619,7 @@ fn published_warnings_capture_types_and_remap_paths_after_environment_drop() {
         generated,
         diagnosed: Vec::new(),
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     };
     drop(materialisations);
     boundary.install_boundary_identity(
@@ -1981,6 +2013,7 @@ fn publish_generated_sidecar_boundary(
         generated,
         diagnosed: Vec::new(),
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     }
 }
 

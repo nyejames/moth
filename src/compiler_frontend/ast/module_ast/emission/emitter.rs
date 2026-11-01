@@ -46,13 +46,15 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
 use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::is_capacity_exhaustion;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     templates, token_lexical,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, DiagnosticDraft, GenericSubstitutionDiagnostic, InvalidTemplateStructureReason,
-    PreparedFailure,
+    DiagnosticBag, DiagnosticDiscoveryStops, DiagnosticDraft, DiagnosticSeverity,
+    GenericSubstitutionDiagnostic, InvalidTemplateStructureReason, PreparedFailure,
 };
+use crate::compiler_frontend::module_compilation::AstRecoveryPolicy;
 use std::sync::Arc;
 
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
@@ -208,6 +210,88 @@ fn count_root_scope_arena_consumers(headers: &[Header]) -> usize {
         })
         .count()
 }
+/// One ordinary concrete body's failure, split by whether later bodies may still run.
+///
+/// WHAT: an authored diagnostic abandons only its own body; every other cause keeps the module's
+///       fatal lane exactly as it was before optional recovery.
+/// WHY: infrastructure failures, compiler bugs and numeric-deferral leaks mean shared construction
+///      state can no longer be trusted, so no later body may run after them.
+#[derive(Debug)]
+enum FunctionBodyFailure {
+    /// An authored user error. The body is abandoned and its draft may join module recovery.
+    Diagnosed(DiagnosticDraft),
+    /// A fatal lane failure that always wins over collected user diagnostics.
+    Fatal(PreparedFailure),
+}
+
+/// Additional-body accounting for one module emission pass.
+///
+/// WHAT: retains one primary draft per failed ordinary body and bounds further admissions with the
+///       module error allowance and the compiler-owned token work guard.
+/// WHY: each header already owns its bounded body tokens, so recovery needs only scalar counters
+///      and one draft bag. Bodies before the first diagnosis keep the ordinary fail-fast path.
+struct BodyDiagnosticRecovery {
+    errors: DiagnosticBag,
+    /// Whether at least one body has been abandoned; later bodies are optional discovery.
+    active: bool,
+    /// Primary error drafts retained so far, which is the module allowance's unit.
+    retained_errors: u32,
+    remaining_work_tokens: u32,
+    module_error_allowance: Option<std::num::NonZeroU32>,
+    stops: DiagnosticDiscoveryStops,
+}
+
+impl BodyDiagnosticRecovery {
+    fn new(policy: AstRecoveryPolicy) -> Self {
+        Self {
+            errors: DiagnosticBag::new(),
+            active: false,
+            retained_errors: 0,
+            remaining_work_tokens: policy.body_work_allowance,
+            module_error_allowance: policy.module_error_allowance,
+            stops: DiagnosticDiscoveryStops::NONE,
+        }
+    }
+
+    fn is_active(&self) -> bool {
+        self.active
+    }
+
+    /// Retains one failed body's primary draft and reports whether recovery must end.
+    ///
+    /// WHAT: counts only primary errors, then recognises a shared-store capacity draft.
+    /// WHY: warnings and labels consume no allowance, while a capacity refusal means this body's
+    ///      store cannot safely serve later bodies.
+    fn record_failed_body(&mut self, diagnostic: DiagnosticDraft) -> bool {
+        self.active = true;
+        if diagnostic.severity() == DiagnosticSeverity::Error {
+            self.retained_errors = self.retained_errors.saturating_add(1);
+        }
+        let ends_recovery = is_capacity_exhaustion(&diagnostic);
+        self.errors.push(diagnostic);
+        ends_recovery
+    }
+
+    /// Charges one additional body's retained token length before admitting it.
+    ///
+    /// WHAT: checks the module allowance first, then the token guard; an exact fit is admitted.
+    /// WHY: both limits describe work not yet admitted, so the flag is set only when this body is
+    ///      actually skipped.
+    fn charge_additional_body(&mut self, body_tokens: u32) -> Option<DiagnosticDiscoveryStops> {
+        if self
+            .module_error_allowance
+            .is_some_and(|limit| self.retained_errors >= limit.get())
+        {
+            return Some(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE);
+        }
+        if body_tokens > self.remaining_work_tokens {
+            return Some(DiagnosticDiscoveryStops::AST_RECOVERY_WORK_GUARD);
+        }
+        self.remaining_work_tokens -= body_tokens;
+        None
+    }
+}
+
 pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'environment> {
     ast: Vec<AstNode>,
     warnings: DiagnosticBag,
@@ -387,10 +471,45 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         Ok(Arc::clone(owner.tokens()))
     }
 
+    /// The body token length the recovery work guard charges for one admitted body.
+    ///
+    /// WHAT: contiguous bodies use their retained body range; a segmented body charges the total
+    ///       retained sequence length, which is the syntax its cursor parses.
+    /// WHY: the guard must bound admitted syntax from facts the header stage already retained,
+    ///      without rescanning tokens or materialising ranges.
+    fn retained_body_token_count(&self, header: &Header) -> Result<u32, InfrastructureFailure> {
+        let Some(sequence) = header.token_sequence else {
+            return Ok(header.tokens.len());
+        };
+        let source = self.canonical_owner_for_header(header)?;
+        let view = source.token_sequence(sequence).map_err(|error| {
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                format!(
+                    "retained body token sequence is invalid for the recovery work guard: {error:?}"
+                ),
+            )
+        })?;
+        u32::try_from(view.len()).map_err(|_| {
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "retained body token sequence length does not fit the recovery work guard",
+            )
+        })
+    }
+
+    /// Emits every header that ordinary compilation reaches.
+    ///
+    /// WHAT: after the first ordinary body diagnosis, optional discovery admits only eligible
+    ///       concrete function bodies within the supplied recovery policy.
+    /// WHY: a failed body must not hide independent errors in later bodies, while shared-store
+    ///      capacity faults, non-eligible semantic producers and fatal lanes end discovery before
+    ///      they can read or publish broken state.
     pub(in crate::compiler_frontend::ast) fn emit(
         mut self,
         sorted_headers: Vec<Header>,
         string_table: &mut StringTable,
+        recovery_policy: AstRecoveryPolicy,
     ) -> Result<AstEmission, PreparedFailure> {
         // The environment owns the single resolved declaration table. Body contexts clone only
         // the Rc pointer so declaration metadata is not rebuilt during emission.
@@ -408,8 +527,43 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             self.context.capacity_estimate.scope_frames,
             root_scope_consumer_count,
         );
+        let mut recovery = BodyDiagnosticRecovery::new(recovery_policy);
 
         for header in sorted_headers {
+            if recovery.is_active() {
+                match &header.kind {
+                    HeaderKind::Function {
+                        generic_parameters, ..
+                    } if generic_parameters.is_empty() => {
+                        let body_tokens = self
+                            .retained_body_token_count(&header)
+                            .map_err(|error| self.error_messages(error, string_table))?;
+                        if let Some(stop) = recovery.charge_additional_body(body_tokens) {
+                            recovery.stops.insert(stop);
+                            return Err(self.capture_recovered_failure(recovery, string_table));
+                        }
+                    }
+
+                    // These producers run shared semantic work of their own. Optional discovery
+                    // ends before them so their fail-fast boundaries are unchanged.
+                    HeaderKind::Function { .. }
+                    | HeaderKind::StartFunction
+                    | HeaderKind::ConstTemplate { .. } => {
+                        return Err(self.capture_recovered_failure(recovery, string_table));
+                    }
+
+                    // Headers with no remaining AST body work are passed over without resolving
+                    // their source scope or visibility.
+                    HeaderKind::Struct { .. }
+                    | HeaderKind::Constant { .. }
+                    | HeaderKind::Choice { .. }
+                    | HeaderKind::TypeAlias { .. }
+                    | HeaderKind::Trait { .. }
+                    | HeaderKind::TraitConformance { .. }
+                    | HeaderKind::TraitIncompatibility { .. } => continue,
+                }
+            }
+
             let source_file_scope = self
                 .source_path_for_header(&header)
                 .map_err(|error| self.error_messages(error, string_table))?;
@@ -436,16 +590,27 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                         continue;
                     }
 
-                    self.emit_function(
+                    match self.emit_function(
                         header,
                         visibility,
                         source_file_scope,
                         scope_frame_capacity_budget.next_root_capacity(),
                         string_table,
-                    )?;
-                    #[cfg(feature = "detailed_timers")]
-                    {
-                        function_headers_emitted += 1;
+                    ) {
+                        Ok(()) => {
+                            #[cfg(feature = "detailed_timers")]
+                            {
+                                function_headers_emitted += 1;
+                            }
+                        }
+                        Err(FunctionBodyFailure::Diagnosed(diagnostic)) => {
+                            if recovery.record_failed_body(diagnostic) {
+                                return Err(self.capture_recovered_failure(recovery, string_table));
+                            }
+                        }
+                        // Infrastructure, compiler bugs and numeric-deferral leaks dominate any
+                        // user diagnostics already collected.
+                        Err(FunctionBodyFailure::Fatal(failure)) => return Err(failure),
                     }
                 }
 
@@ -533,6 +698,12 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     // before body emission.
                 }
             }
+        }
+
+        // A recovered module returns before draining the generic request ledger and before
+        // finalization, so a failed body's provisional requests stay an inert ledger suffix.
+        if recovery.is_active() {
+            return Err(self.capture_recovered_failure(recovery, string_table));
         }
 
         let deferred_generic_requests = self.take_generic_request_ledger();
@@ -1040,6 +1211,12 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         Ok(())
     }
 
+    /// Emits one ordinary concrete function body.
+    ///
+    /// WHAT: an authored body diagnostic returns as [`FunctionBodyFailure::Diagnosed`] before any
+    ///       destructive capture, so the emitter can retain it and continue.
+    /// WHY: freezing this body immediately would consume the string table handoff and discard every
+    ///      later independent diagnosis. Infrastructure and invariant failures stay fatal.
     fn emit_function(
         &mut self,
         header: Header,
@@ -1047,7 +1224,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         source_file_scope: PathId,
         scope_frame_capacity: usize,
         string_table: &mut StringTable,
-    ) -> Result<(), PreparedFailure> {
+    ) -> Result<(), FunctionBodyFailure> {
         // --------------------------
         //  Resolve signature
         // --------------------------
@@ -1058,13 +1235,13 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .get(&header.declaration_path)
             .cloned()
         else {
-            return Err(self.error_messages(
+            return Err(FunctionBodyFailure::Fatal(self.error_messages(
                 InfrastructureFailure::internal(
                     CompilerStage::AstConstruction,
                     "Function signature was not resolved before AST emission.",
                 ),
                 string_table,
-            ));
+            )));
         };
 
         // --------------------------
@@ -1103,7 +1280,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 &*self.path_fork,
                 string_table,
             )
-            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+            .map_err(FunctionBodyFailure::Diagnosed)?;
 
         // --------------------------
         //  Parse body and emit node
@@ -1112,15 +1289,15 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         // bounded canonical source-token range. Segmented headers use the retained
         // sequence; contiguous headers use the range. Loop/template windows and
         // explicit synthetic streams use their own explicit cursors.
-        let body_source = self
-            .canonical_owner_for_header(&header)
-            .map_err(|error| self.error_messages(error, string_table))?;
+        let body_source = self.canonical_owner_for_header(&header).map_err(|error| {
+            FunctionBodyFailure::Fatal(self.error_messages(error, string_table))
+        })?;
         let function_scope = context.scope;
         let mut body_cursor = match header.token_sequence {
             Some(sequence) => AstCursor::from_source_sequence(&body_source, sequence),
             None => AstCursor::from_source_tokens(&body_source, header.tokens),
         }
-        .map_err(|error| self.error_messages(error, string_table))?;
+        .map_err(|error| FunctionBodyFailure::Fatal(self.error_messages(error, string_table)))?;
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
             &mut self.compatibility_cache,
@@ -1140,7 +1317,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
         let body = body_result
             .and_then(|parsed| parsed.expect_complete_nodes("a source function body"))
-            .map_err(|error| self.expression_error_messages(error, string_table))?;
+            .map_err(Self::split_expression_failure)?;
 
         // AST symbol IDs are stored as complete PathId values and are unique
         // module-wide, not only within a local scope.
@@ -1432,6 +1609,25 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         )
     }
 
+    /// Captures one recovered module failure after all independent body diagnostics are known.
+    ///
+    /// WHAT: prepends accumulated warnings exactly as the ordinary capture path does, attaches the
+    ///       recovery stop metadata, and takes the string-table handoff once.
+    /// WHY: the emitter must not freeze diagnostics per body. This terminal capture runs before
+    ///       the generic request ledger is drained or finalization begins.
+    fn capture_recovered_failure(
+        &mut self,
+        recovery: BodyDiagnosticRecovery,
+        string_table: &mut StringTable,
+    ) -> PreparedFailure {
+        let stops = recovery.stops;
+        let mut failure = self.diagnostic_bag_messages(recovery.errors, string_table);
+        if let PreparedFailure::Diagnosed(batch) = &mut failure {
+            batch.set_discovery_stops(stops);
+        }
+        failure
+    }
+
     /// Converts a [`TemplateError`] (which may be user-facing or infrastructure) into the
     /// appropriate AST diagnostic failure lane.
     fn template_error_messages(
@@ -1449,19 +1645,17 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         }
     }
 
-    /// Converts the AST parser's two-lane failure without downgrading retained-data errors.
+    /// Splits one AST expression failure into its recoverable and fatal lanes.
     ///
-    /// A numeric deferral must never reach the emitter: every retaining lane completes at its
-    /// body root, so a leak here is a precise invariant failure naming the boundary.
-    fn expression_error_messages(
-        &mut self,
-        error: ExpressionParseError,
-        string_table: &mut StringTable,
-    ) -> PreparedFailure {
+    /// WHAT: an authored diagnostic becomes [`FunctionBodyFailure::Diagnosed`]; infrastructure and
+    ///       numeric-deferral leaks stay fatal.
+    /// WHY: an ordinary body may retain a user diagnostic, but it must never downgrade a broken
+    ///      construction handoff into a source error.
+    fn split_expression_failure(error: ExpressionParseError) -> FunctionBodyFailure {
         match error.at_boundary_without_numeric_retention("the module emitter body boundary") {
-            Ok(diagnostic) => self.diagnostic_messages(diagnostic, string_table),
+            Ok(diagnostic) => FunctionBodyFailure::Diagnosed(diagnostic),
             Err(ExpressionParseError::Infrastructure(errors)) => {
-                self.error_messages(errors, string_table)
+                FunctionBodyFailure::Fatal(PreparedFailure::Infrastructure(errors))
             }
             Err(
                 ExpressionParseError::Diagnostic(_)
@@ -1472,6 +1666,23 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 CompilerStage::AstConstruction,
                 "module emitter body boundary received an unconverted parse error",
             ),
+        }
+    }
+
+    /// Converts the AST parser's two-lane failure without downgrading retained-data errors.
+    ///
+    /// A numeric deferral must never reach the emitter: every retaining lane completes at its
+    /// body root, so a leak here is a precise invariant failure naming the boundary.
+    fn expression_error_messages(
+        &mut self,
+        error: ExpressionParseError,
+        string_table: &mut StringTable,
+    ) -> PreparedFailure {
+        match Self::split_expression_failure(error) {
+            FunctionBodyFailure::Diagnosed(diagnostic) => {
+                self.diagnostic_messages(diagnostic, string_table)
+            }
+            FunctionBodyFailure::Fatal(failure) => failure,
         }
     }
 }

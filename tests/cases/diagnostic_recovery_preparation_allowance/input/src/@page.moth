@@ -1,0 +1,6 @@
+@helper_a label_a
+@helper_b label_b
+@helper_c label_c
+
+-- Use every imported label so provider discovery reaches all three helper files.
+labels #= [:[label_a][label_b][label_c]]

@@ -3,6 +3,7 @@
 use crate::compiler_frontend::compiler_errors::CompilationOutcome;
 use crate::compiler_frontend::compiler_messages::diagnostic_bag::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
     self, UnknownValueNameView,
 };
@@ -229,4 +230,48 @@ fn root_domain_capture_renders_against_the_seeded_root_table() {
     );
     assert_eq!(view.severity(), DiagnosticSeverity::Error);
     assert!(diagnostic_reports.next().is_none());
+}
+
+#[test]
+fn primary_error_count_counts_only_errors_in_a_mixed_batch() {
+    // One budget-relevant fact: a batch may retain warnings beside errors, but only the error
+    // consumes the request's primary-error budget.
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let nominal_path = path_fork
+        .try_intern_portable_path("NominalType", &mut string_table)
+        .expect("nominal path fits");
+    let path_table = Arc::new(path_fork.snapshot_table());
+    let mut type_environment = TypeEnvironment::new();
+    let (_, nominal_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: nominal_path,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    let error = types_borrows_targets::type_mismatch(
+        nominal_type,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        TypeMismatchContext::Assignment,
+        None,
+    );
+    let warning = imports::unused_import(None);
+    // Owner-scoped capture keeps both groups, mirroring a module batch that retains warnings next
+    // to its errors. Only the error may occupy a budget slot.
+    let batch = PreparedDiagnosticBatch::capture_with_required_paths_for_owners(
+        [
+            (vec![error], &type_environment),
+            (vec![warning], &type_environment),
+        ],
+        string_table,
+        || Some(Arc::clone(&path_table)),
+    )
+    .expect("mixed owner capture without missing path rows cannot fail");
+    assert_eq!(batch.diagnostic_count(), 2);
+    assert_eq!(
+        batch.primary_error_count(),
+        1,
+        "warnings occupy no budget slot"
+    );
 }

@@ -11,9 +11,10 @@ use super::{
 use crate::build_system::build::{BuilderSelection, build_project};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
-use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
+use crate::compiler_frontend::compiler_messages::{DiagnosticDiscoveryStops, DiagnosticSeverity};
+use crate::compiler_frontend::module_compilation::AST_RECOVERY_WORK_TOKENS;
 use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::compiler_tests::test_support::run_stack_budgeted_child;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -63,6 +64,53 @@ fn warning_count(messages: &CompilationResult<()>) -> usize {
     }
 }
 
+/// Default page-project config with no diagnostic-limit overrides.
+const DEFAULT_PAGE_CONFIG: &str =
+    "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n";
+
+/// Page config that disables both error-count limits through typed `I32?` constants.
+const UNLIMITED_PAGE_CONFIG: &str = "\
+module_error_limit #I32? = none
+project_error_limit #I32? = none
+project #= (
+    name = \"docs\",
+    entry_root = \"src\",
+    max_errors_per_module = module_error_limit,
+    max_errors_per_project = project_error_limit,
+)
+html #= ()
+";
+
+/// Six independent ordinary bodies that each fail on an unknown value name.
+///
+/// The bodies are small enough that the 4096-token recovery work guard never fires before the
+/// default five-error module allowance is reached.
+const SIX_FAILING_ORDINARY_BODIES: &str = "\
+first || -> I32:
+    return missing_one
+;
+
+second || -> I32:
+    return missing_two
+;
+
+third || -> I32:
+    return missing_three
+;
+
+fourth || -> I32:
+    return missing_four
+;
+
+fifth || -> I32:
+    return missing_five
+;
+
+sixth || -> I32:
+    return missing_six
+;
+";
+
 #[test]
 fn check_compiles_single_file_without_writing_artifacts() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
@@ -93,6 +141,50 @@ fn check_compiles_single_file_without_writing_artifacts() {
         "check should not write output artifacts to the source folder"
     );
 }
+
+#[test]
+fn single_file_check_uses_default_module_allowance_without_authored_config() {
+    // `run_check_command` records command timing into the shared collector under `timers`.
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let entry_file = _temp.path().join("main.moth");
+    fs::write(&entry_file, SIX_FAILING_ORDINARY_BODIES).expect("should write source file");
+
+    let outcome = execute_check(
+        entry_file
+            .to_str()
+            .expect("temp file path should be valid UTF-8 for this test"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+    );
+
+    let reports = diagnostic_reports(&outcome.messages);
+    assert_eq!(
+        reports.counts().errors,
+        5,
+        "an authored config must not be required for the default module allowance"
+    );
+    assert_eq!(reports.counts().warnings, 0);
+    assert!(
+        reports
+            .iter()
+            .all(|(_, view)| view.descriptor().code == "MOTH-RULE-0034"),
+        "every retained default-limit diagnostic keeps its independent body code"
+    );
+    assert!(
+        outcome
+            .discovery_stops
+            .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
+        "the default allowance must set the module stop flag"
+    );
+    assert_eq!(
+        outcome.discovery_stops.stop_line().as_deref(),
+        Some(
+            "Diagnostic discovery stopped early (module error limit): later code was not checked."
+        )
+    );
+}
+
 #[test]
 fn warning_capacity_failure_marks_check_completion_as_failed() {
     let warning_source = "\
@@ -110,14 +202,17 @@ if value is:
 [:pattern_unreachable_after_duplicate_literal_warning result=[result]]
 ";
     let (_temporary, root) = write_page_project("warning_capacity_failure", warning_source);
-    let messages = execute_check_messages_with_record_limit(
+    let (messages, _) = execute_check_messages_with_record_limit(
         root.to_str()
             .expect("temporary project path should be valid UTF-8"),
         &BuildConfigInputSet::new(),
         &test_project_builder(),
         2,
     );
-    let outcome = CheckOutcome { messages };
+    let outcome = CheckOutcome {
+        messages,
+        discovery_stops: DiagnosticDiscoveryStops::NONE,
+    };
     let completion = check_completion(&outcome);
 
     assert_eq!(
@@ -551,12 +646,21 @@ fn write_page_project(_prefix: &str, source: &str) -> (tempfile::TempDir, PathBu
     let root = temp.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src");
+    fs::write(root.join("config.moth"), DEFAULT_PAGE_CONFIG).expect("should write config");
+    fs::write(src.join("@page.moth"), source).expect("should write @page.moth source");
+    (temp, root)
+}
+
+/// Write a page project whose config declares a module error allowance.
+fn write_page_project_with_module_limit(limit: &str, source: &str) -> (tempfile::TempDir, PathBuf) {
+    let (temp, root) = write_page_project("module_limit", source);
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        format!(
+            "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_module = {limit},\n)\nhtml #= ()\n"
+        ),
     )
-    .expect("should write config");
-    fs::write(src.join("@page.moth"), source).expect("should write @page.moth source");
+    .expect("should write limited config");
     (temp, root)
 }
 
@@ -601,6 +705,7 @@ fn diagnostic_identity_sequence<T>(
 
 #[test]
 fn check_and_build_frontends_produce_identical_diagnostics_and_check_writes_no_artifacts() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let builder = HtmlProjectBuilder::new();
 
     // --------------------------------------------
@@ -644,6 +749,7 @@ if value is:
             .expect("temp project path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {})
     {
@@ -734,6 +840,7 @@ increment(count)
             .expect("temp project path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
     assert!(
@@ -818,6 +925,7 @@ fn check_command_total_excludes_renderer_work() {
             value: (),
             warnings: None,
         }),
+        discovery_stops: DiagnosticDiscoveryStops::NONE,
     };
     let scripted_duration = Duration::from_millis(37);
     let renderer_calls = AtomicUsize::new(0);
@@ -1229,4 +1337,410 @@ fn dangling_operator_numeric_group_source(depth: usize) -> String {
 /// Puts two adjacent operands at the innermost group, then wraps it `depth` times.
 fn consecutive_operand_numeric_group_source(depth: usize) -> String {
     grouped_numeric_function(&grouped_numeric_expression("(1 2)", depth))
+}
+
+#[test]
+fn diagnostic_recovery_request_policy_isolation() {
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+    let (_temp, root) = write_page_project_with_module_limit("1", SIX_FAILING_ORDINARY_BODIES);
+    let root_text = root
+        .to_str()
+        .expect("temporary project path should be valid UTF-8");
+
+    let mut limited_report = None;
+    let limited_completion = run_check_command(
+        root_text,
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+        |report| limited_report = Some(report),
+    );
+    let limited_report = limited_report.expect("check must present its report exactly once");
+    assert_eq!(
+        limited_completion.status,
+        crate::projects::ProjectCommandStatus::Failure
+    );
+    assert_eq!(limited_report.error_count, 1);
+    assert_eq!(
+        diagnostic_reports(&limited_report.messages).counts().errors,
+        1
+    );
+    assert!(
+        limited_report
+            .discovery_stops
+            .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE)
+    );
+
+    // A second request in the same process sees the rewritten config, applies the default
+    // allowance and starts counting from zero.
+    fs::write(root.join("config.moth"), DEFAULT_PAGE_CONFIG).expect("should write default config");
+    let mut default_report = None;
+    let default_completion = run_check_command(
+        root_text,
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+        |report| default_report = Some(report),
+    );
+    let default_report = default_report.expect("check must present its report exactly once");
+    assert_eq!(
+        default_completion.status,
+        crate::projects::ProjectCommandStatus::Failure
+    );
+    assert_eq!(
+        default_report.error_count, 5,
+        "omitted limits must reset to the five-error default, not reuse the prior request's one"
+    );
+    assert_eq!(
+        diagnostic_reports(&default_report.messages).counts().errors,
+        5
+    );
+    assert!(
+        default_report
+            .discovery_stops
+            .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
+        "the default allowance stops after five retained independent errors"
+    );
+    assert_eq!(
+        default_report.discovery_stops.stop_line().as_deref(),
+        Some(
+            "Diagnostic discovery stopped early (module error limit): later code was not checked."
+        )
+    );
+
+    // A third request disables both counts. The fresh request retains every independent body and
+    // carries no stop from either earlier request.
+    fs::write(root.join("config.moth"), UNLIMITED_PAGE_CONFIG)
+        .expect("should write unlimited config");
+    let mut unlimited_report = None;
+    let unlimited_completion = run_check_command(
+        root_text,
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+        |report| unlimited_report = Some(report),
+    );
+    let unlimited_report = unlimited_report.expect("check must present its report exactly once");
+    assert_eq!(
+        unlimited_completion.status,
+        crate::projects::ProjectCommandStatus::Failure
+    );
+    assert_eq!(
+        unlimited_report.error_count, 6,
+        "explicit none must retain every independent body rather than the prior request's count"
+    );
+    assert_eq!(
+        diagnostic_reports(&unlimited_report.messages)
+            .counts()
+            .errors,
+        6
+    );
+    assert!(
+        unlimited_report.discovery_stops.is_empty(),
+        "explicit none must not leak the earlier module allowance stop"
+    );
+    assert_eq!(unlimited_report.discovery_stops.stop_line(), None);
+}
+
+#[test]
+fn diagnostic_recovery_ast_work_guard_stop_reaches_check_report() {
+    // `run_check_command` records command timing into the shared collector under `timers`.
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+
+    // `return 1;` is three body tokens. The first failed body is uncharged, so admitting
+    // `AST_RECOVERY_WORK_TOKENS / 3` valid bodies leaves one token. The final failing body needs
+    // three and is therefore refused by the work guard rather than reported.
+    const VALID_BODY_WORK_TOKENS: u32 = 3;
+    let valid_body_count = AST_RECOVERY_WORK_TOKENS / VALID_BODY_WORK_TOKENS;
+    let mut source = String::from("first || -> I32:\n    return missing;\n");
+    for index in 0..valid_body_count {
+        source.push_str(&format!("\nvalid{index} || -> I32:\n    return 1;\n"));
+    }
+    source.push_str("\nzz_last || -> I32:\n    return also_missing;\n");
+
+    let (_temp, root) = write_page_project("ast_work_guard", &source);
+    let mut presented = None;
+    let completion = run_check_command(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+        |report| presented = Some(report),
+    );
+    let report = presented.expect("check must present its report exactly once");
+
+    assert_eq!(
+        completion.status,
+        crate::projects::ProjectCommandStatus::Failure
+    );
+    assert_eq!(report.error_count, 1);
+    let reports = diagnostic_reports(&report.messages);
+    assert_eq!(
+        reports.counts().errors,
+        1,
+        "only the first failing body is admitted"
+    );
+    assert!(
+        reports
+            .iter()
+            .all(|(_, view)| view.descriptor().code == "MOTH-RULE-0034")
+    );
+    assert!(
+        report
+            .discovery_stops
+            .contains(DiagnosticDiscoveryStops::AST_RECOVERY_WORK_GUARD),
+        "the refused suffix body must record the work-guard stop"
+    );
+    assert!(
+        !report
+            .discovery_stops
+            .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
+        "the default module allowance was never reached"
+    );
+    assert_eq!(
+        report.discovery_stops.stop_line().as_deref(),
+        Some(
+            "Diagnostic discovery stopped early (AST recovery work guard): later code was not checked."
+        )
+    );
+}
+
+#[test]
+fn diagnostic_stop_metadata_preserves_failure_lanes() {
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+    let source = "\
+warn || -> I32:
+    value ~= \"hello\"
+    result ~= \"unset\"
+    if value is:
+        \"hello\" => ~result = \"one\"
+        \"hello\" => ~result = \"two\"
+        \"hello\" => ~result = \"three\"
+        \"hello\" => ~result = \"four\"
+        else => ~result = \"other\"
+    ;
+    return 0
+;
+first || -> I32:
+    return missing
+;
+second || -> I32:
+    return also_missing
+;
+third || -> I32:
+    return third_missing
+;
+";
+
+    let (_limited_temp, limited_root) = write_page_project_with_module_limit("2", source);
+    let mut limited_report = None;
+    let completion = run_check_command(
+        limited_root
+            .to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+        |report| limited_report = Some(report),
+    );
+    let limited_report = limited_report.expect("check must present its report exactly once");
+    assert_eq!(
+        completion.status,
+        crate::projects::ProjectCommandStatus::Failure
+    );
+    assert_eq!(
+        limited_report.error_count, 2,
+        "three leading warnings do not consume the allowance, so limit 2 retains two errors"
+    );
+    assert_eq!(
+        limited_report.warning_count, 0,
+        "a diagnosed module freezes errors without its successful-body warnings"
+    );
+    assert!(
+        limited_report
+            .discovery_stops
+            .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
+        "reaching the module allowance after skipping an eligible body records the stop"
+    );
+    assert_eq!(
+        limited_report.discovery_stops.stop_line().as_deref(),
+        Some(
+            "Diagnostic discovery stopped early (module error limit): later code was not checked."
+        )
+    );
+    let Ok(CompilationOutcome::Diagnosed(reports)) = &limited_report.messages else {
+        panic!("a limited module must keep its diagnosed report set");
+    };
+    assert_eq!(
+        reports.counts().errors,
+        2,
+        "stop metadata is not a diagnostic and adds no error"
+    );
+    assert_eq!(reports.counts().warnings, 0);
+
+    let (_open_temp, open_root) = write_page_project_with_module_limit("3", source);
+    let mut open_report = None;
+    let open_completion = run_check_command(
+        open_root
+            .to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+        |report| open_report = Some(report),
+    );
+    let open_report = open_report.expect("check must present its report exactly once");
+    assert_eq!(
+        open_completion.status,
+        crate::projects::ProjectCommandStatus::Failure
+    );
+    let Ok(CompilationOutcome::Diagnosed(open_reports)) = &open_report.messages else {
+        panic!("all three failing bodies should retain independent errors");
+    };
+    assert_eq!(open_report.error_count, 3);
+    assert_eq!(open_reports.counts().errors, 3);
+    assert_eq!(
+        open_reports.counts().warnings,
+        0,
+        "the diagnosed warning policy is unchanged by the module allowance"
+    );
+    assert!(
+        open_report.discovery_stops.is_empty(),
+        "the allowance was not reached before any available body"
+    );
+
+    // The warning-producing body really emits three warnings. A warning never satisfies the
+    // allowance, and a diagnosed module's freeze policy drops successful-body warnings equally
+    // under either allowance rather than converting them into counted errors.
+    let warning_only_source = "\
+warn || -> I32:
+    value ~= \"hello\"
+    result ~= \"unset\"
+    if value is:
+        \"hello\" => ~result = \"one\"
+        \"hello\" => ~result = \"two\"
+        \"hello\" => ~result = \"three\"
+        \"hello\" => ~result = \"four\"
+        else => ~result = \"other\"
+    ;
+    return 0
+;
+";
+    let (_control_temp, control_root) = write_page_project("warning_control", warning_only_source);
+    let mut control_report = None;
+    let completion = run_check_command(
+        control_root
+            .to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+        |report| control_report = Some(report),
+    );
+    let control_report = control_report.expect("check must present its report exactly once");
+    assert_eq!(
+        completion.status,
+        crate::projects::ProjectCommandStatus::Success
+    );
+    assert_eq!(control_report.error_count, 0);
+    assert_eq!(control_report.warning_count, 3);
+    assert!(!has_errors(&control_report.messages));
+    assert_eq!(warning_count(&control_report.messages), 3);
+    assert!(
+        control_report.discovery_stops.is_empty(),
+        "a successful check that skipped nothing must not report a stop"
+    );
+}
+
+/// Eager check-only preparation must diagnose the first malformed orphan at Stage 0 even when the
+/// project threshold is already one, because the semantic scheduler has not been consulted yet.
+///
+/// WHAT: a clean canonical page, `max_errors_per_project = 1` / `max_errors_per_module = 1`, and two
+///       malformed orphans — `orphan_a.moth` declares two reserved names, `orphan_b.moth` one; the
+///       command must return only the first orphan's retained preparation error and the
+///       module-allowance stop line.
+/// WHY: `docs/build-system-design.md` (diagnostic budgets) records that directory discovery
+///      prepares every module before semantic scheduling and ends the request at the first
+///      diagnosed preparation, returning at most one module allowance, so the project threshold
+///      first changes admission after discovery. Pinning this earlier fail-fast boundary keeps a
+///      later reader from treating the absent `PROJECT_SCHEDULING_CUTOFF` flag as a missing cutoff.
+#[test]
+fn eager_check_only_preparation_stops_at_stage0_before_the_project_cutoff() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let (_temp, root) = write_page_project("eager_preparation", "#[:site]\n");
+    let source_root = root.join("src");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 1,\n    max_errors_per_module = 1,\n)\nhtml #= ()\n",
+    )
+    .expect("should write two-limit config");
+    fs::write(
+        source_root.join("orphan_a.moth"),
+        "Error #= 1\nCASTABLE_TO_I8 #= 2\n",
+    )
+    .expect("should write first orphan source");
+    fs::write(source_root.join("orphan_b.moth"), "Error #= 3\n")
+        .expect("should write second orphan source");
+
+    let mut presented = None;
+    let completion = run_check_command(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+        |report| presented = Some(report),
+    );
+    let report = presented.expect("check must present its report exactly once");
+
+    assert_eq!(
+        completion.status,
+        crate::projects::ProjectCommandStatus::Failure
+    );
+    assert_eq!(
+        report.error_count, 1,
+        "Stage 0 ends at the first diagnosed orphan and retains one module allowance"
+    );
+    let Ok(CompilationOutcome::Diagnosed(reports)) = &report.messages else {
+        panic!("an eager preparation failure must diagnose without assembling a project");
+    };
+    assert_eq!(reports.counts().errors, 1);
+    assert_eq!(reports.counts().warnings, 0);
+
+    let errors = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
+    assert_eq!(errors.len(), 1);
+    let (record, view) = errors[0];
+    assert_eq!(
+        view.descriptor().code,
+        "MOTH-RULE-0039",
+        "the retained error is the orphan's reserved-name collision"
+    );
+    let position = DiagnosticRenderContext::for_report(record)
+        .site_position(view.primary_site())
+        .expect("preparation diagnostics retain a resolvable primary span");
+    assert!(
+        position.path.ends_with("orphan_a.moth"),
+        "the second orphan is never prepared, so only the first orphan's error survives: {}",
+        position.path.display()
+    );
+    assert_eq!(
+        position.start.line, 0,
+        "the module allowance retains the earliest declaration in the first orphan"
+    );
+    assert_eq!(position.line, "Error #= 1");
+
+    assert!(
+        report
+            .discovery_stops
+            .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
+        "the dropped second declaration must record the module allowance stop"
+    );
+    assert!(
+        !report
+            .discovery_stops
+            .contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF),
+        "eager Stage 0 preparation precedes the semantic scheduler, so no cutoff was recorded"
+    );
+    assert!(
+        report
+            .discovery_stops
+            .stop_line()
+            .is_some_and(|line| line.contains("module error limit")),
+        "the stop line must name the module error limit"
+    );
 }

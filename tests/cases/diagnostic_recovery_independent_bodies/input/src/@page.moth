@@ -1,0 +1,12 @@
+-- Two ordinary bodies fail independently; the valid suffix must still be admitted.
+first || -> I32:
+    return missing
+;
+
+second || -> I32:
+    return also_missing
+;
+
+valid || -> I32:
+    return 1
+;

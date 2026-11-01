@@ -9,6 +9,7 @@ use super::{BackendId, CaseExecutionResult, ExpectedOutcome, FailureKind, TestCa
 use crate::build_system::build::{BuilderSelection, build_project};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::CompilationOutcome;
+use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -85,11 +86,14 @@ impl CaseWorker {
             );
         };
 
+        // The runner asserts diagnostics, not shortened-discovery metadata.
+        let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
         let build_result = match build_project(
             self.builder.backend.as_ref(),
             entry_path,
             &self.case.flags,
             &self.build_config_inputs,
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {})
         {

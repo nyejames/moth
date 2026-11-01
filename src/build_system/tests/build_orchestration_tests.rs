@@ -17,6 +17,7 @@ use crate::build_system::output::{
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
+use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
@@ -96,6 +97,7 @@ fn successful_warning_compilation(warning_owner: BoundaryAccumulator) -> Compila
 
 #[test]
 fn build_project_returns_staged_result_before_writing_files() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -110,6 +112,7 @@ fn build_project_returns_staged_result_before_writing_files() {
             .expect("temp file path should be valid UTF-8 for this test"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
     let Ok(CompilationOutcome::Success {
@@ -142,6 +145,7 @@ fn build_project_returns_staged_result_before_writing_files() {
 }
 #[test]
 fn build_output_owner_preserves_frontend_warnings_in_success_outcome() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
     let entry_file = root.join("main.moth");
@@ -159,6 +163,7 @@ fn build_output_owner_preserves_frontend_warnings_in_success_outcome() {
             .expect("temp file path should be valid UTF-8 for this test"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
     let Ok(CompilationOutcome::Success {
@@ -405,6 +410,7 @@ fn successful_compilation_warning_keeps_related_package_label_out_of_default_con
 
 #[test]
 fn build_project_late_backend_infrastructure_discards_frontend_warnings() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temporary project");
     let root = _temp.path().to_path_buf();
     let package = root.join("packages/warnpkg");
@@ -431,6 +437,7 @@ fn build_project_late_backend_infrastructure_discards_frontend_warnings() {
         root.to_str().expect("project path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {}) else {
         panic!("late backend infrastructure failure should use the outer error lane");
@@ -445,6 +452,7 @@ fn build_project_late_backend_infrastructure_discards_frontend_warnings() {
 
 #[test]
 fn build_project_calls_validate_project_config() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -461,8 +469,14 @@ fn build_project_calls_validate_project_config() {
         };
 
         successful_compilation_value(
-            build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new())
-                .unwrap_or_else(|never| match never {}),
+            build_project(
+                &builder,
+                "main.moth",
+                &[],
+                &BuildConfigInputSet::new(),
+                &mut discovery_stops,
+            )
+            .unwrap_or_else(|never| match never {}),
         );
 
         assert!(
@@ -478,6 +492,7 @@ fn build_project_calls_validate_project_config() {
 
 #[test]
 fn project_compilation_selects_only_modules_with_root_activity_as_entries() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let temp = tempfile::tempdir().expect("should create temp dir");
     let root = temp.path().to_path_buf();
     let src = root.join("src");
@@ -503,6 +518,7 @@ fn project_compilation_selects_only_modules_with_root_activity_as_entries() {
             root.to_str().expect("root path should be valid UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -515,6 +531,7 @@ fn project_compilation_selects_only_modules_with_root_activity_as_entries() {
 
 #[test]
 fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let temp = tempfile::tempdir().expect("should create temp dir");
     let root = temp.path().to_path_buf();
     let src = root.join("src");
@@ -540,6 +557,7 @@ fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
 
@@ -550,8 +568,75 @@ fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
         !built.load(std::sync::atomic::Ordering::SeqCst),
         "backend must not receive a partial project compilation"
     );
+    assert!(
+        discovery_stops.is_empty(),
+        "a diagnosis that skipped no discovery work must not report a stop"
+    );
 
+    // A project cutoff stops admission after a returned module error. The stopped graph must not
+    // become a project compilation or reach the backend.
+    let cutoff_temp = tempfile::tempdir().expect("should create cutoff temp dir");
+    let cutoff_root = cutoff_temp.path().to_path_buf();
+    let cutoff_src = cutoff_root.join("src");
+    fs::create_dir_all(cutoff_src.join("first")).expect("should create first module directory");
+    fs::create_dir_all(cutoff_src.join("second")).expect("should create second module directory");
+    fs::write(
+        cutoff_root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 1,\n)\nhtml #= ()\n",
+    )
+    .expect("should write cutoff config");
+    fs::write(
+        cutoff_src.join("first/@first.moth"),
+        "first || -> I32:\n    return missing_one\n;\n",
+    )
+    .expect("should write first failing module root");
+    fs::write(
+        cutoff_src.join("second/@second.moth"),
+        "second || -> I32:\n    return missing_two\n;\n",
+    )
+    .expect("should write second failing module root");
+
+    let cutoff_validated = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let cutoff_built = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let cutoff_builder = ValidationTrackingBuilder {
+        validated: cutoff_validated.clone(),
+        built: cutoff_built.clone(),
+    };
+    let mut cutoff_stops = DiagnosticDiscoveryStops::NONE;
+    let cutoff_result = build_project(
+        &cutoff_builder,
+        cutoff_root
+            .to_str()
+            .expect("cutoff root path should be valid UTF-8"),
+        &[],
+        &BuildConfigInputSet::new(),
+        &mut cutoff_stops,
+    )
+    .unwrap_or_else(|never| match never {});
+
+    let cutoff_reports = diagnosed_reports(&cutoff_result);
+    assert_eq!(
+        cutoff_reports.counts().errors,
+        1,
+        "the admitted module keeps its returned diagnostic batch"
+    );
+    assert!(cutoff_validated.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(
+        !cutoff_built.load(std::sync::atomic::Ordering::SeqCst),
+        "a budget-stopped graph must not reach the backend"
+    );
+    assert!(
+        cutoff_stops.contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF),
+        "the project threshold must reach the build driver as scheduling-cutoff metadata"
+    );
+    assert_eq!(
+        cutoff_stops.stop_line().as_deref(),
+        Some(
+            "Diagnostic discovery stopped early (project scheduling cutoff): later code was not checked."
+        )
+    );
     let _ = temp;
+    let _ = cutoff_temp;
 }
 
 #[test]
@@ -1312,6 +1397,7 @@ fn skip_unchanged_mode_still_cleans_stale_manifest_tracked_outputs() {
 
 #[test]
 fn build_project_preserves_frontend_signature_diagnostic_source_position() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -1324,8 +1410,14 @@ fn build_project_preserves_frontend_signature_diagnostic_source_position() {
     {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
         let builder = HtmlProjectBuilder::new();
-        let result = build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new())
-            .unwrap_or_else(|never| match never {});
+        let result = build_project(
+            &builder,
+            "main.moth",
+            &[],
+            &BuildConfigInputSet::new(),
+            &mut discovery_stops,
+        )
+        .unwrap_or_else(|never| match never {});
         let (report, view) = diagnosed_reports(&result)
             .iter()
             .find(|(_, view)| view.descriptor().code == "MOTH-RULE-0035")
@@ -1345,6 +1437,7 @@ fn build_project_preserves_frontend_signature_diagnostic_source_position() {
 
 #[test]
 fn config_validation_failure_returns_config_error_before_compilation() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -1354,8 +1447,14 @@ fn config_validation_failure_returns_config_error_before_compilation() {
         let _cwd_guard = CurrentDirGuard::set_to(&root);
 
         let builder = FailingValidationBuilder;
-        let result = build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new())
-            .unwrap_or_else(|never| match never {});
+        let result = build_project(
+            &builder,
+            "main.moth",
+            &[],
+            &BuildConfigInputSet::new(),
+            &mut discovery_stops,
+        )
+        .unwrap_or_else(|never| match never {});
 
         assert_has_config_error(&result);
         assert!(
@@ -1422,6 +1521,7 @@ fn validated_output_settings_preserve_configured_profile_roots() {
 
 #[test]
 fn directory_frontend_skips_separator_normalized_output_roots() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let normalized_dev_root = root.join("generated/site");
@@ -1454,6 +1554,7 @@ html #= (
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
 
@@ -1463,6 +1564,7 @@ html #= (
 #[cfg(unix)]
 #[test]
 fn directory_frontend_skips_symlink_ancestor_output_aliases() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     use std::os::unix::fs::symlink;
 
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -1499,6 +1601,7 @@ html #= (
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
 
@@ -1508,6 +1611,7 @@ html #= (
 #[cfg(unix)]
 #[test]
 fn directory_frontend_skips_symlink_aliases_to_output_descendants() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     use std::os::unix::fs::symlink;
 
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -1546,6 +1650,7 @@ html #= (
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
 
@@ -1635,6 +1740,7 @@ fn validated_output_settings_reject_canonical_root_aliases() {
 
 #[test]
 fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
@@ -1654,6 +1760,7 @@ fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
 
@@ -1662,6 +1769,7 @@ fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
 
 #[test]
 fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
@@ -1679,6 +1787,7 @@ fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic()
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
 
@@ -2328,6 +2437,7 @@ fn invalid_later_output_path_causes_zero_files_written() {
 
 #[test]
 fn empty_directory_output_setting_is_rejected() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
@@ -2345,6 +2455,7 @@ fn empty_directory_output_setting_is_rejected() {
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
 
@@ -2353,6 +2464,7 @@ fn empty_directory_output_setting_is_rejected() {
 
 #[test]
 fn absolute_output_setting_is_rejected() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
@@ -2370,6 +2482,7 @@ fn absolute_output_setting_is_rejected() {
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
 
@@ -2378,6 +2491,7 @@ fn absolute_output_setting_is_rejected() {
 
 #[test]
 fn output_folder_inside_entry_root_is_rejected() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
@@ -2395,6 +2509,7 @@ fn output_folder_inside_entry_root_is_rejected() {
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
 
@@ -2403,6 +2518,7 @@ fn output_folder_inside_entry_root_is_rejected() {
 
 #[test]
 fn identical_dev_and_release_folders_are_rejected() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
@@ -2420,6 +2536,7 @@ fn identical_dev_and_release_folders_are_rejected() {
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
 
@@ -2428,6 +2545,7 @@ fn identical_dev_and_release_folders_are_rejected() {
 
 #[test]
 fn valid_distinct_output_folders_resolve_unchanged() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
@@ -2446,6 +2564,7 @@ fn valid_distinct_output_folders_resolve_unchanged() {
             root.to_str().expect("root path should be valid UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -2463,6 +2582,7 @@ fn valid_distinct_output_folders_resolve_unchanged() {
 #[cfg(unix)]
 #[test]
 fn late_output_failure_keeps_authored_setting_source_owner() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let source_root = root.join("src");
@@ -2493,6 +2613,7 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
             root.to_str().expect("project path should be valid UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -2526,6 +2647,7 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
             root.to_str().expect("project path should be valid UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -2604,6 +2726,7 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
 
 #[test]
 fn first_dev_and_release_builds_create_independent_owned_manifests() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let source_root = root.join("src");
@@ -2623,6 +2746,7 @@ fn first_dev_and_release_builds_create_independent_owned_manifests() {
             root.to_str().expect("root path should be valid UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -2650,6 +2774,7 @@ fn first_dev_and_release_builds_create_independent_owned_manifests() {
             root.to_str().expect("root path should be valid UTF-8"),
             &[Flag::Release],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );

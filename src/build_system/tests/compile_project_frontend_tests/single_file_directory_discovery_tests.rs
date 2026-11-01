@@ -1,5 +1,6 @@
 use super::super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
 use super::*;
+use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 #[test]
@@ -419,5 +420,75 @@ fn single_file_rejects_source_package_moth_folder_collision() {
                     && view.reason_key() == Some("invalid_config.source_file_folder_collision")
             }),
         "expected SourceFileFolderCollision diagnostic"
+    );
+}
+
+#[test]
+fn single_file_project_cutoff_after_package_work_skips_module_preparation() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+    let package_root = dir.join("packages/shared");
+    fs::create_dir_all(&package_root).expect("should create registered package root");
+    fs::write(
+        package_root.join("@mod.moth"),
+        "export:\n    render || -> I32:\n        return shared_missing\n    ;\n;\n",
+    )
+    .expect("should write diagnostically invalid package");
+    let moth_path = dir.join("main.moth");
+    fs::write(
+        &moth_path,
+        "@shared render\nvalue = render() catch:\n    then 0\n;\n",
+    )
+    .expect("should write package consumer");
+
+    let mut config = Config::new(moth_path.clone());
+    config.max_errors_per_project = std::num::NonZeroU32::new(1);
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface
+        .source_packages
+        .register_filesystem_root("shared", package_root, PackageOrigin::Builder)
+        .expect("test source root should register");
+    crate::compiler_frontend::pipeline_test_support::reset_file_frontend_prepare_count_for_test(
+        &dir,
+    );
+
+    let result = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+    );
+
+    // The package error meets the threshold during source-package work, so the synthetic entry
+    // module is refused at boundary entry. The cutoff record proves the unvisited slot; the
+    // module never reaches preparation, which the per-path preparation counter observes directly.
+    let reports = diagnosed_reports(&result);
+    assert_eq!(
+        reports.counts().errors,
+        1,
+        "the package diagnostic stays retained after the cutoff"
+    );
+    let rendered = terse::format_terse_diagnostic_reports(reports);
+    assert!(
+        rendered.iter().any(|line| line.contains("shared_missing")),
+        "the package error must be reported: {rendered:?}"
+    );
+    assert_eq!(
+        crate::compiler_frontend::pipeline_test_support::file_frontend_prepare_count_for_path_for_test(
+            &moth_path
+        ),
+        0,
+        "the single-file module must not be prepared once package work met the threshold"
+    );
+    assert!(
+        warning_owner
+            .discovery_stops()
+            .contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF),
+        "refusing the unvisited module is a recorded project cutoff"
     );
 }

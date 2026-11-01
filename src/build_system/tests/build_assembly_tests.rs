@@ -322,6 +322,7 @@ fn boundary(
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: Vec::new(),
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     }
 }
 

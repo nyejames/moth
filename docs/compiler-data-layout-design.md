@@ -157,6 +157,7 @@ Code paths in the table are relative to `src/compiler_frontend/`.
 | `InfrastructureFailure` | at most 56 bytes | `compiler_messages/compiler_errors.rs` |
 | `PendingDiagnostics` | at most 48 bytes | `compiler_messages/diagnostics/freeze.rs` |
 | `PreparedDiagnosticBatch` | at most 48 bytes | `compiler_messages/prepared_batch.rs` |
+| `DiagnosticDiscoveryStops` | 1 byte | `compiler_messages/discovery_stops.rs` |
 | `DiagnosticRun` | 12 bytes | `compiler_messages/diagnostics/report.rs` |
 | `DiagnosticReportSet` | at most 48 bytes | `compiler_messages/diagnostics/report.rs` |
 
@@ -203,7 +204,9 @@ pub struct DiagnosticReportSet {
 ```
 These are the current owners. `FrozenIdentityContext::sources` is a `FrozenSourceDatabase` that owns
 the source slots, snapshots and path table; the context's `strings` field shares the frozen string
-table. Mutable construction uses the existing source-database and string-table owners rather than a
+table.
+
+Mutable construction uses the existing source-database and string-table owners rather than a
 separate aggregate identity builder.
 
 - Mutable builders have one explicit owner.
@@ -221,6 +224,14 @@ separate aggregate identity builder.
 - Compact IDs and records may be `Copy`.
 - Broad `Clone` implementations on report sets, diagnostic bags, source databases and owning render
   contexts are prohibited.
+
+`DiagnosticDiscoveryStops` is a one-byte copyable set that names why optional diagnostic discovery
+stopped. Module-local stops ride on `PreparedDiagnosticBatch` and are OR-merged when batches append
+to the command's `BoundaryAccumulator`. Scheduler stops that belong to no module batch, the project
+scheduling cutoff and a skipped check-only unit, merge into the same accumulator when the scheduler
+refuses the work. Command report owners read the aggregate before the accumulator freezes its
+reports. It is never stored in `DiagnosticRecord`, `DiagnosticReportSet` or per-expression and token
+state, so a normal success allocates nothing for it.
 
 A frozen context is a process-local rendering and inspection boundary. It is not a persistent cache
 key or a cross-process protocol.
@@ -1669,8 +1680,9 @@ infrastructure-failed result never carries unrelated successful warnings. Compil
 `Result` variant.
 
 The compiler may retain successful independent graph branches while diagnosed providers block
-only their dependants. The owning frontend boundary turns the completed graph into `Success` or
-`Diagnosed`; it does not stop independent work early or expose a partially linkable project.
+only their dependants. The owning frontend boundary turns the visited graph into `Success` or
+`Diagnosed`. Independent work stops early only through the build-owned soft scheduling cutoff in
+`docs/build-system-design.md`, and the boundary never exposes a partially linkable project.
 
 ### Current diagnostic and failure transport
 

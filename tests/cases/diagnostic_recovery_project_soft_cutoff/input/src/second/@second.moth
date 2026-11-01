@@ -1,0 +1,3 @@
+consumer || -> I32:
+    return only_second_module
+;
