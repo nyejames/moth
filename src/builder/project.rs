@@ -19,6 +19,7 @@ use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::CompilationOutcome;
+use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_reports;
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
@@ -114,13 +115,19 @@ pub fn build_project(
         BuildProfile::Dev => &[],
         BuildProfile::Release => &release_flags,
     };
-    let build_result =
-        build::build_project(&adapter, project_root, flags, &BuildConfigInputSet::new())?;
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
+    let build_result = build::build_project(
+        &adapter,
+        project_root,
+        flags,
+        &BuildConfigInputSet::new(),
+        &mut discovery_stops,
+    )?;
 
     let build_result = match build_result {
         Ok(CompilationOutcome::Success { value, .. }) => value,
         Ok(CompilationOutcome::Diagnosed(reports)) => {
-            return Err(Error::from_diagnostic_reports(&reports));
+            return Err(Error::from_diagnostic_reports(&reports, discovery_stops));
         }
         Err(errors) => {
             return Err(Error::from_infrastructure_errors(errors));
@@ -132,7 +139,7 @@ pub fn build_project(
             .map(|reports| format_terse_diagnostic_reports(&reports))
             .unwrap_or_default(),
         Ok(CompilationOutcome::Diagnosed(reports)) => {
-            return Err(Error::from_diagnostic_reports(&reports));
+            return Err(Error::from_diagnostic_reports(&reports, discovery_stops));
         }
         Err(errors) => return Err(Error::from_infrastructure_errors(errors)),
     };

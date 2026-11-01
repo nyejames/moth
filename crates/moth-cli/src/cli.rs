@@ -560,6 +560,7 @@ fn trigger_test_panic(path: &Path) {
 }
 
 fn render_build_outcome(report: BuildCommandReport) {
+    let stop_line = report.discovery_stops.stop_line();
     match report.outcome {
         Ok(CompilationOutcome::Success { value, warnings }) => {
             print_build_success_message(value.output_file_count, report.duration);
@@ -573,9 +574,13 @@ fn render_build_outcome(report: BuildCommandReport) {
         Ok(CompilationOutcome::Diagnosed(reports)) => print_diagnostic_reports(&reports),
         Err(errors) => print_infrastructure_errors(&errors),
     }
+    if let Some(stop_line) = stop_line {
+        println!("{stop_line}");
+    }
 }
 
 fn render_check_outcome(report: CheckCommandReport, terse: bool) {
+    let stop_line = report.discovery_stops.stop_line();
     if terse {
         print_terse_compilation_result(&report.messages);
         println!(
@@ -588,6 +593,9 @@ fn render_check_outcome(report: CheckCommandReport, terse: bool) {
         say!(Bold Green "No errors or warnings");
     } else {
         print_compilation_result(&report.messages);
+    }
+    if let Some(stop_line) = stop_line {
+        println!("{stop_line}");
     }
 }
 

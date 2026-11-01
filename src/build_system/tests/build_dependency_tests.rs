@@ -10,6 +10,7 @@ use crate::build_system::output::output_path_identity;
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
+use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::external_packages::{
     CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalJsLowering, ExternalReturnSlot,
     ExternalSymbolCategory, ExternalSymbolId, ExternalSymbolPath,
@@ -498,6 +499,7 @@ mod built_outputs_tests {
 
 #[test]
 fn build_single_file_project_includes_reachable_dependency_files() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -515,8 +517,14 @@ fn build_single_file_project_includes_reachable_dependency_files() {
 
         let builder = HtmlProjectBuilder::new();
         let result = successful_compilation_value(
-            build_project(&builder, "main.moth", &[], &BuildConfigInputSet::new())
-                .unwrap_or_else(|never| match never {}),
+            build_project(
+                &builder,
+                "main.moth",
+                &[],
+                &BuildConfigInputSet::new(),
+                &mut discovery_stops,
+            )
+            .unwrap_or_else(|never| match never {}),
         );
 
         let outputs = BuiltOutputs::index(&result.project);
@@ -543,6 +551,7 @@ fn build_single_file_project_includes_reachable_dependency_files() {
 
 #[test]
 fn build_html_project_local_js_import_emits_generated_glue() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -568,6 +577,7 @@ fn build_html_project_local_js_import_emits_generated_glue() {
             root.to_str().expect("temp dir should be UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -623,6 +633,7 @@ fn build_html_project_local_js_import_emits_generated_glue() {
 
 #[test]
 fn build_html_project_reexport_fixture_emits_provider_and_exact_wrappers() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     // Keep the original real-bug source shared with its executable integration owner.
     let root =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cases/html_js_reexport_linking/input");
@@ -633,6 +644,7 @@ fn build_html_project_reexport_fixture_emits_provider_and_exact_wrappers() {
             root.to_str().expect("fixture path should be UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -837,6 +849,7 @@ impl BackendBuilder for RegisteredJsPackageBuilder {
 
 #[test]
 fn build_html_registered_source_package_preserves_provider_identity_and_order() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let temporary = tempfile::tempdir().expect("should create campaign roots");
     let mut baseline = None;
     // Isolate topologies so the nested provider root cannot survive in the flat fixture.
@@ -905,6 +918,7 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
                     project_root.to_str().expect("fixture path should be UTF-8"),
                     &[],
                     &BuildConfigInputSet::new(),
+                    &mut discovery_stops,
                 )
                 .unwrap_or_else(|never| match never {}),
             );
@@ -1033,6 +1047,7 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
 
 #[test]
 fn build_html_normal_sibling_name_is_not_visible_from_child_module() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let temporary = tempfile::tempdir().expect("should create sibling fixtures");
     let mut baseline = None;
     for reversed in [false, true] {
@@ -1069,6 +1084,7 @@ fn build_html_normal_sibling_name_is_not_visible_from_child_module() {
             root.to_str().expect("fixture root should be UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {});
         let codes = diagnosed_reports(&result)
@@ -1086,6 +1102,7 @@ fn build_html_normal_sibling_name_is_not_visible_from_child_module() {
 
 #[test]
 fn build_html_project_shared_support_provider_keeps_page_wrappers_isolated() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let temp = tempfile::tempdir().expect("should create temp dir");
     let root = temp.path();
     let src = root.join("src");
@@ -1127,6 +1144,7 @@ fn build_html_project_shared_support_provider_keeps_page_wrappers_isolated() {
             root.to_str().expect("temp dir should be UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -1187,6 +1205,7 @@ fn build_html_project_shared_support_provider_keeps_page_wrappers_isolated() {
 
 #[test]
 fn build_html_project_binding_topology_emits_only_demanded_wrappers_and_whole_assets() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/cases/html_js_binding_runtime_topology/input");
     let builder = HtmlProjectBuilder::new();
@@ -1196,6 +1215,7 @@ fn build_html_project_binding_topology_emits_only_demanded_wrappers_and_whole_as
             root.to_str().expect("fixture path should be UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -1248,6 +1268,7 @@ fn build_html_project_binding_topology_emits_only_demanded_wrappers_and_whole_as
 
 #[test]
 fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -1282,6 +1303,7 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
             root.to_str().expect("temp dir should be UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -1329,6 +1351,7 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
 
 #[test]
 fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -1357,6 +1380,7 @@ fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module()
             root.to_str().expect("temp dir should be UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -1371,6 +1395,7 @@ fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module()
 
 #[test]
 fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_module() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -1399,6 +1424,7 @@ fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_m
             root.to_str().expect("temp dir should be UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -1411,6 +1437,7 @@ fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_m
 
 #[test]
 fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artifacts() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -1439,6 +1466,7 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
             root.to_str().expect("temp dir should be UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -1468,6 +1496,7 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
 
 #[test]
 fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_runtime_artifacts() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -1499,6 +1528,7 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
             root.to_str().expect("temp dir should be UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -1534,6 +1564,7 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
 
 #[test]
 fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -1557,6 +1588,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
             root.to_str().expect("temp dir should be UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -1611,6 +1643,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
 
 #[test]
 fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -1634,6 +1667,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
             root.to_str().expect("temp dir should be UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -1672,6 +1706,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
 
 #[test]
 fn build_project_discards_backend_warnings_when_multimodule_diagnostics_fail() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let src_dir = root.join("src");
@@ -1691,6 +1726,7 @@ fn build_project_discards_backend_warnings_when_multimodule_diagnostics_fail() {
         root.to_str().expect("temp dir path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
     let reports = diagnosed_reports(&result);
@@ -1709,6 +1745,7 @@ fn build_project_discards_backend_warnings_when_multimodule_diagnostics_fail() {
 }
 #[test]
 fn build_html_project_literal_const_change_reaches_next_build_without_asset() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -1740,8 +1777,14 @@ fn build_html_project_literal_const_change_reaches_next_build_without_asset() {
     let entry = root.to_str().expect("temp dir should be UTF-8");
 
     let first = successful_compilation_value(
-        build_project(&builder, entry, &[], &BuildConfigInputSet::new())
-            .unwrap_or_else(|never| match never {}),
+        build_project(
+            &builder,
+            entry,
+            &[],
+            &BuildConfigInputSet::new(),
+            &mut discovery_stops,
+        )
+        .unwrap_or_else(|never| match never {}),
     );
     let first_outputs = BuiltOutputs::index(&first.project);
     let first_html = html_text(first_outputs.at("index.html"));
@@ -1758,8 +1801,14 @@ fn build_html_project_literal_const_change_reaches_next_build_without_asset() {
     .expect("should rewrite literal");
 
     let second = successful_compilation_value(
-        build_project(&builder, entry, &[], &BuildConfigInputSet::new())
-            .unwrap_or_else(|never| match never {}),
+        build_project(
+            &builder,
+            entry,
+            &[],
+            &BuildConfigInputSet::new(),
+            &mut discovery_stops,
+        )
+        .unwrap_or_else(|never| match never {}),
     );
     let second_outputs = BuiltOutputs::index(&second.project);
     let second_html = html_text(second_outputs.at("index.html"));
@@ -1784,6 +1833,7 @@ fn build_html_project_literal_const_change_reaches_next_build_without_asset() {
 
 #[test]
 fn build_html_project_mixed_const_and_function_emits_single_glue_module() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -1808,8 +1858,14 @@ fn build_html_project_mixed_const_and_function_emits_single_glue_module() {
     let builder = HtmlProjectBuilder::new();
     let entry = root.to_str().expect("temp dir should be UTF-8");
     let built = successful_compilation_value(
-        build_project(&builder, entry, &[], &BuildConfigInputSet::new())
-            .unwrap_or_else(|never| match never {}),
+        build_project(
+            &builder,
+            entry,
+            &[],
+            &BuildConfigInputSet::new(),
+            &mut discovery_stops,
+        )
+        .unwrap_or_else(|never| match never {}),
     );
     let outputs = BuiltOutputs::index(&built.project);
 
@@ -1883,12 +1939,14 @@ fn write_shared_glue_project(root: &Path, page_dirs: &[&str], page_export: &str)
 }
 
 fn build_shared_glue_project(root: &Path, flags: &[Flag]) -> BuildResult {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     successful_compilation_value(
         build_project(
             &HtmlProjectBuilder::new(),
             root.to_str().expect("temp dir should be UTF-8"),
             flags,
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     )

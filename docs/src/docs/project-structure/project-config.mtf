@@ -1,4 +1,4 @@
-**Current support versus accepted design.** The Alpha compiler accepts parenthesised grouped `project` and `html` records and declaration-owned `#Config of T` inputs. Closed `$project` / `$html_builder` configuration, the required `version` argument and `$config` prefixes remain accepted queued design. The diagnostic limits below are accepted and validated by the current grouped config, but they do not yet change compilation, so their recovery and scheduling effects arrive later. `moth new` does not yet emit the starter below. See @../progress (Progress) and @../directives (Directives).
+**Current support versus accepted design.** The Alpha compiler accepts parenthesised grouped `project` and `html` records and declaration-owned `#Config of T` inputs. Closed `$project` / `$html_builder` configuration, the required `version` argument and `$config` prefixes remain accepted queued design. The module diagnostic limit below now governs ordinary-body diagnostic recovery. The project diagnostic threshold is accepted and validated but is not yet applied, so project scheduling effects arrive in a later phase. `moth new` does not yet emit the starter below. See @../progress (Progress) and @../directives (Directives).
 
 `config.moth` is the single project config file. It lives at the project root, is loaded before source-tree discovery and is one self-contained compile-time source file with no source dependencies, package resolution or authored file-value paths.
 
@@ -96,7 +96,9 @@ The signature is closed. Arbitrary fields, misspelled standard fields and `metad
 
 ### Diagnostic limits
 
-`max_errors_per_module` is a strict allowance of primary errors retained for each module. `max_errors_per_project` is a soft scheduling threshold for the whole command: once the returned error total reaches it, no new compilation work starts, but work already running finishes and keeps its errors. The project total can therefore exceed the threshold. It is not a maximum result count.
+`max_errors_per_module` is a strict allowance of primary errors retained for each module. It bounds ordinary-body diagnostic recovery. After the first failed ordinary body the emitter admits a further eligible body only while the retained primary error count stays below the allowance.
+
+`max_errors_per_project` is an accepted soft scheduling threshold for the whole command. It is validated and stored but is not yet applied, so it does not stop compilation work today. Once applied, work already running will finish and keep its errors, and the project total may therefore exceed the threshold. It is not a maximum result count.
 
 A present value must be an `I32` from 1 to 2147483647. Zero, negative values and other types are rejected. Omitting a setting uses its default. An explicit `none` disables that one count and leaves the other unchanged. Warnings, notes and related labels never count. Neither setting disables the compiler's fixed recovery-work guard or changes program meaning.
 
@@ -224,7 +226,7 @@ Operational config uses declaration-owned `#Config` inputs and parenthesised gro
     )
 ]
 
-The grouped `project` record accepts `max_errors_per_module` and `max_errors_per_project` as fixed-only `I32?` compiler controls. Omission uses the default of 5 module errors or 30 project errors. An explicit `none` disables that one limit and leaves the other unchanged. A present value must be an exact `I32` from 1 to 2147483647. The grouped record has no field type context, so write an explicit absence through a typed `I32?` constant as the example does. Writing `none` directly in the record is a language type error. The loader validates and stores both settings today. Compilation does not consume them yet, so recovery and scheduling behaviour is unchanged.
+The grouped `project` record accepts `max_errors_per_module` and `max_errors_per_project` as fixed-only `I32?` compiler controls. Omission uses the default of 5 module errors or 30 project errors. An explicit `none` disables that one limit and leaves the other unchanged. A present value must be an exact `I32` from 1 to 2147483647. The grouped record has no field type context, so write an explicit absence through a typed `I32?` constant as the example does. Writing `none` directly in the record is a language type error. The loader validates and stores both settings today. The module limit now governs ordinary-body diagnostic recovery. The project threshold is accepted but not yet applied, so scheduling behaviour is unchanged until a later phase.
 
 Retired flat keys remain rejected. Keep live `docs/config.moth` on this current path.
 

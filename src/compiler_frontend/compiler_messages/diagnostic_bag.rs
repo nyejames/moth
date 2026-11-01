@@ -134,11 +134,16 @@ impl PreparedFailure {
     /// Admit a later failure of the same owner, keeping the first diagnosed failure.
     ///
     /// A later diagnostic is dropped here, before capture, so it never takes the owner's string
-    /// or path table. A later infrastructure cause still merges and dominates.
+    /// or path table. Its discovery stops still merge so a dropped batch cannot erase the reason
+    /// checking ended. A later infrastructure cause still merges and dominates.
     pub(crate) fn with_later(self, later: Self) -> Self {
-        match later {
-            Self::Infrastructure(errors) => self.with_infrastructure_errors(*errors),
-            Self::Diagnosed(_) => self,
+        match (self, later) {
+            (Self::Diagnosed(mut kept), Self::Diagnosed(later)) => {
+                kept.merge_discovery_stops(later.discovery_stops());
+                Self::Diagnosed(kept)
+            }
+            (kept, Self::Infrastructure(errors)) => kept.with_infrastructure_errors(*errors),
+            (kept, Self::Diagnosed(_)) => kept,
         }
     }
 

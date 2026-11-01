@@ -475,6 +475,7 @@ pub(super) fn premerge_failure_to_reports(
     }
     // The accumulator must own the only source handles before it unwraps its source rows.
     drop(failure_source);
+    warning_owner.merge_discovery_stops(accumulator.discovery_stops());
     accumulator.finish(InstallMode::Unfrozen)
 }
 /// Append a boundary-wide finish cause, giving infrastructure precedence over diagnostics.

@@ -6,6 +6,7 @@ use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
@@ -1809,6 +1810,7 @@ same_private_box PrivateBox of Bool = forward(private_box)
 
 #[test]
 fn requester_public_receiver_evidence_preserves_independent_declaration_bounds() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let temporary_directory = tempfile::tempdir().expect("should create temporary project");
     let root = temporary_directory.path();
@@ -1961,6 +1963,7 @@ result = combine(Box(Label("payload")))
                 .expect("temporary project path should be UTF-8"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );
@@ -2975,6 +2978,7 @@ impl BackendBuilder for SuccessfulPackageWarningBuilder {
 
 #[test]
 fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical_path() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
     let project_root = temporary_directory.path().to_path_buf();
@@ -3002,6 +3006,7 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
             .expect("temporary project path should be valid UTF-8"),
         &[],
         &BuildConfigInputSet::new(),
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
     let result = match result {

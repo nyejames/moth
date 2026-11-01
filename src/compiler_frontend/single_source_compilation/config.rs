@@ -55,7 +55,9 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderKind, HeaderParseOptions, HeaderPreparationFailure, bind_module_headers,
     prepare_file_from_tokens, prepare_header_syntax,
 };
-use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
+use crate::compiler_frontend::module_compilation::{
+    AstRecoveryPolicy, DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+};
 use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, resolve_module_dependencies,
 };
@@ -303,6 +305,7 @@ fn compile_prepared_config_source(
             module_symbols: sorted.module_symbols,
             binding_environment: sorted.binding_environment,
             top_level_const_fragments: sorted.top_level_const_fragments,
+            recovery_policy: AstRecoveryPolicy::configured_defaults(),
             source_build_config_contract_names: std::sync::Arc::new(Default::default()),
         },
         AstBuildContext {

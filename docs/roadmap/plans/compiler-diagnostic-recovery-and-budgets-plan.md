@@ -13,9 +13,9 @@
 ## Status and activation
 
 - Status: active on `diagnostic-recovery`.
-- Current slice: Phase 2 ordinary-body recovery. Phase 1 delivered the validated config settings. Its options projection, primary-error accounting and stop metadata land with their first Phase 2/3 consumers to avoid dormant paths.
+- Current slice: Phase 3 preparation, scheduling and incomplete graph results. Phases 1 and 2 delivered the validated settings, ordinary-body recovery, the 4096-token work guard and stop metadata through check, build, dev and SDK reports.
 - Blockers: none. Compiler diagnostics improvements, compact diagnostic records, type-display snapshots, three failure lanes and canonical diagnostic aggregation are delivered.
-- Next action: Phase 2 body failure handoff, module allowance and work guard.
+- Next action: Phase 3 preparation allowance, project soft cutoff and incomplete graph validation.
 
 The main roadmap places this work after compiler source/token/diagnostic data layout and diagnostic improvements. The later general-directives/configuration cutover is not a prerequisite. Deliver the two settings using the configuration system present at activation, then preserve them through that later cutover.
 
@@ -176,10 +176,10 @@ Use `src/compiler_frontend/ast/tests/` for local recovery/isolation invariants a
 **Deliverable:** one validated policy projection and lightweight stop metadata, with existing compilation behaviour otherwise preserved.
 
 - [x] Add focused tests `diagnostic_limits_defaults_and_none` and `diagnostic_limits_invalid_values`. Assert omission gives 5/30, each `none` is independent, 1 and I32 maximum are valid, and zero/negative/wrong-type/out-of-range values fail without proportional allocation.
-- [ ] Extend the current project schema, config application and options projection. Use the exact public names above. Keep defaults in one owner and keep the two controls out of semantic globals and fingerprints. Update a real config fixture through the current syntax, not only a constructed Rust options value.
+- [x] Extend the current project schema, config application and options projection. Use the exact public names above. Keep defaults in one owner and keep the two controls out of semantic globals and fingerprints. Update a real config fixture through the current syntax, not only a constructed Rust options value.
 - [x] Add `diagnostic_limits_reload_resets_state`: set custom limits, reload with omissions, then explicit `none`. Counts reset per invocation and settings do not leak from a previous successful or failed load. Test invalid bootstrap with default project policy.
-- [ ] Extend the delivered diagnostic/outcome owner with cheap primary-error accounting and stop reasons. Reuse an existing count if authoritative. Do not repeatedly scan a growing warning/error list or widen common diagnostic records.
-- [ ] Add `diagnostic_stop_metadata_preserves_failure_lanes`: budget metadata is not a source diagnostic, warnings/labels consume no allowance, an infrastructure failure remains fatal and a compiler bug is never demoted.
+- [x] Extend the delivered diagnostic/outcome owner with cheap primary-error accounting and stop reasons. Reuse an existing count if authoritative. Do not repeatedly scan a growing warning/error list or widen common diagnostic records.
+- [x] Add `diagnostic_stop_metadata_preserves_failure_lanes`: budget metadata is not a source diagnostic, warnings/labels consume no allowance, an infrastructure failure remains fatal and a compiler bug is never demoted.
 - [ ] Thread policy through named config, module, direct-template and synthetic services only where each needs it. A source-backed module has one allowance across its producers. Independent identity domains retain separate reports even when the command adds their counts.
 
 ### Phase 1 audit, style review and validation
@@ -187,30 +187,30 @@ Use `src/compiler_frontend/ast/tests/` for local recovery/isolation invariants a
 - [x] Audit omission versus explicit absence, full I32 boundaries, bootstrap ordering, config reloads and source-visible projection. Verify the project threshold has not become a per-module remaining quota.
 - [x] Review type sizes, allocation sites and ownership. Remove obsolete option/constructor paths rather than leaving defaulted adapters. Empty policy/report state allocates nothing.
 - [x] Run the focused budget/config tests and selected manifest cases, `just fmt-check` and `just clippy`. Run `just validate` at this API integration boundary and the relevant documentation gate. Require nonzero selected test counts.
-- [ ] Record matching clean-path timing/allocation evidence before enabling recovery. The compact diagnostic architecture's layout assertions still pass.
+- [x] Record matching clean-path timing/allocation evidence before enabling recovery. The compact diagnostic architecture's layout assertions still pass.
 
 ## Phase 2 - Bounded ordinary-body AST recovery
 
 **Deliverable:** useful independent body diagnostics with no invalid semantic handoff and a measured recovery-work allowance.
 
-- [ ] Add `diagnostic_recovery_independent_bodies`. Use valid predeclared signatures with an unknown local in one body and a bad argument/return type in another. Assert the ordered complete primary-error set, exact source facts and no consequential errors from the first body.
-- [ ] Return the delivered narrow typed body failure to the emitter. Replace eager per-body report construction with local accumulation and one terminal diagnostic handoff. Preserve all attached source/type evidence. Infrastructure/bug paths stay distinct.
-- [ ] Keep the normal first-body path unchanged. On diagnosis, drop that body's construction roots and perform only the isolation action proven in Phase 0. Complete unused interned entries may stay until module discard. Unresolved cached entries, exposed generic requests or mutated shared templates may not affect later reads.
-- [ ] Avoid blanket vector truncation: existing AST roots, TIR overlays, type-display facts or ticket ranges may still address the suffix. Prefer leaving safe append-only entries until the failed module drops. If this cannot be proved, retain fail-fast behaviour for the affected path.
-- [ ] Add `diagnostic_recovery_failed_callee_signature`. A valid signature still produces an independent wrong-argument diagnostic in another body. A check needing unavailable callee-body facts produces no follow-on error. No fake successful or infallible callee is installed.
-- [ ] Add `diagnostic_recovery_shared_state_isolation`. Exercise numeric completion, TIR/slots or wrappers, generic calls and resources before a body fails, then an independent later body. Assert no stale local lookup, ticket collision, phantom generated request or changed valid signature. Use the smallest cases that distinguish the actual mutation paths.
-- [ ] Enforce the module count before admitting another body. Retain one primary diagnostic per failed body. Preserve earlier errors if a later nonrecoverable source failure is returned. Fatal operational/internal failures terminate normally even after user errors exist.
-- [ ] Implement the token work guard at this same boundary. Add `diagnostic_recovery_work_boundary` with a test allowance and body lengths for exact fit, next-body overflow and a successful body consuming the allowance. Test disabled count limits while the work guard remains active.
-- [ ] Keep non-eligible producers fail-fast and end optional discovery when one must run. Add `diagnostic_recovery_scope_boundary` for a generic template, implicit start or const-template boundary without enabling recovery inside it.
-- [ ] Add `diagnostic_recovery_skips_later_stages`. Once emission has any errors, return the diagnosed outcome without finalisation, generated materialisation, HIR, borrow or backend entry. Check root/resource/publication absence through the canonical service, not a fake parser success.
-- [ ] Compare at least three candidate positive token allowances using measured body sizes. Choose the smallest that provides the tested useful independent-error coverage within the performance and memory gates below. Record the chosen constant, workload coverage, extra work and rejected alternatives. Production selection remains fixed, not a runtime project-size heuristic.
+- [x] Add `diagnostic_recovery_independent_bodies`. Use valid predeclared signatures with an unknown local in one body and a bad argument/return type in another. Assert the ordered complete primary-error set, exact source facts and no consequential errors from the first body.
+- [x] Return the delivered narrow typed body failure to the emitter. Replace eager per-body report construction with local accumulation and one terminal diagnostic handoff. Preserve all attached source/type evidence. Infrastructure/bug paths stay distinct.
+- [x] Keep the normal first-body path unchanged. On diagnosis, drop that body's construction roots and perform only the isolation action proven in Phase 0. Complete unused interned entries may stay until module discard. Unresolved cached entries, exposed generic requests or mutated shared templates may not affect later reads.
+- [x] Avoid blanket vector truncation: existing AST roots, TIR overlays, type-display facts or ticket ranges may still address the suffix. Prefer leaving safe append-only entries until the failed module drops. If this cannot be proved, retain fail-fast behaviour for the affected path.
+- [x] Add `diagnostic_recovery_failed_callee_signature`. A valid signature still produces an independent wrong-argument diagnostic in another body. A check needing unavailable callee-body facts produces no follow-on error. No fake successful or infallible callee is installed.
+- [x] Add `diagnostic_recovery_shared_state_isolation`. Exercise numeric completion, TIR/slots or wrappers, generic calls and resources before a body fails, then an independent later body. Assert no stale local lookup, ticket collision, phantom generated request or changed valid signature. Use the smallest cases that distinguish the actual mutation paths. Module file-value resources are not exercised because the AST harness has no module origin. Resource interning is idempotent and append-only by audit.
+- [x] Enforce the module count before admitting another body. Retain one primary diagnostic per failed body. Preserve earlier errors if a later nonrecoverable source failure is returned. Fatal operational/internal failures terminate normally even after user errors exist.
+- [x] Implement the token work guard at this same boundary. Add `diagnostic_recovery_work_boundary` with a test allowance and body lengths for exact fit, next-body overflow and a successful body consuming the allowance. Test disabled count limits while the work guard remains active.
+- [x] Keep non-eligible producers fail-fast and end optional discovery when one must run. Add `diagnostic_recovery_scope_boundary` for a generic template, implicit start or const-template boundary without enabling recovery inside it.
+- [x] Add `diagnostic_recovery_skips_later_stages`. Once emission has any errors, return the diagnosed outcome without finalisation, generated materialisation, HIR, borrow or backend entry. Check root/resource/publication absence through the canonical service, not a fake parser success.
+- [x] Compare at least three candidate positive token allowances using measured body sizes. Choose the smallest that provides the tested useful independent-error coverage within the performance and memory gates below. Record the chosen constant, workload coverage, extra work and rejected alternatives. Production selection remains fixed, not a runtime project-size heuristic.
 
 ### Phase 2 audit, style review and validation
 
-- [ ] Audit every shared-state classification and failure path after the actual patch. Inspect calls to failed bodies, nested templates, numeric deferrals and all stores retained by diagnostics. No live identity or display fact is dropped early.
-- [ ] Perform the Slice/style review, explicitly counting new helpers, structs, scans and clean-path allocations. Delete superseded eager diagnostic wrappers at the affected boundary. Retain no second parser or recovery implementation.
-- [ ] Run focused AST/isolation tests, public negative cases and repaired-source positive controls. Run `just validate` at the phase boundary and affected feature lanes under the current validation guide.
-- [ ] Meet the clean-build, limit-one and bounded-work performance gates. If extra checking is too costly, reduce the admitted recovery scope/allowance and repeat. Record a failed feasibility gate honestly instead of silently accepting cascades or widening the cost budget.
+- [x] Audit every shared-state classification and failure path after the actual patch. Inspect calls to failed bodies, nested templates, numeric deferrals and all stores retained by diagnostics. No live identity or display fact is dropped early.
+- [x] Perform the Slice/style review, explicitly counting new helpers, structs, scans and clean-path allocations. Delete superseded eager diagnostic wrappers at the affected boundary. Retain no second parser or recovery implementation.
+- [x] Run focused AST/isolation tests, public negative cases and repaired-source positive controls. Run `just validate` at the phase boundary and affected feature lanes under the current validation guide.
+- [x] Meet the clean-build, limit-one and bounded-work performance gates. If extra checking is too costly, reduce the admitted recovery scope/allowance and repeat. Record a failed feasibility gate honestly instead of silently accepting cascades or widening the cost budget.
 
 ## Phase 3 - Preparation, scheduling and incomplete graph results
 

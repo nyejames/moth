@@ -16,6 +16,7 @@ pub(crate) mod diagnostic_severity;
 pub(crate) mod diagnostic_token;
 pub(crate) mod diagnostic_types;
 pub(crate) mod diagnostics;
+pub(crate) mod discovery_stops;
 pub(crate) mod display_messages;
 pub(crate) mod prepared_batch;
 pub(crate) mod render;
@@ -34,6 +35,7 @@ pub(crate) use diagnostics::draft::DiagnosticDraft;
 pub(crate) use diagnostics::labels::GenericSubstitutionDiagnostic;
 pub(crate) use diagnostics::reasons::*;
 pub(crate) use diagnostics::schema::DiagnosticCategory;
+pub use discovery_stops::DiagnosticDiscoveryStops;
 
 #[cfg(test)]
 #[path = "tests/diagnostic_token_projection_tests.rs"]
@@ -50,6 +52,10 @@ mod type_rendering_tests;
 #[cfg(test)]
 #[path = "tests/boundary_failure_tests.rs"]
 mod boundary_failure_tests;
+
 #[cfg(test)]
 #[path = "tests/compiler_bug_tests.rs"]
 mod compiler_bug_tests;
+#[cfg(test)]
+#[path = "tests/discovery_stops_tests.rs"]
+mod discovery_stops_tests;

@@ -3324,6 +3324,27 @@ contract = "language.functions.body_stray_comma_rejected"
 role = "primary"
 
 [[case]]
+id = "diagnostic_recovery_independent_bodies"
+path = "diagnostic_recovery_independent_bodies"
+tags = ["integration", "diagnostics", "functions"]
+contract = "language.diagnostics.ordinary_body_recovery_retains_independent_errors"
+role = "primary"
+
+[[case]]
+id = "diagnostic_recovery_module_limit_one"
+path = "diagnostic_recovery_module_limit_one"
+tags = ["integration", "diagnostics", "functions"]
+contract = "language.diagnostics.ordinary_body_recovery_module_limit"
+role = "primary"
+
+[[case]]
+id = "diagnostic_recovery_repaired_source_success"
+path = "diagnostic_recovery_repaired_source_success"
+tags = ["integration", "functions"]
+contract = "language.functions.independent_concrete_bodies_execute"
+role = "primary"
+
+[[case]]
 id = "diagnostic_match_arrow_separator"
 path = "diagnostic_match_arrow_separator"
 tags = ["integration", "diagnostics"]

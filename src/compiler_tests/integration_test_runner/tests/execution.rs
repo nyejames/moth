@@ -30,6 +30,7 @@ use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
@@ -377,12 +378,14 @@ impl EntryFixture {
     }
 
     fn build_result(&self, flags: &[Flag]) -> CompilationResult<BuildResult> {
+        let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
         let builder_selection = BuilderSelection::new(HtmlProjectBuilder::new());
         match build_project(
             builder_selection.backend.as_ref(),
             self.entry.to_str().expect("fixture entry should be UTF-8"),
             flags,
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {})
         {
@@ -1007,6 +1010,7 @@ fn synthetic_start_custom_error_diagnostics_render_after_worker_drop() {
 
 #[test]
 fn synthetic_start_authored_return_stays_a_source_diagnostic() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for directory_entry in [true, false] {
         for source in [
@@ -1023,6 +1027,7 @@ fn synthetic_start_authored_return_stays_a_source_diagnostic() {
                     .expect("fixture entry should be UTF-8"),
                 &[],
                 &BuildConfigInputSet::new(),
+                &mut discovery_stops,
             )
             .unwrap_or_else(|never| match never {});
             let messages = expect_diagnosed(result);
@@ -1069,6 +1074,7 @@ fn synthetic_start_preserves_nested_returns_inside_authored_functions() {
 }
 #[test]
 fn synthetic_start_wasm_rejects_reachable_failure_before_lir() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for directory_entry in [true, false] {
         for (source, expected_reason_key) in [
@@ -1091,6 +1097,7 @@ fn synthetic_start_wasm_rejects_reachable_failure_before_lir() {
                     .expect("fixture entry should be UTF-8"),
                 &[Flag::HtmlWasm],
                 &BuildConfigInputSet::new(),
+                &mut discovery_stops,
             )
             .unwrap_or_else(|never| match never {});
             let messages = expect_diagnosed(result);

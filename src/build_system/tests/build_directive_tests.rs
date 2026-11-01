@@ -5,6 +5,7 @@
 use super::*;
 use crate::build_system::build::build_project;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
+use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terse};
 use crate::compiler_frontend::compiler_messages::{DiagnosticCategory, DiagnosticSeverity};
 use std::fs;
@@ -12,6 +13,7 @@ use std::path::PathBuf;
 
 #[test]
 fn html_project_directives_fail_when_builder_does_not_register_them() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -31,6 +33,7 @@ fn html_project_directives_fail_when_builder_does_not_register_them() {
                 .expect("temp file path should be valid UTF-8 for this test"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {});
         let messages = diagnosed_reports(&result);
@@ -59,6 +62,7 @@ fn html_project_directives_fail_when_builder_does_not_register_them() {
 
 #[test]
 fn frontend_builtin_directives_work_without_builder_registered_project_directives() {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
@@ -78,6 +82,7 @@ fn frontend_builtin_directives_work_without_builder_registered_project_directive
                 .expect("temp file path should be valid UTF-8 for this test"),
             &[],
             &BuildConfigInputSet::new(),
+            &mut discovery_stops,
         )
         .unwrap_or_else(|never| match never {}),
     );

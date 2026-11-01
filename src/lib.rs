@@ -119,6 +119,7 @@ pub mod projects {
     };
     pub use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
     pub use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
+    pub use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
     pub use crate::compiler_frontend::compiler_messages::display_messages::{
         print_compilation_result, print_diagnostic_reports, print_infrastructure_errors,
         print_terse_compilation_result,

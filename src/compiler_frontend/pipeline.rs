@@ -44,7 +44,7 @@ use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::hir_builder::lower_module_with_owner;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
-use crate::compiler_frontend::module_compilation::FrontendOptions;
+use crate::compiler_frontend::module_compilation::{AstRecoveryPolicy, FrontendOptions};
 use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, SortedHeaders, resolve_module_dependencies,
 };
@@ -580,6 +580,7 @@ impl<'a> CompilerFrontend<'a> {
                         .map(|contract| contract.name.clone())
                         .collect(),
                 ),
+                recovery_policy: AstRecoveryPolicy::from_frontend_options(&self.options),
                 headers: sorted.headers,
                 source_token_owners: sorted.source_token_owners,
                 module_symbols: sorted.module_symbols,

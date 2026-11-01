@@ -48,7 +48,7 @@ pub(crate) use generated::{
     validate_completed_generated_record,
 };
 pub(crate) use options::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
-pub(crate) use options::FrontendOptions;
+pub(crate) use options::{AstRecoveryPolicy, FrontendOptions};
 pub(crate) use outcome::{ModuleCompilationOutcome, ModuleSemanticResult};
 pub(crate) use prepared::PreparedModuleInput;
 pub(crate) use service::compile_module;

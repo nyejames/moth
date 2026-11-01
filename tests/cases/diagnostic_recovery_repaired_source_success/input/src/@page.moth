@@ -1,0 +1,10 @@
+first || -> I32:
+    return 1
+;
+
+second || -> I32:
+    return 2
+;
+
+total = first() + second()
+[:diagnostic_recovery_repaired_source_success total=[total]]

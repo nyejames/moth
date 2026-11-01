@@ -9,6 +9,7 @@ use crate::compiler_frontend::build_config::{
     BuildConfigValueOrigin, BuildInputName, PrimitiveBuildValue,
 };
 use crate::compiler_frontend::compiler_errors::CompilationOutcome;
+use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
@@ -56,6 +57,7 @@ fn assert_config_input_overflow_build(
     inputs: BuildConfigInputSet,
     expected_origin: BuildConfigValueOrigin,
 ) {
+    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let temporary_directory = tempfile::tempdir().expect("should create temp dir");
     let root = temporary_directory.path();
     let facade_directory = root.join("src/facade");
@@ -84,6 +86,7 @@ fn assert_config_input_overflow_build(
         root.to_str().expect("root path should be valid UTF-8"),
         &[],
         &inputs,
+        &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {})
     {

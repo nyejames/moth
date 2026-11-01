@@ -157,6 +157,7 @@ Code paths in the table are relative to `src/compiler_frontend/`.
 | `InfrastructureFailure` | at most 56 bytes | `compiler_messages/compiler_errors.rs` |
 | `PendingDiagnostics` | at most 48 bytes | `compiler_messages/diagnostics/freeze.rs` |
 | `PreparedDiagnosticBatch` | at most 48 bytes | `compiler_messages/prepared_batch.rs` |
+| `DiagnosticDiscoveryStops` | 1 byte | `compiler_messages/discovery_stops.rs` |
 | `DiagnosticRun` | 12 bytes | `compiler_messages/diagnostics/report.rs` |
 | `DiagnosticReportSet` | at most 48 bytes | `compiler_messages/diagnostics/report.rs` |
 
@@ -203,7 +204,13 @@ pub struct DiagnosticReportSet {
 ```
 These are the current owners. `FrozenIdentityContext::sources` is a `FrozenSourceDatabase` that owns
 the source slots, snapshots and path table; the context's `strings` field shares the frozen string
-table. Mutable construction uses the existing source-database and string-table owners rather than a
+table.
+
+`DiagnosticDiscoveryStops` is a one-byte copyable set that names why optional diagnostic discovery
+stopped. It rides on `PreparedDiagnosticBatch` and is OR-merged when batches append to the command's
+`BoundaryAccumulator`. Command report owners read the aggregate before the accumulator freezes its
+reports. It is never stored in `DiagnosticRecord`, `DiagnosticReportSet` or per-expression and token
+state, so a normal success allocates nothing for it. Mutable construction uses the existing source-database and string-table owners rather than a
 separate aggregate identity builder.
 
 - Mutable builders have one explicit owner.

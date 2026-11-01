@@ -899,6 +899,17 @@ pub(crate) fn compiler_capacity_exceeded(
     })
 }
 
+/// True when `draft` is one of the compiler's capacity-exhaustion records.
+///
+/// WHAT: matches the compiler-capacity family and its source-span sibling, including a draft that
+///       faulted while encoding another family's facts.
+/// WHY: capacity exhaustion means a shared store can no longer accept the facts later bodies need,
+///      so optional diagnostic recovery ends instead of reading or rebuilding those stores.
+pub(crate) fn is_capacity_exhaustion(draft: &DiagnosticDraft) -> bool {
+    draft.descriptor().code == COMPILER_CAPACITY_EXCEEDED.descriptor.code
+        || draft.descriptor().code == SOURCE_SPAN_CAPACITY.descriptor.code
+}
+
 diagnostic_family! {
     UNEXPECTED_END_OF_FILE {
         internal: 1017,

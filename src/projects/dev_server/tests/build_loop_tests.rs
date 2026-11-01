@@ -30,7 +30,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::report::Diagnostic
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, DiagnosticDraft, DiagnosticSeverity, NamingConvention,
+    DiagnosticBag, DiagnosticDiscoveryStops, DiagnosticDraft, DiagnosticSeverity, NamingConvention,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::dev_server::dev_client::tests::run_client_test;
@@ -403,8 +403,8 @@ impl DevBuildWorker for FakeWorker {
         &self.request
     }
 
-    fn build(&mut self) -> CompilationResult<BuildResult> {
-        match self
+    fn build(&mut self) -> (CompilationResult<BuildResult>, DiagnosticDiscoveryStops) {
+        let result = match self
             .response
             .take()
             .expect("each fake worker builds exactly once")
@@ -419,7 +419,8 @@ impl DevBuildWorker for FakeWorker {
                 CompilerStage::DevelopmentServer,
                 "synthetic compiler bug during dev worker rebuild"
             ),
-        }
+        };
+        (result, DiagnosticDiscoveryStops::NONE)
     }
 
     fn write_outputs(
@@ -984,7 +985,7 @@ fn project_build_executor_preserves_non_utf8_entry_path_as_file_failure() {
         write_mode: WriteMode::SkipUnchanged,
     };
     let mut worker = executor.create_worker(request);
-    let failure = match worker.build() {
+    let failure = match worker.build().0 {
         Ok(_) => panic!("an unrepresentable entry path must not reach compilation"),
         Err(failure) => failure,
     };
@@ -1019,7 +1020,7 @@ fn project_build_executor_separates_warnings_from_output_write_failures() {
         write_mode: WriteMode::SkipUnchanged,
     };
     let mut worker = executor.create_worker(request);
-    let mut compiled = match worker.build() {
+    let mut compiled = match worker.build().0 {
         Ok(CompilationOutcome::Success {
             value,
             warnings: None,
@@ -1842,8 +1843,8 @@ impl DevBuildWorker for RecordingProjectWorker {
         self.inner.request()
     }
 
-    fn build(&mut self) -> CompilationResult<BuildResult> {
-        let result = self.inner.build();
+    fn build(&mut self) -> (CompilationResult<BuildResult>, DiagnosticDiscoveryStops) {
+        let (result, discovery_stops) = self.inner.build();
         if let Ok(CompilationOutcome::Diagnosed(messages)) = &result {
             let mut diagnostics = messages.iter_severity(DiagnosticSeverity::Error);
             let (report, diagnostic) = diagnostics
@@ -1874,7 +1875,7 @@ impl DevBuildWorker for RecordingProjectWorker {
                 "the builtin failure origin label should retain a resolvable source site"
             );
         }
-        result
+        (result, discovery_stops)
     }
 
     fn write_outputs(

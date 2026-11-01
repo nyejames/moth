@@ -51,6 +51,7 @@ use crate::compiler_frontend::{
 };
 use crate::projects::settings::Config;
 use std::fs;
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -1004,6 +1005,185 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
                 origin,
                 crate::compiler_frontend::hir::functions::HirFunctionOrigin::EntryStart
             ))
+    );
+}
+
+/// A diagnosed module stops before every later semantic stage.
+///
+/// WHAT: two independent body diagnostics are retained, the module allowance stop rides on the
+///       diagnosed batch, and the known-generated store gains no records.
+/// WHY: recovery must not publish a semantic result, HIR, borrow facts or generated sidecars
+///      after an ordinary-body failure.
+#[test]
+fn diagnostic_recovery_skips_later_stages() {
+    let temp_dir = tempfile::tempdir().expect("should create temp dir");
+    let entry_file = temp_dir.path().join("entry.moth");
+    let source = "\
+first || -> I32:
+    return missing
+;
+second || -> I32:
+    return also_missing
+;
+third || -> I32:
+    return third_missing
+;
+";
+    fs::write(&entry_file, source).expect("test source should be written");
+    let canonical_entry = fs::canonicalize(&entry_file).expect("test source should canonicalize");
+
+    let mut string_table = StringTable::new();
+    let mut source_files = SourceDatabase::build(
+        std::iter::once(canonical_entry.as_path()),
+        &canonical_entry,
+        None,
+        &mut string_table,
+    )
+    .expect("source file table should build");
+    let source_id = source_files
+        .get_by_canonical_path(&canonical_entry)
+        .expect("test source should have a registered identity")
+        .id;
+    source_files
+        .retain_text(source_id, source.to_owned())
+        .expect("test source snapshot should be retained");
+
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut source_span_builder = ExtendedSpanBuilder::new();
+    let input_files = vec![tokenized_moth_prepared_input(
+        &source_files,
+        &style_directives,
+        &mut string_table,
+        canonical_entry.clone(),
+        source,
+        &mut source_span_builder,
+    )];
+
+    let mut source_files = SourceDatabaseBuilder::new(source_files);
+    source_files.retain_span_builder(source_id, source_span_builder);
+    let (source_files_view, mut span_owners) = source_files.split();
+    let local_table = string_table.fork_source().fork_for_module().into_parts().0;
+    let source_byte_count = source_byte_count(&input_files, source_files_view);
+
+    let project_root = canonical_entry
+        .parent()
+        .expect("entry file should have a parent")
+        .to_path_buf();
+    let project_path_resolver = ProjectPathResolver::new_with_module_roots(
+        project_root.clone(),
+        project_root.clone(),
+        PreparedSourcePackageRoots::default(),
+        &SourceFileKindRegistry::new(),
+        ModuleRootTable::from_records(vec![ModuleRootRecord::new(
+            project_root,
+            canonical_entry.clone(),
+        )]),
+    );
+    let stable_origin = StableModuleOriginIdentity::from_relative_logical_path(
+        StablePackageIdentity::project_local("test-project"),
+        std::path::Path::new(""),
+        ModuleRootRole::Normal,
+    )
+    .expect("single-file module origin should construct");
+    let preparation_context = super::ModulePreparationContext {
+        source_files: source_files_view,
+        style_directives: &style_directives,
+    };
+    #[cfg(feature = "timers")]
+    let prepared_result = preparation_context.prepare_module(
+        stable_origin.clone(),
+        input_files,
+        &mut span_owners,
+        &canonical_entry,
+        local_table,
+        source_files_view.fork_path_interner(),
+        source_byte_count,
+        None,
+    );
+    #[cfg(not(feature = "timers"))]
+    let prepared_result = preparation_context.prepare_module(
+        stable_origin,
+        input_files,
+        &mut span_owners,
+        &canonical_entry,
+        local_table,
+        source_files_view.fork_path_interner(),
+        source_byte_count,
+    );
+    let (prepared, preparation_warnings) =
+        prepared_result.expect("module preparation should succeed");
+
+    let mut config = Config::new(temp_dir.path().to_path_buf());
+    config.max_errors_per_module = NonZeroU32::new(2);
+    let external_packages = Arc::new(ExternalPackageRegistry::new());
+    let resolution_table = ExternalImportResolutionTable::default();
+    let source_provider_dependencies = Default::default();
+    let provider_materialisations = ProviderMaterialisationRegistry::default();
+    let compile_context = ModuleCompilationContext {
+        source_files: source_files_view,
+        options: config.frontend_options(),
+        build_profile: FrontendBuildProfile::Dev,
+        root_role_override: None,
+        project_path_resolver: Some(&project_path_resolver),
+        global_string_table: None,
+        global_path_table: None,
+        style_directives: &style_directives,
+        external_packages,
+        build_config_values: Arc::new(Default::default()),
+        external_dependency_resolution_table: &resolution_table,
+        source_provider_dependencies: &source_provider_dependencies,
+        provider_materialisations: &provider_materialisations,
+        builder_runtime_packages: &[],
+    };
+    let generated_store = super::super::generated_store::BoundaryGeneratedFunctionStore::default();
+    #[cfg(feature = "timers")]
+    let semantic_result = compile_module(
+        &compile_context,
+        prepared.semantic,
+        preparation_warnings,
+        generated_store.known_generated(),
+        None,
+    );
+    #[cfg(not(feature = "timers"))]
+    let semantic_result = compile_module(
+        &compile_context,
+        prepared.semantic,
+        preparation_warnings,
+        generated_store.known_generated(),
+    );
+    let outcome = semantic_result.expect("a diagnosed module must not fail internally");
+    source_files
+        .finish_source(source_id)
+        .expect("the module source should finalize after preparation");
+    source_files
+        .assemble_finalized_tables()
+        .expect("the frozen module source table should assemble");
+    let _source_files = source_files
+        .finish()
+        .expect("source builder should validate after the last producer returned");
+
+    let batch = match outcome {
+        ModuleCompilationOutcome::Success { .. } => {
+            panic!("two failing ordinary bodies must not publish a semantic result")
+        }
+        ModuleCompilationOutcome::Diagnosed(batch) => batch,
+    };
+    assert!(batch.has_errors());
+    assert_eq!(
+        batch.diagnostic_count(),
+        2,
+        "the module allowance retains two independent body errors"
+    );
+    assert!(
+        batch
+            .discovery_stops()
+            .contains(crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
+        "the diagnosed batch carries the allowance stop"
+    );
+    assert_eq!(
+        generated_store.published_record_count(),
+        0,
+        "a diagnosed module publishes no generated sidecars"
     );
 }
 

@@ -14,12 +14,12 @@ use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{
     CompilationOutcome, CompilationResult, InfrastructureErrors, InfrastructureFailure,
 };
-use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
-use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
 use crate::compiler_frontend::compiler_messages::display_messages::print_diagnostic_reports;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerStage, DiagnosticDiscoveryStops, DiagnosticSeverity, PreparedFailure,
+};
 use crate::projects::dev_server::error_page::{
     format_compiler_messages, render_compiler_bug_page, render_compiler_error_page,
 };
@@ -43,6 +43,7 @@ pub struct BuildCycleReport {
     pub build_duration: Duration,
     pub clients_notified: usize,
     pub watch_scope: Option<watch::WatchScope>,
+    pub discovery_stops: DiagnosticDiscoveryStops,
     pub success_messages: Option<DiagnosticReportSet>,
     pub output_warnings: Vec<String>,
     /// Drained timing observations for this cycle, rendered by the caller
@@ -72,7 +73,8 @@ pub(crate) trait DevBuildExecutor: Clone + Send + Sync + 'static {
 
 pub(crate) trait DevBuildWorker {
     fn request(&self) -> &DevBuildRequest;
-    fn build(&mut self) -> CompilationResult<BuildResult>;
+    /// Compile once, returning the stop metadata accumulated before any diagnosed result.
+    fn build(&mut self) -> (CompilationResult<BuildResult>, DiagnosticDiscoveryStops);
     fn write_outputs(
         &mut self,
         build_result: &mut BuildResult,
@@ -129,22 +131,26 @@ impl DevBuildWorker for ProjectBuildWorker {
         &self.request
     }
 
-    fn build(&mut self) -> CompilationResult<BuildResult> {
-        let entry_path = self.request.entry_file.to_str().ok_or_else(|| {
-            InfrastructureErrors::from(InfrastructureFailure::filesystem(
+    fn build(&mut self) -> (CompilationResult<BuildResult>, DiagnosticDiscoveryStops) {
+        let Some(entry_path) = self.request.entry_file.to_str() else {
+            let errors = InfrastructureErrors::from(InfrastructureFailure::filesystem(
                 CompilerStage::DevelopmentServer,
                 &self.request.entry_file,
                 "Dev server entry path contains invalid UTF-8 and cannot be compiled.",
-            ))
-        })?;
+            ));
+            return (Err(errors), DiagnosticDiscoveryStops::NONE);
+        };
 
-        build::build_project(
+        let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
+        let result = build::build_project(
             self.builder.backend.as_ref(),
             entry_path,
             &self.request.flags,
             &self.request.build_config_inputs,
+            &mut discovery_stops,
         )
-        .unwrap_or_else(|never| match never {})
+        .unwrap_or_else(|never| match never {});
+        (result, discovery_stops)
     }
 
     fn write_outputs(
@@ -196,6 +202,7 @@ struct BuildOutcome {
     kind: BuildOutcomeKind,
     watch_scope: Option<watch::WatchScope>,
     output_dir: Option<PathBuf>,
+    discovery_stops: DiagnosticDiscoveryStops,
 }
 
 fn finish_build_failure(
@@ -215,8 +222,8 @@ fn finish_build_failure(
 }
 
 fn run_dev_build_worker(mut worker: Box<dyn DevBuildWorker>) -> BuildOutcome {
-    let compiled = worker.build();
-    let outcome = build_once(worker.as_mut(), compiled);
+    let (compiled, discovery_stops) = worker.build();
+    let outcome = build_once(worker.as_mut(), compiled, discovery_stops);
     drop(worker);
     outcome
 }
@@ -224,14 +231,20 @@ fn run_dev_build_worker(mut worker: Box<dyn DevBuildWorker>) -> BuildOutcome {
 fn build_once(
     worker: &mut dyn DevBuildWorker,
     compiled: CompilationResult<BuildResult>,
+    discovery_stops: DiagnosticDiscoveryStops,
 ) -> BuildOutcome {
     let fallback_output_root = worker.request().output_root.clone();
     let build_result = match compiled {
         Err(errors) => {
-            return failed_build_outcome(Err(errors), None, None);
+            return failed_build_outcome(Err(errors), discovery_stops, None, None);
         }
         Ok(CompilationOutcome::Diagnosed(reports)) => {
-            return failed_build_outcome(Ok(CompilationOutcome::Diagnosed(reports)), None, None);
+            return failed_build_outcome(
+                Ok(CompilationOutcome::Diagnosed(reports)),
+                discovery_stops,
+                None,
+                None,
+            );
         }
         Ok(CompilationOutcome::Success { value, .. }) => value,
     };
@@ -240,7 +253,12 @@ fn build_once(
     let output_summary = match worker.write_outputs(&mut build_result) {
         Ok(summary) => summary,
         Err(failure) => {
-            return failed_build_outcome(finish_build_failure(build_result, failure), None, None);
+            return failed_build_outcome(
+                finish_build_failure(build_result, failure),
+                discovery_stops,
+                None,
+                None,
+            );
         }
     };
     let output_warnings = output_summary.into_warning_messages();
@@ -266,6 +284,7 @@ fn build_once(
         Err(failure) => {
             return failed_build_outcome(
                 finish_build_failure(build_result, failure),
+                discovery_stops,
                 Some(watch_scope),
                 Some(output_dir),
             );
@@ -279,6 +298,7 @@ fn build_once(
         );
         return failed_build_outcome(
             finish_build_failure(build_result, PreparedFailure::Infrastructure(error.into())),
+            discovery_stops,
             Some(watch_scope),
             Some(output_dir),
         );
@@ -292,12 +312,18 @@ fn build_once(
         Ok(CompilationOutcome::Diagnosed(reports)) => {
             return failed_build_outcome(
                 Ok(CompilationOutcome::Diagnosed(reports)),
+                discovery_stops,
                 Some(watch_scope),
                 Some(output_dir),
             );
         }
         Err(errors) => {
-            return failed_build_outcome(Err(errors), Some(watch_scope), Some(output_dir));
+            return failed_build_outcome(
+                Err(errors),
+                discovery_stops,
+                Some(watch_scope),
+                Some(output_dir),
+            );
         }
     };
 
@@ -310,6 +336,7 @@ fn build_once(
         },
         watch_scope: Some(watch_scope),
         output_dir: Some(output_dir),
+        discovery_stops,
     }
 }
 
@@ -372,15 +399,21 @@ pub(crate) fn run_single_build_cycle<E: DevBuildExecutor>(
                                 kind: BuildOutcomeKind::CompilerBug(report),
                                 watch_scope: None,
                                 output_dir: None,
+                                discovery_stops: DiagnosticDiscoveryStops::NONE,
                             }
                         }
                     }
                 }
-                Err(errors) => failed_build_outcome(Err(errors), None, None),
+                Err(errors) => {
+                    failed_build_outcome(Err(errors), DiagnosticDiscoveryStops::NONE, None, None)
+                }
             };
             (outcome, Some(report_entry_file))
         }
-        Err(errors) => (failed_build_outcome(Err(errors), None, None), None),
+        Err(errors) => (
+            failed_build_outcome(Err(errors), DiagnosticDiscoveryStops::NONE, None, None),
+            None,
+        ),
     };
     let report_entry_file = report_entry_file.as_deref().unwrap_or(entry_file);
     let report = publish_build_outcome(state, outcome, start, report_entry_file);
@@ -444,6 +477,7 @@ fn publish_build_outcome(
             build_state.html_site_config.origin.clone(),
         )
     };
+    let discovery_stops = outcome.discovery_stops;
 
     let (
         build_ok,
@@ -487,7 +521,11 @@ fn publish_build_outcome(
             )
         }
         BuildOutcomeKind::Failure(failure) => {
-            let diagnostics_summary = format_compiler_messages(&failure);
+            let mut diagnostics_summary = format_compiler_messages(&failure);
+            if let Some(stop_line) = discovery_stops.stop_line() {
+                diagnostics_summary.push('\n');
+                diagnostics_summary.push_str(&stop_line);
+            }
             let error_html = render_compiler_error_page(&failure, &project_root, &origin, version);
             (
                 false,
@@ -548,6 +586,7 @@ fn publish_build_outcome(
         build_duration,
         clients_notified,
         watch_scope,
+        discovery_stops,
         success_messages,
         output_warnings,
         #[cfg(feature = "timers")]
@@ -600,6 +639,9 @@ pub fn run_builds_until_stable<E: DevBuildExecutor>(
                 Yellow report.clients_notified,
                 Yellow " clients."
             );
+            if let Some(stop_line) = report.discovery_stops.stop_line() {
+                say!(Yellow stop_line);
+            }
         }
         #[cfg(feature = "timers")]
         if let Some(snapshot) = &report.timing_snapshot {
@@ -670,6 +712,7 @@ pub fn run_watch_build_loop<E: DevBuildExecutor>(
 
 fn failed_build_outcome(
     failure: CompilationResult<()>,
+    discovery_stops: DiagnosticDiscoveryStops,
     watch_scope: Option<watch::WatchScope>,
     output_dir: Option<PathBuf>,
 ) -> BuildOutcome {
@@ -677,6 +720,7 @@ fn failed_build_outcome(
         kind: BuildOutcomeKind::Failure(failure),
         watch_scope,
         output_dir,
+        discovery_stops,
     }
 }
 

@@ -247,10 +247,12 @@ impl Config {
     /// Project the settings the compiler frontend consumes.
     ///
     /// WHY: the frontend must not read this configuration container. The project tool owns the
-    ///      translation, so only the template loop ceiling crosses the boundary.
+    ///      translation, so only the template loop ceiling and module error allowance cross the
+    ///      boundary.
     pub(crate) fn frontend_options(&self) -> FrontendOptions {
         FrontendOptions {
             template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
+            max_errors_per_module: self.max_errors_per_module,
         }
     }
 

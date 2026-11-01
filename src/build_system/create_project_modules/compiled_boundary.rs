@@ -1750,6 +1750,7 @@ impl ProjectFrontendCompilation {
             drop(package_source_arcs);
             drop(source_packages);
             drop(project);
+            warning_owner.merge_discovery_stops(accumulator.discovery_stops());
             let messages = accumulator.finish(InstallMode::Frozen);
             return (messages, retention);
         }
@@ -1791,6 +1792,7 @@ impl ProjectFrontendCompilation {
         } else {
             InstallMode::Unfrozen
         };
+        warning_owner.merge_discovery_stops(accumulator.discovery_stops());
         let messages = accumulator.finish(install);
         (messages, retention)
     }
