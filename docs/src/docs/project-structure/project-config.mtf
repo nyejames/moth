@@ -1,4 +1,4 @@
-**Current support versus accepted design.** The Alpha compiler accepts parenthesised grouped `project` and `html` records and declaration-owned `#Config of T` inputs. Closed `$project` / `$html_builder` configuration, the required `version` argument and `$config` prefixes remain accepted queued design. `moth new` does not yet emit the starter below. See @../progress (Progress) and @../directives (Directives).
+**Current support versus accepted design.** The Alpha compiler accepts parenthesised grouped `project` and `html` records and declaration-owned `#Config of T` inputs. Closed `$project` / `$html_builder` configuration, the required `version` argument and `$config` prefixes remain accepted queued design. The diagnostic limits below are accepted design without current support. `moth new` does not yet emit the starter below. See @../progress (Progress) and @../directives (Directives).
 
 `config.moth` is the single project config file. It lives at the project root, is loaded before source-tree discovery and is one self-contained compile-time source file with no source dependencies, package resolution or authored file-value paths.
 
@@ -74,11 +74,31 @@ The required generated starter, once implementation lands, keeps the same versio
         [: The existing compiler-owned default]
         [: No]
     ]
+
+    [td:
+        [: `max_errors_per_module`]
+        [: `I32?`]
+        [: `5`]
+        [: No]
+    ]
+
+    [td:
+        [: `max_errors_per_project`]
+        [: `I32?`]
+        [: `30`]
+        [: No]
+    ]
 ]
 
-The signature is closed. Arbitrary fields, misspelled standard fields and `metadata = ...` are rejected. `@project` publishes only these predefined fields.
+The signature is closed. Arbitrary fields, misspelled standard fields and `metadata = ...` are rejected. `@project` publishes only the first six predefined fields. The two diagnostic limits are compiler controls and are never published.
 
-`name`, `entry_root` and `template_const_loop_iteration_limit` remain fixed-only, including through helper constants. Missing `version` is diagnosed even when an unused input contract named `version` exists.
+`name`, `entry_root`, `template_const_loop_iteration_limit`, `max_errors_per_module` and `max_errors_per_project` remain fixed-only, including through helper constants. Missing `version` is diagnosed even when an unused input contract named `version` exists.
+
+### Diagnostic limits
+
+`max_errors_per_module` is a strict allowance of primary errors retained for each module. `max_errors_per_project` is a soft scheduling threshold for the whole command: once the returned error total reaches it, no new compilation work starts, but work already running finishes and keeps its errors. The project total can therefore exceed the threshold. It is not a maximum result count.
+
+A present value must be an `I32` from 1 to 2147483647. Zero, negative values and other types are rejected. Omitting a setting uses its default. An explicit `none` disables that one count and leaves the other unchanged. Warnings, notes and related labels never count. Neither setting disables the compiler's fixed recovery-work guard or changes program meaning.
 
 ### `$html_builder`
 

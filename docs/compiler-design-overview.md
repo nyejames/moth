@@ -226,6 +226,18 @@ Diagnostic schemas own stable codes and typed facts. Codes are not repurposed wh
 
 MON's public errors are a separate caller-owned data-service boundary, described under `Rust-only MON service`.
 
+### Diagnostic recovery and error budgets
+
+Diagnostic recovery shortens discovery, never compilation. A module that records any user error publishes nothing, and a stopped request never claims that unvisited work succeeded or failed.
+
+- A primary user error consumes one budget slot. Warnings, notes, secondary labels, blocked dependants and stop metadata consume none. A shared provider diagnosis counts once, not once per consumer.
+- Each canonical module has one strict error allowance across its preparation lanes, AST work, generated requests and attributed check-only units. It never resets per file, function, stage or generated request. Parallel preparation may produce speculative extras, but after canonical merging the module retains at most its allowance, keeping complete diagnostic groups and their identity contexts.
+- Stage 4 > `Ordinary-body diagnostic recovery` defines the only semantic recovery root and its compiler-owned work guard. Every other stage keeps its fail-fast boundary.
+- The project threshold is a build-owned soft scheduling cutoff, not a result cap. Build design > `Diagnostic budgets and scheduling cutoff` owns it.
+- Operational failures and compiler bugs keep their lanes. Budget exhaustion never conceals them, and infrastructure still dominates collected diagnostics. Source-capacity exhaustion or a failed shared-store construction ends its owning stage even when it is a user diagnostic.
+- Stop metadata beside the owning outcome distinguishes a module-allowance stop, an AST work-guard stop and a project scheduling stop. It is not a diagnostic and never enters a common diagnostic record. The data-layout authority owns its representation.
+- The two error-count limits are compiler-control settings. They never enter `@project`, semantic fingerprints or reuse identity, so changing one cannot change program meaning or invalidate a successful artefact.
+
 ### Build-lifetime render context
 
 One project or package boundary owns its mutable source, string and path identity construction. Source identities are final before downstream use. Inventory lanes register them upfront. Private discovery lanes normalise provisional identities once at their publication barrier.
@@ -505,6 +517,20 @@ Statically known invalid numeric work remains a source diagnostic, including ins
 Catch eligibility is occurrence-local safety syntax, not evidence that an expression can fail. A well-typed authored cast or arithmetic operation (including unary negation), at least two function/member calls at the selected expression level, or an actual compatible recoverable producer can make an expression eligible. Receiver-chain and sibling-operand calls count at that level; calls inside an argument are counted by that argument's own level and do not increase its parent count. An actually fallible nested argument still contributes its real failure to the protected expression and follows ordinary handler/function-contract delivery; only its call is excluded from the parent's authored count. Eligibility alone adds no error type, failure contributor or recoverable-runtime capability.
 
 Handler types and fallback constraints are validated before failure analysis, even when a protected operation later proves infallible. A missing provisional summary is not proof of no failure and cannot justify removing a handler. Pruning waits for the relevant source/generated summaries and private failure-lane installation to converge; HIR revalidation and affected borrow, numeric-proof and link analyses precede publication.
+
+#### Ordinary-body diagnostic recovery
+
+Each ordinary concrete function body, including a concrete receiver method, is fail-fast. Its first primary error is reported with useful related labels and the rest of the body is abandoned. Body-local nested constructs belong to their containing body and are not separate recovery roots.
+
+After that first error, AST may check later ordinary concrete bodies in sorted header order through the existing signatures, bound visibility and bounded body token ranges. It never rescans for a function boundary or recovers statement by statement. A header needing no further semantic work, such as an already resolved struct shell, is passed over. Recovery ends at the first header that needs another semantic producer, such as generic-template validation, a const template or the implicit `start`, and at the first unavailable prerequisite. A shared-store capacity diagnostic also ends recovery, keeping the diagnostics already collected. Environment construction, declaration and signature completion, generated materialisation and const-template producers keep their fail-fast boundaries. Templates and generic calls inside an eligible body create no extra recovery root.
+
+A valid signature stays usable when its body fails, so a wrong argument elsewhere remains an independent error. Checks that need body-derived failure, effect or other semantic facts from a failed or unvisited body are withheld. Recovery never installs a fabricated successful or infallible callee. A missing infallibility fact keeps its conservative may-fail meaning and produces no follow-on diagnostic.
+
+A failed body's construction roots are dropped. Complete append-only facts it produced, such as interned types, strings and paths or unreachable expression, constant and TIR rows, may remain until the diagnosed module drops because no later body consumes them as its own facts. Recovery adds no per-body full snapshot, broad rollback or successful-path copy. Scope cleanup or a small append checkpoint is allowed only with a proved ownership and lifetime contract.
+
+Before admitting each additional body, AST checks the module error allowance and charges a compiler-owned work guard with that body's full retained token length. It stops when the next body would exceed the remaining guard allowance, without skipping ahead to a smaller body. The first failed body belongs to normal compilation and is not charged. An admitted body is never interrupted, and existing numeric, template, allocation and recursion limits still apply. Disabling an error-count limit never disables the guard. Token accounting bounds additional admitted syntax, not wall-clock time or all semantic complexity.
+
+Once emission records any error, AST captures the collected body diagnostics once and returns the diagnosed outcome. It skips finalisation, generated-request draining, HIR, borrow validation, generated completion and every later stage that needs a valid AST.
 
 #### Dependencies and visibility
 

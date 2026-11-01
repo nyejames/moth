@@ -12,10 +12,10 @@
 
 ## Status and activation
 
-- Status: next in the roadmap, design interview confirmed.
-- Current slice: not started.
+- Status: active on `diagnostic-recovery`.
+- Current slice: Phase 0 activation.
 - Blockers: none. Compiler diagnostics improvements, compact diagnostic records, type-display snapshots, three failure lanes and canonical diagnostic aggregation are delivered.
-- Next action: refresh the activation tree and run Phase 0.
+- Next action: Phase 1 limits, configuration and report contract.
 
 The main roadmap places this work after compiler source/token/diagnostic data layout and diagnostic improvements. The later general-directives/configuration cutover is not a prerequisite. Deliver the two settings using the configuration system present at activation, then preserve them through that later cutover.
 
@@ -155,21 +155,21 @@ Use `src/compiler_frontend/ast/tests/` for local recovery/isolation invariants a
 
 **Deliverable:** a current owner/isolation inventory, contract updates and a reproducible comparison baseline. No recovery enabled yet.
 
-- [ ] Confirm the prerequisite capabilities are merged. Read every required authority and inspect the actual default/feature paths. Record revision, Rust/Node versions, compiler build, host, thread settings and known baseline failures in working notes.
-- [ ] Recheck expression ownership, diagnostic snapshots, module outcomes, source preparation, generated completion, scheduler concurrency and actual cross-build reuse. Distinguish a declared capability from an executing implementation.
-- [ ] Publish the accepted recovery policy in the compiler architecture, scheduling/counting rules in the build architecture and configuration contract in the canonical project-config reference. Keep storage details under the data-layout authority. Preserve existing independent contracts rather than rewriting those documents wholesale.
-- [ ] Inventory every mutation reachable from an eligible body: scope/numeric scratch, expression builder, constant store, TIR views/overlays, type interning/cache, generic-request ledger, evidence and infallibility facts, resource uses, warnings and source spans. Classify each as body-local discard, complete append-only fact, small rollback with proved ownership or unsafe-to-continue.
-- [ ] Prove that retained valid facts cannot expose failed-body state to the next body. Audit cache insertion order and in-progress markers, not just container ownership. Dynamic TIR expression IDs and generic ticket positions are particularly sensitive.
-- [ ] Identify body-dependent diagnostic sites. Prefer the already-required omission of later finalisation to new suppression state. A small failure-path-only identity set or existing readiness state is acceptable when needed. No new graph or clean-path tracking pass is authorised.
-- [ ] Inspect the canonical test inventory and select existing primary cases to extend. Characterise the current first-error result and stage cutoff before changing it.
+- [x] Confirm the prerequisite capabilities are merged. Read every required authority and inspect the actual default/feature paths. Record revision, Rust/Node versions, compiler build, host, thread settings and known baseline failures in working notes.
+- [x] Recheck expression ownership, diagnostic snapshots, module outcomes, source preparation, generated completion, scheduler concurrency and actual cross-build reuse. Distinguish a declared capability from an executing implementation.
+- [x] Publish the accepted recovery policy in the compiler architecture, scheduling/counting rules in the build architecture and configuration contract in the canonical project-config reference. Keep storage details under the data-layout authority. Preserve existing independent contracts rather than rewriting those documents wholesale.
+- [x] Inventory every mutation reachable from an eligible body: scope/numeric scratch, expression builder, constant store, TIR views/overlays, type interning/cache, generic-request ledger, evidence and infallibility facts, resource uses, warnings and source spans. Classify each as body-local discard, complete append-only fact, small rollback with proved ownership or unsafe-to-continue.
+- [x] Prove that retained valid facts cannot expose failed-body state to the next body. Audit cache insertion order and in-progress markers, not just container ownership. Dynamic TIR expression IDs and generic ticket positions are particularly sensitive.
+- [x] Identify body-dependent diagnostic sites. Prefer the already-required omission of later finalisation to new suppression state. A small failure-path-only identity set or existing readiness state is acceptable when needed. No new graph or clean-path tracking pass is authorised.
+- [x] Inspect the canonical test inventory and select existing primary cases to extend. Characterise the current first-error result and stage cutoff before changing it.
 - [ ] Use existing non-recording benchmarks to record clean modules, first-body failure with valid suffix, several independent errors, templates/generics and multi-module fanout. Measure compiler execution separately from building the Rust compiler.
 
 ### Phase 0 audit, style review and validation
 
-- [ ] Audit the owner matrix against actual writers/readers, source identities and report lifetimes. A body is not isolated merely because its local scope drops.
-- [ ] Perform the Slice/style review. Reject new abstractions that only wrap current owners and remove unsupported assumptions inherited from predecessor APIs.
-- [ ] Run the activation `just validate` and affected baseline lanes. Use the documentation release-build gate for authority changes. Record exact failures and unrun checks. A broken baseline is not permission to weaken gates.
-- [ ] Approve only the smallest viable recovery boundary. If ordinary bodies need broad snapshots, a new dependency graph or uncertain rollback, stop the recovery slice and record the blocker. Budget/config work may proceed independently, but recovery is not marked delivered.
+- [x] Audit the owner matrix against actual writers/readers, source identities and report lifetimes. A body is not isolated merely because its local scope drops.
+- [x] Perform the Slice/style review. Reject new abstractions that only wrap current owners and remove unsupported assumptions inherited from predecessor APIs.
+- [x] Run the activation `just validate` and affected baseline lanes. Use the documentation release-build gate for authority changes. Record exact failures and unrun checks. A broken baseline is not permission to weaken gates.
+- [x] Approve only the smallest viable recovery boundary. If ordinary bodies need broad snapshots, a new dependency graph or uncertain rollback, stop the recovery slice and record the blocker. Budget/config work may proceed independently, but recovery is not marked delivered.
 
 ## Phase 1 - Limits, configuration and report contract
 

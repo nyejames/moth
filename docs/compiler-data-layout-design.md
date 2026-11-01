@@ -1669,8 +1669,9 @@ infrastructure-failed result never carries unrelated successful warnings. Compil
 `Result` variant.
 
 The compiler may retain successful independent graph branches while diagnosed providers block
-only their dependants. The owning frontend boundary turns the completed graph into `Success` or
-`Diagnosed`; it does not stop independent work early or expose a partially linkable project.
+only their dependants. The owning frontend boundary turns the visited graph into `Success` or
+`Diagnosed`. Independent work stops early only through the build-owned soft scheduling cutoff in
+`docs/build-system-design.md`, and the boundary never exposes a partially linkable project.
 
 ### Current diagnostic and failure transport
 
