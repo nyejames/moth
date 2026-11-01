@@ -66,6 +66,7 @@ pub(crate) fn project_compilation_from_test_modules_with_resources(
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: Vec::new(),
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     };
     ProjectCompilation::from_successful_boundaries(
         project,

@@ -21,7 +21,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticD
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, InvalidDependencyClauseReason, PreparedFailure,
+    DiagnosticBag, DiagnosticDiscoveryStops, InvalidDependencyClauseReason, PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
@@ -45,13 +45,14 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use crate::projects::settings::Config;
 
+use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use rustc_hash::FxHashMap;
 
 use super::super::compiled_boundary::{
     BlockedModule, BlockedProvider, CompiledGraphBoundary, CompletedSourcePackageRegistry,
-    DiagnosedModule, PackageBoundaryId,
+    DiagnosedModule, PackageBoundaryId, ProjectDiagnosticBudget, SchedulingCutoff,
 };
 use super::super::config_boundary;
 use super::super::generated_store::BoundaryGeneratedFunctionStore;
@@ -79,12 +80,23 @@ struct DirectoryModuleTaskResult {
 enum DirectoryModuleTaskOutcome {
     Success(Box<ModuleSemanticResult>, DiagnosticBag, Vec<DiagnosticBag>),
     Diagnosed(PreparedDiagnosticBatch),
-    /// A transient check-only unit whose required canonical provider already failed.
-    ///
-    /// Check-only units have no graph slot, so this outcome is intentionally not retained in the
-    /// final boundary. The provider's own diagnosed/blocked record remains authoritative.
-    Blocked,
     Infrastructure(Box<InfrastructureErrors>),
+}
+
+/// Classification of a transient check-only unit against its required providers.
+///
+/// WHAT: separates a dependant of a known failed provider from a unit whose providers were never
+///       visited because the command stopped admitting work.
+/// WHY: after the project threshold refuses new work, unvisited project slots, dropped packages and
+///      unvisited package modules are all `Unavailable`. That is stopped work, not a compiler bug,
+///      so the unit must be refused through the cutoff path instead of claiming a false blocker.
+enum CheckOnlyProviderClassification {
+    /// Every required provider resolved successfully, so the unit may be admitted.
+    Ready,
+    /// A resolved provider is diagnosed or blocked, so the unit contributes nothing.
+    Blocked,
+    /// A required slot, package or package module was never visited by this command.
+    Unvisited,
 }
 
 /// Immutable inputs shared by one project or source-package boundary compilation.
@@ -493,68 +505,82 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         SourceProviderDependencySet::new(dependencies)
     }
 
-    /// Return the first failed canonical provider for a transient job, if any.
+    /// Classify a transient job against its canonical providers.
     ///
     /// Check-only units have no graph slot of their own. A diagnosed or blocked provider therefore
     /// suppresses the dependent unit instead of letting interface lookup turn the provider's
-    /// authoritative diagnostic into a secondary infrastructure error. An unavailable slot is
-    /// still a compiler bug: canonical publication should have completed first.
-    fn check_only_blocked_provider(
+    /// authoritative diagnostic into a secondary infrastructure error.
+    ///
+    /// While the project budget is open, an unavailable slot, an unindexed package or an
+    /// unavailable package root is still a compiler bug: canonical publication should have
+    /// completed first. Once the budget refuses new work, those same states mean the command
+    /// stopped before visiting that work, so they are reported as `Unvisited` and the caller
+    /// records the cutoff instead of claiming a blocker.
+    fn classify_check_only_providers(
         &self,
+        budget_open: bool,
         consumer_module_id: ModuleId,
         provider_bindings: &[module_inventory::CheckOnlyProviderBinding],
         source_package_dependencies: &[module_inventory::CheckOnlySourcePackageDependency],
-    ) -> Result<Option<BlockedProvider>, InfrastructureFailure> {
+    ) -> Result<CheckOnlyProviderClassification, InfrastructureFailure> {
+        let mut saw_failed_provider = false;
         for binding in provider_bindings {
             match self.provider_store.slot(binding.provider_module_id)? {
                 ProviderSlot::Successful(_) => {}
-                ProviderSlot::Diagnosed | ProviderSlot::Blocked => {
-                    return Ok(Some(BlockedProvider::Module(binding.provider_module_id)));
-                }
+                ProviderSlot::Diagnosed | ProviderSlot::Blocked => saw_failed_provider = true,
                 ProviderSlot::Unavailable => {
-                    crate::compiler_bug!(
-                        CompilerStage::ProjectBuildAssembly,
-                        "Check-only ModuleId {} became ready before provider ModuleId {} completed",
-                        consumer_module_id.index(),
-                        binding.provider_module_id.index()
-                    );
+                    if budget_open {
+                        crate::compiler_bug!(
+                            CompilerStage::ProjectBuildAssembly,
+                            "Check-only ModuleId {} became ready before provider ModuleId {} completed",
+                            consumer_module_id.index(),
+                            binding.provider_module_id.index()
+                        );
+                    }
+                    return Ok(CheckOnlyProviderClassification::Unvisited);
                 }
             }
         }
 
         for dependency in source_package_dependencies {
-            let package_id = self
+            let Some(package_id) = self
                 .boundary
                 .completed_packages
                 .by_prefix(dependency.dependency_prefix.as_str())
-                .unwrap_or_else(|| {
+            else {
+                if budget_open {
                     crate::compiler_bug!(
                         CompilerStage::ProjectBuildAssembly,
                         "Check-only ModuleId {} depends on unindexed source package @{}",
                         consumer_module_id.index(),
                         dependency.dependency_prefix
-                    )
-                });
+                    );
+                }
+                return Ok(CheckOnlyProviderClassification::Unvisited);
+            };
             let package = self.boundary.completed_packages.package(package_id)?;
             match package.root_slot()? {
                 ProviderSlot::Successful(_) => {}
-                ProviderSlot::Diagnosed | ProviderSlot::Blocked => {
-                    return Ok(Some(BlockedProvider::SourcePackage(
-                        package.package_identity.clone(),
-                    )));
-                }
+                ProviderSlot::Diagnosed | ProviderSlot::Blocked => saw_failed_provider = true,
                 ProviderSlot::Unavailable => {
-                    crate::compiler_bug!(
-                        CompilerStage::ProjectBuildAssembly,
-                        "Check-only ModuleId {} became ready before source package @{} completed its facade",
-                        consumer_module_id.index(),
-                        package.package_prefix()
-                    );
+                    if budget_open {
+                        crate::compiler_bug!(
+                            CompilerStage::ProjectBuildAssembly,
+                            "Check-only ModuleId {} became ready before source package @{} completed its facade",
+                            consumer_module_id.index(),
+                            package.package_prefix()
+                        );
+                    }
+                    return Ok(CheckOnlyProviderClassification::Unvisited);
                 }
             }
         }
 
-        Ok(None)
+        Ok(if saw_failed_provider {
+            CheckOnlyProviderClassification::Blocked
+        } else {
+            CheckOnlyProviderClassification::Ready
+        })
     }
 
     fn compile(
@@ -594,6 +620,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 None,
                 None,
                 None,
+                None,
                 module_context,
             )
         }
@@ -612,12 +639,13 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 None,
                 None,
                 None,
+                None,
             )
         }
     }
     #[allow(
         clippy::too_many_arguments,
-        reason = "module compilation takes module identity, path bases, the global path table, prepared syntax, generated functions, optional check-only and external overrides, and the timers-only context as distinct inputs"
+        reason = "module compilation takes module identity, path bases, the global path table, prepared syntax, generated functions, optional check-only and external overrides, the check-only remaining module allowance, and the timers-only context as distinct inputs"
     )]
     fn compile_prepared(
         &self,
@@ -635,6 +663,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         >,
         external_packages: Option<Arc<ExternalPackageRegistry>>,
         external_dependency_resolution_table: Option<&ExternalImportResolutionTable>,
+        module_error_allowance_override: Option<NonZeroU32>,
         #[cfg(feature = "timers")] module_context: Option<crate::timing::TimingContext>,
     ) -> DirectoryModuleTaskResult {
         match facade_project_globals_dependency(&prepared) {
@@ -701,6 +730,12 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         let effective_build_config_values = build_config_values_override
             .map(|values| Arc::new(values.clone()))
             .unwrap_or_else(|| Arc::clone(&self.boundary.build_config_values));
+        // Check-only units share their canonical owner's remaining module allowance, so the
+        // frontend consumes the exact remaining count instead of the project-wide setting.
+        let mut frontend_options = self.boundary.config.frontend_options();
+        if let Some(remaining_allowance) = module_error_allowance_override {
+            frontend_options.max_errors_per_module = Some(remaining_allowance);
+        }
 
         let effective_external_packages =
             external_packages.unwrap_or_else(|| Arc::clone(self.boundary.external_packages));
@@ -712,7 +747,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                     .external_dependency_resolution_table,
             );
         let compile_context = ModuleCompilationContext {
-            options: self.boundary.config.frontend_options(),
+            options: frontend_options,
             build_profile: self.boundary.build_profile,
             source_files: &self.boundary.source_files,
             root_role_override: (check_only_provider_bindings.is_some()
@@ -779,6 +814,7 @@ fn compile_check_only_job(
     known_generated: KnownGeneratedFunctions<'_>,
     build_config_index: &BuildConfigResolutionIndex<'_>,
     global_path_table: &PathTable,
+    module_error_allowance_override: Option<NonZeroU32>,
 ) -> DirectoryModuleTaskResult {
     let module_inventory::CheckOnlyModuleCompilationJob {
         owner_module_id: module_id,
@@ -791,29 +827,8 @@ fn compile_check_only_job(
         mut prepared,
         preparation_warnings,
     } = job;
-    match compile_context.check_only_blocked_provider(
-        module_id,
-        &provider_bindings,
-        &source_package_dependencies,
-    ) {
-        Ok(Some(_provider)) => {
-            return DirectoryModuleTaskResult {
-                path_base_len,
-                module_id,
-                string_table_base_len: base_len,
-                outcome: DirectoryModuleTaskOutcome::Blocked,
-            };
-        }
-        Ok(None) => {}
-        Err(error) => {
-            return DirectoryModuleTaskResult {
-                module_id,
-                string_table_base_len: base_len,
-                path_base_len,
-                outcome: DirectoryModuleTaskOutcome::Infrastructure(error.into()),
-            };
-        }
-    }
+    // The caller proves the unit is not blocked before admitting it, so admission accounting never
+    // charges a dependant that contributes no diagnostics of its own.
 
     // Resolve this transient unit against borrowed canonical facts and only its own source
     // facts. The transient slice is private to this job: it validates compatibility and
@@ -872,6 +887,7 @@ fn compile_check_only_job(
             Some(&source_package_dependencies),
             Some(external_packages),
             Some(&external_dependency_resolution_table),
+            module_error_allowance_override,
             None,
         )
     }
@@ -890,12 +906,13 @@ fn compile_check_only_job(
             Some(&source_package_dependencies),
             Some(external_packages),
             Some(&external_dependency_resolution_table),
+            module_error_allowance_override,
         )
     }
 }
 #[allow(
     clippy::too_many_arguments,
-    reason = "check-only compilation keeps boundary context, provider/generated/materialisation stores, owned jobs, provider/package edges and their indexes, build-config index and mutable string/path tables separate"
+    reason = "check-only compilation keeps boundary context, provider/generated/materialisation stores, owned jobs, provider/package edges and their indexes, build-config index, shared module allowance, command budget and cutoff state, command stop sink and mutable string/path tables separate"
 )]
 pub(super) fn compile_check_only_batches(
     context: &BoundaryCompilationContext<'_>,
@@ -908,54 +925,97 @@ pub(super) fn compile_check_only_batches(
     source_package_dependencies: &[ResolvedSourcePackageDependency],
     source_package_dependency_index: &rustc_hash::FxHashMap<(ModuleId, DependencyShellId), usize>,
     build_config_index: &BuildConfigResolutionIndex<'_>,
+    retained_module_errors: &mut FxHashMap<ModuleId, u32>,
+    budget: &mut ProjectDiagnosticBudget,
+    boundary_cutoff: &mut Option<SchedulingCutoff>,
+    mut warning_sink: Option<&mut SuccessfulWarningSink<'_>>,
     string_table: &StringTable,
     path_interner: &PathInternerBuilder,
 ) -> Result<Vec<PreparedDiagnosticBatch>, PreparedFailure> {
     // Check-only units are semantically compiled after canonical publication, but their
     // successful artefacts, interfaces, generated deltas and resource associations are discarded.
     // Their prepared diagnostics and warnings stay in the premerge lane until final source pairing.
-    add_frontend_counter(
-        FrontendCounter::ModuleCompilationSerialCount,
-        check_only_jobs.len(),
-    );
+    let module_error_allowance = context.config.frontend_options().max_errors_per_module;
     let mut transient_batches = Vec::new();
     for check_only_job in check_only_jobs {
-        let outcome = {
-            let compile_context = DirectoryModuleCompileContext::new(
-                context,
-                provider_store,
-                provider_materialisations,
-                provider_bindings,
-                provider_binding_index,
-                source_package_dependencies,
-                source_package_dependency_index,
-                string_table,
-            );
-            compile_check_only_job(
-                &compile_context,
-                check_only_job,
-                generated_store.known_generated(),
-                build_config_index,
-                path_interner.paths(),
-            )
+        let owner_module_id = check_only_job.owner_module_id;
+        let compile_context = DirectoryModuleCompileContext::new(
+            context,
+            provider_store,
+            provider_materialisations,
+            provider_bindings,
+            provider_binding_index,
+            source_package_dependencies,
+            source_package_dependency_index,
+            string_table,
+        );
+        // Classification precedes every admission decision: a dependant of an already failed
+        // provider is blocked, not skipped work, so it neither charges the budget nor records a
+        // cutoff and never sets the module-allowance flag. While the budget is open, an
+        // unavailable provider stays a compiler bug; after a cutoff it is unvisited work and the
+        // unit is refused through the same cutoff path as any other new admission.
+        let budget_open = !budget.is_exhausted();
+        match compile_context.classify_check_only_providers(
+            budget_open,
+            owner_module_id,
+            &check_only_job.provider_bindings,
+            &check_only_job.source_package_dependencies,
+        ) {
+            Ok(CheckOnlyProviderClassification::Blocked) => continue,
+            Ok(CheckOnlyProviderClassification::Ready) => {}
+            Ok(CheckOnlyProviderClassification::Unvisited) => {
+                refuse_scheduling_admission(budget, boundary_cutoff, warning_sink.as_deref_mut());
+                break;
+            }
+            Err(error) => return Err(PreparedFailure::Infrastructure(error.into())),
+        }
+        if budget.is_exhausted() {
+            // The command threshold stops new work; the unadmitted units return nothing and their
+            // already-finalized preparation owners keep their spans.
+            refuse_scheduling_admission(budget, boundary_cutoff, warning_sink.as_deref_mut());
+            break;
+        }
+        let owner_retained_errors = retained_module_errors
+            .get(&owner_module_id)
+            .copied()
+            .unwrap_or(0);
+        let Some(module_error_allowance_override) =
+            check_only_remaining_allowance(module_error_allowance, owner_retained_errors)
+        else {
+            // This owner's module allowance is already spent, so the unit is never admitted. Skip
+            // metadata is only truthful because real work was skipped here.
+            if let Some(warning_sink) = warning_sink.as_deref_mut() {
+                warning_sink
+                    .merge_discovery_stops(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE);
+            }
+            continue;
         };
+        add_frontend_counter(FrontendCounter::ModuleCompilationSerialCount, 1);
+        let outcome = compile_check_only_job(
+            &compile_context,
+            check_only_job,
+            generated_store.known_generated(),
+            build_config_index,
+            path_interner.paths(),
+            module_error_allowance_override,
+        );
         let path_base_len = outcome.path_base_len;
         match outcome.outcome {
             DirectoryModuleTaskOutcome::Success(compiled, warnings, sidecar_warnings) => {
                 debug_assert_eq!(compiled.path_fork.base_len(), path_base_len);
-                transient_batches.extend(check_only_success_batch(
-                    *compiled,
-                    warnings,
-                    sidecar_warnings,
-                )?);
+                if let Some(batch) =
+                    check_only_success_batch(*compiled, warnings, sidecar_warnings)?
+                {
+                    charge_check_only_batch(retained_module_errors, owner_module_id, &batch);
+                    budget.charge_batch(&batch);
+                    transient_batches.push(batch);
+                }
             }
             DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
                 // The module boundary already captured these diagnostics after final path pairing.
+                charge_check_only_batch(retained_module_errors, owner_module_id, &diagnostics);
+                budget.charge_batch(&diagnostics);
                 transient_batches.push(diagnostics);
-            }
-            DirectoryModuleTaskOutcome::Blocked => {
-                // The failed canonical provider's own diagnostics remain authoritative; a
-                // dependent check-only unit contributes no cascade diagnostics.
             }
             DirectoryModuleTaskOutcome::Infrastructure(error) => {
                 return Err(PreparedFailure::Infrastructure(error));
@@ -963,6 +1023,37 @@ pub(super) fn compile_check_only_batches(
         }
     }
     Ok(transient_batches)
+}
+
+/// Remaining module allowance one check-only unit may consume.
+///
+/// WHAT: `Some(remaining)` admits the unit; `None` means the unit's canonical owner already
+///       retained its whole allowance and the unit must not be admitted. The inner `Option` is the
+///       per-unit count limit, which is `None` only when the project disabled the module limit.
+/// WHY: check-only units share their owner module's allowance rather than resetting it per orphan
+///      file, and the frontend receives the remaining value as its own module allowance.
+fn check_only_remaining_allowance(
+    module_error_allowance: Option<NonZeroU32>,
+    owner_retained_errors: u32,
+) -> Option<Option<NonZeroU32>> {
+    match module_error_allowance {
+        None => Some(None),
+        Some(limit) => limit
+            .get()
+            .checked_sub(owner_retained_errors)
+            .and_then(NonZeroU32::new)
+            .map(Some),
+    }
+}
+
+/// Subtract one returned check-only batch from its owner module's remaining allowance.
+fn charge_check_only_batch(
+    retained_module_errors: &mut FxHashMap<ModuleId, u32>,
+    owner_module_id: ModuleId,
+    batch: &PreparedDiagnosticBatch,
+) {
+    let retained = retained_module_errors.entry(owner_module_id).or_default();
+    *retained = retained.saturating_add(batch.primary_error_count());
 }
 
 /// Build the transient warning batch one successful check-only unit contributes.
@@ -1034,6 +1125,42 @@ pub(super) fn check_only_success_batch(
     ))
 }
 
+/// Refuse one scheduling admission at the command's project threshold.
+///
+/// WHAT: records the boundary's cutoff proof once and sets `PROJECT_SCHEDULING_CUTOFF` on the
+///       command accumulator when the command supplied its warning sink.
+/// WHY: every admission point (wave, module job, check-only unit, package inventory, project
+///      graph) must make the same decision and leave identical evidence. The flag describes the
+///      command's scheduling, so it never rides on one module's diagnostic batch.
+pub(super) fn refuse_scheduling_admission(
+    budget: &mut ProjectDiagnosticBudget,
+    boundary_cutoff: &mut Option<SchedulingCutoff>,
+    warning_sink: Option<&mut SuccessfulWarningSink<'_>>,
+) {
+    let cutoff = budget.refuse_admission();
+    boundary_cutoff.get_or_insert(cutoff);
+    if let Some(warning_sink) = warning_sink {
+        warning_sink.merge_discovery_stops(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF);
+    }
+}
+
+/// Retained primary errors per canonical module for the shared check-only allowance.
+///
+/// WHAT: one pass over the boundary's diagnosed lane, because each diagnosed module already
+///       carries its merged and truncated batch.
+/// WHY: check-only units attributed to one module must subtract what that module already retained
+///      instead of receiving a fresh allowance per orphan file.
+pub(super) fn retained_module_error_counts(
+    diagnosed: &[DiagnosedModule],
+) -> FxHashMap<ModuleId, u32> {
+    let mut counts: FxHashMap<ModuleId, u32> = FxHashMap::default();
+    for module in diagnosed {
+        let count = counts.entry(module.module_id).or_default();
+        *count = count.saturating_add(module.diagnostics.primary_error_count());
+    }
+    counts
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "wave compilation keeps owned boundary context and graph, canonical waves and check-only jobs, provider/package edges, mutable resource/string/path owners and the command warning sink/order separate"
@@ -1048,6 +1175,7 @@ pub(super) fn compile_module_waves_in_premerge_lane(
     resource_inputs: &mut ResourceInputRegistry,
     string_table: &mut StringTable,
     path_interner: &mut PathInternerBuilder,
+    budget: &mut ProjectDiagnosticBudget,
     mut warning_sink: Option<&mut SuccessfulWarningSink<'_>>,
     warning_boundary: SuccessfulWarningBoundary,
 ) -> Result<(CompiledGraphBoundary, Vec<PreparedDiagnosticBatch>), PreparedFailure> {
@@ -1066,29 +1194,37 @@ pub(super) fn compile_module_waves_in_premerge_lane(
     // Canonical fact ownership is indexed once per boundary. Transient units borrow this index
     // instead of cloning and concatenating the canonical fact vector for every unit.
     let build_config_index = context.build_config_resolution_index();
-    // Index each consumer module's direct package dependencies once per boundary so readiness
-    // walks only the packages that module actually depends on and never filters the full dependency
-    // vector for every job.
-    let module_package_dependencies = build_module_package_dependency_index(
-        source_package_dependencies,
-        context.completed_packages(),
-    );
     let mut diagnosed = Vec::new();
     let mut blocked = Vec::new();
-    for wave in module_waves {
-        add_frontend_counter(FrontendCounter::ModuleCompilationSerialCount, wave.len());
-        let mut ready = Vec::new();
-        for job in wave {
-            let mut blocked_provider = None;
-            for provider_id in graph.dependency_providers(job.module_id)? {
-                match provider_store.slot(*provider_id)? {
-                    ProviderSlot::Successful(_) => {}
-                    ProviderSlot::Diagnosed | ProviderSlot::Blocked => {
-                        blocked_provider = Some(BlockedProvider::Module(*provider_id));
-                        break;
-                    }
-                    ProviderSlot::Unavailable => {
-                        return Err(InfrastructureFailure::internal(
+    // The command's project budget is a soft cutoff, not a result cap: it refuses new admissions
+    // once the returned total meets the threshold and leaves the unadmitted remainder unvisited.
+    // A boundary that refuses here records the cutoff so graph validation can prove every
+    // `Unavailable` slot is intentional rather than unfinished.
+    let mut boundary_cutoff = None;
+    if budget.is_exhausted() {
+        refuse_scheduling_admission(budget, &mut boundary_cutoff, warning_sink.as_deref_mut());
+    } else {
+        // Index each consumer module's direct package dependencies once per boundary so readiness
+        // walks only the packages that module actually depends on and never filters the full
+        // dependency vector for every job. A stopped command never admits a job that would resolve
+        // one of these facades, so the index is built only while the lane is open.
+        let module_package_dependencies = build_module_package_dependency_index(
+            source_package_dependencies,
+            context.completed_packages(),
+        );
+        'waves: for wave in module_waves {
+            let mut ready = Vec::new();
+            for job in wave {
+                let mut blocked_provider = None;
+                for provider_id in graph.dependency_providers(job.module_id)? {
+                    match provider_store.slot(*provider_id)? {
+                        ProviderSlot::Successful(_) => {}
+                        ProviderSlot::Diagnosed | ProviderSlot::Blocked => {
+                            blocked_provider = Some(BlockedProvider::Module(*provider_id));
+                            break;
+                        }
+                        ProviderSlot::Unavailable => {
+                            return Err(InfrastructureFailure::internal(
                             CompilerStage::ProjectBuildAssembly,
                             format!(
                                 "ModuleId {} became ready before provider ModuleId {} completed",
@@ -1097,26 +1233,26 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                             ),
                         )
                         .into());
+                        }
                     }
                 }
-            }
 
-            if blocked_provider.is_none()
-                && let Some(package_ids) = module_package_dependencies.get(&job.module_id)
-            {
-                for package_id in package_ids {
-                    let package = context.completed_packages().package(*package_id)?;
+                if blocked_provider.is_none()
+                    && let Some(package_ids) = module_package_dependencies.get(&job.module_id)
+                {
+                    for package_id in package_ids {
+                        let package = context.completed_packages().package(*package_id)?;
 
-                    match package.root_slot()? {
-                        ProviderSlot::Successful(_) => {}
-                        ProviderSlot::Diagnosed | ProviderSlot::Blocked => {
-                            blocked_provider = Some(BlockedProvider::SourcePackage(
-                                package.package_identity.clone(),
-                            ));
-                            break;
-                        }
-                        ProviderSlot::Unavailable => {
-                            return Err(
+                        match package.root_slot()? {
+                            ProviderSlot::Successful(_) => {}
+                            ProviderSlot::Diagnosed | ProviderSlot::Blocked => {
+                                blocked_provider = Some(BlockedProvider::SourcePackage(
+                                    package.package_identity.clone(),
+                                ));
+                                break;
+                            }
+                            ProviderSlot::Unavailable => {
+                                return Err(
                                 InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                                     "ModuleId {} became ready before source package @{} completed its facade",
                                     job.module_id.index(),
@@ -1124,90 +1260,98 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                                 ))
                                 .into(),
                             );
+                            }
                         }
                     }
                 }
-            }
-            if let Some(required_provider) = blocked_provider {
-                provider_store.mark_blocked(job.module_id)?;
-                blocked.push(BlockedModule {
-                    module_id: job.module_id,
-                    required_provider,
-                });
-            } else {
-                ready.push(job);
-            }
-        }
-
-        ready.sort_by_key(|job| job.module_id.index());
-        for job in ready {
-            // This owner publishes each successful module transaction before starting the next
-            // ModuleId, so duplicate requests in one ready wave materialise exactly once. File
-            // preparation remains parallel inside each module. Semantic module-wave parallelism is
-            // not implemented: generated deltas commit deterministically through this serial
-            // publication owner.
-            let outcome = {
-                let compile_context = DirectoryModuleCompileContext::new(
-                    &context,
-                    &provider_store,
-                    &provider_materialisations,
-                    provider_bindings,
-                    &provider_binding_index,
-                    source_package_dependencies,
-                    &source_package_dependency_index,
-                    &*string_table,
-                );
-                compile_context.compile(
-                    job,
-                    generated_store.known_generated(),
-                    path_interner.paths(),
-                )
-            };
-            match outcome.outcome {
-                DirectoryModuleTaskOutcome::Success(compiled, warnings, sidecar_warnings) => {
-                    publish_compiled_module(
-                        &mut provider_store,
-                        &mut generated_store,
-                        &mut provider_materialisations,
-                        resource_inputs,
-                        outcome.module_id,
-                        graph.node(outcome.module_id).stable_origin(),
-                        *compiled,
-                        warnings,
-                        sidecar_warnings,
-                        outcome.string_table_base_len,
-                        outcome.path_base_len,
-                        string_table,
-                        path_interner,
-                        warning_sink.as_deref_mut(),
-                        warning_boundary,
-                    )?;
-                }
-                DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
-                    provider_store.mark_diagnosed(outcome.module_id)?;
-                    // The module boundary prepared the diagnostics after its final path pairing.
-                    diagnosed.push(DiagnosedModule {
-                        module_id: outcome.module_id,
-                        diagnostics,
+                if let Some(required_provider) = blocked_provider {
+                    provider_store.mark_blocked(job.module_id)?;
+                    blocked.push(BlockedModule {
+                        module_id: job.module_id,
+                        required_provider,
                     });
+                } else {
+                    ready.push(job);
                 }
-                DirectoryModuleTaskOutcome::Blocked => {
-                    return Err(InfrastructureFailure::internal(
-                        CompilerStage::ProjectBuildAssembly,
-                        format!(
-                            "canonical ModuleId {} unexpectedly became transient-blocked",
-                            outcome.module_id.index()
-                        ),
+            }
+
+            ready.sort_by_key(|job| job.module_id.index());
+            for job in ready {
+                // Every wave is classified for blocked dependants before this admission point, so a
+                // dependant of a failed provider is recorded as blocked and never charged or stopped.
+                if budget.is_exhausted() {
+                    refuse_scheduling_admission(
+                        budget,
+                        &mut boundary_cutoff,
+                        warning_sink.as_deref_mut(),
+                    );
+                    break 'waves;
+                }
+                add_frontend_counter(FrontendCounter::ModuleCompilationSerialCount, 1);
+                // This owner publishes each successful module transaction before starting the next
+                // ModuleId, so duplicate requests in one ready wave materialise exactly once. File
+                // preparation remains parallel inside each module. Semantic module-wave parallelism is
+                // not implemented: generated deltas commit deterministically through this serial
+                // publication owner.
+                let outcome = {
+                    let compile_context = DirectoryModuleCompileContext::new(
+                        &context,
+                        &provider_store,
+                        &provider_materialisations,
+                        provider_bindings,
+                        &provider_binding_index,
+                        source_package_dependencies,
+                        &source_package_dependency_index,
+                        &*string_table,
+                    );
+                    compile_context.compile(
+                        job,
+                        generated_store.known_generated(),
+                        path_interner.paths(),
                     )
-                    .into());
-                }
-                DirectoryModuleTaskOutcome::Infrastructure(error) => {
-                    return Err(PreparedFailure::Infrastructure(error));
+                };
+                match outcome.outcome {
+                    DirectoryModuleTaskOutcome::Success(compiled, warnings, sidecar_warnings) => {
+                        publish_compiled_module(
+                            &mut provider_store,
+                            &mut generated_store,
+                            &mut provider_materialisations,
+                            resource_inputs,
+                            outcome.module_id,
+                            graph.node(outcome.module_id).stable_origin(),
+                            *compiled,
+                            warnings,
+                            sidecar_warnings,
+                            outcome.string_table_base_len,
+                            outcome.path_base_len,
+                            string_table,
+                            path_interner,
+                            warning_sink.as_deref_mut(),
+                            warning_boundary,
+                        )?;
+                    }
+                    DirectoryModuleTaskOutcome::Diagnosed(diagnostics) => {
+                        // Charge the returned batch once at this aggregation point. The batch itself
+                        // stays intact: overshoot beyond the threshold is retained in full.
+                        budget.charge_batch(&diagnostics);
+                        provider_store.mark_diagnosed(outcome.module_id)?;
+                        // The module boundary prepared the diagnostics after its final path pairing.
+                        diagnosed.push(DiagnosedModule {
+                            module_id: outcome.module_id,
+                            diagnostics,
+                        });
+                    }
+                    DirectoryModuleTaskOutcome::Infrastructure(error) => {
+                        return Err(PreparedFailure::Infrastructure(error));
+                    }
                 }
             }
         }
     }
 
+    // Check-only units attributed to one canonical owner keep sharing that module's allowance
+    // instead of resetting it per orphan file.
+    let mut retained_module_errors = retained_module_error_counts(&diagnosed);
     let transient_batches = compile_check_only_batches(
         &context,
         &provider_store,
@@ -1219,6 +1363,10 @@ pub(super) fn compile_module_waves_in_premerge_lane(
         source_package_dependencies,
         &source_package_dependency_index,
         &build_config_index,
+        &mut retained_module_errors,
+        budget,
+        &mut boundary_cutoff,
+        warning_sink,
         string_table,
         path_interner,
     )?;
@@ -1250,6 +1398,7 @@ pub(super) fn compile_module_waves_in_premerge_lane(
         generated: generated_store,
         diagnosed,
         blocked,
+        scheduling_cutoff: boundary_cutoff,
     };
     // Seal the mutable suffix into shared path storage while keeping the builder available for
     // adoption into the source database after publication.

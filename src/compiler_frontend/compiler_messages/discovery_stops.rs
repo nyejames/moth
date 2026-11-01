@@ -22,6 +22,13 @@ impl DiagnosticDiscoveryStops {
     /// The additional-body token allowance for AST recovery was exhausted.
     pub(crate) const AST_RECOVERY_WORK_GUARD: Self = Self(1 << 1);
 
+    /// The command stopped admitting new compilation work at its project threshold.
+    ///
+    /// This flag describes whole-command scheduling, so it is set on the command's accumulator
+    /// only after a real returned primary error and a refused admission. It never belongs to one
+    /// module's batch.
+    pub(crate) const PROJECT_SCHEDULING_CUTOFF: Self = Self(1 << 2);
+
     /// True when no discovery work was skipped.
     pub fn is_empty(self) -> bool {
         self.0 == 0
@@ -36,11 +43,18 @@ impl DiagnosticDiscoveryStops {
         let reasons = match (
             self.contains(Self::MODULE_ERROR_ALLOWANCE),
             self.contains(Self::AST_RECOVERY_WORK_GUARD),
+            self.contains(Self::PROJECT_SCHEDULING_CUTOFF),
         ) {
-            (true, true) => "module error limit and AST recovery work guard",
-            (true, false) => "module error limit",
-            (false, true) => "AST recovery work guard",
-            (false, false) => return None,
+            (true, true, true) => {
+                "module error limit, AST recovery work guard and project scheduling cutoff"
+            }
+            (true, true, false) => "module error limit and AST recovery work guard",
+            (true, false, true) => "module error limit and project scheduling cutoff",
+            (false, true, true) => "AST recovery work guard and project scheduling cutoff",
+            (true, false, false) => "module error limit",
+            (false, true, false) => "AST recovery work guard",
+            (false, false, true) => "project scheduling cutoff",
+            (false, false, false) => return None,
         };
         Some(format!(
             "Diagnostic discovery stopped early ({reasons}): later code was not checked."

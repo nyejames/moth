@@ -7104,3 +7104,23 @@ Across all 76 frontend cases the largest median increase is +1.0% (`grouped_not_
 ### Validation
 
 `just validate` passed on the Phase 2 tree (unit tests, integration 3087/3087, docs check). `just fmt-check` and `just clippy` were clean.
+
+## Diagnostic Recovery - Phase 3 Project Scheduling Cutoff (2026-11-01)
+
+Release binaries for `2ab2dde38` (activation baseline) and the Phase 3 candidate, `moth check --terse`, seven interleaved runs after one warm-up. Each generated project has 80 modules with eight valid functions per module. An erroneous module adds one unresolved start value, so it returns one primary error. The default project threshold is 30.
+
+| Workload | Baseline median ms | Candidate median ms | Modules admitted (baseline / candidate) | Errors | Stop line |
+| --- | ---: | ---: | --- | --- | --- |
+| 80 clean modules | 213.51 | 212.60 | 80 / 80 | 0 / 0 | no |
+| 80 erroneous modules (early cutoff) | 48.37 | 31.66 | 80 / 30 | 80 / 30 | yes |
+| errors in modules 45 to 76 (late cutoff) | 149.86 | 141.05 | 80 / 75 | 32 / 30 | yes |
+
+A separate fifteen-run interleave compared the uncapped failure path. The baseline on 80 erroneous modules took a median of 50.65 ms. The candidate with `max_errors_per_project` set to `none` took 50.73 ms and returned all 80 errors, so the budget plumbing adds no measurable cost when the threshold is disabled. The capped candidate took 33.00 ms in the same interleave.
+
+Admission happens between serial module jobs, so the only overshoot is the batch of the job already admitted. There is no parallel module scheduling to measure. Directory discovery still prepares every module before scheduling, so preparation work is not reduced by the cutoff. In the late-cutoff workload the remaining cost is that discovery plus the 75 admitted modules.
+
+The existing `benchmarks/data-layout/diagnosed` workload (40 modules with one error each) now stops at 30 errors with the project scheduling cutoff line under the default threshold.
+
+### Validation
+
+`just validate` passed on the Phase 3 tree (integration 3089/3089, docs clean). `just fmt-check` and `just clippy` were clean.

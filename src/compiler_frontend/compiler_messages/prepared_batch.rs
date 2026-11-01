@@ -314,6 +314,20 @@ impl PreparedDiagnosticBatch {
             .any(|diagnostic| diagnostic.severity() == DiagnosticSeverity::Error)
     }
 
+    /// Primary user errors in this batch; warnings, notes and labels never count.
+    ///
+    /// WHAT: the one bounded scan the command's project budget charges per returned batch.
+    /// WHY: the threshold counts retained primary errors only, so a batch's total diagnostic count
+    ///      would overcharge warning batches and mixed success lanes.
+    pub(crate) fn primary_error_count(&self) -> u32 {
+        let errors = self
+            .prepared
+            .iter()
+            .filter(|diagnostic| diagnostic.severity() == DiagnosticSeverity::Error)
+            .count();
+        u32::try_from(errors).unwrap_or(u32::MAX)
+    }
+
     pub(crate) fn attach_frozen_identity_handle_if_missing(
         &mut self,
         handle: FrozenIdentityHandle,

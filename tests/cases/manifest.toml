@@ -3338,6 +3338,13 @@ contract = "language.diagnostics.ordinary_body_recovery_module_limit"
 role = "primary"
 
 [[case]]
+id = "diagnostic_recovery_project_soft_cutoff"
+path = "diagnostic_recovery_project_soft_cutoff"
+tags = ["integration", "diagnostics", "functions"]
+contract = "language.diagnostics.project_soft_cutoff_retains_returned_module_diagnostics"
+role = "primary"
+
+[[case]]
 id = "diagnostic_recovery_repaired_source_success"
 path = "diagnostic_recovery_repaired_source_success"
 tags = ["integration", "functions"]
@@ -18571,3 +18578,11 @@ path = "web_page_missing_import_rejected"
 tags = ["integration", "external-imports", "diagnostics", "html", "html-wasm"]
 contract = "language.dependencies.web_page_requires_import_rejected"
 role = "primary"
+
+[[case]]
+id = "diagnostic_recovery_preparation_allowance"
+path = "diagnostic_recovery_preparation_allowance"
+tags = ["integration", "diagnostics", "modules"]
+contract = "language.diagnostics.preparation_module_limit"
+role = "primary"
+

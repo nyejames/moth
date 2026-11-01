@@ -96,9 +96,9 @@ The signature is closed. Arbitrary fields, misspelled standard fields and `metad
 
 ### Diagnostic limits
 
-`max_errors_per_module` is a strict allowance of primary errors retained for each module. It bounds ordinary-body diagnostic recovery. After the first failed ordinary body the emitter admits a further eligible body only while the retained primary error count stays below the allowance.
+`max_errors_per_module` is a strict allowance of primary errors retained for each module. File preparation keeps the first errors in source order up to the allowance. Ordinary-body diagnostic recovery admits a further eligible body after the first failed one only while the retained primary error count stays below the allowance. Check-only files attributed to one module share that module's allowance.
 
-`max_errors_per_project` is an accepted soft scheduling threshold for the whole command. It is validated and stored but is not yet applied, so it does not stop compilation work today. Once applied, work already running will finish and keep its errors, and the project total may therefore exceed the threshold. It is not a maximum result count.
+`max_errors_per_project` is a soft scheduling threshold for the whole command. Once the returned primary errors reach it, the compiler starts no further modules, source packages or check-only files. Work already running finishes and keeps its errors, so the project total may exceed the threshold. It is not a maximum result count. Skipped work is reported as not checked and never counts as successful.
 
 A present value must be an `I32` from 1 to 2147483647. Zero, negative values and other types are rejected. Omitting a setting uses its default. An explicit `none` disables that one count and leaves the other unchanged. Warnings, notes and related labels never count. Neither setting disables the compiler's fixed recovery-work guard or changes program meaning.
 

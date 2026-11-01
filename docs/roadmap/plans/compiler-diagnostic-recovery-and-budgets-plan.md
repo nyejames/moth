@@ -13,9 +13,9 @@
 ## Status and activation
 
 - Status: active on `diagnostic-recovery`.
-- Current slice: Phase 3 preparation, scheduling and incomplete graph results. Phases 1 and 2 delivered the validated settings, ordinary-body recovery, the 4096-token work guard and stop metadata through check, build, dev and SDK reports.
+- Current slice: Phase 4 integration, performance acceptance and documentation. Phases 1 to 3 delivered the validated settings, ordinary-body recovery with the 4096-token work guard, preparation allowances, the project soft cutoff, incomplete graph validation and stop metadata through check, build, dev and SDK reports.
 - Blockers: none. Compiler diagnostics improvements, compact diagnostic records, type-display snapshots, three failure lanes and canonical diagnostic aggregation are delivered.
-- Next action: Phase 3 preparation allowance, project soft cutoff and incomplete graph validation.
+- Next action: Phase 4 public command coverage, request policy isolation, performance matrix and documentation handoffs.
 
 The main roadmap places this work after compiler source/token/diagnostic data layout and diagnostic improvements. The later general-directives/configuration cutover is not a prerequisite. Deliver the two settings using the configuration system present at activation, then preserve them through that later cutover.
 
@@ -180,7 +180,7 @@ Use `src/compiler_frontend/ast/tests/` for local recovery/isolation invariants a
 - [x] Add `diagnostic_limits_reload_resets_state`: set custom limits, reload with omissions, then explicit `none`. Counts reset per invocation and settings do not leak from a previous successful or failed load. Test invalid bootstrap with default project policy.
 - [x] Extend the delivered diagnostic/outcome owner with cheap primary-error accounting and stop reasons. Reuse an existing count if authoritative. Do not repeatedly scan a growing warning/error list or widen common diagnostic records.
 - [x] Add `diagnostic_stop_metadata_preserves_failure_lanes`: budget metadata is not a source diagnostic, warnings/labels consume no allowance, an infrastructure failure remains fatal and a compiler bug is never demoted.
-- [ ] Thread policy through named config, module, direct-template and synthetic services only where each needs it. A source-backed module has one allowance across its producers. Independent identity domains retain separate reports even when the command adds their counts.
+- [x] Thread policy through named config, module, direct-template and synthetic services only where each needs it. A source-backed module has one allowance across its producers. Independent identity domains retain separate reports even when the command adds their counts.
 
 ### Phase 1 audit, style review and validation
 
@@ -216,22 +216,22 @@ Use `src/compiler_frontend/ast/tests/` for local recovery/isolation invariants a
 
 **Deliverable:** module allowances apply consistently, the project threshold stops new admissions and all retained results keep valid contexts.
 
-- [ ] Extend existing preparation aggregation with `diagnostic_recovery_parallel_preparation`. More than five malformed independent files produce the same first five retained diagnostic groups in canonical order with one or several workers and deliberately reordered completion. Retain and finalise every returned span owner, including discarded diagnostic producers.
-- [ ] Keep already-running preparation workers independent. Apply the cap before later semantic stages are admitted. Where preparation admits further chunks incrementally, stop admissions at existing deterministic settlement boundaries rather than enqueueing the suffix then discarding everything.
-- [ ] Test canonical and check-only units sharing one module allowance. Provider blocking follows real required interfaces. A filename, stage transition, generated request or orphan unit cannot reset the count.
-- [ ] Add `diagnostic_recovery_project_soft_cutoff`. Inject a small threshold into the real scheduler owner and return module-sized batches that overshoot it. Assert all returned module-bounded diagnostics remain, queued work is not started, already-admitted work finishes and warnings/blocked dependants do not advance the count. Cover `none` and a shared failed provider counted once.
-- [ ] Charge results once at the command-owned aggregation/admission boundary, including selected source-package work. Preserve one total through package transitions and fallback discovery. Keep module limits independent even near the threshold.
-- [ ] Audit every admission path: directory, synthetic single-file, packages, check-only work and later validation jobs that the command would otherwise schedule. Stop new optional work after the cutoff without skipping required cleanup or disguising a fatal failure.
-- [ ] Update graph/result validation for intentional incomplete visitation. Prefer existing outcome state plus lightweight stop metadata. If untouched slots require a new explicit state, add one at their current owner with a documented invariant, not a second graph or per-function registry.
-- [ ] Add `diagnostic_recovery_incomplete_graph_is_not_success`. Skipped slots cannot satisfy providers, linkability or backend gates. A failed provider blocks dependants without source cascades. Independent completed successes remain internally valid and correctly paired with contexts.
-- [ ] Preserve canonical ordering before threshold-dependent scheduling decisions. For existing parallel execution, test reordered completions through the actual scheduler. For future module parallelism, document the required deterministic admission/settlement rule without adding a scheduler prototype or claiming nonexistent concurrency coverage.
+- [x] Extend existing preparation aggregation with `diagnostic_recovery_parallel_preparation`. More than five malformed independent files produce the same first five retained diagnostic groups in canonical order with one or several workers and deliberately reordered completion. Retain and finalise every returned span owner, including discarded diagnostic producers.
+- [x] Keep already-running preparation workers independent. Apply the cap before later semantic stages are admitted. Where preparation admits further chunks incrementally, stop admissions at existing deterministic settlement boundaries rather than enqueueing the suffix then discarding everything.
+- [x] Test canonical and check-only units sharing one module allowance. Provider blocking follows real required interfaces. A filename, stage transition, generated request or orphan unit cannot reset the count.
+- [x] Add `diagnostic_recovery_project_soft_cutoff`. Inject a small threshold into the real scheduler owner and return module-sized batches that overshoot it. Assert all returned module-bounded diagnostics remain, queued work is not started, already-admitted work finishes and warnings/blocked dependants do not advance the count. Cover `none` and a shared failed provider counted once.
+- [x] Charge results once at the command-owned aggregation/admission boundary, including selected source-package work. Preserve one total through package transitions and fallback discovery. Keep module limits independent even near the threshold.
+- [x] Audit every admission path: directory, synthetic single-file, packages, check-only work and later validation jobs that the command would otherwise schedule. Stop new optional work after the cutoff without skipping required cleanup or disguising a fatal failure.
+- [x] Update graph/result validation for intentional incomplete visitation. Prefer existing outcome state plus lightweight stop metadata. If untouched slots require a new explicit state, add one at their current owner with a documented invariant, not a second graph or per-function registry.
+- [x] Add `diagnostic_recovery_incomplete_graph_is_not_success`. Skipped slots cannot satisfy providers, linkability or backend gates. A failed provider blocks dependants without source cascades. Independent completed successes remain internally valid and correctly paired with contexts.
+- [x] Preserve canonical ordering before threshold-dependent scheduling decisions. For existing parallel execution, test reordered completions through the actual scheduler. For future module parallelism, document the required deterministic admission/settlement rule without adding a scheduler prototype or claiming nonexistent concurrency coverage.
 
 ### Phase 3 audit, style review and validation
 
-- [ ] Audit source-owner return paths, string/path remaps, discarded reports, generated deduplication, package counts and graph completion proofs. A soft threshold is not implemented as result truncation or a global worker quota.
-- [ ] Review scheduler and report changes for unnecessary queues, atomics, locks, scans and shadow counters. Keep the success-only project boundary intact.
-- [ ] Run focused preparation/graph/command tests, real multi-module manifest cases and serial/parallel preparation variants. Run `just validate`, applicable feature lanes and platform-sensitive source-context cases.
-- [ ] Measure clean scheduling, early cutoff, late cutoff and parallel overshoot. Record both wall-clock time and total admitted/executed work. Report paths still limited by existing discovery or batch granularity rather than promising instantaneous cancellation.
+- [x] Audit source-owner return paths, string/path remaps, discarded reports, generated deduplication, package counts and graph completion proofs. A soft threshold is not implemented as result truncation or a global worker quota.
+- [x] Review scheduler and report changes for unnecessary queues, atomics, locks, scans and shadow counters. Keep the success-only project boundary intact.
+- [x] Run focused preparation/graph/command tests, real multi-module manifest cases and serial/parallel preparation variants. Run `just validate`, applicable feature lanes and platform-sensitive source-context cases.
+- [x] Measure clean scheduling, early cutoff, late cutoff and parallel overshoot. Record both wall-clock time and total admitted/executed work. Report paths still limited by existing discovery or batch granularity rather than promising instantaneous cancellation.
 
 ## Phase 4 - Integration, performance acceptance and documentation
 

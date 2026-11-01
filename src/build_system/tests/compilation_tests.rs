@@ -1135,6 +1135,7 @@ fn check_only_success_batches_render_local_paths_through_production_construction
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: Vec::new(),
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     };
     let frontend = ProjectFrontendCompilation::new(
         project,
@@ -1293,6 +1294,7 @@ fn canonical_tail_success_retains_warning_source_context() {
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: Vec::new(),
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     };
     let frontend = ProjectFrontendCompilation::new(
         project,
@@ -1617,6 +1619,7 @@ fn published_warnings_capture_types_and_remap_paths_after_environment_drop() {
         generated,
         diagnosed: Vec::new(),
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     };
     drop(materialisations);
     boundary.install_boundary_identity(
@@ -2010,6 +2013,7 @@ fn publish_generated_sidecar_boundary(
         generated,
         diagnosed: Vec::new(),
         blocked: Vec::new(),
+        scheduling_cutoff: None,
     }
 }
 

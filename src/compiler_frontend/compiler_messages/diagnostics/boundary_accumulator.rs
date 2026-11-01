@@ -130,11 +130,21 @@ impl SuccessfulWarningStore {
 }
 
 /// Borrowed command-owned sink for warnings staged during frontend publication.
+///
+/// It also carries the command accumulator's stop metadata so the boundary scheduler can record a
+/// project scheduling cutoff or a skipped check-only unit beside the results it returns, without
+/// owning a second accumulator or a per-module copy of the flags.
 pub(crate) struct SuccessfulWarningSink<'a> {
     store: &'a mut SuccessfulWarningStore,
+    discovery_stops: &'a mut DiagnosticDiscoveryStops,
 }
 
 impl SuccessfulWarningSink<'_> {
+    /// Union command-level stop metadata into the command accumulator.
+    pub(crate) fn merge_discovery_stops(&mut self, stops: DiagnosticDiscoveryStops) {
+        self.discovery_stops.insert(stops);
+    }
+
     pub(crate) fn set_source_package_identity(
         &mut self,
         boundary: SuccessfulWarningBoundary,
@@ -255,10 +265,12 @@ impl BoundaryAccumulator {
             .as_mut()
             .expect("frontend compilation requires an initialized command string-table root");
         let warning_store = &mut self.successful_warnings;
+        let discovery_stops = &mut self.discovery_stops;
         (
             &mut state.string_table,
             SuccessfulWarningSink {
                 store: warning_store,
+                discovery_stops,
             },
         )
     }

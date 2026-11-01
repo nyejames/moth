@@ -24,7 +24,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
-use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, DiagnosticDiscoveryStops, PreparedFailure,
+};
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::compiler_frontend::instrumentation::MemoryLedgerSnapshot;
 use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
@@ -38,7 +40,10 @@ use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::num::NonZeroU32;
 use std::sync::Arc;
+
+use crate::projects::settings::Config;
 
 use super::generated_store::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::MaterialisationContextLocation;
@@ -129,6 +134,86 @@ pub(crate) struct BlockedModule {
     pub(crate) required_provider: BlockedProvider,
 }
 
+/// Proof that the command deliberately stopped admitting work for one graph boundary.
+///
+/// WHAT: the boundary-level record of a project scheduling cutoff. A boundary without this record
+///       must reach a final outcome for every slot; a boundary with it may retain unvisited slots.
+/// WHY: the graph validator has to distinguish an intentionally unvisited module from an unfinished
+///      one, and that distinction is only sound when the cutoff followed a real returned primary
+///      user error. Storing the charged total beside the record keeps the proof on the boundary
+///      instead of inventing a per-slot state or a second graph.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SchedulingCutoff {
+    returned_primary_errors: u32,
+}
+
+impl SchedulingCutoff {
+    /// Primary user errors the command had already returned when it stopped admitting work.
+    pub(crate) fn returned_primary_errors(self) -> u32 {
+        self.returned_primary_errors
+    }
+
+    /// Build the record a test boundary claims, for graph-proof coverage.
+    #[cfg(test)]
+    pub(crate) fn for_test(returned_primary_errors: u32) -> Self {
+        Self {
+            returned_primary_errors,
+        }
+    }
+}
+
+/// Command-owned project diagnostic budget for one directory compilation request.
+///
+/// WHAT: the validated `max_errors_per_project` threshold and the primary user errors returned by
+///       every compiled boundary so far, plus the first refused admission's cutoff record.
+/// WHY: the project threshold is a soft scheduling cutoff owned by the invoking command. It must
+///      charge each returned diagnosed batch once across project and source-package work, never
+///      reset on a package transition, and stop only new admissions. It is deliberately one
+///      plain value: no atomics, locks or per-module copies ride on it, and `None` disables it.
+pub(crate) struct ProjectDiagnosticBudget {
+    threshold: Option<NonZeroU32>,
+    returned_primary_errors: u32,
+    cutoff: Option<SchedulingCutoff>,
+}
+
+impl ProjectDiagnosticBudget {
+    /// Build one request's budget from the validated project configuration.
+    pub(crate) fn from_config(config: &Config) -> Self {
+        Self {
+            threshold: config.max_errors_per_project,
+            returned_primary_errors: 0,
+            cutoff: None,
+        }
+    }
+
+    /// Charge one returned diagnosed batch's primary user errors exactly once.
+    pub(crate) fn charge_batch(&mut self, batch: &PreparedDiagnosticBatch) {
+        self.charge(batch.primary_error_count());
+    }
+
+    /// Charge a primary-error count returned by one aggregation point.
+    fn charge(&mut self, primary_errors: u32) {
+        self.returned_primary_errors = self.returned_primary_errors.saturating_add(primary_errors);
+    }
+
+    /// True when the accumulated total meets the threshold; a disabled threshold is never met.
+    pub(crate) fn is_exhausted(&self) -> bool {
+        self.threshold
+            .is_some_and(|threshold| self.returned_primary_errors >= threshold.get())
+    }
+
+    /// Refuse one admission after the threshold was met while work remains.
+    pub(crate) fn refuse_admission(&mut self) -> SchedulingCutoff {
+        debug_assert!(
+            self.is_exhausted(),
+            "a project scheduling cutoff requires the accumulated total to meet the threshold"
+        );
+        *self.cutoff.get_or_insert(SchedulingCutoff {
+            returned_primary_errors: self.returned_primary_errors,
+        })
+    }
+}
+
 /// One complete project or source-package graph result retained after frontend compilation.
 ///
 /// WHAT: pairs the frozen structural graph with the dense artefact store, the boundary's
@@ -141,6 +226,12 @@ pub(crate) struct CompiledGraphBoundary {
     pub(crate) generated: BoundaryGeneratedFunctionStore,
     pub(crate) diagnosed: Vec<DiagnosedModule>,
     pub(crate) blocked: Vec<BlockedModule>,
+    /// The deliberate scheduling stop this boundary recorded, or `None` for a complete graph.
+    ///
+    /// A boundary that refused a module or check-only admission records the command's cutoff here.
+    /// Unvisited slots stay `ProviderSlot::Unavailable`, and the validator accepts them only when
+    /// this record proves a real returned user error preceded the stop.
+    pub(crate) scheduling_cutoff: Option<SchedulingCutoff>,
 }
 
 /// One final outcome lane claimed by a dense module slot during boundary validation.
@@ -184,11 +275,14 @@ impl CompiledGraphBoundary {
     ///
     /// WHAT: the single completion proof for one frontend graph result. It checks the complete
     ///       slot/lane bijection: graph nodes match store slots, every slot reached a final
-    ///       outcome, successful slots reference an existing artefact row, and diagnosed and
-    ///       blocked lanes hold exactly their slot's record without duplicates or overlap.
+    ///       outcome unless the boundary records a project scheduling cutoff, successful slots
+    ///       reference an existing artefact row, and diagnosed and blocked lanes hold exactly
+    ///       their slot's record without duplicates or overlap.
     /// WHY: dense lookups are only safe after this validation; invalid mappings must fail rather
-    ///       than becoming absent artefacts. The success-only `ProjectCompilation` gate separately
-    ///       adds the all-successful requirement.
+    ///       than becoming absent artefacts. Unvisited slots are legal only as the documented
+    ///       result of a scheduler cutoff that followed a real returned primary user error.
+    ///       The success-only `ProjectCompilation` gate separately adds the all-successful
+    ///       requirement and still rejects every stopped boundary.
     pub(crate) fn validate_invariants(&self) -> Result<(), InfrastructureFailure> {
         if self.structure.nodes().len() != self.modules.slot_count() {
             return Err(InfrastructureFailure::internal(
@@ -200,6 +294,21 @@ impl CompiledGraphBoundary {
                 ),
             ));
         }
+
+        // A scheduling cutoff is a claim about skipped work. It is valid only when the command had
+        // already returned at least one primary user error, which is the boundary-visible proof
+        // that a diagnosed module existed at command scope. A project boundary skipped wholly
+        // after a source-package diagnosis legitimately has no diagnosed module of its own, so the
+        // charged total, not a local lane, carries that proof.
+        if let Some(cutoff) = self.scheduling_cutoff
+            && cutoff.returned_primary_errors() == 0
+        {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                "Graph recorded a project scheduling cutoff before returning any primary user error",
+            ));
+        }
+        let cutoff_recorded = self.scheduling_cutoff.is_some();
 
         // Dense lane proof: every diagnosed or blocked record claims one distinct slot lane.
         // `ModuleId` is already a dense index, so a compact vector replaces hashing and keeps
@@ -281,10 +390,12 @@ impl CompiledGraphBoundary {
             let module_id = ModuleId::from_index(index);
             match self.modules.slot(module_id)? {
                 ProviderSlot::Unavailable => {
-                    return Err(InfrastructureFailure::internal(
-                        CompilerStage::ProjectBuildAssembly,
-                        format!("ModuleId {index} never reached a completed outcome"),
-                    ));
+                    if !cutoff_recorded {
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::ProjectBuildAssembly,
+                            format!("ModuleId {index} never reached a completed outcome"),
+                        ));
+                    }
                 }
                 ProviderSlot::Successful(artifact_id) => {
                     let artifact = self.modules.artifact(module_id)?.ok_or_else(|| {
@@ -366,15 +477,24 @@ impl CompiledGraphBoundary {
         Ok(())
     }
 
-    /// Require every slot to be successful and no diagnosed or blocked record to remain.
+    /// Require every slot to be successful with no diagnosed, blocked or stopped record remaining.
     ///
     /// WHAT: the success-only conversion used when assembling a linkable `ProjectCompilation`.
-    ///       It runs one slot scan plus the two lane emptiness checks; finalization already
-    ///       proved the full outcome bijection at `finish`.
+    ///       It rejects a scheduling cutoff first, then one slot scan plus the two lane emptiness
+    ///       checks; finalization already proved the full outcome bijection at `finish`.
     /// WHY: `build`/`dev` must never receive a diagnosed or blocked boundary, and the stricter
     ///       requirement should not re-run the full invariant proof once finalization is the
     ///       authoritative completion gate.
     pub(crate) fn require_all_successful(&self) -> Result<(), InfrastructureFailure> {
+        if let Some(cutoff) = self.scheduling_cutoff {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "Project compilation received a boundary with a project scheduling cutoff after {} returned primary errors",
+                    cutoff.returned_primary_errors()
+                ),
+            ));
+        }
         if let Some(diagnosed) = self.diagnosed.first() {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::ProjectBuildAssembly,
@@ -534,14 +654,19 @@ impl CompiledSourcePackage {
             }
             ProviderSlot::Diagnosed | ProviderSlot::Blocked => {}
             ProviderSlot::Unavailable => {
-                return Err(InfrastructureFailure::internal(
-                    CompilerStage::ProjectBuildAssembly,
-                    format!(
-                        "Source package @{} root ModuleId {} never reached a completed outcome",
-                        self.package_prefix(),
-                        root_index
-                    ),
-                ));
+                // A package boundary that refused a scheduling admission may leave its own root
+                // unvisited. Consumers depend on the facade only when the command still admits
+                // work, and a cutoff stops every later admission.
+                if self.boundary.scheduling_cutoff.is_none() {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "Source package @{} root ModuleId {} never reached a completed outcome",
+                            self.package_prefix(),
+                            root_index
+                        ),
+                    ));
+                }
             }
         }
 
@@ -626,9 +751,14 @@ pub(crate) struct SourcePackagePublication {
 
 impl CompletedSourcePackageRegistry {
     /// Diagnosed package boundaries retain their reports instead of exposing partial interfaces.
+    ///
+    /// A scheduling cutoff also rejects success-only assembly: a package whose own work stopped
+    /// never publishes a complete linkable surface.
     pub(crate) fn has_diagnosed_or_blocked(&self) -> bool {
         self.iter().any(|package| {
-            !package.boundary.diagnosed.is_empty() || !package.boundary.blocked.is_empty()
+            !package.boundary.diagnosed.is_empty()
+                || !package.boundary.blocked.is_empty()
+                || package.boundary.scheduling_cutoff.is_some()
         })
     }
 
@@ -1428,13 +1558,15 @@ impl ProjectFrontendCompilation {
         })
     }
 
-    /// Whether any boundary contains a diagnosed or blocked module.
+    /// Whether any boundary contains a diagnosed or blocked module, or stopped scheduling.
     ///
     /// `build` and `dev` use this gate before assembling a success-only [`ProjectCompilation`]
-    /// while `check` renders the retained outcomes instead.
+    /// while `check` renders the retained outcomes instead. A scheduling cutoff is never a
+    /// success: the request remains failed and its unvisited remainder stays unreported.
     pub(crate) fn has_diagnosed_or_blocked(&self) -> bool {
         !self.project.diagnosed.is_empty()
             || !self.project.blocked.is_empty()
+            || self.project.scheduling_cutoff.is_some()
             || self
                 .transient_batches
                 .iter()
@@ -1585,6 +1717,12 @@ impl ProjectFrontendCompilation {
             ..
         } = self;
         let project_diagnosed = std::mem::take(&mut project.diagnosed);
+        // A stopped request reports its cutoff on the command accumulator, never on a module
+        // batch. Both the project boundary and every package boundary can own the record.
+        let scheduling_cutoff = project.scheduling_cutoff.is_some()
+            || source_packages
+                .iter()
+                .any(|package| package.boundary.scheduling_cutoff.is_some());
         let (mut source_packages, package_source_arcs) =
             source_packages.into_packages_with_source_databases();
         #[cfg(feature = "data_layout_memory_probe")]
@@ -1605,6 +1743,9 @@ impl ProjectFrontendCompilation {
         });
         warning_owner.discard_successful_warnings();
         let mut accumulator = std::mem::replace(warning_owner, BoundaryAccumulator::new());
+        if scheduling_cutoff {
+            accumulator.merge_discovery_stops(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF);
+        }
         if let Some(source) = project_source.as_ref() {
             accumulator.set_project_source_database(Arc::clone(source));
         }

@@ -13,10 +13,14 @@ use super::super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
 use crate::builder_surface::SourceFileKindRegistry;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::CompilerFrontend;
-use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::{
-    families::names_declarations::IdentifierNamingConventionView,
-    test_support::compact_bag_for_test,
+    boundary_accumulator::BoundaryAccumulator,
+    families::names_declarations::IdentifierNamingConventionView, foreign::SiteRef,
+    freeze::InstallMode, test_support::compact_bag_for_test,
+};
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, DiagnosticDiscoveryStops, DiagnosticSeverity, PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
@@ -664,6 +668,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let preparation_context = super::ModulePreparationContext {
         source_files: source_files_view,
         style_directives: &style_directives,
+        module_error_allowance: None,
     };
 
     // Single-file preparation tests use the same deterministic synthetic normal-module origin
@@ -901,6 +906,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let preparation_context = super::ModulePreparationContext {
         source_files: source_files_view,
         style_directives: &style_directives,
+        module_error_allowance: None,
     };
     #[cfg(feature = "timers")]
     let prepared_result = preparation_context.prepare_module(
@@ -1088,6 +1094,7 @@ third || -> I32:
     let preparation_context = super::ModulePreparationContext {
         source_files: source_files_view,
         style_directives: &style_directives,
+        module_error_allowance: None,
     };
     #[cfg(feature = "timers")]
     let prepared_result = preparation_context.prepare_module(
@@ -1416,6 +1423,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     let preparation_context = super::ModulePreparationContext {
         source_files: frontend.source_files,
         style_directives: frontend.style_directives,
+        module_error_allowance: None,
     };
     let mut preparation_path_fork = source_files.fork_path_interner();
     let (headers, warnings) = preparation_context
@@ -1652,6 +1660,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
     let preparation_context = super::ModulePreparationContext {
         source_files: frontend.source_files,
         style_directives: frontend.style_directives,
+        module_error_allowance: None,
     };
     let mut preparation_path_fork = source_files.fork_path_interner();
     let (headers, warnings) = preparation_context
@@ -1751,6 +1760,7 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
         chunks,
         input_file_count,
         base_len,
+        None,
     )
     .expect("chunk merge should succeed");
 
@@ -1780,6 +1790,327 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
     }
 }
 
+/// A module whose entry file is valid and whose numbered non-entry files each run a top-level
+/// runtime statement, which per-file preparation diagnoses independently.
+fn malformed_independent_file_sources(malformed_count: usize) -> Vec<(String, String)> {
+    let mut file_sources = vec![(String::from("00.moth"), String::from("entry #= 0\n"))];
+    file_sources.extend((1..=malformed_count).map(|index| {
+        (
+            format!("{index:02}.moth"),
+            format!("runtime_{index} = {index}\n"),
+        )
+    }));
+    file_sources
+}
+
+/// A module whose entry file is valid and whose numbered non-entry files each declare a reserved
+/// builtin name. Per-file preparation succeeds; module symbol aggregation diagnoses every file.
+fn reserved_name_file_sources(file_count: usize) -> Vec<(String, String)> {
+    let mut file_sources = vec![(String::from("00.moth"), String::from("entry #= 0\n"))];
+    file_sources.extend(
+        (1..=file_count).map(|index| (format!("{index:02}.moth"), format!("Error #= {index}\n"))),
+    );
+    file_sources
+}
+
+struct PreparationAllowanceOutcome {
+    all_source_ids: Vec<SourceId>,
+    retained_source_ids: Vec<SourceId>,
+    stops: DiagnosticDiscoveryStops,
+    diagnostic_count: usize,
+}
+
+/// Freeze one diagnosed preparation batch and read back the source identity of each retained
+/// primary error in canonical report order.
+fn inspect_diagnosed_preparation(
+    batch: PreparedDiagnosticBatch,
+) -> (Vec<SourceId>, DiagnosticDiscoveryStops, usize) {
+    let stops = batch.discovery_stops();
+    let diagnostic_count = batch.diagnostic_count();
+    let mut accumulator = BoundaryAccumulator::new();
+    accumulator.append_prepared(batch, None);
+    let reports = accumulator
+        .finish(InstallMode::Unfrozen)
+        .expect("preparation diagnostics should freeze");
+    let retained_source_ids = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .map(|(_, view)| match view.primary_site() {
+            SiteRef::Local(span) => span.source(),
+            other => {
+                panic!("a preparation diagnostic should have a local primary span, got {other:?}")
+            }
+        })
+        .collect();
+    (retained_source_ids, stops, diagnostic_count)
+}
+
+/// Prepare one malformed multi-file module under `strategy` and merge it with `allowance`.
+///
+/// Completion order is deliberately reversed for the reordered arm, the merged path delta is
+/// checked against every chunk, and every source's span builder is finalized after the truncating
+/// merge returns.
+fn prepared_file_error_allowance(
+    strategy: super::FilePreparationStrategy,
+    reverse_chunks: bool,
+    allowance: Option<NonZeroU32>,
+) -> PreparationAllowanceOutcome {
+    let file_sources = malformed_independent_file_sources(7);
+    let file_source_refs = fixture_source_refs(&file_sources);
+    let mut fixture = frontend_preparation_fixture(&file_source_refs);
+    let options = HeaderParseOptions {
+        entry_file_id: fixture
+            .frontend
+            .source_files
+            .get_by_canonical_path(&fixture.entry_file_path)
+            .map(|identity| identity.id),
+        entry_file_role: None,
+        active_root_role: ModuleRootRole::Normal,
+    };
+    let fork_source = fixture.frontend.string_table.fork_source();
+    let base_len = fork_source.base_len();
+    let input_file_count = fixture.input_files.len();
+    let all_source_ids: Vec<SourceId> = fixture
+        .input_files
+        .iter()
+        .map(PreparedSourceInput::source_id)
+        .collect();
+
+    let mut chunks = {
+        let (source_files_view, mut span_owners) = fixture.span_builders.split();
+        let prepare_context = FrontendFilePrepareContext {
+            source_files: source_files_view,
+            style_directives: &fixture.frontend.style_directives,
+            entry_file_path: &fixture.entry_file_path,
+            options: &options,
+        };
+        super::ModulePreparationContext::prepare_module_file_chunks(
+            std::mem::take(&mut fixture.input_files),
+            &fork_source,
+            &fixture.frontend.path_fork.fork_source(),
+            &prepare_context,
+            0,
+            0,
+            strategy,
+            &mut span_owners,
+        )
+        .expect("fixture chunks should prepare against the fixture path fork")
+    };
+    let mut restored_span_owner_count = 0usize;
+    for chunk in &mut chunks {
+        for (source, builder) in chunk.span_builders.drain(..) {
+            fixture.span_builders.retain_span_builder(source, builder);
+            restored_span_owner_count += 1;
+        }
+    }
+    assert_eq!(
+        restored_span_owner_count,
+        all_source_ids.len(),
+        "every chunk must return its span builder before the merge can diagnose"
+    );
+    let chunk_path_delta: usize = chunks
+        .iter()
+        .map(|chunk| chunk.local_path_fork.len() - chunk.local_path_fork.base_len())
+        .sum();
+    if reverse_chunks {
+        chunks.reverse();
+    }
+
+    let mut chunk_path_fork = fixture.frontend.path_fork.fork_source().fork_for_module();
+    let batch = match super::ModulePreparationContext::merge_file_preparation_chunks(
+        &mut fixture.frontend.string_table,
+        &mut chunk_path_fork,
+        chunks,
+        input_file_count,
+        base_len,
+        allowance,
+    ) {
+        Err(PreparedFailure::Diagnosed(batch)) => batch,
+        Err(PreparedFailure::Infrastructure(error)) => panic!(
+            "malformed fixture files must produce preparation diagnostics, got infrastructure: {error:?}"
+        ),
+        Ok(_) => panic!("malformed fixture files must not prepare successfully"),
+    };
+    assert_eq!(
+        chunk_path_fork.len() - chunk_path_fork.base_len(),
+        chunk_path_delta,
+        "every chunk path delta must merge even when its diagnostics are dropped"
+    );
+
+    for source_id in &all_source_ids {
+        assert!(
+            !fixture
+                .span_builders
+                .is_source_finalized(*source_id)
+                .expect("fixture source should be registered"),
+            "a preparation span builder must still be live before its final producer returns"
+        );
+        fixture
+            .span_builders
+            .finish_source(*source_id)
+            .expect("every source span builder should finalize after preparation");
+        assert!(
+            fixture
+                .span_builders
+                .is_source_finalized(*source_id)
+                .expect("fixture source should be registered"),
+            "every source span builder should be finalized, including discarded diagnostics"
+        );
+    }
+
+    let (retained_source_ids, stops, diagnostic_count) = inspect_diagnosed_preparation(batch);
+    PreparationAllowanceOutcome {
+        all_source_ids,
+        retained_source_ids,
+        stops,
+        diagnostic_count,
+    }
+}
+
+/// Parallel preparation may find more independent file errors than the module allowance; only the
+/// first `limit` groups in canonical file order survive, under every scheduling strategy.
+#[test]
+fn diagnostic_recovery_parallel_preparation() {
+    const LIMIT: u32 = 5;
+    let allowance = NonZeroU32::new(LIMIT);
+
+    let serial =
+        prepared_file_error_allowance(super::FilePreparationStrategy::Serial, false, allowance);
+    let per_file = prepared_file_error_allowance(
+        super::FilePreparationStrategy::ParallelPerFile,
+        false,
+        allowance,
+    );
+    let chunked_reordered = prepared_file_error_allowance(
+        super::FilePreparationStrategy::ParallelChunked,
+        true,
+        allowance,
+    );
+
+    let expected_retained = serial.all_source_ids[1..=LIMIT as usize].to_vec();
+    for (label, outcome) in [
+        ("serial", &serial),
+        ("parallel per-file", &per_file),
+        ("reordered chunked", &chunked_reordered),
+    ] {
+        assert_eq!(
+            outcome.diagnostic_count, LIMIT as usize,
+            "{label} preparation must retain exactly the module allowance"
+        );
+        assert_eq!(
+            outcome.retained_source_ids, expected_retained,
+            "{label} preparation must retain the first {LIMIT} error groups in canonical file order"
+        );
+        assert!(
+            outcome
+                .stops
+                .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
+            "{label} preparation must record the allowance stop"
+        );
+    }
+    assert_eq!(
+        serial.retained_source_ids, per_file.retained_source_ids,
+        "worker count must not change which diagnostic groups survive"
+    );
+    assert_eq!(
+        serial.retained_source_ids, chunked_reordered.retained_source_ids,
+        "chunk completion order must not change which diagnostic groups survive"
+    );
+
+    let unlimited =
+        prepared_file_error_allowance(super::FilePreparationStrategy::Serial, false, None);
+    assert_eq!(
+        unlimited.retained_source_ids,
+        unlimited.all_source_ids[1..].to_vec(),
+        "`None` must keep every prepared error"
+    );
+    assert!(
+        unlimited.stops.is_empty(),
+        "an unlimited preparation must not claim a stop"
+    );
+
+    let exactly_at_limit = prepared_file_error_allowance(
+        super::FilePreparationStrategy::Serial,
+        false,
+        NonZeroU32::new((unlimited.all_source_ids.len() - 1) as u32),
+    );
+    assert_eq!(
+        exactly_at_limit.retained_source_ids,
+        exactly_at_limit.all_source_ids[1..].to_vec(),
+        "a preparation exactly at its allowance must keep every error"
+    );
+    assert!(
+        exactly_at_limit.stops.is_empty(),
+        "reaching the allowance exactly must not claim skipped work"
+    );
+}
+
+/// Header aggregation sees every successfully prepared file at once, so its own failure batch must
+/// also respect the module allowance.
+#[test]
+fn preparation_header_aggregation_respects_module_allowance() {
+    const LIMIT: u32 = 2;
+    let file_sources = reserved_name_file_sources(7);
+    let file_source_refs = fixture_source_refs(&file_sources);
+    let mut fixture = frontend_preparation_fixture(&file_source_refs);
+    let source_byte_count = source_byte_count(&fixture.input_files, &fixture.frontend.source_files);
+    let all_source_ids: Vec<SourceId> = fixture
+        .input_files
+        .iter()
+        .map(PreparedSourceInput::source_id)
+        .collect();
+    let input_files = std::mem::take(&mut fixture.input_files);
+
+    let preparation_context = super::ModulePreparationContext {
+        source_files: &fixture.frontend.source_files,
+        style_directives: &fixture.frontend.style_directives,
+        module_error_allowance: NonZeroU32::new(LIMIT),
+    };
+    let batch = match preparation_context.prepare_module_files(
+        &mut fixture.frontend.string_table,
+        &mut fixture.frontend.source_files.fork_path_interner(),
+        input_files,
+        &mut fixture.span_builders.split().1,
+        &fixture.entry_file_path,
+        ModuleRootRole::Normal,
+        source_byte_count,
+    ) {
+        Err(PreparedFailure::Diagnosed(batch)) => batch,
+        Err(PreparedFailure::Infrastructure(error)) => panic!(
+            "reserved declaration names must produce preparation diagnostics, got infrastructure: {error:?}"
+        ),
+        Ok(_) => panic!("reserved declaration names must not aggregate successfully"),
+    };
+
+    for source_id in &all_source_ids {
+        fixture
+            .span_builders
+            .finish_source(*source_id)
+            .expect("every source span builder should finalize after preparation");
+        assert!(
+            fixture
+                .span_builders
+                .is_source_finalized(*source_id)
+                .expect("fixture source should be registered"),
+            "header aggregation truncation must not hide a source span owner"
+        );
+    }
+
+    let (retained_source_ids, stops, diagnostic_count) = inspect_diagnosed_preparation(batch);
+    assert_eq!(
+        diagnostic_count, LIMIT as usize,
+        "header aggregation must retain exactly the module allowance"
+    );
+    assert_eq!(
+        retained_source_ids,
+        all_source_ids[1..=LIMIT as usize].to_vec(),
+        "header aggregation must retain the first error groups in canonical file order"
+    );
+    assert!(
+        stops.contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
+        "dropped header diagnostics must record the allowance stop"
+    );
+}
+
 #[test]
 fn chunked_file_preparation_remaps_non_identity_later_chunks() {
     let file_sources = chunked_fixture_sources();
@@ -1791,6 +2122,7 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
     let preparation_context = super::ModulePreparationContext {
         source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
+        module_error_allowance: None,
     };
     let mut preparation_path_fork = fixture.frontend.path_fork.fork_source().fork_for_module();
     let (headers, warnings) = preparation_context
@@ -1958,6 +2290,7 @@ fn indexed_file_preparation_returns_warnings_for_publication() {
     let preparation_context = super::ModulePreparationContext {
         source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
+        module_error_allowance: None,
     };
     let mut selected_source_texts = super::super::source_loading::SelectedSourceTextMap::default();
     let mut syntax = preparation_context
@@ -2021,6 +2354,7 @@ fn chunked_file_preparation_preserves_warning_source_order() {
     let preparation_context = super::ModulePreparationContext {
         source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
+        module_error_allowance: None,
     };
     let (_headers, warnings) = preparation_context
         .prepare_module_files(
@@ -2153,6 +2487,7 @@ fn assert_malformed_chunks_rejected(
         chunks,
         module_file_count,
         0,
+        None,
     ) {
         Err(PreparedFailure::Infrastructure(error)) => error,
         Err(PreparedFailure::Diagnosed(_)) => {
@@ -2267,6 +2602,7 @@ fn merge_rejects_chunk_forked_from_a_foreign_path_base() {
         chunks,
         input_file_count,
         fork_source.base_len(),
+        None,
     ) {
         Err(PreparedFailure::Infrastructure(_)) => {}
         Err(PreparedFailure::Diagnosed(_)) => {
@@ -2420,6 +2756,7 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
         vec![first_chunk, second_chunk],
         3,
         base_len,
+        None,
     )
     .expect("already-global output must bypass the second non-identity payload remap");
 
@@ -2536,6 +2873,7 @@ fn serial_chunk_local_preparation_counts_each_selected_source_once() {
     let preparation_context = super::ModulePreparationContext {
         source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
+        module_error_allowance: None,
     };
     preparation_context
         .prepare_module_files(
@@ -2587,6 +2925,7 @@ fn chunked_file_preparation_skips_identity_payload_remap() {
     let preparation_context = super::ModulePreparationContext {
         source_files: &fixture.frontend.source_files,
         style_directives: &fixture.frontend.style_directives,
+        module_error_allowance: None,
     };
     preparation_context
         .prepare_module_files(
@@ -2665,6 +3004,7 @@ fn forced_path_exhaustion_during_chunk_merge_reports_capacity_diagnostic() {
         vec![chunk],
         1,
         0,
+        None,
     ) {
         Err(error) => error,
         Ok(_) => panic!("authored path exhaustion must fail the chunk merge"),
