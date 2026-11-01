@@ -20,7 +20,9 @@ use crate::builder_surface::config_schema::{
     ConfigFieldShape, ConfigSchema, ConfigSchemaField, ConfigSchemaFieldId, ConfigSchemaNodeId,
     ConfigSchemas, NamedConfigSectionSchema, UnknownFieldPolicy,
 };
-use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
@@ -33,13 +35,15 @@ use crate::compiler_frontend::folded_value::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::projects::settings::{
-    Config, MAX_TEMPLATE_CONST_LOOP_ITERATIONS, ProjectMetadataField,
+    Config, DEFAULT_MAX_ERRORS_PER_MODULE, DEFAULT_MAX_ERRORS_PER_PROJECT,
+    MAX_TEMPLATE_CONST_LOOP_ITERATIONS, ProjectMetadataField,
     TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY,
 };
 use moth_lexical::identifier::is_identifier;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroU32;
 use std::path::{Component, Path, PathBuf};
 
 // -------------------------
@@ -290,6 +294,12 @@ fn apply_project_record_fields(
     let mut errors = Vec::new();
     config.extra_project_fields.clear();
 
+    // Diagnostic limits start from their defaults for every record, so an omitted setting cannot
+    // inherit a value from an earlier load. They are installed only after the whole record applies:
+    // a rejected record must not leave one limit changed while the other fails.
+    let mut module_error_limit = Some(DEFAULT_MAX_ERRORS_PER_MODULE);
+    let mut project_error_limit = Some(DEFAULT_MAX_ERRORS_PER_PROJECT);
+
     for field in fields {
         if matches!(
             field.name.as_str(),
@@ -347,6 +357,38 @@ fn apply_project_record_fields(
                 }
             }
 
+            ("max_errors_per_module", ValidatedConfigValue::FixedScalar(value)) => {
+                match validate_diagnostic_error_limit(
+                    "max_errors_per_module",
+                    value,
+                    field.span,
+                    diagnostic_strings,
+                ) {
+                    Ok(limit) => module_error_limit = Some(limit),
+                    Err(diagnostic) => errors.push(diagnostic),
+                }
+            }
+
+            ("max_errors_per_module", ValidatedConfigValue::OptionNone) => {
+                module_error_limit = None;
+            }
+
+            ("max_errors_per_project", ValidatedConfigValue::FixedScalar(value)) => {
+                match validate_diagnostic_error_limit(
+                    "max_errors_per_project",
+                    value,
+                    field.span,
+                    diagnostic_strings,
+                ) {
+                    Ok(limit) => project_error_limit = Some(limit),
+                    Err(diagnostic) => errors.push(diagnostic),
+                }
+            }
+
+            ("max_errors_per_project", ValidatedConfigValue::OptionNone) => {
+                project_error_limit = None;
+            }
+
             (_, ValidatedConfigValue::Preserved(preserved)) => {
                 let preserved = *preserved;
                 config.extra_project_fields.push(ProjectMetadataField {
@@ -362,6 +404,8 @@ fn apply_project_record_fields(
     }
 
     if errors.is_empty() {
+        config.max_errors_per_module = module_error_limit;
+        config.max_errors_per_project = project_error_limit;
         Ok(())
     } else {
         Err(errors)
@@ -727,6 +771,46 @@ fn validate_value_with_span(
     }
 }
 
+/// Check that an authored `none` carries the optional type its schema field expects.
+///
+/// A `none` literal carries no payload, so the authored field's type identity is the only evidence
+/// of its optional type. A wrong-typed `none` such as `Bool?` for an `I32?` setting must not
+/// silently mean "disabled". Only leaf shapes have one canonical identity that a schema field can
+/// name exactly. Record, collection and nested-optional shapes keep their previous acceptance
+/// because the authored identity may add a nominal origin, a fixed capacity or another optional
+/// layer that the schema shape does not record.
+fn authored_none_matches_field_type(
+    shape: &ConfigFieldShape,
+    value: &PublicFoldedValue,
+    authored_type: &CanonicalTypeIdentity,
+) -> bool {
+    let (ConfigFieldShape::Optional(inner), PublicFoldedValue::OptionNone) = (shape, value) else {
+        return true;
+    };
+    let Some(inner_identity) = canonical_identity_for_shape(inner) else {
+        return true;
+    };
+
+    *authored_type == CanonicalTypeIdentity::Option(Box::new(inner_identity))
+}
+
+/// Project a schema leaf shape onto the folded-value type identity that owns it.
+fn canonical_identity_for_shape(shape: &ConfigFieldShape) -> Option<CanonicalTypeIdentity> {
+    let builtin = match shape {
+        ConfigFieldShape::String => CanonicalBuiltinType::String,
+        ConfigFieldShape::FixedScalar(scalar) => CanonicalBuiltinType::FixedScalar(*scalar),
+        ConfigFieldShape::Bool => CanonicalBuiltinType::Bool,
+        ConfigFieldShape::Char => CanonicalBuiltinType::Char,
+        ConfigFieldShape::Record(_)
+        | ConfigFieldShape::Collection(_)
+        | ConfigFieldShape::Optional(_) => {
+            return None;
+        }
+    };
+
+    Some(CanonicalTypeIdentity::Builtin(builtin))
+}
+
 /// Collections report the element shape, or keep nested diagnostics already pushed by
 /// record-valued elements. A scalar is not promoted to a one-element collection.
 fn validate_collection(
@@ -800,15 +884,25 @@ fn validate_record_fields(
                 let field = view.schema.field(field_id);
                 let field_key = diagnostics.string_table.intern(&authored_field.name);
 
-                match validate_value_with_span(
-                    view,
-                    diagnostics,
-                    Some(field_key),
+                let check = if authored_none_matches_field_type(
                     &field.shape,
-                    field,
                     &authored_field.value,
-                    field_span,
+                    &authored_field.type_identity,
                 ) {
+                    validate_value_with_span(
+                        view,
+                        diagnostics,
+                        Some(field_key),
+                        &field.shape,
+                        field,
+                        &authored_field.value,
+                        field_span,
+                    )
+                } else {
+                    ValueCheck::Mismatch
+                };
+
+                match check {
                     ValueCheck::Valid(validated) => {
                         validated_fields.push(ValidatedRecordField {
                             name: authored_field.name.clone(),
@@ -1127,6 +1221,36 @@ fn validate_template_const_loop_iteration_limit(
             span,
         )]);
     }
+
+    Ok(limit)
+}
+
+/// Validate one diagnostic error limit after the project schema accepted its exact `I32` shape.
+///
+/// The validated form is the disabled marker or a positive count, so later consumers never
+/// reinterpret zero, a negative sentinel or a wider integer as a limit. The schema owns the exact
+/// type and therefore the upper bound, because no `I32` value exceeds 2147483647.
+fn validate_diagnostic_error_limit(
+    key: &str,
+    value: FixedScalarValue,
+    span: Option<SourceSpan>,
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+) -> Result<NonZeroU32, DiagnosticDraft> {
+    debug_assert_eq!(value.scalar(), FixedScalar::I32);
+    let value = value
+        .as_i64()
+        .expect("the validated diagnostic limit is an I32 scalar");
+
+    let Some(limit) = u32::try_from(value).ok().and_then(NonZeroU32::new) else {
+        return Err(config_diagnostic(
+            Some(diagnostic_strings.intern(key)),
+            InvalidConfigReason::InvalidProjectSettingValue {
+                value: diagnostic_strings.intern(&value.to_string()),
+                expected: diagnostic_strings.intern("a positive integer"),
+            },
+            span,
+        ));
+    };
 
     Ok(limit)
 }

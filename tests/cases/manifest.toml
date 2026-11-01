@@ -6357,6 +6357,13 @@ contract = "language.config.template_const_loop_iteration_limit_invalid_rejected
 role = "boundary"
 
 [[case]]
+id = "diagnostic_limits_zero_rejected"
+path = "diagnostic_limits_zero_rejected"
+tags = ["integration","diagnostics","config"]
+contract = "language.config.diagnostic_limits_invalid_rejected"
+role = "primary"
+
+[[case]]
 id = "template_const_loop_limit_runtime_value_rejected"
 path = "template_const_loop_limit_runtime_value_rejected"
 tags = ["integration","templates","diagnostics","config"]

@@ -40,7 +40,9 @@ use crate::compiler_frontend::source::{
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::settings::{BuilderSettings, Config};
+use crate::projects::settings::{
+    BuilderSettings, Config, DEFAULT_MAX_ERRORS_PER_MODULE, DEFAULT_MAX_ERRORS_PER_PROJECT,
+};
 
 use std::path::Path;
 use std::sync::Arc;
@@ -127,6 +129,8 @@ pub fn load_project_config(
         config.config_resolution_records.clear();
         config.project_field_config_dependencies.clear();
         config.extra_project_fields.clear();
+        config.max_errors_per_module = Some(DEFAULT_MAX_ERRORS_PER_MODULE);
+        config.max_errors_per_project = Some(DEFAULT_MAX_ERRORS_PER_PROJECT);
         if config.entry_dir.is_dir() {
             let failure = {
                 let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
@@ -191,6 +195,11 @@ pub(crate) fn compile_project_config_file(
     })?;
     config.output_roots = OutputRootSettings::default();
     config.builder_settings = BuilderSettings::default();
+    // Diagnostic limits belong to the config being loaded, so a reload resets them before folding
+    // or validating. An invalid or missing project record therefore leaves the defaults rather
+    // than the previous load's limits, and a valid record reapplies present values after this.
+    config.max_errors_per_module = Some(DEFAULT_MAX_ERRORS_PER_MODULE);
+    config.max_errors_per_project = Some(DEFAULT_MAX_ERRORS_PER_PROJECT);
     let canonical_config_path = std::fs::canonicalize(config_path).map_err(|error| {
         PreparedFailure::from(InfrastructureFailure::filesystem(
             crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,

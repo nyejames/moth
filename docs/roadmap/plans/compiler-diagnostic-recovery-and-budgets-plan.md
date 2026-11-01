@@ -13,9 +13,9 @@
 ## Status and activation
 
 - Status: active on `diagnostic-recovery`.
-- Current slice: Phase 0 activation.
+- Current slice: Phase 2 ordinary-body recovery. Phase 1 delivered the validated config settings. Its options projection, primary-error accounting and stop metadata land with their first Phase 2/3 consumers to avoid dormant paths.
 - Blockers: none. Compiler diagnostics improvements, compact diagnostic records, type-display snapshots, three failure lanes and canonical diagnostic aggregation are delivered.
-- Next action: Phase 1 limits, configuration and report contract.
+- Next action: Phase 2 body failure handoff, module allowance and work guard.
 
 The main roadmap places this work after compiler source/token/diagnostic data layout and diagnostic improvements. The later general-directives/configuration cutover is not a prerequisite. Deliver the two settings using the configuration system present at activation, then preserve them through that later cutover.
 
@@ -175,18 +175,18 @@ Use `src/compiler_frontend/ast/tests/` for local recovery/isolation invariants a
 
 **Deliverable:** one validated policy projection and lightweight stop metadata, with existing compilation behaviour otherwise preserved.
 
-- [ ] Add focused tests `diagnostic_limits_defaults_and_none` and `diagnostic_limits_invalid_values`. Assert omission gives 5/30, each `none` is independent, 1 and I32 maximum are valid, and zero/negative/wrong-type/out-of-range values fail without proportional allocation.
+- [x] Add focused tests `diagnostic_limits_defaults_and_none` and `diagnostic_limits_invalid_values`. Assert omission gives 5/30, each `none` is independent, 1 and I32 maximum are valid, and zero/negative/wrong-type/out-of-range values fail without proportional allocation.
 - [ ] Extend the current project schema, config application and options projection. Use the exact public names above. Keep defaults in one owner and keep the two controls out of semantic globals and fingerprints. Update a real config fixture through the current syntax, not only a constructed Rust options value.
-- [ ] Add `diagnostic_limits_reload_resets_state`: set custom limits, reload with omissions, then explicit `none`. Counts reset per invocation and settings do not leak from a previous successful or failed load. Test invalid bootstrap with default project policy.
+- [x] Add `diagnostic_limits_reload_resets_state`: set custom limits, reload with omissions, then explicit `none`. Counts reset per invocation and settings do not leak from a previous successful or failed load. Test invalid bootstrap with default project policy.
 - [ ] Extend the delivered diagnostic/outcome owner with cheap primary-error accounting and stop reasons. Reuse an existing count if authoritative. Do not repeatedly scan a growing warning/error list or widen common diagnostic records.
 - [ ] Add `diagnostic_stop_metadata_preserves_failure_lanes`: budget metadata is not a source diagnostic, warnings/labels consume no allowance, an infrastructure failure remains fatal and a compiler bug is never demoted.
 - [ ] Thread policy through named config, module, direct-template and synthetic services only where each needs it. A source-backed module has one allowance across its producers. Independent identity domains retain separate reports even when the command adds their counts.
 
 ### Phase 1 audit, style review and validation
 
-- [ ] Audit omission versus explicit absence, full I32 boundaries, bootstrap ordering, config reloads and source-visible projection. Verify the project threshold has not become a per-module remaining quota.
-- [ ] Review type sizes, allocation sites and ownership. Remove obsolete option/constructor paths rather than leaving defaulted adapters. Empty policy/report state allocates nothing.
-- [ ] Run the focused budget/config tests and selected manifest cases, `just fmt-check` and `just clippy`. Run `just validate` at this API integration boundary and the relevant documentation gate. Require nonzero selected test counts.
+- [x] Audit omission versus explicit absence, full I32 boundaries, bootstrap ordering, config reloads and source-visible projection. Verify the project threshold has not become a per-module remaining quota.
+- [x] Review type sizes, allocation sites and ownership. Remove obsolete option/constructor paths rather than leaving defaulted adapters. Empty policy/report state allocates nothing.
+- [x] Run the focused budget/config tests and selected manifest cases, `just fmt-check` and `just clippy`. Run `just validate` at this API integration boundary and the relevant documentation gate. Require nonzero selected test counts.
 - [ ] Record matching clean-path timing/allocation evidence before enabling recovery. The compact diagnostic architecture's layout assertions still pass.
 
 ## Phase 2 - Bounded ordinary-body AST recovery
