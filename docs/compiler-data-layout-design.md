@@ -206,11 +206,7 @@ These are the current owners. `FrozenIdentityContext::sources` is a `FrozenSourc
 the source slots, snapshots and path table; the context's `strings` field shares the frozen string
 table.
 
-`DiagnosticDiscoveryStops` is a one-byte copyable set that names why optional diagnostic discovery
-stopped. It rides on `PreparedDiagnosticBatch` and is OR-merged when batches append to the command's
-`BoundaryAccumulator`. Command report owners read the aggregate before the accumulator freezes its
-reports. It is never stored in `DiagnosticRecord`, `DiagnosticReportSet` or per-expression and token
-state, so a normal success allocates nothing for it. Mutable construction uses the existing source-database and string-table owners rather than a
+Mutable construction uses the existing source-database and string-table owners rather than a
 separate aggregate identity builder.
 
 - Mutable builders have one explicit owner.
@@ -228,6 +224,12 @@ separate aggregate identity builder.
 - Compact IDs and records may be `Copy`.
 - Broad `Clone` implementations on report sets, diagnostic bags, source databases and owning render
   contexts are prohibited.
+
+`DiagnosticDiscoveryStops` is a one-byte copyable set that names why optional diagnostic discovery
+stopped. It rides on `PreparedDiagnosticBatch` and is OR-merged when batches append to the command's
+`BoundaryAccumulator`. Command report owners read the aggregate before the accumulator freezes its
+reports. It is never stored in `DiagnosticRecord`, `DiagnosticReportSet` or per-expression and token
+state, so a normal success allocates nothing for it.
 
 A frozen context is a process-local rendering and inspection boundary. It is not a persistent cache
 key or a cross-process protocol.

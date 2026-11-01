@@ -17,17 +17,17 @@ impl DiagnosticDiscoveryStops {
     pub(crate) const NONE: Self = Self(0);
 
     /// The module retained its configured number of primary errors.
-    pub(crate) const MODULE_ERROR_ALLOWANCE: Self = Self(1 << 0);
+    pub const MODULE_ERROR_ALLOWANCE: Self = Self(1 << 0);
 
     /// The additional-body token allowance for AST recovery was exhausted.
-    pub(crate) const AST_RECOVERY_WORK_GUARD: Self = Self(1 << 1);
+    pub const AST_RECOVERY_WORK_GUARD: Self = Self(1 << 1);
 
     /// The command stopped admitting new compilation work at its project threshold.
     ///
     /// This flag describes whole-command scheduling, so it is set on the command's accumulator
     /// only after a real returned primary error and a refused admission. It never belongs to one
     /// module's batch.
-    pub(crate) const PROJECT_SCHEDULING_CUTOFF: Self = Self(1 << 2);
+    pub const PROJECT_SCHEDULING_CUTOFF: Self = Self(1 << 2);
 
     /// True when no discovery work was skipped.
     pub fn is_empty(self) -> bool {
@@ -62,7 +62,7 @@ impl DiagnosticDiscoveryStops {
     }
 
     /// True when every flag in `other` is already set.
-    pub(crate) const fn contains(self, other: Self) -> bool {
+    pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
     }
 

@@ -151,6 +151,14 @@ init_docs_sidebar()!
         ]
 
         [data:
+            [: Diagnostic recovery and error budgets]
+            [: Partial]
+            [$md: Targeted coverage of ordinary-body recovery, module allowances, the work guard, the project cutoff and stop metadata. Default and explicitly disabled limits and in-process request isolation are covered by the `diagnostic_recovery_default_module_limit` and `diagnostic_recovery_unlimited_error_limits` cases and the `diagnostic_recovery_request_policy_isolation` test. Focused AST recovery, capacity and discovery-stop tests sit with their owners, with further cases for independent bodies, a module limit of one, preparation allowance, a repaired source and a project soft cutoff.]
+            [: Frontend / build system]
+            [$md: Ordinary concrete function bodies each report their first primary error independently, bounded by the [$html:<code>max_errors_per_module</code>] allowance and a compiler-owned 4096-token work guard. The [$html:<code>max_errors_per_project</code>] threshold is a soft scheduling cutoff, not a result cap, and work already running keeps its errors. Stop metadata distinguishes the module allowance, work guard and project cutoff and never counts as a diagnostic. Any AST error still rejects the whole module before finalisation, HIR, borrowing and later stages. Generic templates, const templates and [$html:<code>start</code>] remain fail-fast. Statement-level and broader AST recovery and borrow recovery remain deferred. See @../project-structure/#diagnostic-limits (Diagnostic limits).]
+        ]
+
+        [data:
             [: Variables, assignment and lexical scope]
             [: Partial]
             [: Broad declaration, reassignment, mutability, structured-control-flow scope, shadowing, undefined-mutation and diagnostic coverage. Targeted new-binding collision cases cover parameters, range and collection bindings, collection source indices, range ordinals, option and choice captures and inline catches. Coverage includes local, parameter and capture matrices for file-visible aliases, traits, forward declarations and Core reservations, plus hidden-name and mutable-update positives. Concrete choice, pending generic-choice and pending optional-field captures have exact rejection sites and distinct checked owners. Focused CLI checks and all 2784 integration target results pass. Block catches and template binders share checked owners without dedicated collision cases. Explicit HIR definitions and updates cover place/value initialisers, caller-result binding freshness and all-results-before-writes multi-bind staging. Re-entered loop binders and body-local aliases have HTML runtime coverage.]

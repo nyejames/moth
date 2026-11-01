@@ -7124,3 +7124,65 @@ The existing `benchmarks/data-layout/diagnosed` workload (40 modules with one er
 ### Validation
 
 `just validate` passed on the Phase 3 tree (integration 3089/3089, docs clean). `just fmt-check` and `just clippy` were clean.
+
+## Diagnostic Recovery - Phase 4 Acceptance Matrix (2026-11-01)
+
+Release binaries for `2ab2dde38` (activation baseline, fail-fast) and the final candidate, `moth check --terse`, interleaved runs after one warm-up. Peak memory is the `maximum resident set size` reported by `/usr/bin/time -l`. The generators and raw captures stay in untracked `tmp/`.
+
+### Expensive bodies within the work guard
+
+Each heavy body instantiates generic functions for its own concrete type, completes numeric arithmetic through mutable locals and builds runtime templates over folded template constants. The suffix workload puts one failing body before 40 heavy bodies. The independent workload adds a failing body before every eighth heavy body. Nine runs.
+
+| Workload | Baseline median ms | Candidate median ms | Baseline peak MiB | Candidate peak MiB | Errors (baseline / candidate) | Stop |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| clean, 40 heavy bodies | 43.53 | 43.98 | 29.9 | 30.2 | 0 / 0 | none |
+| one failure then 40 heavy bodies | 10.79 | 12.49 | 13.0 | 14.6 | 1 / 1 | work guard |
+| failure before every eighth heavy body | 10.15 | 12.26 | 12.9 | 14.5 | 1 / 3 | work guard |
+
+Heavy bodies are about 160 tokens, so the 4096-token guard admits roughly 25 of them after the first failure. The admitted recovery work costs about 2 ms and 1.6 MiB over fail-fast on these workloads, which is under 5% of the clean full check of the same source. The guard, not the module allowance, ends the independent workload after three errors, which is the intended bound on expensive bodies.
+
+### Disabled limits
+
+The Phase 2 independent workload (eight failing bodies among 64 valid bodies), seven runs on the candidate:
+
+| Limits | Median ms | Peak MiB | Errors | Stop |
+| --- | ---: | ---: | --- | --- |
+| `max_errors_per_module = 1` | 12.21 | 15.31 | 1 | module allowance |
+| defaults | 13.12 | 15.89 | 5 | module allowance |
+| both `none` | 13.68 | 16.31 | 8 | work guard |
+
+Disabling both counts adds memory only for the extra bodies checked. Nothing reserves storage in proportion to a limit.
+
+### Incremental reuse
+
+The compiler has no module artefact reuse across requests, so the reuse row of the matrix is not applicable. `diagnostic_recovery_request_policy_isolation` covers per-request policy reset instead.
+
+### Final clean path
+
+`just bench-frontend-check` on `2ab2dde38` and the final production tree. Five pairs overlapped worker compilation and are not used. Six pairs ran on an otherwise idle machine, three with the baseline first and three with the candidate first.
+
+| Measure | Baseline first | Candidate first | All six |
+| --- | ---: | ---: | ---: |
+| suite average, baseline ms | 135.52 | 136.28 | 135.65 |
+| suite average, candidate ms | 135.25 | 133.93 | 135.06 |
+| suite change | -0.2% | -1.7% | -0.4% |
+
+Cases that were above 2% with the baseline first mostly reversed sign with the candidate first, so run order rather than the change explains them. The cases still above 2% across all six pairs, plus the largest order-sensitive ones, were rechecked with release binaries over 41 alternating-order `moth check` runs per binary, comparing the compiler-reported compile time:
+
+| Case | Baseline first | Candidate first | All six | Release compile time |
+| --- | ---: | ---: | ---: | ---: |
+| `many_tiny_files_frontend` | +6.0% | -1.8% | -0.6% | +0.2% |
+| `module_graph_frontend` | +3.8% | -5.0% | -1.4% | -0.3% |
+| `numeric_origin_fanout_32_frontend` | +3.1% | -3.2% | +1.8% | +0.2% |
+| `tiny_one_file_frontend` | +2.8% | -3.0% | +1.2% | +0.0% |
+| `numeric_copy_chain_32_frontend` | +2.8% | -2.3% | +2.3% | +1.4% |
+| `numeric_copy_chain_128_frontend` | +2.1% | +1.7% | +2.5% | +1.2% |
+| `environment_stress_frontend` | +1.0% | +3.9% | +2.4% | -0.8% |
+
+No rechecked workload is slower by more than 1.4% in release builds. The largest release difference is on the 2.7 ms numeric copy chain, roughly 40 µs, and the Phase 2 binary shows a similar difference there. That source has one function body, so per-body recovery bookkeeping cannot account for it and code layout is the likelier cause. A clean build adds one budget check per admitted module and allocates nothing for recovery.
+
+Three small cases remained above 2% across all six idle pairs of the opt-level 0 frontend bench: `numeric_copy_chain_128_frontend` +2.55% (6/6 pairs slower), `environment_stress_frontend` +2.39% (5/6) and `numeric_copy_chain_32_frontend` +2.33% (4/6). The absolute difference is 0.24 to 0.44 ms and does not grow with workload size (`numeric_copy_chain_512_frontend` is +0.27%). Release compile time for the same sources is within 1.4%. The maintainer explicitly accepted this result on 2026-11-01 rather than requiring further correction.
+
+### Validation
+
+`just validate-full` passed on the final tree.

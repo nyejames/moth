@@ -188,12 +188,9 @@ impl ProjectDiagnosticBudget {
 
     /// Charge one returned diagnosed batch's primary user errors exactly once.
     pub(crate) fn charge_batch(&mut self, batch: &PreparedDiagnosticBatch) {
-        self.charge(batch.primary_error_count());
-    }
-
-    /// Charge a primary-error count returned by one aggregation point.
-    fn charge(&mut self, primary_errors: u32) {
-        self.returned_primary_errors = self.returned_primary_errors.saturating_add(primary_errors);
+        self.returned_primary_errors = self
+            .returned_primary_errors
+            .saturating_add(batch.primary_error_count());
     }
 
     /// True when the accumulated total meets the threshold; a disabled threshold is never met.

@@ -1,0 +1,9 @@
+module_error_limit #I32? = none
+project_error_limit #I32? = none
+project #= (
+    name = "test_project",
+    entry_root = "src",
+    max_errors_per_module = module_error_limit,
+    max_errors_per_project = project_error_limit,
+)
+html #= ()

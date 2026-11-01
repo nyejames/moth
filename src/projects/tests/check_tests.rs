@@ -63,6 +63,53 @@ fn warning_count(messages: &CompilationResult<()>) -> usize {
     }
 }
 
+/// Default page-project config with no diagnostic-limit overrides.
+const DEFAULT_PAGE_CONFIG: &str =
+    "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n";
+
+/// Page config that disables both error-count limits through typed `I32?` constants.
+const UNLIMITED_PAGE_CONFIG: &str = "\
+module_error_limit #I32? = none
+project_error_limit #I32? = none
+project #= (
+    name = \"docs\",
+    entry_root = \"src\",
+    max_errors_per_module = module_error_limit,
+    max_errors_per_project = project_error_limit,
+)
+html #= ()
+";
+
+/// Six independent ordinary bodies that each fail on an unknown value name.
+///
+/// The bodies are small enough that the 4096-token recovery work guard never fires before the
+/// default five-error module allowance is reached.
+const SIX_FAILING_ORDINARY_BODIES: &str = "\
+first || -> I32:
+    return missing_one
+;
+
+second || -> I32:
+    return missing_two
+;
+
+third || -> I32:
+    return missing_three
+;
+
+fourth || -> I32:
+    return missing_four
+;
+
+fifth || -> I32:
+    return missing_five
+;
+
+sixth || -> I32:
+    return missing_six
+;
+";
+
 #[test]
 fn check_compiles_single_file_without_writing_artifacts() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
@@ -93,6 +140,50 @@ fn check_compiles_single_file_without_writing_artifacts() {
         "check should not write output artifacts to the source folder"
     );
 }
+
+#[test]
+fn single_file_check_uses_default_module_allowance_without_authored_config() {
+    // `run_check_command` records command timing into the shared collector under `timers`.
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let entry_file = _temp.path().join("main.moth");
+    fs::write(&entry_file, SIX_FAILING_ORDINARY_BODIES).expect("should write source file");
+
+    let outcome = execute_check(
+        entry_file
+            .to_str()
+            .expect("temp file path should be valid UTF-8 for this test"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+    );
+
+    let reports = diagnostic_reports(&outcome.messages);
+    assert_eq!(
+        reports.counts().errors,
+        5,
+        "an authored config must not be required for the default module allowance"
+    );
+    assert_eq!(reports.counts().warnings, 0);
+    assert!(
+        reports
+            .iter()
+            .all(|(_, view)| view.descriptor().code == "MOTH-RULE-0034"),
+        "every retained default-limit diagnostic keeps its independent body code"
+    );
+    assert!(
+        outcome
+            .discovery_stops
+            .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
+        "the default allowance must set the module stop flag"
+    );
+    assert_eq!(
+        outcome.discovery_stops.stop_line().as_deref(),
+        Some(
+            "Diagnostic discovery stopped early (module error limit): later code was not checked."
+        )
+    );
+}
+
 #[test]
 fn warning_capacity_failure_marks_check_completion_as_failed() {
     let warning_source = "\
@@ -554,11 +645,7 @@ fn write_page_project(_prefix: &str, source: &str) -> (tempfile::TempDir, PathBu
     let root = temp.path().to_path_buf();
     let src = root.join("src");
     fs::create_dir_all(&src).expect("should create src");
-    fs::write(
-        root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
-    )
-    .expect("should write config");
+    fs::write(root.join("config.moth"), DEFAULT_PAGE_CONFIG).expect("should write config");
     fs::write(src.join("@page.moth"), source).expect("should write @page.moth source");
     (temp, root)
 }
@@ -1252,7 +1339,108 @@ fn consecutive_operand_numeric_group_source(depth: usize) -> String {
 }
 
 #[test]
+fn diagnostic_recovery_request_policy_isolation() {
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+    let (_temp, root) = write_page_project_with_module_limit("1", SIX_FAILING_ORDINARY_BODIES);
+    let root_text = root
+        .to_str()
+        .expect("temporary project path should be valid UTF-8");
+
+    let mut limited_report = None;
+    let limited_completion = run_check_command(
+        root_text,
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+        |report| limited_report = Some(report),
+    );
+    let limited_report = limited_report.expect("check must present its report exactly once");
+    assert_eq!(
+        limited_completion.status,
+        crate::projects::ProjectCommandStatus::Failure
+    );
+    assert_eq!(limited_report.error_count, 1);
+    assert_eq!(
+        diagnostic_reports(&limited_report.messages).counts().errors,
+        1
+    );
+    assert!(
+        limited_report
+            .discovery_stops
+            .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE)
+    );
+
+    // A second request in the same process sees the rewritten config, applies the default
+    // allowance and starts counting from zero.
+    fs::write(root.join("config.moth"), DEFAULT_PAGE_CONFIG).expect("should write default config");
+    let mut default_report = None;
+    let default_completion = run_check_command(
+        root_text,
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+        |report| default_report = Some(report),
+    );
+    let default_report = default_report.expect("check must present its report exactly once");
+    assert_eq!(
+        default_completion.status,
+        crate::projects::ProjectCommandStatus::Failure
+    );
+    assert_eq!(
+        default_report.error_count, 5,
+        "omitted limits must reset to the five-error default, not reuse the prior request's one"
+    );
+    assert_eq!(
+        diagnostic_reports(&default_report.messages).counts().errors,
+        5
+    );
+    assert!(
+        default_report
+            .discovery_stops
+            .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
+        "the default allowance stops after five retained independent errors"
+    );
+    assert_eq!(
+        default_report.discovery_stops.stop_line().as_deref(),
+        Some(
+            "Diagnostic discovery stopped early (module error limit): later code was not checked."
+        )
+    );
+
+    // A third request disables both counts. The fresh request retains every independent body and
+    // carries no stop from either earlier request.
+    fs::write(root.join("config.moth"), UNLIMITED_PAGE_CONFIG)
+        .expect("should write unlimited config");
+    let mut unlimited_report = None;
+    let unlimited_completion = run_check_command(
+        root_text,
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+        |report| unlimited_report = Some(report),
+    );
+    let unlimited_report = unlimited_report.expect("check must present its report exactly once");
+    assert_eq!(
+        unlimited_completion.status,
+        crate::projects::ProjectCommandStatus::Failure
+    );
+    assert_eq!(
+        unlimited_report.error_count, 6,
+        "explicit none must retain every independent body rather than the prior request's count"
+    );
+    assert_eq!(
+        diagnostic_reports(&unlimited_report.messages)
+            .counts()
+            .errors,
+        6
+    );
+    assert!(
+        unlimited_report.discovery_stops.is_empty(),
+        "explicit none must not leak the earlier module allowance stop"
+    );
+    assert_eq!(unlimited_report.discovery_stops.stop_line(), None);
+}
+
+#[test]
 fn diagnostic_stop_metadata_preserves_failure_lanes() {
+    let _test_guard = crate::timing::lock_instrumentation_tests();
     let source = "\
 warn || -> I32:
     value ~= \"hello\"
@@ -1323,16 +1511,24 @@ third || -> I32:
     assert_eq!(reports.counts().warnings, 0);
 
     let (_open_temp, open_root) = write_page_project_with_module_limit("3", source);
-    let open_outcome = execute_check(
+    let mut open_report = None;
+    let open_completion = run_check_command(
         open_root
             .to_str()
             .expect("temporary project path should be valid UTF-8"),
         &BuildConfigInputSet::new(),
         &test_project_builder(),
+        |report| open_report = Some(report),
     );
-    let Ok(CompilationOutcome::Diagnosed(open_reports)) = &open_outcome.messages else {
+    let open_report = open_report.expect("check must present its report exactly once");
+    assert_eq!(
+        open_completion.status,
+        crate::projects::ProjectCommandStatus::Failure
+    );
+    let Ok(CompilationOutcome::Diagnosed(open_reports)) = &open_report.messages else {
         panic!("all three failing bodies should retain independent errors");
     };
+    assert_eq!(open_report.error_count, 3);
     assert_eq!(open_reports.counts().errors, 3);
     assert_eq!(
         open_reports.counts().warnings,
@@ -1340,7 +1536,7 @@ third || -> I32:
         "the diagnosed warning policy is unchanged by the module allowance"
     );
     assert!(
-        open_outcome.discovery_stops.is_empty(),
+        open_report.discovery_stops.is_empty(),
         "the allowance was not reached before any available body"
     );
 
@@ -1362,14 +1558,26 @@ warn || -> I32:
 ;
 ";
     let (_control_temp, control_root) = write_page_project("warning_control", warning_only_source);
-    let control_outcome = execute_check(
+    let mut control_report = None;
+    let completion = run_check_command(
         control_root
             .to_str()
             .expect("temporary project path should be valid UTF-8"),
         &BuildConfigInputSet::new(),
         &test_project_builder(),
+        |report| control_report = Some(report),
     );
-    assert!(!has_errors(&control_outcome.messages));
-    assert_eq!(warning_count(&control_outcome.messages), 3);
-    assert!(control_outcome.discovery_stops.is_empty());
+    let control_report = control_report.expect("check must present its report exactly once");
+    assert_eq!(
+        completion.status,
+        crate::projects::ProjectCommandStatus::Success
+    );
+    assert_eq!(control_report.error_count, 0);
+    assert_eq!(control_report.warning_count, 3);
+    assert!(!has_errors(&control_report.messages));
+    assert_eq!(warning_count(&control_report.messages), 3);
+    assert!(
+        control_report.discovery_stops.is_empty(),
+        "a successful check that skipped nothing must not report a stop"
+    );
 }

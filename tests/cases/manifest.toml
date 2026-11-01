@@ -18586,3 +18586,17 @@ tags = ["integration", "diagnostics", "modules"]
 contract = "language.diagnostics.preparation_module_limit"
 role = "primary"
 
+
+[[case]]
+id = "diagnostic_recovery_default_module_limit"
+path = "diagnostic_recovery_default_module_limit"
+tags = ["integration", "diagnostics", "functions", "config"]
+contract = "language.diagnostics.ordinary_body_recovery_default_module_limit"
+role = "primary"
+
+[[case]]
+id = "diagnostic_recovery_unlimited_error_limits"
+path = "diagnostic_recovery_unlimited_error_limits"
+tags = ["integration", "diagnostics", "functions", "config"]
+contract = "language.diagnostics.ordinary_body_recovery_explicit_none_limits"
+role = "primary"

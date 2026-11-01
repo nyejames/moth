@@ -1,4 +1,4 @@
--- Two ordinary bodies fail independently; the valid suffix must still be admitted.
+-- With a module allowance of one, only the first independent body failure is retained.
 first || -> I32:
     return missing
 ;

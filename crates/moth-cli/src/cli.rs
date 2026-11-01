@@ -583,11 +583,17 @@ fn render_check_outcome(report: CheckCommandReport, terse: bool) {
     let stop_line = report.discovery_stops.stop_line();
     if terse {
         print_terse_compilation_result(&report.messages);
+        // Tools read the summary as the final terse line, so the stop line precedes it.
+        if let Some(stop_line) = stop_line {
+            println!("{stop_line}");
+        }
         println!(
             "{}",
             format_terse_summary_line(report.duration, report.error_count, report.warning_count)
         );
-    } else if report.error_count == 0 && report.warning_count == 0 {
+        return;
+    }
+    if report.error_count == 0 && report.warning_count == 0 {
         say!(Dark White "---------------------");
         say!(success_message(report.duration));
         say!(Bold Green "No errors or warnings");

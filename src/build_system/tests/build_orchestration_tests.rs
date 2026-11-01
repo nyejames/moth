@@ -568,8 +568,75 @@ fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
         !built.load(std::sync::atomic::Ordering::SeqCst),
         "backend must not receive a partial project compilation"
     );
+    assert!(
+        discovery_stops.is_empty(),
+        "a diagnosis that skipped no discovery work must not report a stop"
+    );
 
+    // A project cutoff stops admission after a returned module error. The stopped graph must not
+    // become a project compilation or reach the backend.
+    let cutoff_temp = tempfile::tempdir().expect("should create cutoff temp dir");
+    let cutoff_root = cutoff_temp.path().to_path_buf();
+    let cutoff_src = cutoff_root.join("src");
+    fs::create_dir_all(cutoff_src.join("first")).expect("should create first module directory");
+    fs::create_dir_all(cutoff_src.join("second")).expect("should create second module directory");
+    fs::write(
+        cutoff_root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 1,\n)\nhtml #= ()\n",
+    )
+    .expect("should write cutoff config");
+    fs::write(
+        cutoff_src.join("first/@first.moth"),
+        "first || -> I32:\n    return missing_one\n;\n",
+    )
+    .expect("should write first failing module root");
+    fs::write(
+        cutoff_src.join("second/@second.moth"),
+        "second || -> I32:\n    return missing_two\n;\n",
+    )
+    .expect("should write second failing module root");
+
+    let cutoff_validated = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let cutoff_built = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let cutoff_builder = ValidationTrackingBuilder {
+        validated: cutoff_validated.clone(),
+        built: cutoff_built.clone(),
+    };
+    let mut cutoff_stops = DiagnosticDiscoveryStops::NONE;
+    let cutoff_result = build_project(
+        &cutoff_builder,
+        cutoff_root
+            .to_str()
+            .expect("cutoff root path should be valid UTF-8"),
+        &[],
+        &BuildConfigInputSet::new(),
+        &mut cutoff_stops,
+    )
+    .unwrap_or_else(|never| match never {});
+
+    let cutoff_reports = diagnosed_reports(&cutoff_result);
+    assert_eq!(
+        cutoff_reports.counts().errors,
+        1,
+        "the admitted module keeps its returned diagnostic batch"
+    );
+    assert!(cutoff_validated.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(
+        !cutoff_built.load(std::sync::atomic::Ordering::SeqCst),
+        "a budget-stopped graph must not reach the backend"
+    );
+    assert!(
+        cutoff_stops.contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF),
+        "the project threshold must reach the build driver as scheduling-cutoff metadata"
+    );
+    assert_eq!(
+        cutoff_stops.stop_line().as_deref(),
+        Some(
+            "Diagnostic discovery stopped early (project scheduling cutoff): later code was not checked."
+        )
+    );
     let _ = temp;
+    let _ = cutoff_temp;
 }
 
 #[test]

@@ -11,6 +11,7 @@ use crate::builder::{
 };
 use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use std::cell::Cell;
 #[cfg(unix)]
 use std::ffi::OsString;
@@ -24,6 +25,20 @@ const CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n    entry_root 
 
 /// The smallest page that compiles without diagnostics.
 const PAGE_SOURCE: &str = "#[:<h1>About</h1>]\n";
+
+/// Config that limits diagnostic discovery to one retained error per module.
+const MODULE_LIMIT_CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_module = 1,\n)\n";
+
+/// Two independent ordinary bodies, so the first retained error ends discovery early.
+const TWO_FAILING_BODIES_PAGE_SOURCE: &str = "\
+first || -> I32:
+    return missing_one
+;
+
+second || -> I32:
+    return missing_two
+;
+";
 
 /// A record literal that is never closed, so the frontend rejects the project before any builder
 /// runs.
@@ -169,6 +184,45 @@ fn source_diagnostics_return_compilation_error_without_building() {
             .iter()
             .any(|message| { message.split('|').nth(2) == Some("@page.moth") }),
         "diagnosed source must retain its authored path"
+    );
+    assert_eq!(builder.build_calls.get(), 0);
+}
+
+#[test]
+fn diagnosed_build_exposes_module_allowance_stop_through_public_sdk() {
+    let temp_dir = project_temp_dir();
+    let src = temp_dir.path().join("src");
+    fs::create_dir_all(&src).expect("should create src");
+    fs::write(
+        temp_dir.path().join("config.moth"),
+        MODULE_LIMIT_CONFIG_SOURCE,
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), TWO_FAILING_BODIES_PAGE_SOURCE)
+        .expect("should write @page.moth source");
+    let builder = RecordingBuilder::new(BuildBehaviour::Succeed);
+
+    let error = build_project(&builder, BuildRequest::new(temp_dir.path()))
+        .expect_err("a module at its error allowance should fail the build");
+
+    assert_eq!(error.kind(), ErrorKind::Compilation);
+    assert_eq!(
+        error.messages().len(),
+        1,
+        "module allowance one retains exactly one primary error"
+    );
+    assert_eq!(error.messages()[0].split('|').nth(2), Some("@page.moth"));
+    assert!(
+        error
+            .discovery_stops()
+            .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
+        "SDK callers must receive the module allowance stop from the public driver"
+    );
+    assert_eq!(
+        error.discovery_stops().stop_line().as_deref(),
+        Some(
+            "Diagnostic discovery stopped early (module error limit): later code was not checked."
+        )
     );
     assert_eq!(builder.build_calls.get(), 0);
 }
