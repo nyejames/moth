@@ -7186,3 +7186,25 @@ Three small cases remained above 2% across all six idle pairs of the opt-level 0
 ### Validation
 
 `just validate-full` passed on the final tree.
+
+## Diagnostic Recovery - Merge Audit Follow-up (2026-11-02)
+
+The follow-up audit changed presentation only: the builder SDK error text and the dev server browser page now render the same discovery-stop line as the CLI, and the module error default moved to its compiler owner. The semantic recovery path, the work guard and the budget accounting are unchanged, so this section re-measures the accepted candidate `2bc1bbb8b` against the follow-up tree to confirm no movement rather than to re-derive the earlier matrix.
+
+Method as before: release binaries for both trees, interleaved runs on an idle machine. Success cases report the compiler-reported `Done in` time over 16 runs per binary. Error cases print no timing summary, so they report wall clock over 25 interleaved runs. The fixture generator, the run scripts and the raw output stay in untracked `tmp/`, so these figures are measured but not reproduced by a checked-in harness.
+
+| Workload | Accepted median ms | Follow-up median ms | Change |
+| --- | ---: | ---: | ---: |
+| clean, 40 heavy bodies | 35.87 | 35.85 | -0.07% |
+| `environment-stress.moth` | 3.84 | 3.82 | -0.52% |
+| `fold-stress.moth` | 4.88 | 4.86 | -0.52% |
+| one failure then 40 heavy bodies | 10.59 | 10.42 | -1.6% |
+| failure before every eighth heavy body | 10.39 | 10.35 | -0.4% |
+
+Peak memory is unchanged within run spread. The median `maximum resident set size` over five runs is 30.3 MiB for the clean workload, 14.7 MiB for the guarded workloads and no more than 0.2 MiB apart between the two trees. Retained error counts are also identical at one error for the guarded suffix workload and three for the independent workload, so the follow-up adds no retained AST state or typed diagnostic snapshots.
+
+The three small opt-level 0 cases the maintainer accepted on 2026-11-01 are unaffected: this follow-up adds one string format on a failure path and no work to a successful compile.
+
+### Validation
+
+`just validate` and `just validate-full` passed on the follow-up tree.

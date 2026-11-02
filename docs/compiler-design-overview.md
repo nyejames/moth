@@ -235,7 +235,7 @@ Diagnostic recovery shortens discovery, never compilation. A module that records
 - Stage 4 > `Ordinary-body diagnostic recovery` defines the only semantic recovery root and its compiler-owned work guard. Every other stage keeps its fail-fast boundary.
 - The project threshold is a build-owned soft scheduling cutoff, not a result cap. Build design > `Diagnostic budgets and scheduling cutoff` owns it.
 - Operational failures and compiler bugs keep their lanes. Budget exhaustion never conceals them, and infrastructure still dominates collected diagnostics. Source-capacity exhaustion or a failed shared-store construction ends its owning stage even when it is a user diagnostic.
-- Stop metadata beside the owning outcome distinguishes a module-allowance stop, an AST work-guard stop and a project scheduling stop. It is not a diagnostic and never enters a common diagnostic record. The data-layout authority owns its representation.
+- Stop metadata beside the owning outcome distinguishes a module-allowance stop, an AST work-guard stop and a project scheduling stop. It is not a diagnostic and never enters a common diagnostic record. The data-layout authority owns its representation. Every failure surface derives one line from it, so the CLI, the dev server terminal and browser page and the builder SDK error text say that later code was not checked without repeating the reason as a diagnostic.
 - The two error-count limits are compiler-control settings. They never enter `@project`, semantic fingerprints or reuse identity, so changing one cannot change program meaning or invalidate a successful artefact.
 
 ### Build-lifetime render context

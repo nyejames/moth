@@ -82,10 +82,11 @@ impl AstRecoveryPolicy {
 impl Default for FrontendOptions {
     /// The settings a standalone test fixture compiles under.
     ///
-    /// WHY: only fixtures compile one standalone source with no configured origin, so only they
-    ///      need a ready-made value. Production callers must project their configuration through
-    ///      `Config::frontend_options`, and a shipping `Default` would let a caller compile
-    ///      without the project's configured settings.
+    /// WHY: fixtures build their options directly instead of loading a project, so they need a
+    ///      ready-made value. Production callers project their configuration through
+    ///      `Config::frontend_options`, or use [`AstRecoveryPolicy::configured_defaults`] when a
+    ///      direct template or config build has no project configuration source. A shipping
+    ///      `Default` would let a caller compile without the project's configured settings.
     fn default() -> Self {
         Self {
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
