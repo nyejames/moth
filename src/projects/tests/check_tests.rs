@@ -14,6 +14,7 @@ use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationR
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::{DiagnosticDiscoveryStops, DiagnosticSeverity};
+use crate::compiler_frontend::module_compilation::AST_RECOVERY_WORK_TOKENS;
 use crate::compiler_tests::test_fs::assert_path_missing;
 use crate::compiler_tests::test_support::run_stack_budgeted_child;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -1436,6 +1437,69 @@ fn diagnostic_recovery_request_policy_isolation() {
         "explicit none must not leak the earlier module allowance stop"
     );
     assert_eq!(unlimited_report.discovery_stops.stop_line(), None);
+}
+
+#[test]
+fn diagnostic_recovery_ast_work_guard_stop_reaches_check_report() {
+    // `run_check_command` records command timing into the shared collector under `timers`.
+    let _test_guard = crate::timing::lock_instrumentation_tests();
+
+    // `return 1;` is three body tokens. The first failed body is uncharged, so admitting
+    // `AST_RECOVERY_WORK_TOKENS / 3` valid bodies leaves one token. The final failing body needs
+    // three and is therefore refused by the work guard rather than reported.
+    const VALID_BODY_WORK_TOKENS: u32 = 3;
+    let valid_body_count = AST_RECOVERY_WORK_TOKENS / VALID_BODY_WORK_TOKENS;
+    let mut source = String::from("first || -> I32:\n    return missing;\n");
+    for index in 0..valid_body_count {
+        source.push_str(&format!("\nvalid{index} || -> I32:\n    return 1;\n"));
+    }
+    source.push_str("\nzz_last || -> I32:\n    return also_missing;\n");
+
+    let (_temp, root) = write_page_project("ast_work_guard", &source);
+    let mut presented = None;
+    let completion = run_check_command(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+        |report| presented = Some(report),
+    );
+    let report = presented.expect("check must present its report exactly once");
+
+    assert_eq!(
+        completion.status,
+        crate::projects::ProjectCommandStatus::Failure
+    );
+    assert_eq!(report.error_count, 1);
+    let reports = diagnostic_reports(&report.messages);
+    assert_eq!(
+        reports.counts().errors,
+        1,
+        "only the first failing body is admitted"
+    );
+    assert!(
+        reports
+            .iter()
+            .all(|(_, view)| view.descriptor().code == "MOTH-RULE-0034")
+    );
+    assert!(
+        report
+            .discovery_stops
+            .contains(DiagnosticDiscoveryStops::AST_RECOVERY_WORK_GUARD),
+        "the refused suffix body must record the work-guard stop"
+    );
+    assert!(
+        !report
+            .discovery_stops
+            .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
+        "the default module allowance was never reached"
+    );
+    assert_eq!(
+        report.discovery_stops.stop_line().as_deref(),
+        Some(
+            "Diagnostic discovery stopped early (AST recovery work guard): later code was not checked."
+        )
+    );
 }
 
 #[test]

@@ -24,9 +24,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, DiagnosticDiscoveryStops, PreparedFailure,
-};
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::compiler_frontend::instrumentation::MemoryLedgerSnapshot;
 use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
@@ -165,7 +163,7 @@ impl SchedulingCutoff {
 /// Command-owned project diagnostic budget for one directory compilation request.
 ///
 /// WHAT: the validated `max_errors_per_project` threshold and the primary user errors returned by
-///       every compiled boundary so far, plus the first refused admission's cutoff record.
+///       every compiled boundary so far.
 /// WHY: the project threshold is a soft scheduling cutoff owned by the invoking command. It must
 ///      charge each returned diagnosed batch once across project and source-package work, never
 ///      reset on a package transition, and stop only new admissions. It is deliberately one
@@ -173,7 +171,6 @@ impl SchedulingCutoff {
 pub(crate) struct ProjectDiagnosticBudget {
     threshold: Option<NonZeroU32>,
     returned_primary_errors: u32,
-    cutoff: Option<SchedulingCutoff>,
 }
 
 impl ProjectDiagnosticBudget {
@@ -182,7 +179,6 @@ impl ProjectDiagnosticBudget {
         Self {
             threshold: config.max_errors_per_project,
             returned_primary_errors: 0,
-            cutoff: None,
         }
     }
 
@@ -200,14 +196,18 @@ impl ProjectDiagnosticBudget {
     }
 
     /// Refuse one admission after the threshold was met while work remains.
-    pub(crate) fn refuse_admission(&mut self) -> SchedulingCutoff {
+    ///
+    /// No batch is charged after the first refusal, so every refusal observes the same total and
+    /// callers keep the first record they retained. The returned value is therefore derived, not
+    /// stored here: the boundary owns the record and the command sink owns the stop flag.
+    pub(crate) fn refuse_admission(&self) -> SchedulingCutoff {
         debug_assert!(
             self.is_exhausted(),
             "a project scheduling cutoff requires the accumulated total to meet the threshold"
         );
-        *self.cutoff.get_or_insert(SchedulingCutoff {
+        SchedulingCutoff {
             returned_primary_errors: self.returned_primary_errors,
-        })
+        }
     }
 }
 
@@ -1714,12 +1714,6 @@ impl ProjectFrontendCompilation {
             ..
         } = self;
         let project_diagnosed = std::mem::take(&mut project.diagnosed);
-        // A stopped request reports its cutoff on the command accumulator, never on a module
-        // batch. Both the project boundary and every package boundary can own the record.
-        let scheduling_cutoff = project.scheduling_cutoff.is_some()
-            || source_packages
-                .iter()
-                .any(|package| package.boundary.scheduling_cutoff.is_some());
         let (mut source_packages, package_source_arcs) =
             source_packages.into_packages_with_source_databases();
         #[cfg(feature = "data_layout_memory_probe")]
@@ -1740,9 +1734,6 @@ impl ProjectFrontendCompilation {
         });
         warning_owner.discard_successful_warnings();
         let mut accumulator = std::mem::replace(warning_owner, BoundaryAccumulator::new());
-        if scheduling_cutoff {
-            accumulator.merge_discovery_stops(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF);
-        }
         if let Some(source) = project_source.as_ref() {
             accumulator.set_project_source_database(Arc::clone(source));
         }

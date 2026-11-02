@@ -228,6 +228,14 @@ fn diagnostic_recovery_project_soft_cutoff() {
         .scheduling_cutoff
         .expect("the boundary must record the refused admission");
     assert_eq!(cutoff.returned_primary_errors(), 3);
+    // The command flag has one owner: `refuse_scheduling_admission` merges it through the warning
+    // sink at refusal time. Report retention must never re-derive it from boundary records.
+    assert!(
+        warning_owner
+            .discovery_stops()
+            .contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF),
+        "the cutoff flag must arrive through the warning sink before report freezing"
+    );
 
     let reports = finish_diagnosed(frontend, &mut warning_owner, project_source_files);
     assert_eq!(reports.counts().errors, 3);

@@ -545,19 +545,17 @@ fn compile_single_file_frontend_with_target(
         if project_budget.is_exhausted() {
             // The package diagnostics upstream stay retained. The unvisited slot is proven by the
             // cutoff record and the command's stop flag; it never reports success or diagnosis.
-            let mut boundary_cutoff = None;
-            canonical::refuse_scheduling_admission(
-                &mut project_budget,
-                &mut boundary_cutoff,
+            let scheduling_cutoff = Some(canonical::refuse_scheduling_admission(
+                &project_budget,
                 warning_sink.as_deref_mut(),
-            );
+            ));
             let boundary = CompiledGraphBoundary {
                 structure: graph,
                 modules: ModuleArtifactStore::new(1),
                 generated: BoundaryGeneratedFunctionStore::default(),
                 diagnosed: Vec::new(),
                 blocked: Vec::new(),
-                scheduling_cutoff: boundary_cutoff,
+                scheduling_cutoff,
             };
             return ProjectFrontendCompilation::new(
                 boundary,

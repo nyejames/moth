@@ -226,8 +226,10 @@ separate aggregate identity builder.
   contexts are prohibited.
 
 `DiagnosticDiscoveryStops` is a one-byte copyable set that names why optional diagnostic discovery
-stopped. It rides on `PreparedDiagnosticBatch` and is OR-merged when batches append to the command's
-`BoundaryAccumulator`. Command report owners read the aggregate before the accumulator freezes its
+stopped. Module-local stops ride on `PreparedDiagnosticBatch` and are OR-merged when batches append
+to the command's `BoundaryAccumulator`. Scheduler stops that belong to no module batch, the project
+scheduling cutoff and a skipped check-only unit, merge into the same accumulator when the scheduler
+refuses the work. Command report owners read the aggregate before the accumulator freezes its
 reports. It is never stored in `DiagnosticRecord`, `DiagnosticReportSet` or per-expression and token
 state, so a normal success allocates nothing for it.
 

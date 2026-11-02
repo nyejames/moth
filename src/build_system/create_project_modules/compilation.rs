@@ -1152,12 +1152,7 @@ pub(super) fn compile_source_package_inventories(
             // The invoking command's threshold stops new compilation work. Each remaining package
             // inventory was discovered but never compiled, so it has no boundary to record and its
             // source owner is simply dropped as unvisited work.
-            let mut no_boundary_cutoff = None;
-            canonical::refuse_scheduling_admission(
-                budget,
-                &mut no_boundary_cutoff,
-                warning_sink.as_deref_mut(),
-            );
+            canonical::refuse_scheduling_admission(budget, warning_sink.as_deref_mut());
             break;
         }
         let SourcePackageModuleInventory {
@@ -1307,8 +1302,11 @@ pub(super) fn compile_source_package_inventories(
             let package = completed_source_packages.package(package_id)?;
             // Deferred check-only units keep sharing their canonical owner's allowance across
             // package transitions; the owner's retained errors reset only with the request.
-            let mut retained_module_errors =
-                canonical::retained_module_error_counts(&package.boundary.diagnosed);
+            let mut retained_module_errors = if check_only_jobs.is_empty() {
+                FxHashMap::default()
+            } else {
+                canonical::retained_module_error_counts(&package.boundary.diagnosed)
+            };
             let check_only_batches = deferred_check_only::compile_check_only_jobs_after_canonical(
                 canonical::BoundaryCompilationContext::new(
                     config,

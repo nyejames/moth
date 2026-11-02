@@ -964,7 +964,10 @@ pub(super) fn compile_check_only_batches(
             Ok(CheckOnlyProviderClassification::Blocked) => continue,
             Ok(CheckOnlyProviderClassification::Ready) => {}
             Ok(CheckOnlyProviderClassification::Unvisited) => {
-                refuse_scheduling_admission(budget, boundary_cutoff, warning_sink.as_deref_mut());
+                boundary_cutoff.get_or_insert(refuse_scheduling_admission(
+                    budget,
+                    warning_sink.as_deref_mut(),
+                ));
                 break;
             }
             Err(error) => return Err(PreparedFailure::Infrastructure(error.into())),
@@ -972,7 +975,10 @@ pub(super) fn compile_check_only_batches(
         if budget.is_exhausted() {
             // The command threshold stops new work; the unadmitted units return nothing and their
             // already-finalized preparation owners keep their spans.
-            refuse_scheduling_admission(budget, boundary_cutoff, warning_sink.as_deref_mut());
+            boundary_cutoff.get_or_insert(refuse_scheduling_admission(
+                budget,
+                warning_sink.as_deref_mut(),
+            ));
             break;
         }
         let owner_retained_errors = retained_module_errors
@@ -1127,21 +1133,21 @@ pub(super) fn check_only_success_batch(
 
 /// Refuse one scheduling admission at the command's project threshold.
 ///
-/// WHAT: records the boundary's cutoff proof once and sets `PROJECT_SCHEDULING_CUTOFF` on the
-///       command accumulator when the command supplied its warning sink.
+/// WHAT: returns the cutoff proof for the caller's boundary to retain and sets
+///       `PROJECT_SCHEDULING_CUTOFF` on the command accumulator when the command supplied its
+///       warning sink.
 /// WHY: every admission point (wave, module job, check-only unit, package inventory, project
 ///      graph) must make the same decision and leave identical evidence. The flag describes the
 ///      command's scheduling, so it never rides on one module's diagnostic batch.
 pub(super) fn refuse_scheduling_admission(
-    budget: &mut ProjectDiagnosticBudget,
-    boundary_cutoff: &mut Option<SchedulingCutoff>,
+    budget: &ProjectDiagnosticBudget,
     warning_sink: Option<&mut SuccessfulWarningSink<'_>>,
-) {
+) -> SchedulingCutoff {
     let cutoff = budget.refuse_admission();
-    boundary_cutoff.get_or_insert(cutoff);
     if let Some(warning_sink) = warning_sink {
         warning_sink.merge_discovery_stops(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF);
     }
+    cutoff
 }
 
 /// Retained primary errors per canonical module for the shared check-only allowance.
@@ -1202,7 +1208,10 @@ pub(super) fn compile_module_waves_in_premerge_lane(
     // `Unavailable` slot is intentional rather than unfinished.
     let mut boundary_cutoff = None;
     if budget.is_exhausted() {
-        refuse_scheduling_admission(budget, &mut boundary_cutoff, warning_sink.as_deref_mut());
+        boundary_cutoff.get_or_insert(refuse_scheduling_admission(
+            budget,
+            warning_sink.as_deref_mut(),
+        ));
     } else {
         // Index each consumer module's direct package dependencies once per boundary so readiness
         // walks only the packages that module actually depends on and never filters the full
@@ -1280,11 +1289,10 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                 // Every wave is classified for blocked dependants before this admission point, so a
                 // dependant of a failed provider is recorded as blocked and never charged or stopped.
                 if budget.is_exhausted() {
-                    refuse_scheduling_admission(
+                    boundary_cutoff.get_or_insert(refuse_scheduling_admission(
                         budget,
-                        &mut boundary_cutoff,
                         warning_sink.as_deref_mut(),
-                    );
+                    ));
                     break 'waves;
                 }
                 add_frontend_counter(FrontendCounter::ModuleCompilationSerialCount, 1);
@@ -1350,8 +1358,13 @@ pub(super) fn compile_module_waves_in_premerge_lane(
     }
 
     // Check-only units attributed to one canonical owner keep sharing that module's allowance
-    // instead of resetting it per orphan file.
-    let mut retained_module_errors = retained_module_error_counts(&diagnosed);
+    // instead of resetting it per orphan file. Boundaries with no check-only jobs (a source
+    // package whose schedule has none) never build the per-owner map.
+    let mut retained_module_errors = if check_only_jobs.is_empty() {
+        FxHashMap::default()
+    } else {
+        retained_module_error_counts(&diagnosed)
+    };
     let transient_batches = compile_check_only_batches(
         &context,
         &provider_store,

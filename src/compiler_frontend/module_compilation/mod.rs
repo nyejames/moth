@@ -47,6 +47,8 @@ pub(crate) use generated::{
     GeneratedFunctionSidecar, KnownGeneratedFunctions, ProviderMaterialisationRegistry,
     validate_completed_generated_record,
 };
+#[cfg(test)]
+pub(crate) use options::AST_RECOVERY_WORK_TOKENS;
 pub(crate) use options::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 pub(crate) use options::{AstRecoveryPolicy, FrontendOptions};
 pub(crate) use outcome::{ModuleCompilationOutcome, ModuleSemanticResult};

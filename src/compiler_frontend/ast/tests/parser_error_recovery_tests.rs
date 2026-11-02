@@ -491,6 +491,9 @@ catching || -> I32:
     );
 }
 
+// Module file-value resources are not exercised here because the AST harness has no module
+// origin. Resource interning is idempotent and append-only, so a failed body leaves no entry that a
+// later body can misread.
 #[test]
 fn diagnostic_recovery_shared_state_isolation() {
     let source = "\

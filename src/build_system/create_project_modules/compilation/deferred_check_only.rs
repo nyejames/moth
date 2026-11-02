@@ -52,6 +52,11 @@ fn seed_boundary_materialisations(
 /// WHAT: stays in the prepared lane and calls the typed canonical batch helper directly.
 /// WHY: the deferred lane never constructs the final vessel; the source-owner tail appends
 ///      each prepared batch with its finalized snapshot.
+///
+/// The cutoff and allowance decisions share `compile_check_only_batches` and its classification
+/// with the project lane, where
+/// `diagnostic_recovery_stopped_check_only_unit_treats_unvisited_provider_as_stopped_work` covers
+/// them. No test reaches a cutoff inside this deferred package lane directly.
 #[allow(
     clippy::too_many_arguments,
     reason = "deferred check-only compilation keeps boundary context, provider and generated stores, jobs, provider and package edges, shared module allowance, command budget and stop sink, and mutable string/path tables as separate borrows"
