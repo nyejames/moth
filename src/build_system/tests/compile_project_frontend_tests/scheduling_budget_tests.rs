@@ -4,11 +4,13 @@
 //!       retained graph boundary before the terminal wrapper converts it into reports.
 //! WHY: the project threshold is a command-owned soft cutoff, not a result cap. These tests prove
 //!       returned module diagnostics stay intact, unadmitted modules keep `Unavailable` slots, the
-//!       cutoff flag is command scope, and check-only units share their owner's module allowance.
+//!       cutoff flag is command scope, check-only units share their owner's module allowance,
+//!       package and deferred package work stop at the same threshold, and a diagnosed module
+//!       publishes neither an artefact nor a semantic resource association.
 
 use super::*;
 use crate::build_system::create_project_modules::compiled_boundary::{
-    BlockedProvider, ProjectFrontendCompilation,
+    BlockedProvider, CompiledSourcePackage, ProjectFrontendCompilation,
 };
 use crate::build_system::create_project_modules::module_artifact_store::ProviderSlot;
 use crate::build_system::create_project_modules::module_identity::ModuleId;
@@ -27,6 +29,17 @@ const THREE_FAILING_BODIES: &str = "first || -> I32:\n    return missing_one\n;\
      second || -> I32:\n    return missing_two\n;\n\n\
      third || -> I32:\n    return missing_three\n;\n";
 const ONE_FAILING_BODY: &str = "consumer || -> I32:\n    return only_second_module\n;\n";
+/// The project threshold every package cutoff fixture in this file reaches.
+const PROJECT_ERROR_LIMIT_TWO: &str = "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 2,\n)\nhtml #= ()\n";
+/// A module root whose body binds a resolved resource before failing, plus an independent body
+/// in an owned sibling file with the same shape.
+const RESOURCE_FAILING_MODULE_ROOT: &str = "@extra later\nexport:\n    probe || -> String:\n        logo = @assets/broken.svg\n        return missing_one\n    ;\n;\n";
+const RESOURCE_FAILING_MODULE_EXTRA: &str =
+    "later || -> String:\n    other = @assets/broken.svg\n    return missing_two\n;\n";
+/// The same two bodies repaired to return their resource bindings.
+const RESOURCE_REPAIRED_MODULE_ROOT: &str = "@extra later\nexport:\n    probe || -> String:\n        logo = @assets/broken.svg\n        return logo\n    ;\n;\n";
+const RESOURCE_REPAIRED_MODULE_EXTRA: &str =
+    "later || -> String:\n    other = @assets/broken.svg\n    return other\n;\n";
 
 /// Run the real directory frontend lane and keep the retained boundary for inspection.
 ///
@@ -107,6 +120,30 @@ fn run_directory_lane_with_surface(
     (frontend, warning_owner, project_source_files)
 }
 
+/// Run the directory lane with `shared` registered at its real package root.
+///
+/// WHY: package work only enters the lane through the builder surface, and every package
+///      scheduling regression needs the same real-root registration.
+fn run_shared_package_lane(
+    root: &Path,
+    mode: FrontendCompilationMode,
+) -> (
+    ProjectFrontendCompilation,
+    BoundaryAccumulator,
+    Option<Arc<SourceDatabase>>,
+) {
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface
+        .source_packages
+        .register_filesystem_root(
+            "shared",
+            root.join("packages/shared"),
+            PackageOrigin::ProjectLocal,
+        )
+        .expect("the shared package root registers");
+    run_directory_lane_with_surface(root, mode, &mut frontend_surface)
+}
+
 /// Convert one retained diagnosed boundary into its frozen reports.
 fn finish_diagnosed(
     frontend: ProjectFrontendCompilation,
@@ -158,6 +195,108 @@ fn assert_slot_is_successful(frontend: &ProjectFrontendCompilation, suffix: &str
         ),
         "{suffix} should reach a complete artefact"
     );
+}
+
+/// Resolve the package-local graph slot for one module directory path suffix.
+fn package_module_id(package: &CompiledSourcePackage, suffix: &str) -> ModuleId {
+    package
+        .boundary
+        .structure
+        .nodes()
+        .iter()
+        .find(|node| node.stable_origin().logical_module_path().ends_with(suffix))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a @{} module graph node ending with {suffix:?}",
+                package.package_prefix()
+            )
+        })
+        .module_id()
+}
+
+/// Assert the shared package-and-project cutoff tail, then freeze the reports.
+///
+/// WHY: every request stopped at the project threshold leaves identical command-scope evidence on
+///      both retained boundaries while each test keeps its own slot-level assertions inline.
+fn finish_stopped_package_request(
+    frontend: ProjectFrontendCompilation,
+    warning_owner: &mut BoundaryAccumulator,
+    project_source_files: Option<Arc<SourceDatabase>>,
+    expected_primary_errors: u32,
+) -> DiagnosticReportSet {
+    let package = frontend
+        .source_packages
+        .iter()
+        .next()
+        .expect("a stopped package request retains its boundary");
+    assert_eq!(
+        package
+            .boundary
+            .scheduling_cutoff
+            .map(|cutoff| cutoff.returned_primary_errors()),
+        Some(expected_primary_errors),
+        "the package boundary must retain the canonical cutoff proof"
+    );
+    assert!(
+        package.boundary.blocked.is_empty(),
+        "a refused admission must not invent a blocked provider"
+    );
+    assert_eq!(
+        frontend
+            .project
+            .scheduling_cutoff
+            .map(|cutoff| cutoff.returned_primary_errors()),
+        Some(expected_primary_errors),
+        "the project boundary must record the same spent threshold"
+    );
+    assert!(
+        frontend.project.diagnosed.is_empty(),
+        "the project boundary must not invent a diagnosis"
+    );
+    assert!(
+        frontend.project.blocked.is_empty(),
+        "an exhausted budget refuses admission instead of blocking"
+    );
+    assert!(
+        warning_owner
+            .discovery_stops()
+            .contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF),
+        "the cutoff flag arrives through the command warning sink"
+    );
+    let stop_line = warning_owner
+        .discovery_stops()
+        .stop_line()
+        .expect("a stopped request renders one stop line");
+    assert!(stop_line.contains("project scheduling cutoff"));
+    assert!(
+        !stop_line.contains('\n'),
+        "one cutoff must render exactly one line: {stop_line:?}"
+    );
+
+    // The success-only gate used by build assembly must reject the retained project boundary and
+    // every retained package before the reports are frozen.
+    let rejection = frontend
+        .project
+        .require_all_successful()
+        .expect_err("a stopped project boundary is never linkable");
+    assert!(
+        rejection.message.contains("project scheduling cutoff"),
+        "unexpected success-only rejection: {rejection:?}"
+    );
+    for package in frontend.source_packages.iter() {
+        let rejection = package
+            .boundary
+            .require_all_successful()
+            .expect_err("a stopped package boundary is never linkable");
+        assert!(
+            rejection.message.contains("project scheduling cutoff"),
+            "unexpected package success-only rejection: {rejection:?}"
+        );
+    }
+
+    let reports = finish_diagnosed(frontend, warning_owner, project_source_files);
+    assert_eq!(reports.counts().errors, expected_primary_errors);
+    reports
 }
 
 fn write_project(root: &Path, config_text: &str, files: &[(&str, &str)]) {
@@ -569,20 +708,8 @@ fn diagnostic_recovery_project_budget_spans_source_package_work() {
 
     // The package is registered at its real project root, so the directory lane discovers and
     // compiles it before any project module is admitted.
-    let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    frontend_surface
-        .source_packages
-        .register_filesystem_root(
-            "shared",
-            root.join("packages/shared"),
-            PackageOrigin::ProjectLocal,
-        )
-        .expect("the shared package root registers");
-    let (frontend, mut warning_owner, project_source_files) = run_directory_lane_with_surface(
-        root,
-        FrontendCompilationMode::Canonical,
-        &mut frontend_surface,
-    );
+    let (frontend, mut warning_owner, project_source_files) =
+        run_shared_package_lane(root, FrontendCompilationMode::Canonical);
     assert_eq!(
         frontend
             .source_packages
@@ -690,5 +817,669 @@ fn diagnostic_recovery_stopped_check_only_unit_treats_unvisited_provider_as_stop
             .iter()
             .all(|line| !line.contains("orphan") && !line.contains("orphan_missing")),
         "the unadmitted orphan must not be compiled: {rendered:?}"
+    );
+}
+
+#[test]
+fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("temp project should exist");
+    let root = temp.path();
+    // Both bodies of the diagnosed module bind a resolved resource before their independent
+    // unknown name. The sibling module is clean and owns a different resource. Recovery must
+    // retain exactly the two authored errors: no missing-target or file-value cascade may leak
+    // from the failed bodies, and only the clean module may publish its resource association.
+    write_project(
+        root,
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        &[
+            ("src/@page.moth", "#[:site]\n"),
+            ("src/broken/@broken.moth", RESOURCE_FAILING_MODULE_ROOT),
+            ("src/broken/extra.moth", RESOURCE_FAILING_MODULE_EXTRA),
+            (
+                "src/ok/@ok.moth",
+                "export:\n    greeting || -> String:\n        logo = @assets/ok.svg\n        return logo\n    ;\n;\n",
+            ),
+            ("src/broken/assets/broken.svg", "<svg/>"),
+            ("src/ok/assets/ok.svg", "<svg/>"),
+        ],
+    );
+
+    let (frontend, mut warning_owner, project_source_files) =
+        run_directory_lane(root, FrontendCompilationMode::Canonical);
+    let broken_module = module_id_for_path(&frontend, "broken");
+    let ok_module = module_id_for_path(&frontend, "ok");
+    let broken_origin = StableResourceOriginId::module_owned(
+        frontend
+            .project
+            .structure
+            .node(broken_module)
+            .stable_origin()
+            .clone(),
+        PortableResourcePath::from_relative_logical_path(Path::new("assets/broken.svg"))
+            .expect("the broken resource path is portable"),
+    );
+    let ok_origin = StableResourceOriginId::module_owned(
+        frontend
+            .project
+            .structure
+            .node(ok_module)
+            .stable_origin()
+            .clone(),
+        PortableResourcePath::from_relative_logical_path(Path::new("assets/ok.svg"))
+            .expect("the clean resource path is portable"),
+    );
+
+    assert_eq!(
+        frontend.project.modules.slot(broken_module).unwrap(),
+        ProviderSlot::Diagnosed
+    );
+    assert!(
+        frontend
+            .project
+            .modules
+            .interface(broken_module)
+            .expect("slot lookup should resolve")
+            .is_none(),
+        "a diagnosed module never publishes an interface"
+    );
+    assert!(
+        frontend
+            .project
+            .successful_artefacts_in_module_id_order()
+            .all(
+                |artifact| artifact.interface.module_origin.logical_module_path()
+                    != Path::new("broken")
+            ),
+        "a diagnosed module never publishes an artefact"
+    );
+    assert_slot_is_successful(&frontend, "ok");
+    assert_eq!(frontend.project.diagnosed.len(), 1);
+    assert_eq!(
+        frontend.project.diagnosed[0]
+            .diagnostics
+            .primary_error_count(),
+        2,
+        "both independent body errors must be retained without a resource cascade"
+    );
+    assert!(frontend.project.scheduling_cutoff.is_none());
+    assert!(warning_owner.discovery_stops().is_empty());
+
+    // Stage 0 registered both physical files, but the diagnosed module's failed semantic result
+    // published no origin association. The clean sibling keeps exactly its own origin.
+    assert_eq!(frontend.resource_inputs.records().len(), 2);
+    assert!(
+        frontend
+            .resource_inputs
+            .missing_watch_interests()
+            .is_empty(),
+        "every authored resource target resolved, so no watch interest may remain"
+    );
+    assert!(
+        frontend
+            .resource_inputs
+            .source_for_origin(&broken_origin)
+            .is_none(),
+        "a diagnosed module must not register a semantic resource association"
+    );
+    assert!(
+        frontend
+            .resource_inputs
+            .source_for_origin(&ok_origin)
+            .is_some(),
+        "the clean module commits its own resource association"
+    );
+    let ok_artefact = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .find(|artifact| artifact.interface.module_origin.logical_module_path() == Path::new("ok"))
+        .expect("the clean module should publish an artefact");
+    let ok_origins = ok_artefact.module.executable.resource_table.origins();
+    assert_eq!(
+        ok_origins.len(),
+        1,
+        "the clean module must not inherit the diagnosed module's resource"
+    );
+    assert_eq!(ok_origins[0].origin, ok_origin);
+
+    // The success-only gate used by build assembly must reject the retained diagnosed boundary.
+    let rejection = frontend
+        .project
+        .require_all_successful()
+        .expect_err("a diagnosed project boundary is never linkable");
+    assert!(
+        rejection.message.contains("diagnosed ModuleId"),
+        "unexpected success-only rejection: {rejection:?}"
+    );
+
+    let reports = finish_diagnosed(frontend, &mut warning_owner, project_source_files);
+    assert_eq!(reports.counts().errors, 2);
+    let sites = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .map(|(report, view)| {
+            assert_eq!(
+                view.descriptor().code,
+                UNKNOWN_NAME_CODE,
+                "only the authored unknown names may remain"
+            );
+            let position = DiagnosticRenderContext::for_report(report)
+                .site_position(view.primary_site())
+                .expect("a retained error keeps its authored site");
+            (
+                position.path,
+                position.byte_range.start,
+                position.line.trim().to_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let root_site = sites
+        .iter()
+        .find(|(path, ..)| path.ends_with("broken/@broken.moth"))
+        .expect("the first body error keeps its authored file");
+    assert_eq!(
+        root_site.1,
+        RESOURCE_FAILING_MODULE_ROOT
+            .find("missing_one")
+            .expect("the fixture names the missing value") as u32
+    );
+    assert_eq!(root_site.2, "return missing_one");
+    let extra_site = sites
+        .iter()
+        .find(|(path, ..)| path.ends_with("broken/extra.moth"))
+        .expect("the independent body keeps its authored file");
+    assert_eq!(
+        extra_site.1,
+        RESOURCE_FAILING_MODULE_EXTRA
+            .find("missing_two")
+            .expect("the fixture names the missing value") as u32
+    );
+    assert_eq!(extra_site.2, "return missing_two");
+
+    // Repairing both bodies on the same root proves the repaired source compiles and now
+    // publishes the association; each lane run builds fresh registries.
+    fs::write(
+        root.join("src/broken/@broken.moth"),
+        RESOURCE_REPAIRED_MODULE_ROOT,
+    )
+    .expect("the repaired root source should be written");
+    fs::write(
+        root.join("src/broken/extra.moth"),
+        RESOURCE_REPAIRED_MODULE_EXTRA,
+    )
+    .expect("the repaired extra source should be written");
+
+    let (repaired, mut warning_owner, project_source_files) =
+        run_directory_lane(root, FrontendCompilationMode::Canonical);
+    let repaired_broken_module = module_id_for_path(&repaired, "broken");
+    let repaired_origin = StableResourceOriginId::module_owned(
+        repaired
+            .project
+            .structure
+            .node(repaired_broken_module)
+            .stable_origin()
+            .clone(),
+        PortableResourcePath::from_relative_logical_path(Path::new("assets/broken.svg"))
+            .expect("the broken resource path is portable"),
+    );
+    assert_slot_is_successful(&repaired, "broken");
+    assert!(
+        repaired.project.diagnosed.is_empty(),
+        "the repaired module compiles without diagnostics"
+    );
+    assert!(repaired.project.scheduling_cutoff.is_none());
+    assert!(warning_owner.discovery_stops().is_empty());
+    assert!(
+        repaired
+            .resource_inputs
+            .source_for_origin(&repaired_origin)
+            .is_some(),
+        "the repaired module now publishes the previously absent association"
+    );
+    let outcome = repaired
+        .into_compilation_result(&mut warning_owner, project_source_files, None)
+        .expect("a repaired request compiles");
+    assert!(matches!(outcome, CompilationOutcome::Success { .. }));
+}
+
+#[test]
+fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("temp project should exist");
+    let root = temp.path();
+    // `helper` and `z_broken` are wave 0; the package root depends on `helper` and stays in wave 1.
+    // `z_broken` reaches the threshold after `helper` published, so the root is never admitted and
+    // the project boundary finds the budget already spent when it starts.
+    write_project(
+        root,
+        PROJECT_ERROR_LIMIT_TWO,
+        &[
+            (
+                "src/@page.moth",
+                "@shared render\nvalue = render() catch:\n    then 0\n;\n#[:site]\n",
+            ),
+            (
+                "packages/shared/@mod.moth",
+                "@helper value\nexport:\n    render || -> I32:\n        return value()\n    ;\n;\n",
+            ),
+            (
+                "packages/shared/helper/@helper.moth",
+                "export:\n    value || -> I32:\n        return 1\n    ;\n;\n",
+            ),
+            (
+                "packages/shared/z_broken/@z_broken.moth",
+                "a || -> I32:\n    return pkg_missing_one\n;\n\n\
+                 b || -> I32:\n    return pkg_missing_two\n;\n",
+            ),
+        ],
+    );
+
+    let (frontend, mut warning_owner, project_source_files) =
+        run_shared_package_lane(root, FrontendCompilationMode::Canonical);
+    assert_eq!(frontend.source_packages.len(), 1);
+    let package = frontend
+        .source_packages
+        .iter()
+        .next()
+        .expect("the registered package should publish");
+    let helper_module = package_module_id(package, "helper");
+    let broken_module = package_module_id(package, "z_broken");
+    assert!(
+        matches!(
+            package
+                .boundary
+                .modules
+                .slot(helper_module)
+                .expect("package slot should resolve"),
+            ProviderSlot::Successful(_)
+        ),
+        "the wave-zero helper publishes before the threshold is met"
+    );
+    assert_eq!(
+        package
+            .boundary
+            .modules
+            .slot(broken_module)
+            .expect("package slot should resolve"),
+        ProviderSlot::Diagnosed
+    );
+    assert_eq!(package.boundary.diagnosed.len(), 1);
+    assert_eq!(
+        package.boundary.diagnosed[0]
+            .diagnostics
+            .primary_error_count(),
+        2,
+        "the retained package batch keeps both module errors once"
+    );
+    assert_eq!(
+        package
+            .boundary
+            .scheduling_cutoff
+            .map(|cutoff| cutoff.returned_primary_errors()),
+        Some(2),
+        "refusing the wave-one root requires the package cutoff proof"
+    );
+    assert_eq!(
+        package
+            .root_slot()
+            .expect("package root slot should resolve"),
+        ProviderSlot::Unavailable,
+        "the package facade was never admitted"
+    );
+    assert!(
+        package
+            .boundary
+            .modules
+            .interface(package.root_module_id)
+            .expect("package slot lookup should resolve")
+            .is_none(),
+        "an unvisited package root publishes no facade interface"
+    );
+
+    let page_module = module_id_with_path(&frontend, "");
+    assert_eq!(
+        frontend.project.modules.slot(page_module).unwrap(),
+        ProviderSlot::Unavailable
+    );
+    assert!(
+        frontend
+            .project
+            .modules
+            .interface(page_module)
+            .expect("project slot lookup should resolve")
+            .is_none()
+    );
+
+    let reports =
+        finish_stopped_package_request(frontend, &mut warning_owner, project_source_files, 2);
+    for (report, view) in reports.iter_severity(DiagnosticSeverity::Error) {
+        assert_eq!(view.descriptor().code, UNKNOWN_NAME_CODE);
+        let position = DiagnosticRenderContext::for_report(report)
+            .site_position(view.primary_site())
+            .expect("the frozen package diagnostic keeps its authored site");
+        assert!(
+            position.path.ends_with("z_broken/@z_broken.moth"),
+            "the retained diagnostic must keep its package-logical source identity: {:?}",
+            position.path
+        );
+        assert!(
+            position.line.trim() == "return pkg_missing_one"
+                || position.line.trim() == "return pkg_missing_two",
+            "unexpected authored line: {:?}",
+            position.line
+        );
+    }
+    let rendered = terse::format_terse_diagnostic_reports(&reports);
+    assert!(
+        rendered
+            .iter()
+            .all(|line| line.contains("z_broken/@z_broken.moth")),
+        "only the admitted module may render diagnostics: {rendered:?}"
+    );
+}
+
+#[test]
+fn diagnostic_recovery_package_cutoff_can_diagnose_its_own_root() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("temp project should exist");
+    let root = temp.path();
+    // The package root itself is diagnosed in wave 0, so the cutoff proof must accept a diagnosed
+    // root while leaving the later independent child unvisited.
+    write_project(
+        root,
+        PROJECT_ERROR_LIMIT_TWO,
+        &[
+            (
+                "src/@page.moth",
+                "@shared a\nvalue = a() catch:\n    then 0\n;\n#[:site]\n",
+            ),
+            (
+                "packages/shared/@mod.moth",
+                "export:\n    a || -> I32:\n        return root_missing_one\n    ;\n\n\
+                 b || -> I32:\n        return root_missing_two\n    ;\n;\n",
+            ),
+            (
+                "packages/shared/later/@later.moth",
+                "export:\n    value || -> I32:\n        return 1\n    ;\n;\n",
+            ),
+        ],
+    );
+
+    let (frontend, mut warning_owner, project_source_files) =
+        run_shared_package_lane(root, FrontendCompilationMode::Canonical);
+    let package = frontend
+        .source_packages
+        .iter()
+        .next()
+        .expect("the registered package should publish");
+    let later_module = package_module_id(package, "later");
+    assert_eq!(
+        package
+            .boundary
+            .modules
+            .slot(package.root_module_id)
+            .expect("package root slot should resolve"),
+        ProviderSlot::Diagnosed
+    );
+    assert!(
+        package
+            .boundary
+            .modules
+            .interface(package.root_module_id)
+            .expect("package slot lookup should resolve")
+            .is_none()
+    );
+    assert_eq!(
+        package
+            .boundary
+            .modules
+            .slot(later_module)
+            .expect("package slot should resolve"),
+        ProviderSlot::Unavailable,
+        "the later independent child was never admitted"
+    );
+    assert!(
+        package
+            .boundary
+            .modules
+            .interface(later_module)
+            .expect("package slot lookup should resolve")
+            .is_none()
+    );
+    assert_eq!(package.boundary.diagnosed.len(), 1);
+    assert_eq!(
+        package.boundary.diagnosed[0]
+            .diagnostics
+            .primary_error_count(),
+        2
+    );
+
+    let _reports =
+        finish_stopped_package_request(frontend, &mut warning_owner, project_source_files, 2);
+}
+
+/// Write the deferred check-only package fixture.
+///
+/// The two unselected package-root sources are examined in path order after every canonical
+/// package facade publishes, so `a_orphan` is examined first and `b_orphan` is the unit left
+/// uncompiled. `broken` is retained before the limit is reached so the deferred lane can charge
+/// further work or be refused after a package cutoff.
+fn write_deferred_check_only_package_project(
+    root: &Path,
+    project_error_limit: u32,
+    first_orphan: &str,
+    second_orphan: &str,
+) {
+    let config = format!(
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = {project_error_limit},\n)\nhtml #= ()\n"
+    );
+    write_project(
+        root,
+        &config,
+        &[
+            (
+                "src/@page.moth",
+                "@shared render\nvalue = render() catch:\n    then 0\n;\n#[:site]\n",
+            ),
+            (
+                "packages/shared/@mod.moth",
+                "export:\n    render || -> I32:\n        return 7\n    ;\n;\n",
+            ),
+            (
+                "packages/shared/broken/@broken.moth",
+                "a || -> I32:\n    return pkg_missing_one\n;\n\n\
+                 b || -> I32:\n    return pkg_missing_two\n;\n",
+            ),
+            (
+                "packages/shared/z_late/@z_late.moth",
+                "export:\n    late_value || -> I32:\n        return 1\n    ;\n;\n",
+            ),
+            ("packages/shared/a_orphan.moth", first_orphan),
+            ("packages/shared/b_orphan.moth", second_orphan),
+        ],
+    );
+}
+
+#[test]
+fn diagnostic_recovery_deferred_package_check_only_refuses_an_unvisited_provider() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("temp project should exist");
+    let root = temp.path();
+    // The package cutoff leaves `z_late` unvisited. The first deferred orphan imports it: with the
+    // budget already closed that provider is stopped work, not a compiler bug, so the unit is
+    // refused through the cutoff path and the lane continues to no further work.
+    write_deferred_check_only_package_project(
+        root,
+        2,
+        "@z_late late_value\norphan || -> I32:\n    return orphan_unvisited_missing\n;\n",
+        "orphan || -> I32:\n    return orphan_skipped_missing\n;\n",
+    );
+
+    let (frontend, mut warning_owner, project_source_files) =
+        run_shared_package_lane(root, FrontendCompilationMode::Check);
+    let package = frontend
+        .source_packages
+        .iter()
+        .next()
+        .expect("the registered package should publish");
+    let late_module = package_module_id(package, "z_late");
+    assert!(
+        matches!(
+            package
+                .boundary
+                .modules
+                .slot(package.root_module_id)
+                .expect("package root slot should resolve"),
+            ProviderSlot::Successful(_)
+        ),
+        "the canonical package facade published before the deferred lane ran"
+    );
+    assert_eq!(
+        package
+            .boundary
+            .modules
+            .slot(late_module)
+            .expect("package slot should resolve"),
+        ProviderSlot::Unavailable,
+        "the canonical cutoff left the later module unvisited"
+    );
+    assert!(
+        frontend.transient_batches.is_empty(),
+        "the refused deferred unit contributes no transient batch"
+    );
+    assert!(
+        !warning_owner
+            .discovery_stops()
+            .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
+        "stopped work reports the project cutoff, not a spent module allowance"
+    );
+
+    // Deferred refusals never install into the package boundary: its cutoff is unchanged from
+    // canonical work.
+    let reports =
+        finish_stopped_package_request(frontend, &mut warning_owner, project_source_files, 2);
+    let rendered = terse::format_terse_diagnostic_reports(&reports);
+    assert!(
+        rendered.iter().all(|line| !line.contains("a_orphan.moth")
+            && !line.contains("b_orphan.moth")
+            && !line.contains("orphan_unvisited_missing")
+            && !line.contains("orphan_skipped_missing")),
+        "refused deferred work must never appear in reports: {rendered:?}"
+    );
+}
+
+#[test]
+fn diagnostic_recovery_deferred_package_check_only_stops_after_an_admitted_unit() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("temp project should exist");
+    let root = temp.path();
+    // The canonical package completes below the limit of three. The first deferred orphan is
+    // admitted, charges the third error and closes the budget; the second eligible orphan is then
+    // refused. Its absence from reports proves the deferred lane observed the threshold, and the
+    // package boundary keeps no cutoff record because canonical work was complete.
+    write_deferred_check_only_package_project(
+        root,
+        3,
+        "orphan || -> I32:\n    return orphan_admitted_missing\n;\n",
+        "orphan_b || -> I32:\n    return orphan_skipped_missing\n;\n",
+    );
+
+    let (frontend, mut warning_owner, project_source_files) =
+        run_shared_package_lane(root, FrontendCompilationMode::Check);
+    let package = frontend
+        .source_packages
+        .iter()
+        .next()
+        .expect("the registered package should publish");
+    assert!(matches!(
+        package
+            .boundary
+            .modules
+            .slot(package.root_module_id)
+            .expect("package root slot should resolve"),
+        ProviderSlot::Successful(_)
+    ));
+    assert_eq!(
+        package.boundary.diagnosed.len(),
+        1,
+        "deferred diagnostics never join the package boundary"
+    );
+    assert_eq!(
+        package.boundary.diagnosed[0]
+            .diagnostics
+            .primary_error_count(),
+        2
+    );
+    assert!(
+        package.boundary.scheduling_cutoff.is_none(),
+        "canonical package work finished below the threshold"
+    );
+    assert_eq!(
+        frontend.transient_batches.len(),
+        1,
+        "exactly the first deferred unit was admitted"
+    );
+    // The domain tag proves this batch came from the deferred package lane rather than the project
+    // transient lane; no other assertion observes the tag.
+    assert!(frontend.transient_batches[0].package_id.is_some());
+    assert_eq!(frontend.transient_batches[0].batch.primary_error_count(), 1);
+    assert_eq!(
+        frontend
+            .project
+            .scheduling_cutoff
+            .map(|cutoff| cutoff.returned_primary_errors()),
+        Some(3)
+    );
+    assert!(
+        frontend.project.diagnosed.is_empty(),
+        "the project boundary must not invent a diagnosis"
+    );
+    assert!(
+        warning_owner
+            .discovery_stops()
+            .contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF)
+    );
+    assert!(
+        !warning_owner
+            .discovery_stops()
+            .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE)
+    );
+
+    // Mirror the build assembly success-only gate. The project boundary carries the cutoff while
+    // the completed package boundary only retains its diagnosed canonical module.
+    let rejection = frontend
+        .project
+        .require_all_successful()
+        .expect_err("a stopped project boundary is never linkable");
+    assert!(
+        rejection.message.contains("project scheduling cutoff"),
+        "unexpected success-only rejection: {rejection:?}"
+    );
+    for package in frontend.source_packages.iter() {
+        let rejection = package
+            .boundary
+            .require_all_successful()
+            .expect_err("a diagnosed package boundary is never linkable");
+        assert!(
+            rejection.message.contains("diagnosed ModuleId"),
+            "unexpected package success-only rejection: {rejection:?}"
+        );
+    }
+
+    let reports = finish_diagnosed(frontend, &mut warning_owner, project_source_files);
+    assert_eq!(
+        reports.counts().errors,
+        3,
+        "the canonical batch plus exactly one admitted deferred unit"
+    );
+    let rendered = terse::format_terse_diagnostic_reports(&reports);
+    assert!(
+        rendered.iter().any(|line| line.contains("a_orphan.moth")),
+        "the admitted deferred unit must keep its diagnostics: {rendered:?}"
+    );
+    assert!(
+        rendered
+            .iter()
+            .all(|line| !line.contains("b_orphan.moth") && !line.contains("orphan_skipped_missing")),
+        "the orphan beyond the threshold must not be compiled: {rendered:?}"
     );
 }

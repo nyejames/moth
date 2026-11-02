@@ -1645,3 +1645,102 @@ warn || -> I32:
         "a successful check that skipped nothing must not report a stop"
     );
 }
+
+/// Eager check-only preparation must diagnose the first malformed orphan at Stage 0 even when the
+/// project threshold is already one, because the semantic scheduler has not been consulted yet.
+///
+/// WHAT: a clean canonical page, `max_errors_per_project = 1` / `max_errors_per_module = 1`, and two
+///       malformed orphans — `orphan_a.moth` declares two reserved names, `orphan_b.moth` one; the
+///       command must return only the first orphan's retained preparation error and the
+///       module-allowance stop line.
+/// WHY: `docs/build-system-design.md` (diagnostic budgets) records that directory discovery
+///      prepares every module before semantic scheduling and ends the request at the first
+///      diagnosed preparation, returning at most one module allowance, so the project threshold
+///      first changes admission after discovery. Pinning this earlier fail-fast boundary keeps a
+///      later reader from treating the absent `PROJECT_SCHEDULING_CUTOFF` flag as a missing cutoff.
+#[test]
+fn eager_check_only_preparation_stops_at_stage0_before_the_project_cutoff() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let (_temp, root) = write_page_project("eager_preparation", "#[:site]\n");
+    let source_root = root.join("src");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 1,\n    max_errors_per_module = 1,\n)\nhtml #= ()\n",
+    )
+    .expect("should write two-limit config");
+    fs::write(
+        source_root.join("orphan_a.moth"),
+        "Error #= 1\nCASTABLE_TO_I8 #= 2\n",
+    )
+    .expect("should write first orphan source");
+    fs::write(source_root.join("orphan_b.moth"), "Error #= 3\n")
+        .expect("should write second orphan source");
+
+    let mut presented = None;
+    let completion = run_check_command(
+        root.to_str()
+            .expect("temporary project path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+        |report| presented = Some(report),
+    );
+    let report = presented.expect("check must present its report exactly once");
+
+    assert_eq!(
+        completion.status,
+        crate::projects::ProjectCommandStatus::Failure
+    );
+    assert_eq!(
+        report.error_count, 1,
+        "Stage 0 ends at the first diagnosed orphan and retains one module allowance"
+    );
+    let Ok(CompilationOutcome::Diagnosed(reports)) = &report.messages else {
+        panic!("an eager preparation failure must diagnose without assembling a project");
+    };
+    assert_eq!(reports.counts().errors, 1);
+    assert_eq!(reports.counts().warnings, 0);
+
+    let errors = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .collect::<Vec<_>>();
+    assert_eq!(errors.len(), 1);
+    let (record, view) = errors[0];
+    assert_eq!(
+        view.descriptor().code,
+        "MOTH-RULE-0039",
+        "the retained error is the orphan's reserved-name collision"
+    );
+    let position = DiagnosticRenderContext::for_report(record)
+        .site_position(view.primary_site())
+        .expect("preparation diagnostics retain a resolvable primary span");
+    assert!(
+        position.path.ends_with("orphan_a.moth"),
+        "the second orphan is never prepared, so only the first orphan's error survives: {}",
+        position.path.display()
+    );
+    assert_eq!(
+        position.start.line, 0,
+        "the module allowance retains the earliest declaration in the first orphan"
+    );
+    assert_eq!(position.line, "Error #= 1");
+
+    assert!(
+        report
+            .discovery_stops
+            .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
+        "the dropped second declaration must record the module allowance stop"
+    );
+    assert!(
+        !report
+            .discovery_stops
+            .contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF),
+        "eager Stage 0 preparation precedes the semantic scheduler, so no cutoff was recorded"
+    );
+    assert!(
+        report
+            .discovery_stops
+            .stop_line()
+            .is_some_and(|line| line.contains("module error limit")),
+        "the stop line must name the module error limit"
+    );
+}

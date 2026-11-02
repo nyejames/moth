@@ -129,7 +129,7 @@ fn compiler_error_page_links_to_project_relative_resolved_source_path() {
 }
 
 #[test]
-fn compiler_error_page_renders_one_combined_stop_line_only_after_stopped_discovery() {
+fn compiler_error_page_renders_one_combined_stop_line_for_stopped_discovery() {
     let root = tempfile::tempdir().expect("should create temp dir");
     let diagnostic = project_config::invalid_config_reason(
         None,

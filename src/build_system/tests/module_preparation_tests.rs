@@ -1844,18 +1844,20 @@ fn inspect_diagnosed_preparation(
     (retained_source_ids, stops, diagnostic_count)
 }
 
-/// Prepare one malformed multi-file module under `strategy` and merge it with `allowance`.
+/// Prepare one malformed multi-file module from `file_sources` under `strategy` and merge it with
+/// `allowance`.
 ///
-/// Completion order is deliberately reversed for the reordered arm, the merged path delta is
-/// checked against every chunk, and every source's span builder is finalized after the truncating
-/// merge returns.
+/// Per-file body diagnostics and header-aggregation diagnostics both reach the same truncating
+/// merge boundary, so the same harness covers either fixture shape. Completion order is
+/// deliberately reversed for the reordered arm, the merged path delta is checked against every
+/// chunk, and every source's span builder is finalized after the truncating merge returns.
 fn prepared_file_error_allowance(
+    file_sources: &[(String, String)],
     strategy: super::FilePreparationStrategy,
     reverse_chunks: bool,
     allowance: Option<NonZeroU32>,
 ) -> PreparationAllowanceOutcome {
-    let file_sources = malformed_independent_file_sources(7);
-    let file_source_refs = fixture_source_refs(&file_sources);
+    let file_source_refs = fixture_source_refs(file_sources);
     let mut fixture = frontend_preparation_fixture(&file_source_refs);
     let options = HeaderParseOptions {
         entry_file_id: fixture
@@ -1926,9 +1928,9 @@ fn prepared_file_error_allowance(
     ) {
         Err(PreparedFailure::Diagnosed(batch)) => batch,
         Err(PreparedFailure::Infrastructure(error)) => panic!(
-            "malformed fixture files must produce preparation diagnostics, got infrastructure: {error:?}"
+            "the fixture must produce preparation diagnostics, got infrastructure: {error:?}"
         ),
-        Ok(_) => panic!("malformed fixture files must not prepare successfully"),
+        Ok(_) => panic!("the fixture must not prepare successfully"),
     };
     assert_eq!(
         chunk_path_fork.len() - chunk_path_fork.base_len(),
@@ -1972,15 +1974,22 @@ fn prepared_file_error_allowance(
 fn diagnostic_recovery_parallel_preparation() {
     const LIMIT: u32 = 5;
     let allowance = NonZeroU32::new(LIMIT);
+    let file_sources = malformed_independent_file_sources(7);
 
-    let serial =
-        prepared_file_error_allowance(super::FilePreparationStrategy::Serial, false, allowance);
+    let serial = prepared_file_error_allowance(
+        &file_sources,
+        super::FilePreparationStrategy::Serial,
+        false,
+        allowance,
+    );
     let per_file = prepared_file_error_allowance(
+        &file_sources,
         super::FilePreparationStrategy::ParallelPerFile,
         false,
         allowance,
     );
     let chunked_reordered = prepared_file_error_allowance(
+        &file_sources,
         super::FilePreparationStrategy::ParallelChunked,
         true,
         allowance,
@@ -2006,6 +2015,12 @@ fn diagnostic_recovery_parallel_preparation() {
                 .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
             "{label} preparation must record the allowance stop"
         );
+        assert!(
+            !outcome
+                .stops
+                .contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF),
+            "{label} preparation is eager Stage 0 work and must not claim a scheduling cutoff"
+        );
     }
     assert_eq!(
         serial.retained_source_ids, per_file.retained_source_ids,
@@ -2016,8 +2031,12 @@ fn diagnostic_recovery_parallel_preparation() {
         "chunk completion order must not change which diagnostic groups survive"
     );
 
-    let unlimited =
-        prepared_file_error_allowance(super::FilePreparationStrategy::Serial, false, None);
+    let unlimited = prepared_file_error_allowance(
+        &file_sources,
+        super::FilePreparationStrategy::Serial,
+        false,
+        None,
+    );
     assert_eq!(
         unlimited.retained_source_ids,
         unlimited.all_source_ids[1..].to_vec(),
@@ -2029,6 +2048,7 @@ fn diagnostic_recovery_parallel_preparation() {
     );
 
     let exactly_at_limit = prepared_file_error_allowance(
+        &file_sources,
         super::FilePreparationStrategy::Serial,
         false,
         NonZeroU32::new((unlimited.all_source_ids.len() - 1) as u32),
@@ -2045,69 +2065,66 @@ fn diagnostic_recovery_parallel_preparation() {
 }
 
 /// Header aggregation sees every successfully prepared file at once, so its own failure batch must
-/// also respect the module allowance.
+/// also respect the module allowance under every preparation strategy.
 #[test]
 fn preparation_header_aggregation_respects_module_allowance() {
     const LIMIT: u32 = 2;
+    let allowance = NonZeroU32::new(LIMIT);
     let file_sources = reserved_name_file_sources(7);
-    let file_source_refs = fixture_source_refs(&file_sources);
-    let mut fixture = frontend_preparation_fixture(&file_source_refs);
-    let source_byte_count = source_byte_count(&fixture.input_files, &fixture.frontend.source_files);
-    let all_source_ids: Vec<SourceId> = fixture
-        .input_files
-        .iter()
-        .map(PreparedSourceInput::source_id)
-        .collect();
-    let input_files = std::mem::take(&mut fixture.input_files);
 
-    let preparation_context = super::ModulePreparationContext {
-        source_files: &fixture.frontend.source_files,
-        style_directives: &fixture.frontend.style_directives,
-        module_error_allowance: NonZeroU32::new(LIMIT),
-    };
-    let batch = match preparation_context.prepare_module_files(
-        &mut fixture.frontend.string_table,
-        &mut fixture.frontend.source_files.fork_path_interner(),
-        input_files,
-        &mut fixture.span_builders.split().1,
-        &fixture.entry_file_path,
-        ModuleRootRole::Normal,
-        source_byte_count,
-    ) {
-        Err(PreparedFailure::Diagnosed(batch)) => batch,
-        Err(PreparedFailure::Infrastructure(error)) => panic!(
-            "reserved declaration names must produce preparation diagnostics, got infrastructure: {error:?}"
-        ),
-        Ok(_) => panic!("reserved declaration names must not aggregate successfully"),
-    };
+    let serial = prepared_file_error_allowance(
+        &file_sources,
+        super::FilePreparationStrategy::Serial,
+        false,
+        allowance,
+    );
+    let per_file = prepared_file_error_allowance(
+        &file_sources,
+        super::FilePreparationStrategy::ParallelPerFile,
+        false,
+        allowance,
+    );
+    let chunked_reordered = prepared_file_error_allowance(
+        &file_sources,
+        super::FilePreparationStrategy::ParallelChunked,
+        true,
+        allowance,
+    );
 
-    for source_id in &all_source_ids {
-        fixture
-            .span_builders
-            .finish_source(*source_id)
-            .expect("every source span builder should finalize after preparation");
+    let expected_retained = serial.all_source_ids[1..=LIMIT as usize].to_vec();
+    for (label, outcome) in [
+        ("serial", &serial),
+        ("parallel per-file", &per_file),
+        ("reordered chunked", &chunked_reordered),
+    ] {
+        assert_eq!(
+            outcome.diagnostic_count, LIMIT as usize,
+            "{label} header aggregation must retain exactly the module allowance"
+        );
+        assert_eq!(
+            outcome.retained_source_ids, expected_retained,
+            "{label} header aggregation must retain the first {LIMIT} error groups in canonical file order"
+        );
         assert!(
-            fixture
-                .span_builders
-                .is_source_finalized(*source_id)
-                .expect("fixture source should be registered"),
-            "header aggregation truncation must not hide a source span owner"
+            outcome
+                .stops
+                .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
+            "{label} dropped header diagnostics must record the allowance stop"
+        );
+        assert!(
+            !outcome
+                .stops
+                .contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF),
+            "{label} preparation is eager Stage 0 work and must not claim a scheduling cutoff"
         );
     }
-
-    let (retained_source_ids, stops, diagnostic_count) = inspect_diagnosed_preparation(batch);
     assert_eq!(
-        diagnostic_count, LIMIT as usize,
-        "header aggregation must retain exactly the module allowance"
+        serial.retained_source_ids, per_file.retained_source_ids,
+        "worker count must not change which header diagnostics survive"
     );
     assert_eq!(
-        retained_source_ids,
-        all_source_ids[1..=LIMIT as usize].to_vec(),
-        "header aggregation must retain the first error groups in canonical file order"
-    );
-    assert!(
-        stops.contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
-        "dropped header diagnostics must record the allowance stop"
+        serial.retained_source_ids, chunked_reordered.retained_source_ids,
+        "chunk completion order must not change which header diagnostics survive"
     );
 }
 
