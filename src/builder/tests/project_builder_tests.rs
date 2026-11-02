@@ -185,6 +185,18 @@ fn source_diagnostics_return_compilation_error_without_building() {
             .any(|message| { message.split('|').nth(2) == Some("@page.moth") }),
         "diagnosed source must retain its authored path"
     );
+    assert!(
+        error.discovery_stops().is_empty(),
+        "an ordinary fail-fast diagnostic must not claim shortened discovery"
+    );
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "The project failed to compile.\n{}",
+            error.messages().join("\n")
+        ),
+        "complete checking must render only the summary and diagnostics"
+    );
     assert_eq!(builder.build_calls.get(), 0);
 }
 
@@ -218,11 +230,28 @@ fn diagnosed_build_exposes_module_allowance_stop_through_public_sdk() {
             .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
         "SDK callers must receive the module allowance stop from the public driver"
     );
+    let stop_line = error
+        .discovery_stops()
+        .stop_line()
+        .expect("module allowance must provide a stop line");
     assert_eq!(
-        error.discovery_stops().stop_line().as_deref(),
-        Some(
-            "Diagnostic discovery stopped early (module error limit): later code was not checked."
-        )
+        stop_line,
+        "Diagnostic discovery stopped early (module error limit): later code was not checked."
+    );
+    assert!(
+        !error
+            .messages()
+            .iter()
+            .any(|message| message.contains(stop_line.as_str())),
+        "the stop explanation must stay out of the diagnostic-only messages"
+    );
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "The project failed to compile.\n{}\n{stop_line}",
+            error.messages().join("\n")
+        ),
+        "SDK Display must append one stop line after the ordinary diagnostic lines"
     );
     assert_eq!(builder.build_calls.get(), 0);
 }

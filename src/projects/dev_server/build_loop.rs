@@ -526,7 +526,13 @@ fn publish_build_outcome(
                 diagnostics_summary.push('\n');
                 diagnostics_summary.push_str(&stop_line);
             }
-            let error_html = render_compiler_error_page(&failure, &project_root, &origin, version);
+            let error_html = render_compiler_error_page(
+                &failure,
+                &project_root,
+                &origin,
+                version,
+                discovery_stops,
+            );
             (
                 false,
                 diagnostics_summary,

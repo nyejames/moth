@@ -29,6 +29,20 @@ if value is:\n\
 
 const INVALID_SOURCE: &str = "value = (\n";
 
+/// Two independent ordinary bodies that fail on unknown value names.
+const TWO_FAILING_BODIES_SOURCE: &str = "\
+first || -> I32:
+    return missing_one
+;
+
+second || -> I32:
+    return missing_two
+;
+";
+
+/// Directory-project config retaining one module error before discovery stops.
+const MODULE_LIMIT_CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_module = 1,\n)\nhtml #= ()\n";
+
 fn run_moth(arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_moth"))
         .args(arguments)
@@ -176,6 +190,66 @@ fn check_command_executes_with_typed_config_input() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(!root.path().join("preview").exists());
+}
+
+#[test]
+fn check_orders_the_module_stop_before_the_terse_summary_and_omits_it_when_complete() {
+    let root = tempdir().expect("temporary directory should be created");
+    let src = root.path().join("src");
+    fs::create_dir_all(&src).expect("src should be created");
+    fs::write(root.path().join("config.moth"), MODULE_LIMIT_CONFIG_SOURCE)
+        .expect("limited config should be written");
+    fs::write(src.join("@page.moth"), TWO_FAILING_BODIES_SOURCE)
+        .expect("page source should be written");
+    let stop_line =
+        "Diagnostic discovery stopped early (module error limit): later code was not checked.";
+
+    let terse = run_moth_from_dir(root.path(), &["check", ".", "--terse"]);
+    assert_eq!(terse.status.code(), Some(1));
+    let terse_stdout = String::from_utf8_lossy(&terse.stdout);
+    let terse_lines = terse_stdout.lines().collect::<Vec<_>>();
+    assert_eq!(
+        terse_lines.last().copied(),
+        Some("errors=1, warnings=0."),
+        "the terse summary must stay the final line: {terse_stdout}"
+    );
+    assert_eq!(
+        terse_lines
+            .get(terse_lines.len().saturating_sub(2))
+            .copied(),
+        Some(stop_line),
+        "the stop line must precede the terse summary: {terse_stdout}"
+    );
+    assert_eq!(terse_stdout.matches(stop_line).count(), 1);
+
+    let default = run_moth_from_dir(root.path(), &["check", "."]);
+    assert_eq!(default.status.code(), Some(1));
+    let default_stdout = String::from_utf8_lossy(&default.stdout);
+    assert_eq!(
+        default_stdout.matches(stop_line).count(),
+        1,
+        "the default check output must explain the stop exactly once: {default_stdout}"
+    );
+    let last_diagnostic = default_stdout
+        .rfind("missing_one")
+        .expect("default check output must retain the retained diagnostic");
+    assert!(
+        last_diagnostic
+            < default_stdout
+                .find(stop_line)
+                .expect("default check output must include the stop line"),
+        "the stop explanation must follow the diagnostics: {default_stdout}"
+    );
+
+    let complete_root = tempdir().expect("temporary directory should be created");
+    write_directory_html_project(complete_root.path(), TWO_FAILING_BODIES_SOURCE);
+    let complete = run_moth_from_dir(complete_root.path(), &["check", "."]);
+    assert_eq!(complete.status.code(), Some(1));
+    let complete_stdout = String::from_utf8_lossy(&complete.stdout);
+    assert!(
+        !complete_stdout.contains("Diagnostic discovery stopped early"),
+        "a complete diagnosed result must not print a stop line: {complete_stdout}"
+    );
 }
 
 #[test]

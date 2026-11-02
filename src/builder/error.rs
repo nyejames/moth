@@ -34,7 +34,8 @@ pub enum ErrorKind {
 
 /// A builder SDK failure: its category, a summary, and any rendered compiler lines.
 ///
-/// `Display` writes the summary, then each rendered line on its own line.
+/// `Display` writes the summary, then each rendered line on its own line, and finally the
+/// discovery-stop explanation when diagnostic discovery ended early.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error {
     kind: ErrorKind,
@@ -128,6 +129,9 @@ impl fmt::Display for Error {
         formatter.write_str(&self.message)?;
         for line in &self.messages {
             write!(formatter, "\n{line}")?;
+        }
+        if let Some(stop_line) = self.discovery_stops.stop_line() {
+            write!(formatter, "\n{stop_line}")?;
         }
         Ok(())
     }

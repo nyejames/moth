@@ -9,7 +9,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::project_
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, DiagnosticDraft, InvalidConfigReason,
+    DiagnosticBag, DiagnosticDiscoveryStops, DiagnosticDraft, InvalidConfigReason,
 };
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan,
@@ -106,7 +106,8 @@ fn compiler_error_page_links_to_project_relative_resolved_source_path() {
         Some(source_span),
     );
     let failure = diagnostic_result(diagnostic, string_table, Some(Arc::new(source_database)));
-    let page = render_compiler_error_page(&failure, &root, "/docs", 7);
+    let page =
+        render_compiler_error_page(&failure, &root, "/docs", 7, DiagnosticDiscoveryStops::NONE);
 
     // The browser card should not visibly show MOTH-* codes but should
     // carry them as data attributes for debugging.
@@ -125,4 +126,47 @@ fn compiler_error_page_links_to_project_relative_resolved_source_path() {
 
     // SSE client is injected.
     assert!(page.contains("EventSource(\"/docs/__moth/events\")"));
+}
+
+#[test]
+fn compiler_error_page_renders_one_combined_stop_line_only_after_stopped_discovery() {
+    let root = tempfile::tempdir().expect("should create temp dir");
+    let diagnostic = project_config::invalid_config_reason(
+        None,
+        InvalidConfigReason::UnsupportedScalarValue,
+        None,
+    );
+    let failure = diagnostic_result(diagnostic, StringTable::new(), None);
+
+    let mut discovery_stops = DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE;
+    discovery_stops.insert(DiagnosticDiscoveryStops::AST_RECOVERY_WORK_GUARD);
+    let expected_stop_line = discovery_stops
+        .stop_line()
+        .expect("two stop reasons must combine into one stop line");
+
+    let stopped_page =
+        render_compiler_error_page(&failure, root.path(), "/docs", 7, discovery_stops);
+    assert_eq!(
+        stopped_page
+            .matches("Diagnostic discovery stopped early")
+            .count(),
+        1,
+        "multi-reason discovery must render exactly one stop line"
+    );
+    assert!(
+        stopped_page.contains(&escape_html(&expected_stop_line)),
+        "the single stop line must name every reason"
+    );
+
+    let complete_page = render_compiler_error_page(
+        &failure,
+        root.path(),
+        "/docs",
+        7,
+        DiagnosticDiscoveryStops::NONE,
+    );
+    assert!(
+        !complete_page.contains("Diagnostic discovery stopped early"),
+        "complete discovery must not render a stop explanation"
+    );
 }
