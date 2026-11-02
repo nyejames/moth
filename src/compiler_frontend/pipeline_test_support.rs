@@ -6,9 +6,15 @@
 //!      counters do not retain path granularity. The `synthetic_preparation_*` and repeated
 //!      template tests therefore need one test-owned observer while the shipping path uses a
 //!      zero-cost no-op counterpart.
+//!
+//! Paths are keyed in canonical form because the source identity supplies a canonical OS path.
+//! Reset and lookup canonicalize their caller's path for the same reason: temp-directory paths
+//! such as macOS `/var/...` resolve to `/private/var/...`, and comparing a raw path against a
+//! canonical key would silently observe zero preparations.
 
 use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
@@ -37,10 +43,18 @@ pub(super) fn record_prepare(source_files: &SourceDatabase, source_id: SourceId)
     }
 }
 
+/// Canonicalize a caller-supplied test path, falling back to the supplied spelling when the path
+/// does not exist. The fallback keeps missing-fixture lookups from panicking; recorded entries
+/// always come from the source identity's canonical OS path.
+fn canonical_or_supplied(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 pub(crate) fn reset_file_frontend_prepare_count_for_test(tracked_prefix: &Path) {
     *FILE_FRONTEND_PREPARE_TRACK_PREFIX
         .lock()
-        .expect("file preparation test hook lock poisoned") = Some(tracked_prefix.to_path_buf());
+        .expect("file preparation test hook lock poisoned") =
+        Some(canonical_or_supplied(tracked_prefix));
     FILE_FRONTEND_PREPARE_COUNTS
         .lock()
         .expect("file preparation count test hook lock poisoned")
@@ -48,10 +62,11 @@ pub(crate) fn reset_file_frontend_prepare_count_for_test(tracked_prefix: &Path) 
 }
 
 pub(crate) fn file_frontend_prepare_count_for_path_for_test(path: &Path) -> usize {
+    let canonical_path = canonical_or_supplied(path);
     FILE_FRONTEND_PREPARE_COUNTS
         .lock()
         .expect("file preparation count test hook lock poisoned")
-        .get(path)
+        .get(&canonical_path)
         .copied()
         .unwrap_or(0)
 }

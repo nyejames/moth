@@ -424,7 +424,7 @@ fn single_file_rejects_source_package_moth_folder_collision() {
 }
 
 #[test]
-fn single_file_project_cutoff_after_package_work_skips_module_preparation() {
+fn single_file_project_cutoff_after_package_work_refuses_module_admission() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
@@ -465,8 +465,12 @@ fn single_file_project_cutoff_after_package_work_skips_module_preparation() {
     );
 
     // The package error meets the threshold during source-package work, so the synthetic entry
-    // module is refused at boundary entry. The cutoff record proves the unvisited slot; the
-    // module never reaches preparation, which the per-path preparation counter observes directly.
+    // module is refused at boundary entry and never reaches module preparation. Stage 0 discovery
+    // prepared the entry once before that budget decision, and an admitted module would reuse the
+    // `MothPrepared` output instead of preparing the file again, so the counter observes exactly
+    // one discovery preparation rather than zero. The refusal itself is proven by the recorded
+    // project cutoff below; this test also keeps the package diagnostic and its rendered fact
+    // intact across the cutoff.
     let reports = diagnosed_reports(&result);
     assert_eq!(
         reports.counts().errors,
@@ -482,8 +486,8 @@ fn single_file_project_cutoff_after_package_work_skips_module_preparation() {
         crate::compiler_frontend::pipeline_test_support::file_frontend_prepare_count_for_path_for_test(
             &moth_path
         ),
-        0,
-        "the single-file module must not be prepared once package work met the threshold"
+        1,
+        "Stage 0 discovery prepares the entry source exactly once; no second preparation follows"
     );
     assert!(
         warning_owner
