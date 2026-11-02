@@ -31,6 +31,7 @@ use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnos
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
+use crate::compiler_frontend::module_compilation::DEFAULT_MAX_ERRORS_PER_MODULE;
 use crate::compiler_frontend::single_source_compilation::{
     CompiledConfigSource, ConfigCompilationOutcome, ConfigCompilationRequest, compile_config_source,
 };
@@ -40,9 +41,7 @@ use crate::compiler_frontend::source::{
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::settings::{
-    BuilderSettings, Config, DEFAULT_MAX_ERRORS_PER_MODULE, DEFAULT_MAX_ERRORS_PER_PROJECT,
-};
+use crate::projects::settings::{BuilderSettings, Config, DEFAULT_MAX_ERRORS_PER_PROJECT};
 
 use std::path::Path;
 use std::sync::Arc;

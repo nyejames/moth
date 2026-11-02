@@ -32,12 +32,12 @@ use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, PublicConstTemplate, PublicConstTemplateKind, PublicConstTemplatePiece,
     PublicFoldedField, PublicFoldedValue,
 };
+use crate::compiler_frontend::module_compilation::DEFAULT_MAX_ERRORS_PER_MODULE;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::projects::settings::{
-    Config, DEFAULT_MAX_ERRORS_PER_MODULE, DEFAULT_MAX_ERRORS_PER_PROJECT,
-    MAX_TEMPLATE_CONST_LOOP_ITERATIONS, ProjectMetadataField,
-    TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY,
+    Config, DEFAULT_MAX_ERRORS_PER_PROJECT, MAX_TEMPLATE_CONST_LOOP_ITERATIONS,
+    ProjectMetadataField, TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY,
 };
 use moth_lexical::identifier::is_identifier;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};

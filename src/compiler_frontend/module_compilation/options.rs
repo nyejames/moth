@@ -15,6 +15,15 @@ use std::num::NonZeroU32;
 ///      [`FrontendOptions`], and the build system owns the config key and its accepted maximum.
 pub(crate) const DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS: usize = 10_000;
 
+/// Default primary-error allowance retained for each module.
+///
+/// WHY: the allowance bounds the frontend's own diagnostic recovery, so the compiler owns its
+///      default and project configuration overrides it through [`FrontendOptions`]. The project
+///      config omits the setting to accept this default and supplies an explicit absence to disable
+///      the allowance, so the default is a value rather than the absence of the limit.
+pub(crate) const DEFAULT_MAX_ERRORS_PER_MODULE: NonZeroU32 =
+    NonZeroU32::new(5).expect("the default module error allowance is non-zero");
+
 /// Tokens of additional body syntax one module may admit after its first body diagnosis.
 ///
 /// WHAT: the compiler-owned recovery-work allowance. Tests supply smaller synthetic values through
@@ -63,7 +72,7 @@ impl AstRecoveryPolicy {
     ///      omitted-config defaults a project without either diagnostic key would receive.
     pub(crate) fn configured_defaults() -> Self {
         Self {
-            module_error_allowance: Some(crate::projects::settings::DEFAULT_MAX_ERRORS_PER_MODULE),
+            module_error_allowance: Some(DEFAULT_MAX_ERRORS_PER_MODULE),
             body_work_allowance: AST_RECOVERY_WORK_TOKENS,
         }
     }
@@ -80,7 +89,7 @@ impl Default for FrontendOptions {
     fn default() -> Self {
         Self {
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-            max_errors_per_module: Some(crate::projects::settings::DEFAULT_MAX_ERRORS_PER_MODULE),
+            max_errors_per_module: Some(DEFAULT_MAX_ERRORS_PER_MODULE),
         }
     }
 }
