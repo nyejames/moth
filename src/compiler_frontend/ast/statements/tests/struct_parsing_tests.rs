@@ -179,11 +179,11 @@ fn optional_present_default_preserves_struct_field_type() {
 
 #[test]
 fn parses_struct_construction_and_field_access_in_declarations() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "Point = |\n    x I32,\n    y I32,\n|\n\npoint = Point(1, 2)\nvalue = point.x\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::VariableDeclaration(point_decl) = &body[0].kind else {
         panic!("expected point declaration");
@@ -209,7 +209,7 @@ fn parses_struct_construction_and_field_access_in_declarations() {
 fn parses_builtin_error_with_default_code_field() {
     let (ast, path_fork, string_table) = parse_single_file_ast("err = Error(\"bad\")\n");
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
     let NodeKind::VariableDeclaration(error_decl) = &body[0].kind else {
         panic!("expected error declaration");
     };
@@ -528,7 +528,7 @@ boxed = Box(value = 7)\n";
     let (build_result, path_fork, mut string_table) =
         parse_single_file_ast_build_result(source).expect("generic nominal default should resolve");
     let ast = &build_result.ast;
-    let boxed = start_function_body(ast, &path_fork, &string_table)
+    let boxed = start_function_body(ast)
         .iter()
         .find_map(|node| match &node.kind {
             NodeKind::VariableDeclaration(declaration)

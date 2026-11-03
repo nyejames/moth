@@ -495,7 +495,7 @@ pub(super) fn create_header(
         }
 
         // `=` only creates a declaration header for struct shells. Runtime top-level
-        // `name = value` stays in the entry start body outside `config.moth`.
+        // `name = value` stays in the entry body outside `config.moth`.
         TokenTag::ASSIGN => {
             if next_tag == Some(TokenTag::TYPE_PARAMETER_BRACKET) {
                 ensure_not_keyword_shadow_identifier(

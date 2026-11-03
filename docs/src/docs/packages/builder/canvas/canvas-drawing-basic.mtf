@@ -18,7 +18,7 @@ Bind the functions you need with a direct-selection clause.
     fill_rect(~ctx, 10.0, 10.0, 50.0, 50.0)
 ]
 
-At the top level, `!` propagates failure through the implicit `start` function's
+At the top level, `!` propagates failure through the implicit entry's
 `Error!` channel.
 
 ### Basic opaque types

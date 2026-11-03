@@ -228,8 +228,8 @@ pub struct HirBuilder<'a> {
     current_region: Option<RegionId>,
     pub(super) loop_targets: Vec<LoopTargets>,
 
-    /// The runtime fragment vec local inside entry start(), if currently lowering it.
-    /// Set when entering entry start() and cleared on leave.
+    /// The runtime fragment vec local inside the compiler-owned entry, if currently lowering it.
+    /// Set when entering the compiler-owned entry and cleared on leave.
     pub(super) entry_fragment_vec_local: Option<LocalId>,
 
     /// Active target for value-block lowering.

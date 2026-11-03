@@ -76,6 +76,9 @@ pub(crate) fn create_test_hir_module() -> HirModule {
 ///
 /// WHAT: binds the test module's names into the caller-owned shared string table.
 /// WHY: HTML builder tests share the production one-table diagnostic model.
+///
+/// `start_entry` is a stand-in for the entry's HTML-facing name: the production entry carries
+/// no side-table path, so this fixture only exercises name-agnostic bootstrap wiring.
 pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut StringTable) -> Module {
     let mut path_fork = PathInternerFork::empty();
     let mut hir_module = create_test_hir_module();

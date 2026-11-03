@@ -235,15 +235,10 @@ impl BackendBuilder for HtmlProjectBuilder {
                 .map_or(route.logical_html_path.as_path(), |plan| {
                     plan.html_path.as_path()
                 });
-            let start_function = module
-                .executable
-                .hir
-                .require_start_function("HTML page metadata extraction")?;
             let page_metadata_plan = {
                 let mut diagnostic_strings = backend_context.diagnostic_strings();
                 match extract_html_page_metadata(
                     &module.executable.hir,
-                    start_function,
                     &module.executable.path_table,
                     &module.executable.resource_table,
                     &mut diagnostic_strings,

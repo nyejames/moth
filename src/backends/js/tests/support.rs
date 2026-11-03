@@ -32,7 +32,7 @@ pub(super) use crate::compiler_frontend::hir::expression_store::{
     HirExpressionStore, HirValueRange,
 };
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapEntry, ValueKind};
-use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{
     BlockId, ChoiceId, FunctionId, HirNodeId, LocalId, RegionId,
 };
@@ -281,6 +281,9 @@ pub(super) fn append_string_pieces(
 
 /// Assembles a module from this backend's fixture shape.
 ///
+/// `function_name` is a backend-naming stand-in: production entries are nameless, so the
+/// compiler-owned entry reaches this lane through `start_function` alone.
+///
 /// Deliberately local to each backend: the two signatures and their naming, region and choice
 /// seeding differ, so this is not the same operation under one name. Only the HIR node
 /// constructors are shared, from `compiler_frontend::tests::hir_fixture_support`.
@@ -310,12 +313,21 @@ pub(super) fn build_module(
         variants: vec![],
     }];
 
+    module
+        .function_origins
+        .insert(function_id, HirFunctionOrigin::EntryStart);
+    // The supplied name is a stand-in for JS naming tests, not the entry's source file, so the
+    // fixture records ownership separately and keeps the callable name path explicit.
     let function_path = path_fork
         .try_intern_portable_path(function_name, string_table)
         .expect("test path fits");
     module
         .side_table
         .bind_function_name(function_id, function_path);
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", string_table)
+        .expect("test path fits");
+    module.start_source_file = Some(source_path);
 
     for (local_id, local_name) in local_names {
         let local_path = path_fork

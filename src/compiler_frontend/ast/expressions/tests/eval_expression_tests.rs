@@ -127,15 +127,7 @@ fn first_start_declaration_expression(source: &str) -> ParsedExpression {
 fn nth_start_declaration_expression(source: &str, index: usize) -> ParsedExpression {
     let (ast, _path_fork, _string_table) = parse_single_file_ast(source);
     let root = {
-        let start_function = ast
-            .nodes
-            .iter()
-            .find(|node| matches!(node.kind, NodeKind::Function(_, _, _)))
-            .expect("start function should exist");
-
-        let NodeKind::Function(_, _, body) = &start_function.kind else {
-            panic!("expected start function body");
-        };
+        let body = start_function_body(&ast);
         let NodeKind::VariableDeclaration(declaration) = &body[index].kind else {
             panic!("expected start statement {index} to be a variable declaration");
         };
@@ -670,15 +662,7 @@ fn char_relational_comparison_resolves_to_bool() {
 fn fully_constant_boolean_and_comparison_expressions_fold() {
     let (ast, _path_fork, _string_table) =
         parse_single_file_ast("flag = not (1 < 2) or (3 < 4 and false)\n");
-    let start_function = ast
-        .nodes
-        .iter()
-        .find(|node| matches!(node.kind, NodeKind::Function(_, _, _)))
-        .expect("start function should exist");
-
-    let NodeKind::Function(_, _, body) = &start_function.kind else {
-        panic!("expected start function body");
-    };
+    let body = start_function_body(&ast);
     let NodeKind::VariableDeclaration(declaration) = &body[0].kind else {
         panic!("expected folded declaration");
     };
@@ -1663,8 +1647,8 @@ fn u32_grouped_compound_exponent_keeps_u32_rhs() {
     // Grouped `^=` on a U32 target keeps ordinary same-family arithmetic: the
     // grouped right side receives U32 context, while Dec keeps the I32 edge.
     let source = concat!("powered ~U32 = 2\n", "~powered ^= 1 + 2\n");
-    let (ast, path_fork, string_table) = parse_single_file_ast(source);
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let (ast, _, _) = parse_single_file_ast(source);
+    let body = start_function_body(&ast);
     let NodeKind::Assignment { target, value } = &body[1].kind else {
         panic!("expected grouped U32 exponent compound assignment");
     };

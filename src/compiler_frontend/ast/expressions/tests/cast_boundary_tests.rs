@@ -357,14 +357,14 @@ parse_count |text String| -> I32, Error!:
 
 #[test]
 fn constant_receiver_keeps_successful_foldable_cast_catch() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         r#"
 value I32 = cast "42" catch:
     then 0
 ;
 "#,
     );
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
     let NodeKind::VariableDeclaration(declaration) = &body[0].kind else {
         panic!("expected the constant initializer");
     };

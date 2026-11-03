@@ -321,7 +321,7 @@ enum RetainedRangeCompletion {
         bindings: Box<LoopBindings>,
         end_kind: RangeEndKind,
         /// Authored site of an omitted start operand, used by the shared range policy for the
-        /// implicit start.
+        /// entry.
         omitted_start_span: Option<SourceSpan>,
         /// Operands already built at parse time, indexed by `RangeOperandSlot` (Start, End, Step);
         /// retained operands arrive through their records.

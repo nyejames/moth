@@ -10,7 +10,7 @@ impl ScopeContext {
     /// Replace the declarations in the current scope frame.
     ///
     /// WHAT: validates every parameter's name collision before atomically replacing the frame's
-    ///       declarations and rebuilding its name index for a function or start body.
+    ///       declarations and rebuilding its name index for a function or entry body.
     pub(crate) fn set_local_declarations(
         &mut self,
         declarations: Vec<Declaration>,

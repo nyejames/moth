@@ -276,3 +276,113 @@ fn selected_value_root_keeps_authored_sibling_immutable() {
         "unchanged child IDs are reused"
     );
 }
+
+#[test]
+fn authored_start_and_entry_record_provenance_under_distinct_identities() {
+    use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
+    use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+    use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
+    use crate::compiler_frontend::synthetic_interface_provenance::{
+        SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
+    };
+    use crate::compiler_frontend::tests::ast_fixture_support::{entry_start_node, function_node};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let span: Option<SourceSpan> = None;
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let start_path = path_fork
+        .try_intern_portable_path("start", &mut string_table)
+        .expect("test path fits");
+
+    let mut build_provenance_condition =
+        |member: &str, path_fork: &mut PathInternerFork, string_table: &mut StringTable| {
+            let then_scope = path_fork
+                .try_intern_portable_path(&format!("then-{member}"), string_table)
+                .expect("test path fits");
+            let else_scope = path_fork
+                .try_intern_portable_path(&format!("else-{member}"), string_table)
+                .expect("test path fits");
+            let condition = builder
+                .bool(&mut const_values, true, span, ValueMode::ImmutableOwned)
+                .expect("typed bool")
+                .id();
+            let condition = builder
+                .with_synthetic_interface_provenance(
+                    builder.own(condition),
+                    SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
+                        SyntheticInterfaceClass::ProjectContext,
+                        "source-config",
+                        member,
+                    )),
+                )
+                .expect("occurrence provenance")
+                .id();
+            AstNode {
+                kind: NodeKind::If(
+                    condition,
+                    Vec::new(),
+                    Some(Vec::new()),
+                    IfBranchMetadata::new(
+                        IfGenericRequestRanges::default(),
+                        then_scope,
+                        Some(else_scope),
+                    ),
+                ),
+                span,
+                scope: then_scope,
+            }
+        };
+
+    let authored_if =
+        build_provenance_condition("authored-start", &mut path_fork, &mut string_table);
+    let entry_if = build_provenance_condition("entry-start", &mut path_fork, &mut string_table);
+
+    let mut ast = vec![
+        function_node(
+            start_path,
+            FunctionSignature::default(),
+            vec![authored_if],
+            span,
+        ),
+        entry_start_node(
+            FunctionSignature {
+                parameters: vec![],
+                returns: vec![],
+            },
+            vec![entry_if],
+        ),
+    ];
+
+    let specialization = StaticIfSpecialization::run(
+        &mut ast,
+        &mut const_values,
+        &mut builder,
+        Rc::new(RefCell::new(TemplateIrStore::new())),
+        &mut string_table,
+        &TypeEnvironment::new(),
+        None,
+    )
+    .expect("static literal conditions should specialize");
+
+    let provenance = specialization.function_provenance();
+    let authored = provenance
+        .get(&AstFunctionIdentity::Authored(start_path))
+        .expect("the authored start must own its selected provenance");
+    assert_eq!(
+        authored.source_config_member_names().collect::<Vec<_>>(),
+        vec!["authored-start"],
+        "the authored start must not absorb the entry's provenance"
+    );
+    let entry = provenance
+        .get(&AstFunctionIdentity::Entry)
+        .expect("the entry must own its selected provenance");
+    assert_eq!(
+        entry.source_config_member_names().collect::<Vec<_>>(),
+        vec!["entry-start"],
+        "the entry must not absorb the authored start's provenance"
+    );
+}

@@ -2,11 +2,11 @@
 
 ### Root activation
 
-Top-level runtime code in a selected module root becomes a dormant `start`. It
+Top-level runtime code in a selected module root becomes a dormant entry. It
 runs once when that module becomes a page entry. Helper files provide
-declarations and never own an entry or an independent start.
+declarations and never own an entry.
 
-`start` has built-in `Error!`. Checked numeric failure and compatible top-level
+The entry has built-in `Error!`. Checked numeric failure and compatible top-level
 postfix `!` can propagate to the generated terminal handler. Custom errors still
 need explicit recovery. See @../progress (Progress) for current compiler support.
 
@@ -31,7 +31,7 @@ runtime work legal by keeping it dormant.
 Direct top-level templates in the selected root remain fragments:
 
 - A const fragment (the `#` prefix form) becomes static HTML.
-- A runtime fragment (the plain bracket form) runs through the root's `start`.
+- A runtime fragment (the plain bracket form) runs through the root's entry.
 
 The builder keeps static and runtime fragments in source order. Assigned or
 returned templates are ordinary values, and helpers cannot create page

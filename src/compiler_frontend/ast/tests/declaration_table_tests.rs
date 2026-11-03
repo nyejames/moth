@@ -358,39 +358,21 @@ fn compiler_owned_rows_reject_semantic_path_collisions() {
 }
 
 #[test]
-fn implicit_start_rejects_authored_start_collision() {
+fn compiler_owned_rows_reject_a_duplicate_path() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let start_path = path_fork
-        .try_intern_portable_path("start", &mut string_table)
+    let path = path_fork
+        .try_intern_portable_path("compiler_owned", &mut string_table)
         .expect("test path fits");
-    let authored = function_shell(&start_path);
-    let implicit = authored.clone();
 
-    let authored_collision = TopLevelDeclarationTable::from_stage3_order(
-        vec![ordered_declaration(
-            0,
-            0,
-            &start_path,
-            OrderedSemanticDeclarationKind::Function,
-            Some(authored),
-        )],
-        vec![implicit],
-        &path_fork,
-    );
-    assert!(
-        authored_collision.is_err(),
-        "an authored start path must not shadow the compiler-owned start"
-    );
-
-    let repeated_start = TopLevelDeclarationTable::from_stage3_order(
+    let repeated = TopLevelDeclarationTable::from_stage3_order(
         Vec::new(),
-        vec![function_shell(&start_path), function_shell(&start_path)],
+        vec![function_shell(&path), function_shell(&path)],
         &path_fork,
     );
     assert!(
-        repeated_start.is_err(),
-        "a second compiler-owned start must not replace the first compiler-owned row"
+        repeated.is_err(),
+        "a second compiler-owned row must not replace the first compiler-owned row"
     );
 }
 

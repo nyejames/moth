@@ -16,9 +16,9 @@ use crate::compiler_frontend::source::SourceSpan;
 
 impl<'a> HirBuilder<'a> {
     /// Allocates and initializes the `Vec<String>` fragment accumulator for the
-    /// implicit entry `start()` function.
+    /// compiler-owned entry, which has no source-level name.
     ///
-    /// WHAT: creates an empty collection local before the start body is lowered.
+    /// WHAT: creates an empty collection local before the entry body is lowered.
     /// WHY: each `PushStartRuntimeFragment` statement in the body appends one
     ///      evaluated string to this local; the implicit return at end loads it.
     pub(super) fn maybe_initialize_entry_fragment_accumulator(

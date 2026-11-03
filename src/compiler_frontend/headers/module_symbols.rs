@@ -28,7 +28,6 @@ use crate::compiler_frontend::ast::ast_nodes::{
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
@@ -41,9 +40,8 @@ use crate::compiler_frontend::headers::types::DependencySelection;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSlot, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Resolved target of a module-root public export entry.
@@ -195,7 +193,9 @@ pub(crate) struct ModuleSymbols {
     /// consume final identity and order without reconstructing either fact from paths.
     pub(crate) ordered_semantic_declarations: Vec<OrderedSemanticDeclaration>,
 
-    /// Synthetic start and builtin declarations appended after authored semantic slots.
+    /// Builtin rows appended after authored semantic slots.
+    ///
+    /// The compiler-owned entry is a typed header marker and never becomes a declaration row.
     pub(crate) compiler_owned_declarations: Vec<Declaration>,
 
     // Staging: builtin declarations collected during header parsing.
@@ -359,8 +359,8 @@ impl ModuleSymbols {
 
     /// Build final identity-bearing semantic records from topologically ordered headers.
     ///
-    /// WHAT: assigns one dense ID and typed optional value row to each semantic header, separates
-    /// synthetic start rows, then appends the builtins staged during header parsing.
+    /// WHAT: assigns one dense ID and typed optional value row to each semantic header and appends
+    /// the builtins staged during header parsing.
     ///
     /// WHY: declarations must be in the same topological order as the sorted headers so that
     /// all AST passes see dependencies before dependents. The order-independent maps were already
@@ -368,8 +368,6 @@ impl ModuleSymbols {
     pub(crate) fn build_sorted_declarations(
         &mut self,
         sorted_headers: &[Header],
-        string_table: &mut StringTable,
-        path_fork: &mut PathInternerFork,
     ) -> Result<(), DiagnosticDraft> {
         self.ordered_semantic_declarations.clear();
         self.compiler_owned_declarations.clear();
@@ -384,21 +382,9 @@ impl ModuleSymbols {
                         header_index,
                         path: header.declaration_path,
                         kind,
-                        declaration: declaration_from_header(
-                            header,
-                            self.source_path_for_header(header)
-                                .expect("header body range has no prepared source-path identity"),
-                            string_table,
-                            path_fork,
-                        )?,
+                        declaration: declaration_from_header(header),
                     });
-            } else if let Some(declaration) = declaration_from_header(
-                header,
-                self.source_path_for_header(header)
-                    .expect("header body range has no prepared source-path identity"),
-                string_table,
-                path_fork,
-            )? {
+            } else if let Some(declaration) = declaration_from_header(header) {
                 self.compiler_owned_declarations.push(declaration);
             }
         }
@@ -427,14 +413,9 @@ fn ordered_semantic_declaration_kind(
     }
 }
 
-fn declaration_from_header(
-    header: &Header,
-    source_file: PathId,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> Result<Option<Declaration>, DiagnosticDraft> {
+fn declaration_from_header(header: &Header) -> Option<Declaration> {
     match &header.kind {
-        HeaderKind::Function { .. } => Ok(Some(Declaration {
+        HeaderKind::Function { .. } => Some(Declaration {
             id: header.declaration_path,
             type_id: builtin_type_ids::NONE,
             type_syntax: None,
@@ -442,13 +423,13 @@ fn declaration_from_header(
             value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
             binding_span: header.name_span,
             config_qualifier: None,
-        })),
-        HeaderKind::Constant { declaration, .. } => Ok(Some(constant_declaration_placeholder(
+        }),
+        HeaderKind::Constant { declaration, .. } => Some(constant_declaration_placeholder(
             &header.declaration_path,
             declaration,
             header.name_span,
-        ))),
-        HeaderKind::Struct { .. } => Ok(Some(Declaration {
+        )),
+        HeaderKind::Struct { .. } => Some(Declaration {
             id: header.declaration_path,
             type_id: builtin_type_ids::NONE,
             type_syntax: None,
@@ -456,8 +437,8 @@ fn declaration_from_header(
             value: DeclarationValue::Shell(DeclarationShell::Struct),
             binding_span: header.name_span,
             config_qualifier: None,
-        })),
-        HeaderKind::Choice { .. } => Ok(Some(Declaration {
+        }),
+        HeaderKind::Choice { .. } => Some(Declaration {
             id: header.declaration_path,
             type_id: builtin_type_ids::NONE,
             type_syntax: None,
@@ -465,28 +446,17 @@ fn declaration_from_header(
             value: DeclarationValue::Shell(DeclarationShell::Choice),
             binding_span: header.name_span,
             config_qualifier: None,
-        })),
+        }),
         HeaderKind::StartFunction => {
-            // The implicit start function is a compiler-owned synthetic declaration scoped under
-            // the entry source file.
-            let start_name = path_fork
-                .try_intern_child(source_file, string_table.intern(IMPLICIT_START_FUNC_NAME))
-                .ok_or_else(token_lexical::logical_path_capacity)?;
-            Ok(Some(Declaration {
-                id: start_name,
-                type_id: builtin_type_ids::NONE,
-                type_syntax: None,
-                value_mode: ValueMode::ImmutableReference,
-                value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
-                binding_span: None,
-                config_qualifier: None,
-            }))
+            // The implicit entry is a typed AST node and a HIR-owned function, never a source
+            // declaration. It owns no declaration path, symbol registration or binding surface.
+            None
         }
-        HeaderKind::TypeAlias { .. } => Ok(None),
-        HeaderKind::ConstTemplate { .. } => Ok(None),
+        HeaderKind::TypeAlias { .. } => None,
+        HeaderKind::ConstTemplate { .. } => None,
         HeaderKind::Trait { .. }
         | HeaderKind::TraitConformance { .. }
-        | HeaderKind::TraitIncompatibility { .. } => Ok(None),
+        | HeaderKind::TraitIncompatibility { .. } => None,
     }
 }
 

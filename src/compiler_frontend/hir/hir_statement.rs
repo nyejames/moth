@@ -58,6 +58,10 @@ impl<'a> HirBuilder<'a> {
                 self.lower_function_body(expressions, name, signature, body, &node.span)
             }
 
+            NodeKind::EntryStart(signature, body) => {
+                self.lower_entry_start_body(expressions, signature, body, &node.span)
+            }
+
             NodeKind::StructDefinition(_, _) => Ok(()),
 
             NodeKind::Return(_) | NodeKind::ReturnError(_) => Err(InfrastructureFailure::hir_transformation(
@@ -90,11 +94,45 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<(), HirConstructionFailure> {
         let function_id = self.resolve_function_id_or_error(function_name)?;
 
+        self.lower_resolved_function_body(expressions, function_id, signature, body, span)
+    }
+
+    /// Lower the compiler-owned entry body into its pre-allocated HIR function.
+    ///
+    /// WHAT: uses the entry `FunctionId` HIR declaration preparation stored on the module.
+    /// WHY: the entry has no declaration path, so its body cannot be resolved through the
+    ///      name-indexed function table like an authored function.
+    pub(super) fn lower_entry_start_body(
+        &mut self,
+        expressions: &ExpressionStore,
+        signature: &FunctionSignature,
+        body: &[AstNode],
+        span: &Option<SourceSpan>,
+    ) -> Result<(), HirConstructionFailure> {
+        let Some(function_id) = self.module.start_function else {
+            return Err(InfrastructureFailure::hir_transformation(
+                "HIR invariant: the entry body reached HIR lowering without an allocated entry function",
+            )
+            .into());
+        };
+
+        self.lower_resolved_function_body(expressions, function_id, signature, body, span)
+    }
+
+    /// Lowers one already-resolved function through the full enter/init/leave lifecycle.
+    fn lower_resolved_function_body(
+        &mut self,
+        expressions: &ExpressionStore,
+        function_id: FunctionId,
+        signature: &FunctionSignature,
+        body: &[AstNode],
+        span: &Option<SourceSpan>,
+    ) -> Result<(), HirConstructionFailure> {
         self.enter_function(function_id)?;
 
-        // WHAT: for entry start(), allocate the Vec<String> fragment accumulator before lowering.
+        // WHAT: for the entry, allocate the Vec<String> fragment accumulator before lowering.
         // WHY: PushStartRuntimeFragment nodes in the body push to this local; the implicit return
-        //      at end of entry start loads it as the function result.
+        //      at end of the entry body loads it as the function result.
         self.maybe_initialize_entry_fragment_accumulator(function_id, span)?;
 
         let lower_result =
@@ -133,7 +171,7 @@ impl<'a> HirBuilder<'a> {
             return Ok(());
         }
 
-        // WHAT: entry start() has an implicit return of the fragment vec accumulator.
+        // WHAT: the compiler-owned entry has an implicit return of the fragment vec accumulator.
         // WHY: the body contains only PushStartRuntimeFragment nodes with no explicit return;
         //      the return type is Vec<String> which the builder consumes as the fragment list.
         if self.maybe_emit_entry_fragment_return(function_id, current_block, span)? {
@@ -296,7 +334,7 @@ impl<'a> HirBuilder<'a> {
                 // WHY: the fragment accumulator local was allocated at function entry; each
                 //      PushStartRuntimeFragment appends one evaluated string to it.
                 let Some(vec_local) = self.entry_fragment_vec_local else {
-                    return Err(InfrastructureFailure::hir_transformation("PushStartRuntimeFragment encountered outside entry start() — no fragment vec local is active").into());
+                    return Err(InfrastructureFailure::hir_transformation("PushStartRuntimeFragment encountered outside the compiler-owned entry — no fragment vec local is active").into());
                 };
 
                 let value =

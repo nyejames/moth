@@ -154,7 +154,7 @@ implicit failure as `Error`:
 - A private function with no error slot carries implicit failure through the existing same-module failure lane.
 - A custom `E!` slot does not automatically convert implicit failure. Recover locally or map it to `E`.
 - An exported callable without an error slot must discharge failure that could escape its public contract.
-- Entry-selected top-level runtime code runs in `start` with builtin `Error!`.
+- Entry-selected top-level runtime code runs in the compiler-owned entry with builtin `Error!`.
 
 Numeric operators remain ordinary source expressions. See
 @../errors/#error-returns (Error returns) for function contracts.

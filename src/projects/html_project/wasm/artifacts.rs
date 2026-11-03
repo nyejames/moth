@@ -39,7 +39,7 @@ const SHOW_HTML_WASM_EXPORTS: bool = false;
 pub(crate) struct HtmlWasmBuildPlan {
     /// Deterministic export selection and wrapper naming policy for this module.
     pub export_plan: HtmlWasmExportPlan,
-    /// Ordered runtime slot IDs derived from entry start() PushRuntimeFragment sequence.
+    /// Ordered runtime slot IDs derived from the compiler-owned entry PushRuntimeFragment sequence.
     pub js_entry_slot_ids: Vec<String>,
     /// JS start invocation snippet reused in bootstrap emission and debug summaries.
     pub js_start_invocation: String,
@@ -216,7 +216,7 @@ pub(crate) fn build_html_wasm_plan(
 ) -> Result<HtmlWasmBuildPlan, InfrastructureFailure> {
     let export_plan = build_html_wasm_export_plan(hir_module)?;
     let wasm_request = build_wasm_backend_request(&export_plan, reachability);
-    // WHY: entry start() is exported as "moth_start"; JS evaluates it directly and consumes the
+    // WHY: the compiler-owned entry is exported as "moth_start"; JS evaluates it directly and consumes the
     //      returned fragment Vec handle. No JS-side wrapper installation is part of the contract.
     let js_start_invocation = String::from("instance.exports.moth_start()");
 

@@ -153,7 +153,7 @@ pub use templates::top_level_templates::AstDocFragment;
 pub use templates::top_level_templates::AstDocFragmentKind;
 
 // Imports for the AST entry point and body-parsing helper.
-use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, AstNode};
 use crate::compiler_frontend::ast::const_values::facts::AstConstFacts;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
@@ -235,8 +235,6 @@ pub struct Ast {
     pub(crate) expressions: ExpressionStore,
     pub doc_fragments: Vec<AstDocFragment>,
 
-    pub entry_path: PathId,
-
     /// Structural role of the active module root.
     ///
     /// HIR uses this to require `start` only for normal modules. API-only support and facade
@@ -264,16 +262,17 @@ pub struct Ast {
     /// Compile-time const facts for all declarations that resolve to constant values.
     ///
     /// WHAT: records explicit module constants, private inferred top-level constants
-    ///       (start body), and body-local constants discovered during AST finalization.
+    ///       (entry body), and body-local constants discovered during AST finalization.
     /// WHY: config validation and HIR metadata need one shared source of truth for
     ///      const-ness without re-walking the AST.
     pub const_facts: AstConstFacts,
     pub(crate) imported_functions_by_local_path: FxHashMap<PathId, AstImportedFunctionContract>,
     /// Canonical infallible cast requirements, projected onto local executable method paths.
     pub(crate) infallible_cast_evidence: FxHashMap<PathId, InfallibleCastEvidenceContract>,
-    /// Provenance introduced by static configuration branch selection, keyed by function path
+    /// Provenance introduced by static configuration branch selection, keyed by function identity
     /// until HIR allocates the build-local function IDs.
-    pub(crate) static_if_function_provenance: FxHashMap<PathId, SyntheticInterfaceProvenance>,
+    pub(crate) static_if_function_provenance:
+        FxHashMap<AstFunctionIdentity, SyntheticInterfaceProvenance>,
 }
 
 /// Consumer-local semantic contract for one imported concrete source function.

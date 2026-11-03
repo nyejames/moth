@@ -95,8 +95,6 @@ fn staged_result_local(
 fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
     let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table);
@@ -132,8 +130,7 @@ fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge(
         )
         .expect("fixture handled call fits expression store")
         .id();
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![error_return_slot(builtin_type_ids::STRING)],
@@ -142,13 +139,11 @@ fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge(
             NodeKind::ExpressionStatement(propagated_call),
             location,
         )],
-        location,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![can_fail_function, start_function],
-            entry_path,
             builder,
             constants,
             TypeEnvironment::new(),
@@ -195,8 +190,6 @@ fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge(
 fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
     let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table);
@@ -250,20 +243,17 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
         location,
     );
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), location)],
-        location,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![can_fail_function, forward_function, start_function],
-            entry_path,
             builder,
             constants,
             TypeEnvironment::new(),
@@ -344,8 +334,6 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
 fn direct_return_result_propagation_allows_alias_success_return() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let constants = ConstValueStore::default();
     let source_name = super::symbol("source", &mut path_fork, &mut string_table);
@@ -420,20 +408,17 @@ fn direct_return_result_propagation_allows_alias_success_return() {
         location,
     );
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), location)],
-        location,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![source_function, forward_function, start_function],
-            entry_path,
             builder,
             constants,
             TypeEnvironment::new(),
@@ -494,8 +479,6 @@ fn direct_return_result_propagation_allows_alias_success_return() {
 fn declaration_result_propagation_assigns_native_success_on_success_edge() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
     let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table);
@@ -563,20 +546,17 @@ fn declaration_result_propagation_assigns_native_success_on_success_edge() {
         location,
     );
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), location)],
-        location,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![can_fail_function, forward_function, start_function],
-            entry_path,
             builder,
             constants,
             TypeEnvironment::new(),
@@ -644,8 +624,6 @@ fn declaration_result_propagation_assigns_native_success_on_success_edge() {
 fn multi_bind_result_propagation_binds_ordered_slots_on_success_edge() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
     let pair_name = super::symbol("pair", &mut path_fork, &mut string_table);
@@ -755,20 +733,17 @@ fn multi_bind_result_propagation_binds_ordered_slots_on_success_edge() {
         location,
     );
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), location)],
-        location,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![pair_function, forward_function, start_function],
-            entry_path,
             builder,
             constants,
             TypeEnvironment::new(),
@@ -843,8 +818,6 @@ fn multi_bind_result_propagation_binds_ordered_slots_on_success_edge() {
 fn call_argument_result_propagation_lowers_before_outer_call() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
     let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table);
@@ -951,14 +924,12 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
         location,
     );
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), location)],
-        location,
     );
 
     let (module, _type_environment) = lower_ast(
@@ -969,7 +940,6 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
                 forward_function,
                 start_function,
             ],
-            entry_path,
             builder,
             constants,
             TypeEnvironment::new(),
@@ -1047,8 +1017,6 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
 fn runtime_binary_result_propagation_lowers_before_operator() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
     let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table);
@@ -1139,20 +1107,17 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
         location,
     );
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), location)],
-        location,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![can_fail_function, forward_function, start_function],
-            entry_path,
             builder,
             constants,
             TypeEnvironment::new(),
@@ -1230,8 +1195,6 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
 fn return_bang_lowers_to_explicit_error_terminator() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
     let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table);
@@ -1256,20 +1219,17 @@ fn return_bang_lowers_to_explicit_error_terminator() {
         location,
     );
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), location)],
-        location,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![can_fail_function, start_function],
-            entry_path,
             builder,
             constants,
             TypeEnvironment::new(),
@@ -1301,8 +1261,6 @@ fn return_bang_lowers_to_explicit_error_terminator() {
 fn fallible_success_return_preserves_success_slots_and_error_signature() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
     let can_succeed_name = super::symbol("can_succeed", &mut path_fork, &mut string_table);
@@ -1330,20 +1288,17 @@ fn fallible_success_return_preserves_success_slots_and_error_signature() {
         location,
     );
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), location)],
-        location,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![can_succeed_function, start_function],
-            entry_path,
             builder,
             constants,
             TypeEnvironment::new(),
@@ -1383,14 +1338,13 @@ fn fallible_success_return_preserves_success_slots_and_error_signature() {
 fn statement_catch_handler_lowering_builds_explicit_result_branching() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let entry_path = super::symbol("main.moth", &mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
     let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table);
     let location = None;
     let error_binding = path_fork
-        .try_intern_child(start_name, string_table.intern("err"))
+        .try_intern_child(entry_path, string_table.intern("err"))
         .expect("test path fits");
 
     let boom = builder
@@ -1450,8 +1404,7 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
     )
     .expect("fixture catch fits expression store");
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -1460,13 +1413,11 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
             NodeKind::ExpressionStatement(catch_expression.id()),
             location,
         )],
-        location,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![can_fail_function, start_function],
-            entry_path,
             builder,
             constants,
             TypeEnvironment::new(),
@@ -1546,8 +1497,7 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
 fn multi_bind_lowering_binds_ordered_slots_from_single_rhs_call() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let entry_path = super::symbol("main.moth", &mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
     let pair_name = super::symbol("pair", &mut path_fork, &mut string_table);
@@ -1587,14 +1537,13 @@ fn multi_bind_lowering_binds_ordered_slots_from_single_rhs_call() {
     );
 
     let left_id = path_fork
-        .try_intern_child(start_name, string_table.intern("left"))
+        .try_intern_child(entry_path, string_table.intern("left"))
         .expect("test path fits");
     let right_id = path_fork
-        .try_intern_child(start_name, string_table.intern("right"))
+        .try_intern_child(entry_path, string_table.intern("right"))
         .expect("test path fits");
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -1632,13 +1581,11 @@ fn multi_bind_lowering_binds_ordered_slots_from_single_rhs_call() {
             },
             location,
         )],
-        location,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![pair_function, start_function],
-            entry_path,
             builder,
             constants,
             TypeEnvironment::new(),
@@ -1720,8 +1667,7 @@ fn multi_bind_lowering_binds_ordered_slots_from_single_rhs_call() {
 fn multi_value_then_snapshots_earlier_scalar_before_later_mutation() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let entry_path = super::symbol("main.moth", &mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
     let count = super::symbol("count", &mut path_fork, &mut string_table);
@@ -1858,8 +1804,7 @@ fn multi_value_then_snapshots_earlier_scalar_before_later_mutation() {
         None,
         ValueMode::MutableOwned,
     );
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: fresh_success_returns(vec![scalar_type, scalar_type]),
@@ -1872,12 +1817,10 @@ fn multi_value_then_snapshots_earlier_scalar_before_later_mutation() {
             ),
             node(NodeKind::Return(vec![value_if]), None),
         ],
-        None,
     );
     let (module, _) = lower_ast(
         build_ast_with_registered_types(
             vec![bump_function, start_function],
-            entry_path,
             builder,
             constants,
             TypeEnvironment::new(),

@@ -24,7 +24,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     build_ast_with_registered_types, lower_ast,
 };
-use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
 mod checked_numeric_lowering_tests;
 mod float_formatting_lowering_tests;
@@ -57,16 +56,7 @@ pub(super) fn symbol(
         .expect("test path fits")
 }
 
-pub(super) fn entry_path_and_start_name(
-    path_fork: &mut PathInternerFork,
-    string_table: &mut StringTable,
-) -> (PathId, PathId) {
-    let entry_path = symbol("main.moth", path_fork, string_table);
-    let start_name = path_fork
-        .try_intern_child(entry_path, string_table.intern(IMPLICIT_START_FUNC_NAME))
-        .expect("test path fits");
-    (entry_path, start_name)
-}
+pub(super) use crate::compiler_frontend::tests::ast_fixture_support::entry_start_node;
 
 pub(super) fn start_function(module: &HirModule) -> &HirFunction {
     module
@@ -173,37 +163,24 @@ fn node(kind: NodeKind, span: Option<SourceSpan>) -> AstNode {
     }
 }
 
-fn function_node(
-    name: PathId,
-    signature: FunctionSignature,
-    body: Vec<AstNode>,
-    span: Option<SourceSpan>,
-) -> AstNode {
-    node(NodeKind::Function(name, signature, body), span)
-}
-
-/// Lowers a module whose only item is the implicit start function.
+/// Lowers a module whose only item is the compiler-owned entry.
 ///
 /// WHAT: returns the string table, the lowered module, and its type environment so a test can append its own rows.
 /// WHY: normal-entry validation tests and the same-instance walk tests share this fixture, so both start from an identical lowering path.
 pub(super) fn minimal_lowered_hir_module() -> (StringTable, HirModule, TypeEnvironment) {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),

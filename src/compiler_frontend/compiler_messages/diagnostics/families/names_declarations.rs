@@ -78,7 +78,6 @@ unit_code! {
         BuiltinType = 1,
         Keyword = 2,
         CoreTrait = 3,
-        ImplicitStart = 4,
         ParameterContract = 5,
     }
 }

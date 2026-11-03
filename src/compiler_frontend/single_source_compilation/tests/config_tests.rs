@@ -462,6 +462,93 @@ fn rejects_authored_plain_bindings_inside_the_service() {
 }
 
 #[test]
+fn start_is_an_ordinary_config_constant_name() {
+    let mut string_table = StringTable::new();
+    let _path_fork = PathInternerFork::empty();
+    let surface = BuilderSurface::with_mandatory_core();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+
+    let compiled = compile_config_source(
+        ConfigCompilationRequest {
+            authored_path: Path::new("project/config.moth"),
+            file_id: SourceId::COMPILATION_ROOT,
+            source_code: "start #= \"ordinary\"\nproject #= (name = start)\n",
+            style_directives: &style_directives,
+            binding_packages: &surface.binding_packages,
+            build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
+            ),
+            builder_config_globals:
+                &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
+            project_field_config_policies: surface
+                .config_schemas
+                .project()
+                .project_field_config_policies(),
+        },
+        &mut string_table,
+    )
+    .result
+    .expect("a compile-time constant named start is ordinary config source");
+
+    assert!(
+        compiled
+            .declarations
+            .iter()
+            .any(|declaration| string_table.resolve(declaration.name) == "start"),
+        "the authored start constant should reach the folded declarations"
+    );
+}
+
+#[test]
+fn authored_start_function_in_config_uses_the_ordinary_rejection() {
+    // Config is compile-time-only, so an authored function is rejected like any other. The
+    // rejection must not depend on the declaration's spelling.
+    let mut string_table = StringTable::new();
+    let _path_fork = PathInternerFork::empty();
+    let surface = BuilderSurface::with_mandatory_core();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+
+    for function_name in ["start", "helper"] {
+        let source =
+            format!("{function_name} || -> I32:\n    return 1\n;\n\nentry_root = \"src\"\n");
+        let failure = compile_config_source(
+            ConfigCompilationRequest {
+                authored_path: Path::new("project/config.moth"),
+                file_id: SourceId::COMPILATION_ROOT,
+                source_code: &source,
+                style_directives: &style_directives,
+                binding_packages: &surface.binding_packages,
+                build_config_inputs:
+                    &crate::compiler_frontend::build_config::BuildConfigInputSet::new(),
+                builder_config_globals:
+                    &crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new(),
+                project_field_config_policies: surface
+                    .config_schemas
+                    .project()
+                    .project_field_config_policies(),
+            },
+            &mut string_table,
+        )
+        .result
+        .err()
+        .expect("config rejects authored functions");
+
+        let result = config_failure_boundary(failure);
+        let errors: Vec<_> = config_failure_reports(&result)
+            .iter_severity(DiagnosticSeverity::Error)
+            .map(|(_, view)| (view.descriptor().code, view.reason_key()))
+            .collect();
+        assert_eq!(
+            errors,
+            vec![(
+                "MOTH-CONFIG-0001",
+                Some("invalid_config.function_unsupported")
+            )],
+            "function named {function_name}"
+        );
+    }
+}
+
+#[test]
 fn rejects_implicit_sibling_field_reference_inside_a_grouped_project_record() {
     // Record fields resolve through the enclosing constant scope only: a sibling field name
     // is not a constant, so reusing it must be rejected instead of resolving implicitly.

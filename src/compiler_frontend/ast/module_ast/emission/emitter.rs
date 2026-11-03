@@ -3,7 +3,7 @@
 //! WHAT: iterates sorted headers with full context (resolved signatures, receiver catalog,
 //! per-file visibility) and lowers each header into typed AST nodes.
 //! WHY: emission is the only AST phase that parses executable bodies (function bodies, template
-//! bodies, start body). Earlier phases consume header shells without body parsing.
+//! bodies, entry body). Earlier phases consume header shells without body parsing.
 //! Top-level declaration shell reparsing does NOT happen here — shells were fully parsed
 //! by the header stage and resolved by environment construction.
 //!
@@ -72,7 +72,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::SourceTokens;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
-use crate::projects::settings::{self, IMPLICIT_START_FUNC_NAME};
+use crate::projects::settings;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -1386,7 +1386,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .canonical_owner_for_header(&header)
             .map_err(|error| self.error_messages(error, string_table))?;
         let start_scope = context.scope;
-        let start_src_path = header.declaration_path;
         let mut body_cursor = match header.token_sequence {
             Some(sequence) => AstCursor::from_source_sequence(&start_source, sequence),
             None => AstCursor::from_source_tokens(&start_source, header.tokens),
@@ -1410,22 +1409,16 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         self.warnings.append(body_warnings);
 
         let body = body_result
-            .and_then(|parsed| parsed.expect_complete_nodes("the implicit start function body"))
+            .and_then(|parsed| parsed.expect_complete_nodes("the compiler-owned entry body"))
             .map_err(|error| self.expression_error_messages(error, string_table))?;
 
         // --------------------------
-        // Emit the module-owned start without changing root selection or activation.
-        let full_name = self
-            .path_fork
-            .try_intern_child(
-                start_src_path,
-                string_table.intern(IMPLICIT_START_FUNC_NAME),
-            )
-            .ok_or_else(token_lexical::logical_path_capacity)?;
-
+        //  Emit the compiler-owned entry without changing root selection or activation.
+        //  The entry is a typed node, not a named declaration, so it never enters the
+        //  declaration table, exports or dependency binding.
         self.ast.push(AstNode {
-            kind: NodeKind::Function(full_name, start_signature, body),
-            // The implicit start function has no authored declaration span.
+            kind: NodeKind::EntryStart(start_signature, body),
+            // The implicit entry has no authored declaration span.
             span: None,
             scope: start_scope,
         });

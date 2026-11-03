@@ -35,7 +35,7 @@ Split an expression or map its errors explicitly when its sources need different
 handling. @./#catch-and-recovery (Catch and recovery) owns placement, boundary
 and explicit-propagation conflict rules.
 
-The implicit `start` uses the built-in `Error!` rule and its generated caller
+The implicit entry uses the built-in `Error!` rule and its generated caller
 reports an unsuccessful entry invocation. HTML publishes that invocation's
 runtime fragments only after success. Static HTML stays after failure. Release
 uses a generic safe notice, not the application error message as HTML.

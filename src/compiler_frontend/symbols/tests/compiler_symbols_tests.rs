@@ -8,16 +8,7 @@
 use crate::compiler_frontend::symbols::compiler_symbols::CompilerSymbolSet;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-const COMPILER_SYMBOLS: [&str; 8] = [
-    "start",
-    "this",
-    "Error",
-    "message",
-    "code",
-    ";",
-    "]",
-    "<unknown>",
-];
+const COMPILER_SYMBOLS: [&str; 7] = ["this", "Error", "message", "code", ";", "]", "<unknown>"];
 
 fn preseeded_table() -> StringTable {
     CompilerSymbolSet::preseeded_table(0)

@@ -32,7 +32,7 @@ The facade:
 - cannot expose a semantic fact that depends on project-private context
 - rejects top-level runtime work and page fragments
 - cannot declare root-only `$page` metadata
-- has no implicit `start`
+- has no implicit entry
 - emits no route or HTML artefact
 
 Support roots and the project package facade reject top-level runtime work and

@@ -20,6 +20,7 @@ use crate::compiler_frontend::analysis::borrow_checker::{
     BorrowCheckError, BorrowCheckReport, check_borrows as run_borrow_checker,
 };
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
+use crate::compiler_frontend::ast::ast_nodes::AstFunctionIdentity;
 use crate::compiler_frontend::ast::{
     Ast, AstBuildContext, AstBuildInput, AstBuildResult, FileValueResolutionServices,
     Stage0ResolutionFacts,
@@ -653,19 +654,32 @@ impl<'a> CompilerFrontend<'a> {
             frozen_identity_handle,
             prior_diagnostics,
         )?;
-        for (function_path, provenance) in static_if_function_provenance {
-            let Some(function_id) = result.hir_module.functions.iter().find_map(|function| {
-                (result.hir_module.side_table.function_name_path(function.id)
-                    == Some(function_path))
-                .then_some(function.id)
-            }) else {
-                return Err(PreparedFailure::from(InfrastructureFailure::internal(
-                    CompilerStage::HirConstruction,
-                    format!(
-                        "Static configuration provenance has no lowered HIR function for path {:?}",
-                        function_path
-                    ),
-                )));
+        for (identity, provenance) in static_if_function_provenance {
+            let function_id = match identity {
+                AstFunctionIdentity::Authored(function_path) => {
+                    let Some(function_id) =
+                        result.hir_module.functions.iter().find_map(|function| {
+                            (result.hir_module.side_table.function_name_path(function.id)
+                                == Some(function_path))
+                            .then_some(function.id)
+                        })
+                    else {
+                        return Err(PreparedFailure::from(InfrastructureFailure::internal(
+                            CompilerStage::HirConstruction,
+                            format!(
+                                "Static configuration provenance has no lowered HIR function for path {:?}",
+                                function_path
+                            ),
+                        )));
+                    };
+                    function_id
+                }
+                AstFunctionIdentity::Entry => result.hir_module.start_function.ok_or_else(|| {
+                    PreparedFailure::from(InfrastructureFailure::internal(
+                        CompilerStage::HirConstruction,
+                        "Static configuration provenance belongs to an entry body that HIR did not lower",
+                    ))
+                })?,
             };
             let Some(existing_provenance) =
                 result.hir_module.function_provenance.get_mut(&function_id)

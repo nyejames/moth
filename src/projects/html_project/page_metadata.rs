@@ -14,7 +14,6 @@ use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, owned_folded_string_from_const_string,
 };
 use crate::compiler_frontend::hir::constants::HirConstValue;
-use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
@@ -89,17 +88,12 @@ impl From<InfrastructureFailure> for PageMetadataError {
 
 pub(crate) fn extract_html_page_metadata(
     hir_module: &HirModule,
-    start_function: FunctionId,
     path_table: &PathTable,
     resources: &ModuleResourceTable,
     string_table: &mut DiagnosticStringBuilder,
 ) -> Result<HtmlPageMetadataPlan, PageMetadataError> {
-    let entry_scope = hir_module
-        .side_table
-        .function_name_path(start_function)
-        .and_then(|path| path_table.parent(path));
-
-    let entry_scope_prefix = entry_scope
+    let entry_scope_prefix = hir_module
+        .start_source_file
         .map(|path| path_table.render_portable(path, string_table.strings(), &mut Vec::new()));
     let mut metadata = HtmlPageMetadata::default();
     let mut resource_uses = Vec::new();

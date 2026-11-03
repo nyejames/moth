@@ -27,7 +27,7 @@ fn deep_static_specialisation_uses_one_mib_stack() {
                 resolver,
                 inactive_generic_requests: Vec::new(),
                 selection_count: 0,
-                current_function_path: None,
+                current_function: None,
                 function_provenance: FxHashMap::default(),
                 expression_pending: Vec::new(),
                 expression_results: Vec::new(),

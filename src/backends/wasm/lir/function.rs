@@ -25,7 +25,7 @@ pub(crate) struct WasmLirFunction {
 pub(crate) enum WasmLirFunctionOrigin {
     /// User-defined function.
     Normal,
-    /// Entry-file implicit start function.
+    /// Compiler-owned entry function.
     EntryStart,
     /// Synthetic wrapper created by export policy.
     ExportWrapper,

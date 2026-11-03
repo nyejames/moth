@@ -95,8 +95,8 @@ fn prefixed_receiver_calls_keep_nested_named_arguments_out_of_write_dispatch() {
         point ~= Point()\n\
         ~point.update(amount = combine(left = 1, right = 2))\n\
         ~point.x = 3\n";
-    let (ast, paths, strings) = parse_single_file_ast(source);
-    let body = start_function_body(&ast, &paths, &strings);
+    let (ast, _, _) = parse_single_file_ast(source);
+    let body = start_function_body(&ast);
     assert!(matches!(body[1].kind, NodeKind::ExpressionStatement(_)));
     assert!(matches!(body[2].kind, NodeKind::Assignment { .. }));
 }
@@ -107,10 +107,9 @@ fn prefixed_receiver_calls_keep_nested_named_arguments_out_of_write_dispatch() {
 
 #[test]
 fn parses_mutable_and_explicitly_typed_declarations() {
-    let (ast, path_fork, string_table) =
-        parse_single_file_ast("count ~= 1\nname String = \"Ada\"\n");
+    let (ast, _, _) = parse_single_file_ast("count ~= 1\nname String = \"Ada\"\n");
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::VariableDeclaration(count_decl) = &body[0].kind else {
         panic!("expected mutable declaration");
@@ -140,10 +139,10 @@ fn parses_mutable_and_explicitly_typed_declarations() {
 
 #[test]
 fn resolves_named_type_annotations_against_prior_structs() {
-    let (ast, path_fork, string_table) =
+    let (ast, _, _) =
         parse_single_file_ast("Point = |\n    x I32,\n|\n\norigin Point = Point(0)\n");
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::VariableDeclaration(origin_decl) = &body[0].kind else {
         panic!("expected typed declaration");
@@ -552,12 +551,12 @@ fn body_local_prelude_collisions_retain_authored_name_span() {
 
 #[test]
 fn body_local_prelude_lookup_preserves_namespace_and_function_calls() {
-    let (result, paths, strings) = parse_single_file_ast_build_result_with_registry(
+    let (result, _, _) = parse_single_file_ast_build_result_with_registry(
         "message = \"hello\"\nio.print(message)\nprelude_print(message)\n",
         body_prelude_registry(),
     )
     .expect("ordinary locals and original prelude calls must remain valid");
-    let body = start_function_body(&result.ast, &paths, &strings);
+    let body = start_function_body(&result.ast);
     assert!(matches!(body[0].kind, NodeKind::VariableDeclaration(_)));
     for statement in &body[1..] {
         let NodeKind::ExpressionStatement(expression) = statement.kind else {
@@ -798,8 +797,8 @@ fn assert_declaration_type_mismatch(source: &str) {
 
 #[test]
 fn shorthand_fixed_collection_declaration_infers_element_type() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("items {2} = {1, 2}\n");
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let (ast, _, string_table) = parse_single_file_ast("items {2} = {1, 2}\n");
+    let body = start_function_body(&ast);
 
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
         panic!("expected declaration");
@@ -818,13 +817,13 @@ fn shorthand_fixed_collection_declaration_infers_element_type() {
 
 #[test]
 fn fixed_collection_alias_literal_is_accepted() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, string_table) = parse_single_file_ast(
         r#"
     Names as {2 String}
     names Names = {"Priya"}
     "#,
     );
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
         panic!("expected declaration");
@@ -843,8 +842,8 @@ fn fixed_collection_alias_literal_is_accepted() {
 
 #[test]
 fn nested_fixed_collection_literal_is_accepted() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("grid {2 {3 I32}} = {{1}, {2}}\n");
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let (ast, _, string_table) = parse_single_file_ast("grid {2 {3 I32}} = {{1}, {2}}\n");
+    let body = start_function_body(&ast);
 
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
         panic!("expected declaration");
@@ -863,7 +862,7 @@ fn nested_fixed_collection_literal_is_accepted() {
 
 #[test]
 fn immutable_fixed_collection_from_function_call_is_allowed() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, string_table) = parse_single_file_ast(
         r#"
     make || -> {2 I32}:
         return {1}
@@ -872,7 +871,7 @@ fn immutable_fixed_collection_from_function_call_is_allowed() {
     items {2 I32} = make()
     "#,
     );
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
         panic!("expected declaration");
@@ -891,7 +890,7 @@ fn immutable_fixed_collection_from_function_call_is_allowed() {
 
 #[test]
 fn generic_identity_preserves_fixed_collection_shape() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, string_table) = parse_single_file_ast(
         r#"
     identity type Item |value Item| -> Item:
         return value
@@ -901,7 +900,7 @@ fn generic_identity_preserves_fixed_collection_shape() {
     same = identity(items)
     "#,
     );
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::VariableDeclaration(decl) = &body[1].kind else {
         panic!("expected declaration");
@@ -933,8 +932,8 @@ buffer ~= Buffer()
 
 #[test]
 fn mutable_empty_fixed_collection_is_allowed() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("items ~{2 I32} = {}\n");
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let (ast, _, string_table) = parse_single_file_ast("items ~{2 I32} = {}\n");
+    let body = start_function_body(&ast);
 
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
         panic!("expected declaration");
@@ -953,8 +952,8 @@ fn mutable_empty_fixed_collection_is_allowed() {
 
 #[test]
 fn normal_collection_declaration() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("items {I32} = {1, 2}\n");
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let (ast, _, string_table) = parse_single_file_ast("items {I32} = {1, 2}\n");
+    let body = start_function_body(&ast);
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
         panic!("expected declaration");
     };

@@ -335,24 +335,15 @@ pub(crate) fn choice_type_id(
 /// Freeze the fixture's issuing expression domain while retaining its canonical types.
 pub(crate) fn build_ast_with_registered_types(
     nodes: Vec<AstNode>,
-    entry_path: PathId,
     builder: AstExpressionBuilder,
     const_values: ConstValueStore,
     type_environment: TypeEnvironment,
 ) -> Ast {
-    build_ast_with_choices(
-        nodes,
-        entry_path,
-        vec![],
-        builder,
-        const_values,
-        type_environment,
-    )
+    build_ast_with_choices(nodes, vec![], builder, const_values, type_environment)
 }
 
 pub(crate) fn build_ast_with_choices(
     mut nodes: Vec<AstNode>,
-    entry_path: PathId,
     choice_definitions: Vec<HirTestChoiceDefinition>,
     builder: AstExpressionBuilder,
     const_values: ConstValueStore,
@@ -446,7 +437,6 @@ pub(crate) fn build_ast_with_choices(
         const_values,
         expressions,
         doc_fragments: vec![],
-        entry_path,
         const_top_level_fragments: vec![],
         warnings: vec![],
         choice_definitions: choice_definitions

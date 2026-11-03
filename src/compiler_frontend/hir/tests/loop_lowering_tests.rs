@@ -37,7 +37,7 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId,
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, reference_expr_with_type_id, test_if_branch_metadata,
+    make_test_variable, node, reference_expr_with_type_id, test_if_branch_metadata,
 };
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     assert_no_placeholder_terminators, build_ast_with_registered_types, error_return_slot,
@@ -176,8 +176,6 @@ fn lower_range_loop_fixture(
 ) -> HirModule {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -197,20 +195,17 @@ fn lower_range_loop_fixture(
         location,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![range_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             TypeEnvironment::new(),
@@ -260,8 +255,6 @@ fn lower_collection_loop_with_step_fixture(
 ) -> HirModule {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -328,20 +321,17 @@ fn lower_collection_loop_with_step_fixture(
         }
     };
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns,
         },
         vec![collection_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             type_environment,
@@ -522,8 +512,6 @@ fn i32_literal(
 fn lowers_range_loop_with_new_syntax() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -560,20 +548,17 @@ fn lowers_range_loop_with_new_syntax() {
         location,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![range_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             TypeEnvironment::new(),
@@ -879,8 +864,6 @@ fn float_range_loops_keep_a_no_progress_guard_but_integer_ranges_do_not() {
 fn lowers_range_loop_without_user_bindings() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -913,20 +896,17 @@ fn lowers_range_loop_without_user_bindings() {
         location,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![range_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             TypeEnvironment::new(),
@@ -949,8 +929,6 @@ fn lowers_range_loop_without_user_bindings() {
 fn lowers_range_loop_with_index_binding() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -992,20 +970,17 @@ fn lowers_range_loop_with_index_binding() {
         location,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![range_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             TypeEnvironment::new(),
@@ -1070,8 +1045,6 @@ fn lowers_range_loop_with_index_binding() {
 fn preserves_runtime_zero_step_guard_for_dynamic_step() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -1127,20 +1100,17 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
         location,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![step_decl, range_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             TypeEnvironment::new(),
@@ -1178,8 +1148,6 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
 fn lowers_collection_loop_to_explicit_cfg() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -1206,20 +1174,17 @@ fn lowers_collection_loop_to_explicit_cfg() {
         location,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![collection_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             type_environment,
@@ -1824,8 +1789,6 @@ fn direct_break_in_stepped_collection_loop_discards_unreachable_candidate_blocks
 fn lowers_collection_loop_without_user_bindings() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -1849,20 +1812,17 @@ fn lowers_collection_loop_without_user_bindings() {
         location,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![collection_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             type_environment,
@@ -1897,8 +1857,6 @@ fn lowers_collection_loop_without_user_bindings() {
 fn lowers_collection_loop_item_binding_from_indexed_place() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -1925,20 +1883,17 @@ fn lowers_collection_loop_item_binding_from_indexed_place() {
         location,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![collection_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             type_environment,
@@ -1987,8 +1942,6 @@ fn lowers_collection_loop_item_binding_from_indexed_place() {
 fn lowers_collection_loop_optional_index_binding() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -2020,20 +1973,17 @@ fn lowers_collection_loop_optional_index_binding() {
         location,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![collection_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             type_environment,
@@ -2085,8 +2035,6 @@ fn lowers_collection_loop_optional_index_binding() {
 fn lowers_range_loop_user_bindings_as_immutable_locals() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let item_symbol = super::symbol("item", &mut path_fork, &mut string_table);
     let index_symbol = super::symbol("index", &mut path_fork, &mut string_table);
     let location = None;
@@ -2126,20 +2074,17 @@ fn lowers_range_loop_user_bindings_as_immutable_locals() {
         },
         location,
     );
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![range_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             TypeEnvironment::new(),
@@ -2162,8 +2107,6 @@ fn lowers_range_loop_user_bindings_as_immutable_locals() {
 fn lowers_collection_loop_user_bindings_as_immutable_locals() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -2195,20 +2138,17 @@ fn lowers_collection_loop_user_bindings_as_immutable_locals() {
         location,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![collection_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             type_environment,
@@ -2244,8 +2184,6 @@ fn lowers_collection_loop_user_bindings_as_immutable_locals() {
 fn break_targets_exit_block_in_collection_loop() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -2296,20 +2234,17 @@ fn break_targets_exit_block_in_collection_loop() {
         location,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![flag_decl, collection_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             type_environment,
@@ -2356,8 +2291,6 @@ fn break_targets_exit_block_in_collection_loop() {
 fn direct_break_in_collection_loop_does_not_leave_unreachable_step_block() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -2384,20 +2317,17 @@ fn direct_break_in_collection_loop_does_not_leave_unreachable_step_block() {
         location,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![collection_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             type_environment,
@@ -2415,8 +2345,6 @@ fn direct_break_in_collection_loop_does_not_leave_unreachable_step_block() {
 fn direct_break_in_range_loop_does_not_leave_unreachable_step_block() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -2453,20 +2381,17 @@ fn direct_break_in_range_loop_does_not_leave_unreachable_step_block() {
         location,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![range_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             TypeEnvironment::new(),
@@ -2484,8 +2409,6 @@ fn direct_break_in_range_loop_does_not_leave_unreachable_step_block() {
 fn continue_targets_step_block_in_collection_loop() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -2512,20 +2435,17 @@ fn continue_targets_step_block_in_collection_loop() {
         location,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![collection_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             type_environment,
@@ -2571,8 +2491,6 @@ fn nested_loop_targets_remain_correct() {
     let mut const_values = ConstValueStore::default();
     let mut type_environment = TypeEnvironment::new();
 
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let inner_item_symbol = super::symbol("inner_item", &mut path_fork, &mut string_table);
     let inner_loop = node(
         NodeKind::CollectionLoop {
@@ -2617,20 +2535,17 @@ fn nested_loop_targets_remain_correct() {
         location,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![outer_loop],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             type_environment,

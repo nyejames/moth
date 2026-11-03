@@ -14,7 +14,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
+use crate::compiler_frontend::ast::ast_nodes::{
+    AstFunctionIdentity, AstNode, Declaration, NodeKind,
+};
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionStore, ExpressionView,
     PlaceProjectionView,
@@ -307,7 +309,7 @@ fn pending_function_failure_facts_with_call_summaries(
 ///      Unknown callees remain conservative. Unrelated bodies and summary-insensitive call
 ///      chains never reopen their AST, while dormant handler validation retains its scope.
 pub(crate) struct AstBuiltinFailureSummaries {
-    functions: HashMap<PathId, PendingFunctionFailureFacts>,
+    functions: HashMap<AstFunctionIdentity, PendingFunctionFailureFacts>,
     active: HashSet<PathId>,
     known_functions: HashSet<PathId>,
 }
@@ -322,28 +324,42 @@ impl AstBuiltinFailureSummaries {
         let mut bodies = HashMap::new();
         for nodes in node_groups {
             for node in *nodes {
-                if let NodeKind::Function(path, _, body) = &node.kind {
-                    bodies.insert(*path, body.as_slice());
-                }
+                let (identity, body) = match &node.kind {
+                    NodeKind::Function(path, _, body) => {
+                        (AstFunctionIdentity::Authored(*path), body)
+                    }
+                    NodeKind::EntryStart(_, body) => (AstFunctionIdentity::Entry, body),
+                    _ => continue,
+                };
+                bodies.insert(identity, body.as_slice());
             }
         }
-        let known_functions: HashSet<_> = bodies.keys().copied().collect();
+        // Only authored declarations can be call targets; the entry body has no call surface.
+        let known_functions: HashSet<PathId> = bodies
+            .keys()
+            .filter_map(|identity| match identity {
+                AstFunctionIdentity::Authored(path) => Some(*path),
+                AstFunctionIdentity::Entry => None,
+            })
+            .collect();
         let mut functions = HashMap::with_capacity(bodies.len());
         let mut active = HashSet::new();
         let mut activation_queue = Vec::new();
-        let mut activation_dependants: HashMap<PathId, HashSet<PathId>> = HashMap::new();
-        let mut classification_dependants: HashMap<PathId, HashSet<PathId>> = HashMap::new();
-        let mut dirty = known_functions.clone();
+        let mut activation_dependants: HashMap<PathId, HashSet<AstFunctionIdentity>> =
+            HashMap::new();
+        let mut classification_dependants: HashMap<PathId, HashSet<AstFunctionIdentity>> =
+            HashMap::new();
+        let mut dirty: HashSet<AstFunctionIdentity> = bodies.keys().copied().collect();
 
         while !dirty.is_empty() {
             // A wave observes all stable activations from the previous wave, not one callee
             // at a time. Within each body the traversal retains authored witness order.
             let mut batch: Vec<_> = dirty.drain().collect();
             batch.sort_unstable();
-            for path in batch {
+            for identity in batch {
                 let dependencies = RefCell::new(HashSet::new());
                 let facts = pending_function_failure_facts_with_call_summaries(
-                    bodies[&path],
+                    bodies[&identity],
                     template_ir_store,
                     &active,
                     &known_functions,
@@ -354,7 +370,7 @@ impl AstBuiltinFailureSummaries {
                     classification_dependants
                         .entry(dependency)
                         .or_default()
-                        .insert(path);
+                        .insert(identity);
                 }
                 for contributor in &facts.body.implicit {
                     if let ImplicitFailureSource::PrivateCall(callee) = contributor.source
@@ -364,10 +380,15 @@ impl AstBuiltinFailureSummaries {
                         activation_dependants
                             .entry(callee)
                             .or_default()
-                            .insert(path);
+                            .insert(identity);
                     }
                 }
-                if !active.contains(&path)
+                let self_path = match identity {
+                    AstFunctionIdentity::Authored(path) => Some(path),
+                    AstFunctionIdentity::Entry => None,
+                };
+                if let Some(path) = self_path
+                    && !active.contains(&path)
                     && facts.body.implicit.iter().any(|contributor| {
                         Self::source_is_active(contributor, &active, &known_functions)
                     })
@@ -375,7 +396,7 @@ impl AstBuiltinFailureSummaries {
                     active.insert(path);
                     activation_queue.push(path);
                 }
-                functions.insert(path, facts);
+                functions.insert(identity, facts);
             }
 
             // Escaping calls need only their retained contributors. Draining this closure
@@ -386,8 +407,11 @@ impl AstBuiltinFailureSummaries {
                 }
                 if let Some(dependants) = activation_dependants.remove(&callee) {
                     for dependant in dependants {
-                        if active.insert(dependant) {
-                            activation_queue.push(dependant);
+                        let AstFunctionIdentity::Authored(path) = dependant else {
+                            continue;
+                        };
+                        if active.insert(path) {
+                            activation_queue.push(path);
                         }
                     }
                 }
@@ -400,8 +424,11 @@ impl AstBuiltinFailureSummaries {
         })
     }
 
-    pub(crate) fn function_facts(&self, path: PathId) -> Option<&PendingFunctionFailureFacts> {
-        self.functions.get(&path)
+    pub(crate) fn function_facts(
+        &self,
+        identity: AstFunctionIdentity,
+    ) -> Option<&PendingFunctionFailureFacts> {
+        self.functions.get(&identity)
     }
 
     pub(crate) fn is_active(&self, contributor: &ImplicitFailureContributor) -> bool {
@@ -485,7 +512,9 @@ impl AstBuiltinFailureSummaries {
                         break;
                     }
                     ImplicitFailureSource::PrivateCall(callee) => {
-                        let Some(facts) = self.functions.get(&callee) else {
+                        let Some(facts) =
+                            self.functions.get(&AstFunctionIdentity::Authored(callee))
+                        else {
                             hops.push(contributor.span);
                             break;
                         };
@@ -1736,7 +1765,7 @@ fn classify_nodes(
                 }
                 effect
             }
-            NodeKind::Function(_, _, _) => None,
+            NodeKind::Function(_, _, _) | NodeKind::EntryStart(_, _) => None,
             NodeKind::StructDefinition(_, fields) => {
                 classify_declarations(fields, template_ir_store, state)?
             }

@@ -177,7 +177,7 @@ when implementing this abbreviated target-flow outline.
 See `docs/build-system-design.md` "HTML project builder", "Mixed-target planning and validation", "Physical variants" and "Runtime and memory" for the full contracts.
 
 Retain:
-- JavaScript-owned `start` (the implicit `start` is lowered to JS, not Wasm)
+- JavaScript-owned entry (the compiler-owned entry is lowered to JS, not Wasm)
 - backwards propagation of JavaScript requirements (DOM, browser, project JS force JS ownership, requirements propagate to transitive callers)
 - no Wasm-to-JavaScript Moth call after propagation
 - JavaScript-to-Wasm wrappers (JS-owned functions may call Wasm-owned functions through generated wrappers)
@@ -262,7 +262,7 @@ Context: replace whole-module JS or Wasm mode with function-level partitioning.
 See `docs/build-system-design.md` "Mixed-target planning and validation" for partition rules.
 
 - Compute target affinity from semantic package and capability metadata.
-- Apply partition rules: `start` is JavaScript-owned, DOM and browser JS force JavaScript, JS requirements propagate backwards, no Wasm-to-JS Moth call after propagation, JS-to-Wasm wrappers, remaining functions default to Wasm.
+- Apply partition rules: the compiler-owned entry is JavaScript-owned, DOM and browser JS force JavaScript, JS requirements propagate backwards, no Wasm-to-JS Moth call after propagation, JS-to-Wasm wrappers, remaining functions default to Wasm.
 - Every decision records an explicit reason.
 - Partitioning is entry-specific and independent of development or release mode. Exact semantic numeric identities never change with partitioning.
 - Run compiler target validation against the completed deterministic partition.
@@ -283,7 +283,7 @@ Context: JS backend needs a partition-selected emission mode, not all-functions 
 - Emit required runtime helpers only for selected functions.
 - Render compile-time fragments into the document.
 - Emit runtime fragment slots.
-- Invoke active `start` once through the selected runtime path.
+- Invoke the active entry once through the selected runtime path.
 - Hydrate runtime fragments in source order.
 - Generate JavaScript companion facades for entry physical variants.
 
@@ -474,7 +474,7 @@ Context: documentation, tests and progress matrix must reflect the final backend
 
 Cover:
 
-- JavaScript-owned `start` lowering
+- JavaScript-owned entry lowering
 - backwards propagation of JavaScript requirements
 - no Wasm-to-JavaScript Moth call after propagation
 - JavaScript-to-Wasm wrappers
@@ -533,7 +533,7 @@ Before marking this plan complete, verify:
 
 - the backend consumes `ProjectCompilation`, not `Vec<Module>`
 - function-level partitioning replaces whole-module JS or Wasm mode
-- `start` is JavaScript-owned with backwards propagation
+- the compiler-owned entry is JavaScript-owned with backwards propagation
 - no Wasm-to-JavaScript Moth call exists after propagation
 - Wasm LIR is structured, not flat basic-block with dispatcher loops
 - Wasm target validation and optional names follow final emitted indices;

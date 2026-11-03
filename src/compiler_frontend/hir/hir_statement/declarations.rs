@@ -42,7 +42,6 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
 impl<'a> HirBuilder<'a> {
     // WHAT: pre-registers all structs and functions before any HIR body lowering starts.
@@ -70,12 +69,18 @@ impl<'a> HirBuilder<'a> {
         }
 
         for node in &ast.nodes {
-            if let NodeKind::Function(name, signature, _) = &node.kind {
-                self.register_function_declaration(name, signature, &node.span)?;
+            match &node.kind {
+                NodeKind::Function(name, signature, _) => {
+                    self.register_function_declaration(name, signature, &node.span)?;
+                }
+                NodeKind::EntryStart(signature, _) => {
+                    self.register_entry_function(signature, node.scope, &node.span)?;
+                }
+                _ => {}
             }
         }
 
-        self.resolve_start_function(ast)
+        self.validate_entry_presence(ast)
     }
 
     // WHAT: lowers the AST module-constant pool into HIR's dedicated constant metadata arena.
@@ -620,6 +625,44 @@ impl<'a> HirBuilder<'a> {
             .into());
         }
 
+        let function_id = self.allocate_function(signature, span)?;
+
+        self.functions_by_name.insert(*name, function_id);
+        self.side_table.bind_function_name(function_id, *name);
+        Ok(())
+    }
+
+    /// Register the module's compiler-owned entry body as one ordinary HIR function.
+    ///
+    /// WHAT: allocates the entry's single `FunctionId` before any body lowering and stores it on
+    ///       the module alongside the root file that owns the body. The entry gains no name-table
+    ///       entry and no callable path.
+    /// WHY: later stages identify the entry by HIR identity and `EntryStart` origin alone.
+    fn register_entry_function(
+        &mut self,
+        signature: &FunctionSignature,
+        source_file: PathId,
+        span: &Option<SourceSpan>,
+    ) -> Result<(), HirConstructionFailure> {
+        if self.module.start_function.is_some() {
+            return Err(InfrastructureFailure::hir_transformation(
+                "HIR invariant: the module carries more than one implicit entry body during HIR lowering",
+            )
+            .into());
+        }
+
+        let function_id = self.allocate_function(signature, span)?;
+        self.module.start_function = Some(function_id);
+        self.module.start_source_file = Some(source_file);
+        Ok(())
+    }
+
+    /// Allocate one HIR function shell from its validated signature.
+    fn allocate_function(
+        &mut self,
+        signature: &FunctionSignature,
+        span: &Option<SourceSpan>,
+    ) -> Result<crate::compiler_frontend::hir::ids::FunctionId, HirConstructionFailure> {
         let function_id = self.allocate_function_id();
 
         let success_return_slot_count = signature.success_return_slot_count();
@@ -685,8 +728,6 @@ impl<'a> HirBuilder<'a> {
             error_return: error_return_type_id,
         };
 
-        self.functions_by_name.insert(*name, function_id);
-        self.side_table.bind_function_name(function_id, *name);
         self.side_table.map_function(*span, &function);
         self.push_function(function);
 
@@ -694,36 +735,26 @@ impl<'a> HirBuilder<'a> {
             .function_provenance
             .insert(function_id, SyntheticInterfaceProvenance::empty());
 
-        Ok(())
+        Ok(function_id)
     }
 
-    fn resolve_start_function(&mut self, ast: &Ast) -> Result<(), HirConstructionFailure> {
-        if !ast.root_role.has_implicit_start() {
-            self.module.start_function = None;
-            return Ok(());
+    /// Reject a missing or misplaced entry body for this module role.
+    ///
+    /// WHAT: normal roots require exactly one entry; support roots and the package facade allow none.
+    /// WHY: the entry body is module-owned structure, so a mismatch is a compiler invariant failure
+    ///      rather than a user error.
+    fn validate_entry_presence(&mut self, ast: &Ast) -> Result<(), HirConstructionFailure> {
+        match (ast.root_role.has_implicit_start(), self.module.start_function) {
+            (true, Some(_)) | (false, None) => Ok(()),
+            (true, None) => Err(InfrastructureFailure::hir_transformation(
+                "HIR invariant: a normal module root reached HIR lowering without its implicit entry body",
+            )
+            .into()),
+            (false, Some(_)) => Err(InfrastructureFailure::hir_transformation(
+                "HIR invariant: a module without an implicit entry reached HIR lowering with an entry body",
+            )
+            .into()),
         }
-
-        let start_component = self.string_table.intern(IMPLICIT_START_FUNC_NAME);
-        let start_name = self
-            .functions_by_name
-            .keys()
-            .find(|path| {
-                self.path_fork.try_parent(**path) == Some(ast.entry_path)
-                    && self.path_fork.try_component(**path) == Some(start_component)
-            })
-            .copied();
-
-        let Some(start_name) = start_name else {
-            return Err(InfrastructureFailure::hir_transformation(format!(
-                "HIR invariant: failed to resolve module start function '{}' during HIR lowering",
-                IMPLICIT_START_FUNC_NAME
-            ))
-            .into());
-        };
-
-        let start_function = self.functions_by_name[&start_name];
-        self.module.start_function = Some(start_function);
-        Ok(())
     }
     pub(super) fn lower_parameter_locals(
         &mut self,

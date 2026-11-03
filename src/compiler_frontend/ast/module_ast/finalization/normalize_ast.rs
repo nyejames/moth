@@ -451,7 +451,9 @@ fn normalize_ast_node_templates(
             normalize_expression_templates(value, context)
         }
 
-        NodeKind::Function(_, _, body) => normalize_nodes(body, context),
+        NodeKind::Function(_, _, body) | NodeKind::EntryStart(_, body) => {
+            normalize_nodes(body, context)
+        }
 
         NodeKind::Return(values) => normalize_expressions(values, context),
 
@@ -812,6 +814,7 @@ fn discard_statement_assertions(
     };
     match &mut node.kind {
         NodeKind::Function(_, _, body)
+        | NodeKind::EntryStart(_, body)
         | NodeKind::LexicalScope { body }
         | NodeKind::RangeLoop { body, .. }
         | NodeKind::CollectionLoop { body, .. }

@@ -1024,10 +1024,10 @@ fn selected_statement_branch_keeps_its_immediate_scope_before_nested_control_flo
         .nodes
         .iter()
         .find_map(|node| match &node.kind {
-            NodeKind::Function(_, _, body) => Some(body),
+            NodeKind::EntryStart(_, body) => Some(body),
             _ => None,
         })
-        .expect("entry function should exist");
+        .expect("entry start should exist");
     let selected = &body[1];
     let NodeKind::LexicalScope {
         body: selected_body,
@@ -1070,20 +1070,14 @@ fn synthetic_start_keeps_ast_builtin_error_slot_before_hir_narrowing() {
         let mut project = failure_project(source);
         let ast = project.ast();
         let error_type = builtin_error_type_id(&project, &ast);
-        let signature =
-            ast.nodes
-                .iter()
-                .find_map(|node| match &node.kind {
-                    NodeKind::Function(path, signature, _)
-                        if project.frontend.path_fork.component(*path).is_some_and(
-                            |component| project.frontend.string_table.resolve(component) == "start",
-                        ) =>
-                    {
-                        Some(signature)
-                    }
-                    _ => None,
-                })
-                .expect("executable root must synthesize start");
+        let signature = ast
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                NodeKind::EntryStart(signature, _) => Some(signature),
+                _ => None,
+            })
+            .expect("executable root must synthesize the entry start");
 
         assert_eq!(signature.error_return_type_id(), Some(error_type));
         assert_eq!(signature.success_return_type_ids().len(), 1);

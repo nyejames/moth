@@ -1,0 +1,5 @@
+start || -> String:
+    return "authored"
+;
+
+io.line([: [start()]])

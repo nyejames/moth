@@ -28,7 +28,6 @@ use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
 /// Collect all order-independent top-level symbol metadata from parsed (unsorted) headers.
 ///
@@ -59,9 +58,7 @@ pub(super) fn build_module_symbols(
             .insert(file_output.file_id, file_output.source_file);
 
         for header in &file_output.headers {
-            if let Some(mut diagnostic) =
-                validate_declared_name(header, file_output.file_role, string_table, path_fork)
-            {
+            if let Some(mut diagnostic) = validate_declared_name(header, string_table, path_fork) {
                 capture(file_output.file_id, &mut diagnostic)
                     .map_err(|error| HeaderPreparationFailure::Infrastructure(error.into()))?;
                 diagnostic_bag.push(diagnostic);
@@ -123,7 +120,6 @@ pub(super) fn build_module_symbols(
 
 fn validate_declared_name(
     header: &Header,
-    file_role: FileRole,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
 ) -> Option<DiagnosticDraft> {
@@ -156,17 +152,6 @@ fn validate_declared_name(
         return Some(names_declarations::reserved_name_collision(
             symbol_name,
             ReservedNameOwner::CoreTrait,
-            header.name_span,
-        ));
-    }
-
-    if file_role == FileRole::ActiveModuleRoot
-        && !matches!(&header.kind, HeaderKind::StartFunction)
-        && symbol_name_text == IMPLICIT_START_FUNC_NAME
-    {
-        return Some(names_declarations::reserved_name_collision(
-            symbol_name,
-            ReservedNameOwner::ImplicitStart,
             header.name_span,
         ));
     }

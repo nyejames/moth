@@ -22,10 +22,9 @@ use crate::compiler_frontend::source::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::{function_node, node, symbol};
+use crate::compiler_frontend::tests::ast_fixture_support::{entry_start_node, node};
 use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 fn test_span(start: u32) -> SourceSpan {
@@ -38,10 +37,6 @@ fn test_span(start: u32) -> SourceSpan {
 fn lower_hir_capacity_failure_keeps_error_without_warnings_and_captured_site() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let entry_path = symbol("@page.moth", &mut path_fork, &mut string_table);
-    let start_name = path_fork
-        .try_intern_child(entry_path, string_table.intern(IMPLICIT_START_FUNC_NAME))
-        .expect("test start path fits");
     let authored_span = test_span(10);
     let ast_warning_span = test_span(20);
     let preparation_warning_span = test_span(30);
@@ -58,8 +53,7 @@ fn lower_hir_capacity_failure_keeps_error_without_warnings_and_captured_site() {
         )
         .expect("fixture literal fits store");
     let mut ast = build_ast_with_registered_types(
-        vec![function_node(
-            start_name,
+        vec![entry_start_node(
             FunctionSignature {
                 parameters: vec![],
                 returns: vec![],
@@ -68,9 +62,7 @@ fn lower_hir_capacity_failure_keeps_error_without_warnings_and_captured_site() {
                 NodeKind::ExpressionStatement(literal.id()),
                 Some(authored_span),
             )],
-            Some(authored_span),
         )],
-        entry_path,
         expressions,
         constants,
         Default::default(),
@@ -97,7 +89,9 @@ fn lower_hir_capacity_failure_keeps_error_without_warnings_and_captured_site() {
     builder.set_frozen_identity_handle(Some(frozen_identity.clone()));
     builder.set_prior_diagnostics(Some(&mut warnings));
     builder.set_expression_store_test_limits(HirExpressionStoreTestLimits {
-        rows: 0,
+        // The entry's fragment accumulator is appended before the authored literal, so admit
+        // that compiler-owned row and fail on the authored expression with its own span.
+        rows: 1,
         ..Default::default()
     });
     let failure = match builder.build_hir_module(ast, &ExternalPackageRegistry::new()) {

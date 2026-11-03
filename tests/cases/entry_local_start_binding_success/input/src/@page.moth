@@ -1,0 +1,7 @@
+helper || -> I32:
+    start = 41
+    return start + 1
+;
+
+start = 42
+io.line([: [helper()], [start]])

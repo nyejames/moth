@@ -595,7 +595,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .unwrap_or_default();
 
         for symbol_path in symbol_paths {
-            // Skip compiler-owned synthetic declarations (e.g. implicit start function).
+            // Skip compiler-owned synthetic declarations (e.g. compiler-owned entry).
             if !self
                 .module_symbols
                 .dependency_bindable_source_symbol_paths

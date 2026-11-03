@@ -1,0 +1,9 @@
+start || -> I32:
+    return 1
+;
+
+start || -> I32:
+    return 2
+;
+
+io.line([: [start()]])

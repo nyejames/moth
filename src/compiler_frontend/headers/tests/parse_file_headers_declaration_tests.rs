@@ -585,7 +585,7 @@ fn loop_binding_symbols_remain_in_start_function_body() {
     assert_eq!(
         headers.headers.len(),
         1,
-        "loop-only top-level files should emit only the implicit start header"
+        "loop-only top-level files should emit only the entry header"
     );
     assert!(matches!(headers.headers[0].kind, HeaderKind::StartFunction));
 
@@ -594,11 +594,11 @@ fn loop_binding_symbols_remain_in_start_function_body() {
 
     assert!(
         start_symbols.iter().any(|symbol| symbol == "item"),
-        "loop item binding should stay in the implicit start body token stream"
+        "loop item binding should stay in the entry body token stream"
     );
     assert!(
         start_symbols.iter().any(|symbol| symbol == "index"),
-        "loop index binding should stay in the implicit start body token stream"
+        "loop index binding should stay in the entry body token stream"
     );
     assert!(
         cursor_has_tag(header_body_tokens(&headers, start_header), TokenTag::LOOP),
@@ -631,7 +631,7 @@ fn top_level_expression_symbols_stay_in_implicit_start_body() {
 
     assert!(
         start_symbols.iter().any(|symbol| symbol == "basic"),
-        "imported symbol usage in expression/template position should stay in start body"
+        "imported symbol usage in expression/template position should stay in entry body"
     );
     assert!(
         start_symbols.iter().any(|symbol| symbol == "item")
@@ -674,7 +674,7 @@ fn compile_time_declarations_parse_as_headers_without_elevating_body_symbols() {
     assert_eq!(
         headers.headers.len(),
         2,
-        "expected one compile-time constant header plus the implicit start header"
+        "expected one compile-time constant header plus the entry header"
     );
     assert!(
         headers
@@ -689,7 +689,7 @@ fn compile_time_declarations_parse_as_headers_without_elevating_body_symbols() {
 
     assert!(
         start_symbols.iter().any(|symbol| symbol == "theme"),
-        "same-name symbol uses later in top-level expressions should stay in start body"
+        "same-name symbol uses later in top-level expressions should stay in entry body"
     );
     assert!(
         start_symbols.iter().any(|symbol| symbol == "item")

@@ -127,7 +127,7 @@ impl HirFunctionOriginLookup {
     ///
     /// WHAT: returns the stable origin for `path` and records that a lowered function consumed
     /// the seed. Returns `None` when no seed exists for the path (private functions and the
-    /// implicit start).
+    /// entry).
     /// WHY: tracking consumption lets the lowering boundary detect unused seeds without keeping a
     /// second parallel origin set.
     pub(crate) fn consume_origin_for(&mut self, path: &PathId) -> Option<HirStableFunctionOrigin> {

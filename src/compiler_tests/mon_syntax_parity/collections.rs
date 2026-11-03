@@ -2,7 +2,7 @@
 //!
 //! WHAT: covers scalar and record collections, nesting, typed map keys, and duplicate/schema
 //!       rejection boundaries.
-//! WHY: source map literals need their declared struct receiver in the start body, while MON
+//! WHY: source map literals need their declared struct receiver in the entry body, while MON
 //!      validates the same literal against the explicit root schema.
 
 use crate::compiler_frontend::instrumentation::lock_counter_test;

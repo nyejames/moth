@@ -3434,3 +3434,60 @@ fn io_console_functions_are_unsupported_in_wasm() {
         "error must not suggest that a host import lowering exists, got: {error_message}"
     );
 }
+
+#[test]
+fn nameless_entry_function_retains_a_debug_name() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, _types) = build_type_environment();
+    let mut expressions = HirExpressionStore::default();
+    expressions.freeze();
+
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![],
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
+    };
+    let block = HirBlock {
+        id: BlockId(0),
+        region: RegionId(0),
+        locals: vec![],
+        statements: vec![],
+        terminator: HirTerminator::Return(HirValueRange::empty()),
+    };
+    let entry_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        expressions,
+        vec![(function, entry_path, HirFunctionOrigin::EntryStart)],
+        vec![block],
+        FunctionId(0),
+    );
+
+    let lowered = lower_hir_to_wasm_lir(
+        &module,
+        &default_borrow_facts(),
+        &default_numeric_proofs(),
+        &WasmBackendRequest::default(),
+        &string_table,
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("a nameless entry should lower");
+
+    let entry = &lowered.lir_module.functions[0];
+    assert_eq!(entry.origin, WasmLirFunctionOrigin::EntryStart);
+    assert!(
+        !entry.debug_name.is_empty(),
+        "the nameless entry must retain a debug-only callable name"
+    );
+    assert!(
+        !entry.blocks.is_empty(),
+        "the nameless entry must lower an executable body"
+    );
+}

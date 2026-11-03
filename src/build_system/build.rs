@@ -952,7 +952,7 @@ pub(crate) struct LinkedModuleAssembly {
 
 /// Assemble the optional project package facade from its externally visible export surface.
 ///
-/// The facade has no implicit start. Exported concrete functions and receiver methods seed
+/// The facade has no implicit entry. Exported concrete functions and receiver methods seed
 /// reachability in their owning base modules; exported constants/defaults select descendant
 /// interfaces without making their dormant roots executable. Every generated module reached by
 /// those link facts remains paired with the sidecar module that owns its resource table.

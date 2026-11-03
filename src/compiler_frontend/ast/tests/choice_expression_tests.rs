@@ -34,7 +34,7 @@ fn resolves_choice_variant_expressions_with_choice_types() {
      next = make_status()\n",
     );
 
-    let start_body = start_function_body(&ast, &path_fork, &string_table);
+    let start_body = start_function_body(&ast);
     let current_declaration = start_body
         .iter()
         .find_map(|node| match &node.kind {

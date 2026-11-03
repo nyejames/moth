@@ -504,7 +504,7 @@ impl ScopeContext {
     /// WHAT: scans visible namespace records only after ordinary value lookup has failed.
     /// WHY: expression identifiers and place roots share this error path. A constant context
     ///      additionally recognises a runtime-root binding, whose name is absent from ordinary
-    ///      visibility because the implicit start body is not a module declaration.
+    ///      visibility because the compiler-owned entry body is not a module declaration.
     pub(crate) fn unknown_unqualified_value_name(
         &self,
         name: StringId,

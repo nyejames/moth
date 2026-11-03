@@ -560,7 +560,7 @@ impl ConstantResolutionSession {
         .with_template_const_loop_iteration_limit(module_view.template_const_loop_iteration_limit)
         // Keep full module declarations for path identity, but gate every file-local lookup
         // through the header-built visibility package so namespace bindings and aliases behave
-        // exactly like they do in function/start body contexts.
+        // exactly like they do in function/entry body contexts.
         .with_file_visibility(Arc::clone(file_visibility))
         .with_source_file_scope(source_file_scope)
         .with_declaring_file_id(header.tokens.source())

@@ -3,7 +3,7 @@
 //! WHAT: collects folded top-level const string fragments and extracts doc fragments from
 //! comment templates.
 //! WHY: builders consume ordered const fragments (with runtime insertion indices) and doc
-//! metadata; all runtime template handling moves into the entry start() function body via
+//! metadata; all runtime template handling moves into the compiler-owned entry body via
 //! PushStartRuntimeFragment nodes.
 
 use crate::compiler_frontend::ast::ast_nodes::AstNode;

@@ -3,7 +3,7 @@
 //! WHAT: verifies how HIR records entry and normal function origins.
 //! WHY: backends rely on stable function-origin metadata when deciding which functions to emit.
 //!
-//! HIR produces only two origins: EntryStart (for the entry-file implicit start) and Normal
+//! HIR produces only two origins: EntryStart (for the compiler-owned entry) and Normal
 //! (for all other functions).
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
@@ -22,8 +22,6 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-
-use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
 fn node(kind: NodeKind, span: Option<crate::compiler_frontend::source::SourceSpan>) -> AstNode {
     AstNode {
@@ -68,19 +66,21 @@ fn classifies_entry_start_and_normal_functions() {
     let mut string_table = StringTable::new();
 
     let entry_path = super::symbol("main.moth", &mut path_fork, &mut string_table);
-    let entry_start = path_fork
-        .try_intern_child(entry_path, string_table.intern(IMPLICIT_START_FUNC_NAME))
-        .expect("test path fits");
     let normal_fn = path_fork
         .try_intern_child(entry_path, string_table.intern("helper"))
         .expect("test path fits");
 
     let ast = build_ast_with_registered_types(
         vec![
-            function_node(entry_start, None),
+            super::entry_start_node(
+                FunctionSignature {
+                    parameters: vec![],
+                    returns: vec![],
+                },
+                vec![node(NodeKind::Return(vec![]), None)],
+            ),
             function_node(normal_fn, None),
         ],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -114,7 +114,7 @@ fn classifies_entry_start_and_normal_functions() {
     assert_eq!(module.function_origins.len(), module.functions.len());
     assert!(
         module.function_ids_by_origin.is_empty(),
-        "private functions and the implicit start must not enter the stable public-origin relation"
+        "private functions and the entry must not enter the stable public-origin relation"
     );
 }
 
@@ -124,9 +124,6 @@ fn lowers_exact_stable_origin_to_local_function_id() {
     let mut string_table = StringTable::new();
 
     let entry_path = super::symbol("main.moth", &mut path_fork, &mut string_table);
-    let entry_start = path_fork
-        .try_intern_child(entry_path, string_table.intern(IMPLICIT_START_FUNC_NAME))
-        .expect("test path fits");
     let normal_fn = path_fork
         .try_intern_child(entry_path, string_table.intern("helper"))
         .expect("test path fits");
@@ -140,10 +137,15 @@ fn lowers_exact_stable_origin_to_local_function_id() {
 
     let ast = build_ast_with_registered_types(
         vec![
-            function_node(entry_start, None),
+            super::entry_start_node(
+                FunctionSignature {
+                    parameters: vec![],
+                    returns: vec![],
+                },
+                vec![node(NodeKind::Return(vec![]), None)],
+            ),
             function_node(normal_fn, None),
         ],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -207,9 +209,6 @@ fn rejects_unused_concrete_origin_seed() {
     let mut string_table = StringTable::new();
 
     let entry_path = super::symbol("main.moth", &mut path_fork, &mut string_table);
-    let entry_start = path_fork
-        .try_intern_child(entry_path, string_table.intern(IMPLICIT_START_FUNC_NAME))
-        .expect("test path fits");
     let normal_fn = path_fork
         .try_intern_child(entry_path, string_table.intern("helper"))
         .expect("test path fits");
@@ -224,10 +223,15 @@ fn rejects_unused_concrete_origin_seed() {
 
     let ast = build_ast_with_registered_types(
         vec![
-            function_node(entry_start, None),
+            super::entry_start_node(
+                FunctionSignature {
+                    parameters: vec![],
+                    returns: vec![],
+                },
+                vec![node(NodeKind::Return(vec![]), None)],
+            ),
             function_node(normal_fn, None),
         ],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -271,9 +275,6 @@ fn hir_validation_rejects_two_origins_for_one_local_function() {
     let mut string_table = StringTable::new();
 
     let entry_path = super::symbol("main.moth", &mut path_fork, &mut string_table);
-    let entry_start = path_fork
-        .try_intern_child(entry_path, string_table.intern(IMPLICIT_START_FUNC_NAME))
-        .expect("test path fits");
     let normal_fn = path_fork
         .try_intern_child(entry_path, string_table.intern("helper"))
         .expect("test path fits");
@@ -287,10 +288,15 @@ fn hir_validation_rejects_two_origins_for_one_local_function() {
 
     let ast = build_ast_with_registered_types(
         vec![
-            function_node(entry_start, None),
+            super::entry_start_node(
+                FunctionSignature {
+                    parameters: vec![],
+                    returns: vec![],
+                },
+                vec![node(NodeKind::Return(vec![]), None)],
+            ),
             function_node(normal_fn, None),
         ],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),

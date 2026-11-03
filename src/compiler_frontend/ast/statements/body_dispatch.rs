@@ -640,7 +640,7 @@ pub(crate) fn parse_function_body_statements(
             },
 
             // Templates
-            // Top-level runtime template in the entry start() body.
+            // Top-level runtime template in the compiler-owned entry body.
             // Each template becomes a PushStartRuntimeFragment so the HIR builder can
             // push the evaluated string directly to the runtime fragment list.
             TokenTag::TEMPLATE_HEAD => {

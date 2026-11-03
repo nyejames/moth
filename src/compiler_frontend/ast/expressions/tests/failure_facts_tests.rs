@@ -1,6 +1,8 @@
 //! Invariants for expression failure side data and recovered contributor boundaries.
 
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, LoopBindings, NodeKind};
+use crate::compiler_frontend::ast::ast_nodes::{
+    AstFunctionIdentity, AstNode, LoopBindings, NodeKind,
+};
 use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::assertion_message_effects::{
     assert_message_escape_diagnostic, classify_assertion_message_effect,
@@ -1263,7 +1265,7 @@ fn summary_convergence_keeps_nested_handler_origins_outside_protected_scopes() {
         unreachable!("the named fixture is a function");
     };
     let facts = summaries
-        .function_facts(path)
+        .function_facts(AstFunctionIdentity::Authored(path))
         .expect("check has closed facts");
     assert_eq!(facts.body.implicit.len(), 1);
     let contributor = summaries
@@ -1312,7 +1314,7 @@ fn infallible_protected_work_retains_validation_without_executable_handler_failu
         unreachable!("the named fixture is a function");
     };
     let closed = summaries
-        .function_facts(path)
+        .function_facts(AstFunctionIdentity::Authored(path))
         .expect("check has closed facts");
     assert!(closed.body.implicit.is_empty());
 }
@@ -1360,7 +1362,7 @@ fn catch_dependencies_batch_activation_before_reclassifying_the_consumer() {
             unreachable!("the named fixture is a function");
         };
         let facts = summaries
-            .function_facts(path)
+            .function_facts(AstFunctionIdentity::Authored(path))
             .expect("check has closed facts");
         let contributor = summaries
             .first_active(&facts.body.implicit)

@@ -30,9 +30,9 @@ fn entry_reachability(
 
 #[test]
 fn compile_html_module_wasm_exports_moth_start_directly() {
-    // WHAT: verify that the export plan exports entry start() as "moth_start", not per-function
+    // WHAT: verify that the export plan exports the compiler-owned entry as "moth_start", not per-function
     //       wrappers discovered by entry-body call scanning.
-    // WHY: entry start() is the sole runtime fragment producer; JS calls it directly.
+    // WHY: the compiler-owned entry is the sole runtime fragment producer; JS calls it directly.
     let mut string_table = StringTable::new();
     let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     let reachability = entry_reachability(&module);

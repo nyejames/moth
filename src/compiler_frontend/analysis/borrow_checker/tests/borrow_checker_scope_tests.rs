@@ -19,15 +19,16 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::entry_start_node;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, immutable_reference_expr, make_test_variable, node, symbol,
+    assignment_target, immutable_reference_expr, make_test_variable, node, symbol,
     test_if_branch_metadata, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_borrow_error_view, run_borrow_checker,
 };
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
+use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
 use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
 
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -55,7 +56,6 @@ fn i32_expression(
 fn if_branch_local_alias_does_not_escape_merge() {
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -65,8 +65,7 @@ fn if_branch_local_alias_does_not_escape_merge() {
     let y = symbol("y", &mut path_fork, &mut string_table);
     let flag = symbol("flag", &mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -147,17 +146,10 @@ fn if_branch_local_alias_does_not_escape_merge() {
                 test_source_location(4),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start_fn],
-            entry_path,
-            builder,
-            const_values,
-            type_environment,
-        ),
+        build_ast_with_registered_types(vec![start_fn], builder, const_values, type_environment),
         &mut string_table,
         &mut path_fork,
         &external_package_registry,
@@ -170,7 +162,6 @@ fn if_branch_local_alias_does_not_escape_merge() {
 fn match_arm_local_alias_does_not_escape_merge() {
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -207,8 +198,7 @@ fn match_arm_local_alias_does_not_escape_merge() {
         )],
     };
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -262,17 +252,10 @@ fn match_arm_local_alias_does_not_escape_merge() {
                 test_source_location(5),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start_fn],
-            entry_path,
-            builder,
-            const_values,
-            type_environment,
-        ),
+        build_ast_with_registered_types(vec![start_fn], builder, const_values, type_environment),
         &mut string_table,
         &mut path_fork,
         &external_package_registry,
@@ -285,7 +268,6 @@ fn match_arm_local_alias_does_not_escape_merge() {
 fn while_body_local_alias_does_not_escape_exit() {
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -294,8 +276,7 @@ fn while_body_local_alias_does_not_escape_exit() {
     let x = symbol("x", &mut path_fork, &mut string_table);
     let y = symbol("y", &mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -361,17 +342,10 @@ fn while_body_local_alias_does_not_escape_exit() {
                 test_source_location(4),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start_fn],
-            entry_path,
-            builder,
-            const_values,
-            type_environment,
-        ),
+        build_ast_with_registered_types(vec![start_fn], builder, const_values, type_environment),
         &mut string_table,
         &mut path_fork,
         &external_package_registry,
@@ -384,7 +358,6 @@ fn while_body_local_alias_does_not_escape_exit() {
 fn dead_local_access_reports_borrow_error() {
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -394,8 +367,7 @@ fn dead_local_access_reports_borrow_error() {
     let y = symbol("y", &mut path_fork, &mut string_table);
     let flag = symbol("flag", &mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -476,17 +448,10 @@ fn dead_local_access_reports_borrow_error() {
                 test_source_location(4),
             ),
         ],
-        None,
     );
 
     let mut hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start_fn],
-            entry_path,
-            builder,
-            const_values,
-            type_environment,
-        ),
+        build_ast_with_registered_types(vec![start_fn], builder, const_values, type_environment),
         &mut string_table,
         &mut path_fork,
         &external_package_registry,

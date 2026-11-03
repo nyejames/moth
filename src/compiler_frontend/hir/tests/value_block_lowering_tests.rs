@@ -29,7 +29,7 @@ use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node, param_with_type_id, reference_expr_with_type_id,
+    make_test_variable, node, param_with_type_id, reference_expr_with_type_id,
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -94,8 +94,6 @@ fn value_block_result_definition(
 fn value_match_lowering_joins_ordered_slot_at_shared_merge_block() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let result_name = super::symbol("result", &mut path_fork, &mut string_table);
 
@@ -207,8 +205,7 @@ fn value_match_lowering_joins_ordered_slot_at_shared_merge_block() {
         .expect("fixture value block occurrence must be valid")
         .id();
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 x,
@@ -226,13 +223,11 @@ fn value_match_lowering_joins_ordered_slot_at_shared_merge_block() {
             )),
             None,
         )],
-        None,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             TypeEnvironment::new(),
@@ -290,13 +285,10 @@ fn value_match_lowering_joins_ordered_slot_at_shared_merge_block() {
 fn then_value_without_active_target_is_hir_invariant_failure() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -314,13 +306,11 @@ fn then_value_without_active_target_is_hir_invariant_failure() {
             }),
             None,
         )],
-        None,
     );
 
     let err = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             const_values,
             TypeEnvironment::new(),

@@ -86,14 +86,14 @@ fn i32_value(value: i64) -> FixedScalarValue {
 
 #[test]
 fn parses_if_else_statements() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "flag ~= true\nif flag:\n    io.line([: [\"yes\"]])\nelse\n    io.line([: [\"no\"]])\n;\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::If(condition, then_block, else_block, metadata) = &body[1].kind else {
-        panic!("expected if statement in start body");
+        panic!("expected if statement in entry body");
     };
 
     assert_eq!(
@@ -226,13 +226,13 @@ fn runtime_operator_sequence(
 
 #[test]
 fn parses_nested_if_else_statements() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "outer ~= true\ninner ~= false\nif outer:\n    if inner:\n        io.line([: [\"inner\"]])\n    else\n        io.line([: [\"not inner\"]])\n    ;\nelse\n    io.line([: [\"outer false\"]])\n;\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
     let NodeKind::If(_, then_block, else_block, _) = &body[2].kind else {
-        panic!("expected top-level if statement in start body");
+        panic!("expected top-level if statement in entry body");
     };
     let NodeKind::If(_, nested_then, nested_else, _) = &then_block[0].kind else {
         panic!("expected nested if statement in top-level then block");
@@ -273,13 +273,13 @@ fn rejects_string_if_condition_with_type_error_metadata() {
 
 #[test]
 fn precedence_not_binds_tighter_than_and_in_if_conditions() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "a ~= true\nb ~= false\nif not a and b:\n    io.line([: [\"x\"]])\n;\n",
     );
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::If(condition, _, _, _) = &body[2].kind else {
-        panic!("expected if statement in start body");
+        panic!("expected if statement in entry body");
     };
 
     assert_eq!(
@@ -290,13 +290,13 @@ fn precedence_not_binds_tighter_than_and_in_if_conditions() {
 
 #[test]
 fn precedence_and_binds_tighter_than_or_in_if_conditions() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "a ~= true\nb ~= false\nc ~= false\nif a or b and c:\n    io.line([: [\"x\"]])\n;\n",
     );
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::If(condition, _, _, _) = &body[3].kind else {
-        panic!("expected if statement in start body");
+        panic!("expected if statement in entry body");
     };
 
     assert_eq!(
@@ -307,13 +307,13 @@ fn precedence_and_binds_tighter_than_or_in_if_conditions() {
 
 #[test]
 fn parenthesized_grouping_overrides_default_logical_precedence() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "a ~= true\nb ~= false\nc ~= false\nif (a or b) and c:\n    io.line([: [\"x\"]])\n;\n",
     );
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::If(condition, _, _, _) = &body[3].kind else {
-        panic!("expected if statement in start body");
+        panic!("expected if statement in entry body");
     };
 
     assert_eq!(
@@ -324,13 +324,13 @@ fn parenthesized_grouping_overrides_default_logical_precedence() {
 
 #[test]
 fn comparisons_bind_tighter_than_and_in_if_conditions() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "a ~= 1\nb ~= 2\nc ~= 3\nd ~= 4\nif a < b and c < d:\n    io.line([: [\"x\"]])\n;\n",
     );
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::If(condition, _, _, _) = &body[4].kind else {
-        panic!("expected if statement in start body");
+        panic!("expected if statement in entry body");
     };
 
     assert_eq!(
@@ -341,12 +341,12 @@ fn comparisons_bind_tighter_than_and_in_if_conditions() {
 
 #[test]
 fn parenthesized_comparison_can_be_negated_in_if_conditions() {
-    let (ast, path_fork, string_table) =
+    let (ast, _, _) =
         parse_single_file_ast("a ~= 1\nb ~= 2\nif not (a < b):\n    io.line([: [\"x\"]])\n;\n");
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::If(condition, _, _, _) = &body[2].kind else {
-        panic!("expected if statement in start body");
+        panic!("expected if statement in entry body");
     };
 
     assert_eq!(
@@ -357,13 +357,13 @@ fn parenthesized_comparison_can_be_negated_in_if_conditions() {
 
 #[test]
 fn equality_and_or_precedence_stays_deterministic_in_if_conditions() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "a ~= 1\nb ~= 1\nc ~= 2\nd ~= 2\nif a is b or c is d:\n    io.line([: [\"x\"]])\n;\n",
     );
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::If(condition, _, _, _) = &body[4].kind else {
-        panic!("expected if statement in start body");
+        panic!("expected if statement in entry body");
     };
 
     assert_eq!(
@@ -378,11 +378,11 @@ fn equality_and_or_precedence_stays_deterministic_in_if_conditions() {
 
 #[test]
 fn parses_match_statements_with_else_arm() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "value = 42\nif value is:\n    0 => io.line([: [\"zero\"]])\n    42 => io.line([: [\"forty-two\"]])\n    else => io.line([: [\"other\"]])\n;\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::Match {
         scrutinee,
@@ -391,7 +391,7 @@ fn parses_match_statements_with_else_arm() {
         exhaustiveness,
     } = &body[1].kind
     else {
-        panic!("expected match statement in start body");
+        panic!("expected match statement in entry body");
     };
 
     assert_eq!(
@@ -417,11 +417,11 @@ fn parses_match_statements_with_else_arm() {
 
 #[test]
 fn parses_match_arm_with_boolean_guard() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "value = 42\nif value is:\n    42 if true => io.line([: [\"forty-two\"]])\n    else => io.line([: [\"other\"]])\n;\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::Match {
         arms,
@@ -430,7 +430,7 @@ fn parses_match_arm_with_boolean_guard() {
         ..
     } = &body[1].kind
     else {
-        panic!("expected match statement in start body");
+        panic!("expected match statement in entry body");
     };
 
     assert_eq!(arms.len(), 1);
@@ -447,14 +447,14 @@ fn parses_match_arm_with_boolean_guard() {
 
 #[test]
 fn parses_negative_match_arm_with_multiline_boolean_guard() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "value = 42\nif value is:\n    42 => io.line([: [\"forty-two\"]])\n    -42 if\n        true => io.line([: [\"negative\"]])\n    else => io.line([: [\"other\"]])\n;\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::Match { arms, .. } = &body[1].kind else {
-        panic!("expected match statement in start body");
+        panic!("expected match statement in entry body");
     };
 
     assert_eq!(arms.len(), 2);
@@ -521,7 +521,7 @@ fn rejects_non_boolean_match_guard_with_type_error_metadata() {
 
 #[test]
 fn parses_choice_match_arms_with_bare_and_qualified_variants() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "Status :: Ready, Busy;\n\
      current Status = Status::Ready\n\
      if current is:\n\
@@ -531,7 +531,7 @@ fn parses_choice_match_arms_with_bare_and_qualified_variants() {
      ;\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
     let NodeKind::Match {
         scrutinee,
         arms,
@@ -539,7 +539,7 @@ fn parses_choice_match_arms_with_bare_and_qualified_variants() {
         exhaustiveness,
     } = &body[1].kind
     else {
-        panic!("expected match statement in start body");
+        panic!("expected match statement in entry body");
     };
 
     let scrutinee_type = ast
@@ -572,7 +572,7 @@ fn parses_choice_match_arms_with_bare_and_qualified_variants() {
 
 #[test]
 fn parses_exhaustive_choice_match_without_else_marks_exhaustive_choice() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "Status :: Ready, Busy;\n\
      current Status = Status::Ready\n\
      if current is:\n\
@@ -581,7 +581,7 @@ fn parses_exhaustive_choice_match_without_else_marks_exhaustive_choice() {
      ;\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
     let NodeKind::Match {
         scrutinee: _,
         arms,
@@ -589,7 +589,7 @@ fn parses_exhaustive_choice_match_without_else_marks_exhaustive_choice() {
         exhaustiveness,
     } = &body[1].kind
     else {
-        panic!("expected match statement in start body");
+        panic!("expected match statement in entry body");
     };
 
     assert_eq!(arms.len(), 2);
@@ -808,11 +808,11 @@ fn rejects_guarded_choice_match_without_else() {
 
 #[test]
 fn parses_option_present_capture_statement_condition() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "value I32? = 42\nif value is |amount|:\n    io.line([: [amount]])\n;\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
     let NodeKind::Match {
         scrutinee,
         arms,
@@ -849,7 +849,7 @@ fn parses_option_present_capture_statement_condition() {
 
 #[test]
 fn parses_option_match_present_capture_guard_and_none_patterns() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "value I32? = 42\n\
      if value is:\n\
          |positive| if positive > 0 => io.line([: [positive]])\n\
@@ -858,7 +858,7 @@ fn parses_option_match_present_capture_guard_and_none_patterns() {
      ;\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
     let NodeKind::Match { arms, default, .. } = &body[1].kind else {
         panic!("expected option full match statement");
     };
@@ -886,13 +886,13 @@ fn parses_option_match_present_capture_guard_and_none_patterns() {
 
 #[test]
 fn parses_relational_match_patterns() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "value = 1\nif value is:\n    < 0 => io.line([: [\"neg\"]])\n    else => io.line([: [\"other\"]])\n;\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
     let NodeKind::Match { arms, .. } = &body[1].kind else {
-        panic!("expected match statement in start body");
+        panic!("expected match statement in entry body");
     };
 
     assert_eq!(arms.len(), 1);
@@ -916,7 +916,7 @@ fn rejects_semicolon_between_match_arms() {
 
 #[test]
 fn allows_semicolons_inside_nested_structures_within_match_arms() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "flag ~= true\n\
      value = 1\n\
      if value is:\n\
@@ -928,10 +928,10 @@ fn allows_semicolons_inside_nested_structures_within_match_arms() {
      ;\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::Match { arms, .. } = &body[2].kind else {
-        panic!("expected match statement in start body");
+        panic!("expected match statement in entry body");
     };
 
     assert_eq!(arms.len(), 1);
@@ -943,13 +943,13 @@ fn allows_semicolons_inside_nested_structures_within_match_arms() {
 
 #[test]
 fn parses_relational_int_patterns() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "value = 5\nif value is:\n    < 0 => io.line([: [\"negative\"]])\n    >= 0 => io.line([: [\"non-negative\"]])\n    else => io.line([: [\"fallback\"]])\n;\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
     let NodeKind::Match { arms, .. } = &body[1].kind else {
-        panic!("expected match statement in start body");
+        panic!("expected match statement in entry body");
     };
 
     assert_eq!(arms.len(), 2);
@@ -977,7 +977,7 @@ fn parses_relational_int_patterns() {
 
 #[test]
 fn parses_relational_arm_after_single_line_assignment_body() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "value = 5\n\
      result ~= \"\"\n\
      if value is:\n\
@@ -988,9 +988,9 @@ fn parses_relational_arm_after_single_line_assignment_body() {
      ;\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
     let NodeKind::Match { arms, .. } = &body[2].kind else {
-        panic!("expected match statement in start body");
+        panic!("expected match statement in entry body");
     };
 
     assert_eq!(arms.len(), 3);
@@ -1055,7 +1055,7 @@ fn relational_pattern_rejects_string() {
 
 #[test]
 fn parses_multi_statement_match_arm_body_delimited_by_next_arm() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "value = 1\n\
      result ~= \"unset\"\n\
      if value is:\n\
@@ -1068,14 +1068,14 @@ fn parses_multi_statement_match_arm_body_delimited_by_next_arm() {
      ;\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
     let NodeKind::Match {
         arms,
         default: else_block,
         ..
     } = &body[2].kind
     else {
-        panic!("expected match statement in start body");
+        panic!("expected match statement in entry body");
     };
 
     assert_eq!(arms.len(), 2, "should have two pattern arms");
@@ -1094,9 +1094,9 @@ fn parses_multi_statement_match_arm_body_delimited_by_next_arm() {
 
 #[test]
 fn case_is_valid_as_normal_identifier() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("case = 42\nio.line([: [case]])\n");
+    let (ast, _, _) = parse_single_file_ast("case = 42\nio.line([: [case]])\n");
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
     assert_eq!(
         body.len(),
         2,

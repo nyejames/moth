@@ -105,6 +105,6 @@ Until the cutover, operational pages keep reserved names such as `page_title` an
 ### Concepts related to entry metadata
 
 - For module identity versus artefacts see @#module-roots (Module roots).
-- For fragments and `start` see @#entry-runtime-and-fragments (Active-root runtime and fragments).
+- For fragments and the entry see @#entry-runtime-and-fragments (Active-root runtime and fragments).
 - For routes and command-specific no-page rules see @#html-routing-and-artifacts (HTML routing and artefacts).
 - For general directive grammar see @../directives (Directives).

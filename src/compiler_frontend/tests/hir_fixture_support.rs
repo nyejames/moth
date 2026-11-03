@@ -25,27 +25,13 @@ use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId, LocalId, RegionI
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 use std::cell::RefCell;
 use std::rc::Rc;
-
-pub(crate) fn entry_and_start(
-    path_fork: &mut PathInternerFork,
-    string_table: &mut StringTable,
-) -> (PathId, PathId) {
-    let entry_path = path_fork
-        .try_intern_portable_path("@page.moth", string_table)
-        .expect("test entry path fits");
-    let start_name = path_fork
-        .try_intern_child(entry_path, string_table.intern(IMPLICIT_START_FUNC_NAME))
-        .expect("test start path fits");
-    (entry_path, start_name)
-}
 
 pub(crate) fn lower_hir(
     ast: Ast,

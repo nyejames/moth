@@ -22,7 +22,7 @@ use crate::compiler_frontend::ast::{AstDocFragment, AstDocFragmentKind};
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::folded_value::{PublicConstTemplate, PublicConstTemplateKind};
 use crate::compiler_frontend::hir::constants::{HirConstField, HirConstValue};
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
@@ -203,14 +203,13 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 };
 
 #[test]
-fn registers_declarations_and_resolves_start_function() {
+fn registers_declarations_and_allocates_the_entry_function() {
     let builder = AstExpressionBuilder::new().unwrap();
     let constants = ConstValueStore::default();
     let type_environment = TypeEnvironment::new();
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let entry_path = super::symbol("main.moth", &mut path_fork, &mut string_table);
 
     let struct_name = super::symbol("MyStruct", &mut path_fork, &mut string_table);
     let field_name = path_fork
@@ -229,19 +228,17 @@ fn registers_declarations_and_resolves_start_function() {
         None,
     );
 
-    let start_function = function_node(
-        start_name,
+    let mut start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
+    start_function.scope = entry_path;
 
     let ast = build_ast_with_registered_types(
         vec![struct_node, start_function],
-        entry_path,
         builder,
         constants,
         type_environment,
@@ -262,13 +259,303 @@ fn registers_declarations_and_resolves_start_function() {
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
     );
     assert_eq!(module.functions.len(), 1);
+    let entry = module
+        .start_function
+        .expect("normal test module should have start");
     assert_eq!(
-        module.side_table.function_name_path(
+        module.side_table.function_name_path(entry),
+        None,
+        "the compiler-owned entry must not gain a callable name path"
+    );
+    assert_eq!(
+        module.start_source_file,
+        Some(entry_path),
+        "the entry must record the root source file that owns its body"
+    );
+}
+
+#[test]
+fn authored_start_function_stays_a_normal_function_beside_the_entry() {
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(
+        "start || -> I32:\n    return 41\n;\n\nvalue = start()\n[:Value: [value]]\n",
+    );
+    let (module, _) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("an authored start and the compiler-owned entry should both lower");
+
+    let entry = module
+        .start_function
+        .expect("a normal root always has an entry");
+    assert_eq!(
+        module.function_origins.get(&entry),
+        Some(&HirFunctionOrigin::EntryStart)
+    );
+    assert_eq!(module.side_table.function_name_path(entry), None);
+
+    let authored = module
+        .functions
+        .iter()
+        .find(|function| {
             module
-                .start_function
-                .expect("normal test module should have start"),
-        ),
-        Some(start_name),
+                .side_table
+                .function_name_path(function.id)
+                .and_then(|path| path_fork.component(path))
+                .is_some_and(|component| string_table.resolve(component) == "start")
+        })
+        .expect("the authored start must keep an ordinary name path");
+    assert_ne!(authored.id, entry);
+    assert_eq!(
+        module.function_origins.get(&authored.id),
+        Some(&HirFunctionOrigin::Normal)
+    );
+    assert_eq!(
+        module.functions.len(),
+        2,
+        "the entry and the authored start are the only functions"
+    );
+    assert_eq!(
+        module
+            .function_origins
+            .values()
+            .filter(|origin| matches!(origin, HirFunctionOrigin::EntryStart))
+            .count(),
+        1,
+        "exactly one function carries the entry origin"
+    );
+    assert_eq!(module.function_origins.len(), module.functions.len());
+
+    let entry_body = module
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter());
+    let mut saw_authored_call = false;
+    let mut saw_runtime_fragment = false;
+    for statement in entry_body {
+        match &statement.kind {
+            HirStatementKind::Call {
+                target: CallTarget::Local(function_id),
+                ..
+            } if *function_id == authored.id => saw_authored_call = true,
+            HirStatementKind::PushRuntimeFragment { .. } => saw_runtime_fragment = true,
+            _ => {}
+        }
+    }
+    assert!(
+        saw_authored_call,
+        "the entry body must call the authored start by its FunctionId"
+    );
+    assert!(
+        saw_runtime_fragment,
+        "the entry body must keep its authored runtime template"
+    );
+}
+
+#[test]
+fn authored_fn_declaration_and_call_lower_normally() {
+    let (ast, mut path_fork, mut string_table) =
+        parse_single_file_ast("fn || -> I32:\n    return 7\n;\n\nvalue = fn()\n");
+    let (module, _) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("an authored fn declaration should lower");
+
+    let authored = module
+        .functions
+        .iter()
+        .find(|function| {
+            module
+                .side_table
+                .function_name_path(function.id)
+                .and_then(|path| path_fork.component(path))
+                .is_some_and(|component| string_table.resolve(component) == "fn")
+        })
+        .expect("the authored fn must keep an ordinary name path");
+    assert_eq!(
+        module.function_origins.get(&authored.id),
+        Some(&HirFunctionOrigin::Normal)
+    );
+    assert!(
+        module
+            .blocks
+            .iter()
+            .any(|block| block.statements.iter().any(|statement| {
+                matches!(
+                    &statement.kind,
+                    HirStatementKind::Call {
+                        target: CallTarget::Local(function_id),
+                        ..
+                    } if *function_id == authored.id
+                )
+            })),
+        "the entry body must call the authored fn by its FunctionId"
+    );
+}
+
+#[test]
+fn rejects_an_entry_in_an_api_only_root() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let mut ast = build_ast_with_registered_types(
+        vec![super::entry_start_node(
+            FunctionSignature {
+                parameters: vec![],
+                returns: vec![],
+            },
+            vec![],
+        )],
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    ast.root_role = ModuleRootRole::Support;
+
+    let error = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect_err("an API-only root cannot carry an entry body");
+    let PreparedFailure::Infrastructure(errors) = error else {
+        panic!("a misplaced entry must be an infrastructure failure")
+    };
+    assert!(
+        errors
+            .primary
+            .message
+            .contains("without an implicit entry reached HIR lowering with an entry body")
+    );
+}
+
+#[test]
+fn repeated_lowering_and_path_remap_keep_the_entry_identity() {
+    let source = "start || -> I32:\n    return 41\n;\n\nvalue = start()\n";
+
+    let lower = || {
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+        let (module, _) = lower_ast(
+            ast,
+            &mut string_table,
+            &mut path_fork,
+            &super::ExternalPackageRegistry::new(),
+        )
+        .expect("lowering should succeed");
+        (module, path_fork, string_table)
+    };
+
+    let (first, mut path_fork, mut string_table) = lower();
+    let (second, _, _) = lower();
+    assert_eq!(first.start_function, second.start_function);
+    assert_eq!(first.start_source_file, second.start_source_file);
+    let entry = first.start_function.expect("the entry is present");
+    assert_eq!(
+        second.function_origins.get(&entry),
+        first.function_origins.get(&entry)
+    );
+
+    let old_scope = first
+        .start_source_file
+        .expect("the entry records its source file");
+    let new_scope = super::symbol("remapped.moth", &mut path_fork, &mut string_table);
+    let mut mapped = Vec::with_capacity(path_fork.len());
+    for index in 0..path_fork.len() {
+        mapped.push(
+            crate::compiler_frontend::symbols::path_interner::PathId::try_from_index(index)
+                .expect("fixture path table addresses its own nodes"),
+        );
+    }
+    mapped[old_scope.index()] = new_scope;
+    let remap = crate::compiler_frontend::symbols::path_interner::PathIdRemap::from_full(mapped);
+    let mut first = first;
+    first.remap_path_ids(&remap);
+
+    assert_eq!(first.start_source_file, Some(new_scope));
+    assert_eq!(
+        first.function_origins.get(&entry),
+        Some(&HirFunctionOrigin::EntryStart)
+    );
+}
+
+#[test]
+fn rejects_more_than_one_compiler_owned_entry() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let signature = || FunctionSignature {
+        parameters: vec![],
+        returns: vec![],
+    };
+
+    let ast = build_ast_with_registered_types(
+        vec![
+            super::entry_start_node(signature(), vec![]),
+            super::entry_start_node(signature(), vec![]),
+        ],
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+
+    let error = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect_err("a module cannot carry two compiler-owned entries");
+    let PreparedFailure::Infrastructure(errors) = error else {
+        panic!("duplicate entries must be an infrastructure failure")
+    };
+    assert!(
+        errors
+            .primary
+            .message
+            .contains("more than one implicit entry body")
+    );
+}
+
+#[test]
+fn rejects_a_normal_root_without_its_compiler_owned_entry() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let function_path = super::symbol("helper", &mut path_fork, &mut string_table);
+
+    let ast = build_ast_with_registered_types(
+        vec![function_node(
+            function_path,
+            FunctionSignature {
+                parameters: vec![],
+                returns: vec![],
+            },
+            vec![],
+            None,
+        )],
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+
+    let error = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect_err("a normal root must carry its compiler-owned entry");
+    let PreparedFailure::Infrastructure(errors) = error else {
+        panic!("a missing entry must be an infrastructure failure")
+    };
+    assert!(
+        errors
+            .primary
+            .message
+            .contains("without its implicit entry body")
     );
 }
 
@@ -280,7 +567,6 @@ fn api_only_root_roles_lower_without_implicit_start() {
         ModuleRootRole::ProjectPackageFacade,
     ] {
         let mut string_table = StringTable::new();
-        let entry_path = super::symbol("api.moth", &mut path_fork, &mut string_table);
         let declaration_path = super::symbol("exported_value", &mut path_fork, &mut string_table);
         let declaration = function_node(
             declaration_path,
@@ -293,7 +579,6 @@ fn api_only_root_roles_lower_without_implicit_start() {
         );
         let mut ast = build_ast_with_registered_types(
             vec![declaration],
-            entry_path,
             AstExpressionBuilder::new().unwrap(),
             ConstValueStore::default(),
             TypeEnvironment::new(),
@@ -324,17 +609,13 @@ fn api_only_root_roles_lower_without_implicit_start() {
 fn lowers_module_constants_into_hir_const_pool() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let mut builder = AstExpressionBuilder::new().unwrap();
@@ -353,13 +634,8 @@ fn lowers_module_constants_into_hir_const_pool() {
     let declaration = make_test_variable(const_name, value, &builder);
     fold_test_module_constant(&mut constants, &builder, &declaration, &type_environment);
 
-    let ast = build_ast_with_registered_types(
-        vec![start_function],
-        entry_path,
-        builder,
-        constants,
-        type_environment,
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_function], builder, constants, type_environment);
 
     let (module, _type_environment) = lower_ast(
         ast,
@@ -431,8 +707,6 @@ rendered #= [layout: [stored_title] Body]
 fn start_function_can_reference_module_constant() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let third_const = super::symbol("third_const", &mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
@@ -445,14 +719,12 @@ fn start_function_can_reference_module_constant() {
         None,
         ValueMode::ImmutableReference,
     );
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::ExpressionStatement(reference), None)],
-        None,
     );
 
     let value = i32_literal(
@@ -465,13 +737,8 @@ fn start_function_can_reference_module_constant() {
     let declaration = make_test_variable(third_const, value, &builder);
     fold_test_module_constant(&mut constants, &builder, &declaration, &type_environment);
 
-    let ast = build_ast_with_registered_types(
-        vec![start_function],
-        entry_path,
-        builder,
-        constants,
-        type_environment,
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_function], builder, constants, type_environment);
 
     let (module, _type_environment) = lower_ast(
         ast,
@@ -499,7 +766,7 @@ fn start_function_can_reference_module_constant() {
                     )
             )
         }),
-        "expected constant reference to lower into a usable expression in start body"
+        "expected constant reference to lower into a usable expression in entry body"
     );
 }
 
@@ -507,21 +774,17 @@ fn start_function_can_reference_module_constant() {
 fn rejects_unmaterialized_template_constants_in_hir_module_constant_lowering() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
     let type_environment = TypeEnvironment::new();
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let (template_constant, _template_registry) = raw_template_expression_for_hir_invariant(
@@ -535,13 +798,8 @@ fn rejects_unmaterialized_template_constants_in_hir_module_constant_lowering() {
     let declaration = make_test_variable(wrapper_name, template_constant, &builder);
     fold_test_module_constant(&mut constants, &builder, &declaration, &type_environment);
 
-    let ast = build_ast_with_registered_types(
-        vec![start_function],
-        entry_path,
-        builder,
-        constants,
-        type_environment,
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_function], builder, constants, type_environment);
 
     let error = lower_ast(
         ast,
@@ -565,17 +823,13 @@ fn rejects_unmaterialized_template_constants_in_hir_module_constant_lowering() {
 fn rejects_nested_unmaterialized_template_constants_in_hir_module_constant_lowering() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let mut builder = AstExpressionBuilder::new().unwrap();
@@ -609,13 +863,8 @@ fn rejects_nested_unmaterialized_template_constants_in_hir_module_constant_lower
     let declaration = make_test_variable(page_const_name, page_value, &builder);
     fold_test_module_constant(&mut constants, &builder, &declaration, &type_environment);
 
-    let ast = build_ast_with_registered_types(
-        vec![start_function],
-        entry_path,
-        builder,
-        constants,
-        type_environment,
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_function], builder, constants, type_environment);
 
     let error = lower_ast(
         ast,
@@ -639,17 +888,13 @@ fn rejects_nested_unmaterialized_template_constants_in_hir_module_constant_lower
 fn template_folded_piece_bearing_module_constant_lowers_into_pool_pieces() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     // The fold fixture supplies the pieces a wrapper-template finalization would fold, while
@@ -687,13 +932,8 @@ fn template_folded_piece_bearing_module_constant_lowers_into_pool_pieces() {
         &type_environment,
     );
 
-    let ast = build_ast_with_registered_types(
-        vec![start_function],
-        entry_path,
-        builder,
-        constants,
-        type_environment,
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_function], builder, constants, type_environment);
 
     let (module, _type_environment) = lower_ast(
         ast,
@@ -728,8 +968,6 @@ fn template_folded_piece_bearing_module_constant_lowers_into_pool_pieces() {
 fn lowers_struct_module_constant_into_record_with_ordered_fields() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let struct_name = super::symbol("Point", &mut path_fork, &mut string_table);
     let x_field = path_fork
         .try_intern_child(struct_name, string_table.intern("x"))
@@ -757,14 +995,12 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
         None,
     );
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let mut builder = AstExpressionBuilder::new().unwrap();
@@ -811,7 +1047,6 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
 
     let ast = build_ast_with_registered_types(
         vec![struct_node, start_function],
-        entry_path,
         builder,
         constants,
         type_environment,
@@ -859,16 +1094,12 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
 fn lowers_fixed_scalar_module_constant_with_exact_bits_and_type() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
@@ -884,13 +1115,8 @@ fn lowers_fixed_scalar_module_constant_with_exact_bits_and_type() {
     let declaration = make_test_variable(const_name, value, &builder);
     fold_test_module_constant(&mut constants, &builder, &declaration, &type_environment);
 
-    let ast = build_ast_with_registered_types(
-        vec![start_function],
-        entry_path,
-        builder,
-        constants,
-        type_environment,
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_function], builder, constants, type_environment);
 
     let (module, _type_environment) = lower_ast(
         ast,
@@ -915,24 +1141,19 @@ fn lowers_fixed_scalar_module_constant_with_exact_bits_and_type() {
 fn extracts_ast_doc_fragments_into_module_metadata() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let first_doc = string_table.intern("First doc");
     let second_doc = string_table.intern("Second doc");
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let mut ast = build_ast_with_registered_types(
         vec![start_function],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -1006,17 +1227,13 @@ fn structural_constant(
 fn piece_bearing_module_constant_reaches_hir_const_pool_in_authored_order() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let mut builder = AstExpressionBuilder::new().unwrap();
@@ -1039,13 +1256,8 @@ fn piece_bearing_module_constant_reaches_hir_const_pool_in_authored_order() {
             ConstStringPiece::Text(suffix),
         ],
     );
-    let ast = build_ast_with_registered_types(
-        vec![start_function],
-        entry_path,
-        builder,
-        constants,
-        type_environment,
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_function], builder, constants, type_environment);
 
     let (module, _type_environment) = lower_ast(
         ast,
@@ -1080,17 +1292,13 @@ fn piece_bearing_module_constant_reaches_hir_const_pool_in_authored_order() {
 fn site_root_module_constant_survives_hir_lowering() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let mut builder = AstExpressionBuilder::new().unwrap();
@@ -1111,13 +1319,8 @@ fn site_root_module_constant_survives_hir_lowering() {
             ConstStringPiece::Text(suffix),
         ],
     );
-    let ast = build_ast_with_registered_types(
-        vec![start_function],
-        entry_path,
-        builder,
-        constants,
-        type_environment,
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_function], builder, constants, type_environment);
 
     let (module, _type_environment) = lower_ast(
         ast,
@@ -1151,8 +1354,6 @@ fn site_root_module_constant_survives_hir_lowering() {
 fn structural_module_constant_reference_lowers_into_structural_expression() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let logo_const = super::symbol("LOGO", &mut path_fork, &mut string_table);
 
     let mut builder = AstExpressionBuilder::new().unwrap();
@@ -1166,14 +1367,12 @@ fn structural_module_constant_reference_lowers_into_structural_expression() {
         None,
         ValueMode::ImmutableReference,
     );
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::ExpressionStatement(reference), None)],
-        None,
     );
 
     let mut resources = ModuleResourceTable::new();
@@ -1191,13 +1390,8 @@ fn structural_module_constant_reference_lowers_into_structural_expression() {
             ConstStringPiece::Text(prefix),
         ],
     );
-    let ast = build_ast_with_registered_types(
-        vec![start_function],
-        entry_path,
-        builder,
-        constants,
-        type_environment,
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_function], builder, constants, type_environment);
 
     let (module, _type_environment) = lower_ast(
         ast,
@@ -1205,7 +1399,7 @@ fn structural_module_constant_reference_lowers_into_structural_expression() {
         &mut path_fork,
         &super::ExternalPackageRegistry::new(),
     )
-    .expect("start body referencing a structural constant should lower");
+    .expect("entry body referencing a structural constant should lower");
 
     // The const-store expression lane (module-constant reference lowering) must preserve
     // pieces, not just the constant pool value.
@@ -1239,17 +1433,13 @@ fn structural_module_constant_reference_lowers_into_structural_expression() {
 fn remaps_structural_module_constant_piece_text_after_table_merge() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let mut builder = AstExpressionBuilder::new().unwrap();
@@ -1265,13 +1455,8 @@ fn remaps_structural_module_constant_piece_text_after_table_merge() {
         "LOGO",
         vec![ConstStringPiece::Text(prefix), ConstStringPiece::SiteRoot],
     );
-    let ast = build_ast_with_registered_types(
-        vec![start_function],
-        entry_path,
-        builder,
-        constants,
-        type_environment,
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_function], builder, constants, type_environment);
 
     let (mut module, _type_environment) = lower_ast(
         ast,
@@ -1631,8 +1816,6 @@ fn structural_pieces_in_statement<'a>(
 fn runtime_template_handoff_resource_piece_lowers_through_the_module_resource_table() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
     // The decoy occupies row 0 of the table, so a handoff origin minted against the wrong table
     // returns an index that resolves to the decoy instead of silently aliasing the real origin.
@@ -1670,19 +1853,16 @@ fn runtime_template_handoff_resource_piece_lowers_through_the_module_resource_ta
     let handoff_expr =
         runtime_template_handoff_expr(&mut builder, handoff, None, ValueMode::ImmutableOwned);
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::ExpressionStatement(handoff_expr), None)],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_function],
-        entry_path,
         builder,
         constants,
         TypeEnvironment::new(),
@@ -1744,8 +1924,6 @@ fn runtime_template_handoff_resource_piece_lowers_through_the_module_resource_ta
 fn runtime_template_handoff_site_root_piece_lowers_through_the_module_resource_table() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
@@ -1770,18 +1948,15 @@ fn runtime_template_handoff_site_root_piece_lowers_through_the_module_resource_t
     let handoff_expr =
         runtime_template_handoff_expr(&mut builder, handoff, None, ValueMode::ImmutableOwned);
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::ExpressionStatement(handoff_expr), None)],
-        None,
     );
     let ast = build_ast_with_registered_types(
         vec![start_function],
-        entry_path,
         builder,
         constants,
         TypeEnvironment::new(),

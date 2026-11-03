@@ -60,13 +60,13 @@ Files without `@` in the same directory as a root are normal source files within
 
 ### Root identity, page purpose and activation
 
-Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised `start`. The current builder selects entries from authored runtime or fragment activity. The accepted design instead requires an authored root purpose, initially `$page`, before the builder selects an HTML artefact.
+Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-owned entry. The current builder selects entries from authored runtime or fragment activity. The accepted design instead requires an authored root purpose, initially `$page`, before the builder selects an HTML artefact.
 
 [codeblock, $code("moth"):
     $page
 ]
 
-Helpers remain declarations inside the surrounding module. They never own an entry, an independent `start` or a page. Binding a module exposes only its public interface and never activates its root work. A selected page root activates its module-owned `start` once and assembles its direct fragments in source order.
+Helpers remain declarations inside the surrounding module. They never own an entry or a page. Binding a module exposes only its public interface and never activates its root work. A selected page root activates its module-owned entry once and assembles its direct fragments in source order.
 
 ### Visibility status
 

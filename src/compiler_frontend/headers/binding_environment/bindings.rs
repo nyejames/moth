@@ -295,7 +295,7 @@ pub(crate) struct FileVisibility {
     /// and namespace aliases have no authored span and therefore have no entry.
     pub(crate) dependency_binding_spans: FxHashMap<StringId, SourceSpan>,
 
-    /// Authored declaration spans for this file's implicit start-body runtime bindings.
+    /// Authored declaration spans for this file's entry-body runtime bindings.
     ///
     /// WHAT: records top-level runtime assignment names, which are not module declarations and
     ///       therefore never enter `visible_source_names`.

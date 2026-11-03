@@ -176,7 +176,7 @@ fn reports_the_compiler_reaching_into_a_container_through_a_braced_import() {
     assert_eq!(
         rules(
             "src/compiler_frontend/module_compilation/service.rs",
-            "use crate::projects::settings::{Config, IMPLICIT_START_FUNC_NAME};\n"
+            "use crate::projects::settings::{Config, INDEX_PAGE_NAME};\n"
         ),
         vec![BoundaryRule::CompilerDependencyOnBuild]
     );
@@ -245,7 +245,7 @@ fn accepts_the_compiler_reading_an_authored_name_constant() {
     assert!(
         rules(
             "src/compiler_frontend/headers/module_symbols.rs",
-            "use crate::projects::settings::IMPLICIT_START_FUNC_NAME;\n"
+            "use crate::projects::settings::INDEX_PAGE_NAME;\n"
         )
         .is_empty()
     );

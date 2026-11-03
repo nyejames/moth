@@ -1,7 +1,7 @@
 //! JS bootstrap generator for HTML+Wasm mode.
 //!
 //! WHAT: emits builder-owned JS that instantiates Wasm, wires host imports, hydrates
-//! runtime slots from the fragment list returned by entry start(), and runs the lifecycle.
+//! runtime slots from the fragment list returned by the compiler-owned entry, and runs the lifecycle.
 //! WHY: HTML assembly/orchestration remains builder policy while Wasm stays backend-generic.
 
 use crate::projects::html_project::js_path::append_startup_fault_report;
@@ -9,7 +9,7 @@ use crate::projects::html_project::js_path::append_startup_fault_report;
 /// Emits `page.js` for HTML Wasm mode.
 ///
 /// WHAT: appends a Wasm bootstrap around lowered JS helpers and slot hydration.
-/// WHY: entry start() is exported as "moth_start"; JS calls it directly and uses the
+/// WHY: the compiler-owned entry is exported as "moth_start"; JS calls it directly and uses the
 ///      returned fragment list to hydrate slots. No per-function wrapper bindings needed.
 pub(crate) fn generate_wasm_bootstrap_js(
     js_bundle: &str,
@@ -121,7 +121,7 @@ pub(crate) fn generate_wasm_bootstrap_js(
         out.push_str("  instance.exports.moth_release(moth_frag_vec);\n");
     } else {
         // WHAT: call moth_start() and decode the returned runtime fragment list to hydrate slots.
-        // WHY: entry start() is the sole runtime fragment producer; builders call it once and
+        // WHY: the compiler-owned entry is the sole runtime fragment producer; builders call it once and
         //      use the returned Vec<String> elements to fill source-order slot placeholders.
         out.push_str("  const moth_slot_ids = [\n");
         for slot_id in slot_ids {

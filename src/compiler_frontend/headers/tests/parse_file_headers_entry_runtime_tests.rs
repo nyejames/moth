@@ -190,7 +190,7 @@ fn start_function_retains_segmented_source_runs_in_order_with_eof() {
     assert_eq!(path_count, 1, "the file value must remain a runtime token");
     assert!(
         !contains_answer,
-        "the constant declaration must not leak into the start body"
+        "the constant declaration must not leak into the entry body"
     );
     assert_eq!(
         last_tag,

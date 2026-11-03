@@ -61,8 +61,9 @@ pub(in crate::compiler_frontend::ast::templates) fn collect_and_strip_comment_te
     };
 
     for node in ast_nodes.iter_mut() {
-        let NodeKind::Function(_, _, body) = &mut node.kind else {
-            continue;
+        let body = match &mut node.kind {
+            NodeKind::Function(_, _, body) | NodeKind::EntryStart(_, body) => body,
+            _ => continue,
         };
 
         let mut retained = Vec::with_capacity(body.len());

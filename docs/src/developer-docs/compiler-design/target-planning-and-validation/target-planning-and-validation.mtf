@@ -19,11 +19,11 @@ Neither one is source-visible target identity. Moth source cannot ask which phys
 
 A function can be perfectly typed and still require a capability its assigned target lacks.
 
-For the greeting walkthrough, `start`, `greet` and any template runtime work arrive with link facts and capability requirements. Even a humble string page exercises the machinery that larger apps need for the DOM and everything around it.
+For the greeting walkthrough, the entry, `greet` and any template runtime work arrive with link facts and capability requirements. Even a humble string page exercises the machinery that larger apps need for the DOM and everything around it.
 
 ## Affinity and propagation
 
-Some functions are born with **affinity**. A JavaScript-owned `start` that must orchestrate page lifecycle wants the JS side. A DOM-touching helper wants JS. Neutral pure computation may default toward Wasm where the design supports it.
+Some functions are born with **affinity**. A JavaScript-owned entry that must orchestrate page lifecycle wants the JS side. A DOM-touching helper wants JS. Neutral pure computation may default toward Wasm where the design supports it.
 
 Requirements **propagate backwards** along call edges. If a callee needs the DOM, callers that must reach it inherit the constraint under the accepted propagation rules. Neutral callees can still sit in Wasm when callers bridge correctly.
 

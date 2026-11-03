@@ -651,7 +651,7 @@ assert(value is 7)
 assert(recovered is 0)
 "#,
     );
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let declared_names: Vec<String> = body
         .iter()

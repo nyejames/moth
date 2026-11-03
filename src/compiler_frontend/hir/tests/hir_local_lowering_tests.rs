@@ -146,8 +146,6 @@ fn authored_local_names(
 fn allocates_parameter_locals_and_binds_names() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let const_values = ConstValueStore::default();
@@ -163,8 +161,7 @@ fn allocates_parameter_locals_and_binds_names() {
         None,
     )];
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 x,
@@ -175,12 +172,10 @@ fn allocates_parameter_locals_and_binds_names() {
             returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
         body,
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_function],
-        entry_path,
         expressions,
         const_values,
         TypeEnvironment::new(),
@@ -228,8 +223,6 @@ fn allocates_parameter_locals_and_binds_names() {
 fn variable_declaration_emits_local_and_definition_write() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -241,8 +234,7 @@ fn variable_declaration_emits_local_and_definition_write() {
         ValueMode::ImmutableOwned,
     );
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -251,12 +243,10 @@ fn variable_declaration_emits_local_and_definition_write() {
             NodeKind::VariableDeclaration(make_test_variable(x, init, &expressions)),
             None,
         )],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_function],
-        entry_path,
         expressions,
         const_values,
         TypeEnvironment::new(),
@@ -369,8 +359,6 @@ fn absent_local_declaration_allocates_metadata_without_initializer_work() {
 fn immutable_and_mutable_place_initializers_keep_place_classification() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let immutable_source = super::symbol("immutable_source", &mut path_fork, &mut string_table);
     let mutable_source = super::symbol("mutable_source", &mut path_fork, &mut string_table);
     let immutable_copy = super::symbol("immutable_copy", &mut path_fork, &mut string_table);
@@ -392,8 +380,7 @@ fn immutable_and_mutable_place_initializers_keep_place_classification() {
         ValueMode::MutableReference,
     );
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![
                 param_with_type_id(
@@ -429,12 +416,10 @@ fn immutable_and_mutable_place_initializers_keep_place_classification() {
                 None,
             ),
         ],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_function],
-        entry_path,
         expressions,
         const_values,
         TypeEnvironment::new(),
@@ -489,8 +474,6 @@ fn immutable_and_mutable_place_initializers_keep_place_classification() {
 fn duplicate_local_declarations_in_same_scope_fail() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let var_name = super::symbol("my_var", &mut path_fork, &mut string_table);
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -509,8 +492,7 @@ fn duplicate_local_declarations_in_same_scope_fail() {
         ValueMode::ImmutableOwned,
     );
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -525,12 +507,10 @@ fn duplicate_local_declarations_in_same_scope_fail() {
                 None,
             ),
         ],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_function],
-        entry_path,
         expressions,
         const_values,
         TypeEnvironment::new(),
@@ -559,8 +539,6 @@ fn duplicate_local_declarations_in_same_scope_fail() {
 fn assignment_lowers_value_prelude_before_assign() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let helper = super::symbol("helper", &mut path_fork, &mut string_table);
     let mut expressions = AstExpressionBuilder::new().unwrap();
@@ -606,8 +584,7 @@ fn assignment_lowers_value_prelude_before_assign() {
         None,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 x,
@@ -618,12 +595,10 @@ fn assignment_lowers_value_prelude_before_assign() {
             returns: vec![],
         },
         vec![assignment],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![helper_fn, start_fn],
-        entry_path,
         expressions,
         const_values,
         TypeEnvironment::new(),
@@ -691,8 +666,6 @@ fn assignment_lowers_value_prelude_before_assign() {
 fn call_expression_statements_materialize_result_values() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let callee = super::symbol("callee", &mut path_fork, &mut string_table);
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -756,8 +729,7 @@ fn call_expression_statements_materialize_result_values() {
         )
         .expect("fixture call fits store")
         .id();
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -766,12 +738,10 @@ fn call_expression_statements_materialize_result_values() {
             node(NodeKind::ExpressionStatement(callee_call), None),
             node(NodeKind::ExpressionStatement(alloc_call), None),
         ],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![callee_fn, start_fn],
-        entry_path,
         expressions,
         const_values,
         TypeEnvironment::new(),
@@ -807,8 +777,6 @@ fn call_expression_statements_materialize_result_values() {
 fn multi_bind_assignment_reads_every_rhs_slot_before_updating_targets() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let pair_name = super::symbol("pair", &mut path_fork, &mut string_table);
     let left = super::symbol("left", &mut path_fork, &mut string_table);
     let right = super::symbol("right", &mut path_fork, &mut string_table);
@@ -853,8 +821,7 @@ fn multi_bind_assignment_reads_every_rhs_slot_before_updating_targets() {
         )
         .expect("fixture call fits store")
         .id();
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![
                 param_with_type_id(
@@ -894,12 +861,10 @@ fn multi_bind_assignment_reads_every_rhs_slot_before_updating_targets() {
             },
             None,
         )],
-        None,
     );
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![pair_function, start_function],
-            entry_path,
             expressions,
             const_values,
             TypeEnvironment::new(),
@@ -1021,12 +986,11 @@ fn multi_bind_assignment_reads_every_rhs_slot_before_updating_targets() {
 fn mixed_multi_bind_preserves_definition_and_update_destination_tags() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let entry_path = super::symbol("main.moth", &mut path_fork, &mut string_table);
     let pair_name = super::symbol("pair", &mut path_fork, &mut string_table);
     let existing = super::symbol("existing", &mut path_fork, &mut string_table);
     let declared = path_fork
-        .try_intern_child(start_name, string_table.intern("declared"))
+        .try_intern_child(entry_path, string_table.intern("declared"))
         .expect("test path fits");
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -1066,8 +1030,7 @@ fn mixed_multi_bind_preserves_definition_and_update_destination_tags() {
         )
         .expect("fixture call fits store")
         .id();
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 existing,
@@ -1099,12 +1062,10 @@ fn mixed_multi_bind_preserves_definition_and_update_destination_tags() {
             },
             None,
         )],
-        None,
     );
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![pair_function, start_function],
-            entry_path,
             expressions,
             const_values,
             TypeEnvironment::new(),
@@ -1209,8 +1170,6 @@ fn mixed_multi_bind_preserves_definition_and_update_destination_tags() {
 fn return_lowering_handles_zero_one_and_many_values() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let one_name = super::symbol("one", &mut path_fork, &mut string_table);
     let many_name = super::symbol("many", &mut path_fork, &mut string_table);
     let mut expressions = AstExpressionBuilder::new().unwrap();
@@ -1234,14 +1193,12 @@ fn return_lowering_handles_zero_one_and_many_values() {
         .expect("fixture literal fits store")
         .id();
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
 
     let one_fn = function_node(
@@ -1269,7 +1226,6 @@ fn return_lowering_handles_zero_one_and_many_values() {
 
     let ast = build_ast_with_registered_types(
         vec![start_fn, one_fn, many_fn],
-        entry_path,
         expressions,
         const_values,
         TypeEnvironment::new(),

@@ -212,8 +212,8 @@ fn prefixed_unknown_and_nonplace_targets_are_not_declarations() {
 
 #[test]
 fn prefixed_pending_binding_writes_use_the_mutation_owner() {
-    let (ast, paths, strings) = parse_single_file_ast("value ~= 1\n~value += 2\n~value = 3\n");
-    let body = start_function_body(&ast, &paths, &strings);
+    let (ast, _, _) = parse_single_file_ast("value ~= 1\n~value += 2\n~value = 3\n");
+    let body = start_function_body(&ast);
     assert!(matches!(&body[1].kind, NodeKind::Assignment { .. }));
     assert!(matches!(&body[2].kind, NodeKind::Assignment { .. }));
 }
@@ -317,8 +317,8 @@ fn missing_prefix_preserves_the_compound_operator_fact() {
 
 #[test]
 fn allows_whole_literal_into_decimal_binding_at_f64_context() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("total ~= 1.5\n~total = 2\n");
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let (ast, _, _) = parse_single_file_ast("total ~= 1.5\n~total = 2\n");
+    let body = start_function_body(&ast);
 
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
         panic!("expected second statement to be an assignment");
@@ -336,8 +336,8 @@ fn allows_whole_literal_into_decimal_binding_at_f64_context() {
 
 #[test]
 fn allows_i32_divide_assign_with_checked_store_conversion() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("value ~I32 = 10\n~value /= 4\n");
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let (ast, _, _) = parse_single_file_ast("value ~I32 = 10\n~value /= 4\n");
+    let body = start_function_body(&ast);
 
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
         panic!("expected second statement to be an assignment");
@@ -359,8 +359,8 @@ fn allows_i32_divide_assign_with_checked_store_conversion() {
 
 #[test]
 fn allows_same_type_u8_add_assign_without_store_conversion() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("value ~U8 = 1\n~value += 1\n");
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let (ast, _, _) = parse_single_file_ast("value ~U8 = 1\n~value += 1\n");
+    let body = start_function_body(&ast);
 
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
         panic!("expected compound assignment");
@@ -380,9 +380,8 @@ fn allows_same_type_u8_add_assign_without_store_conversion() {
 
 #[test]
 fn allows_mixed_domain_u8_add_assign_with_checked_store_conversion() {
-    let (ast, path_fork, string_table) =
-        parse_single_file_ast("wide U64 = 1\nvalue ~U8 = 1\n~value += wide\n");
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let (ast, _, _) = parse_single_file_ast("wide U64 = 1\nvalue ~U8 = 1\n~value += wide\n");
+    let body = start_function_body(&ast);
 
     let NodeKind::Assignment { value, .. } = &body[2].kind else {
         panic!("expected compound assignment");
@@ -404,8 +403,8 @@ fn allows_mixed_domain_u8_add_assign_with_checked_store_conversion() {
 
 #[test]
 fn allows_i32_integer_divide_assign() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("value ~I32 = 10\n~value //= 4\n");
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let (ast, _, _) = parse_single_file_ast("value ~I32 = 10\n~value //= 4\n");
+    let body = start_function_body(&ast);
 
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
         panic!("expected second statement to be an assignment");
@@ -423,8 +422,8 @@ fn allows_i32_integer_divide_assign() {
 
 #[test]
 fn allows_f64_divide_assign_whole_literal_rhs() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("value ~F64 = 10\n~value /= 4\n");
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let (ast, _, _) = parse_single_file_ast("value ~F64 = 10\n~value /= 4\n");
+    let body = start_function_body(&ast);
 
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
         panic!("expected second statement to be an assignment");
@@ -452,8 +451,8 @@ fn rejects_f64_integer_divide_assign_rhs() {
 
 #[test]
 fn allows_i32_modulus_assign() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("value ~I32 = 10\n~value %= 4\n");
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let (ast, _, _) = parse_single_file_ast("value ~I32 = 10\n~value %= 4\n");
+    let body = start_function_body(&ast);
 
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
         panic!("expected second statement to be an assignment");
@@ -471,8 +470,8 @@ fn allows_i32_modulus_assign() {
 
 #[test]
 fn allows_i32_exponent_assign() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("value ~I32 = 2\n~value ^= 3\n");
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let (ast, _, _) = parse_single_file_ast("value ~I32 = 2\n~value ^= 3\n");
+    let body = start_function_body(&ast);
 
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
         panic!("expected second statement to be an assignment");
@@ -491,8 +490,8 @@ fn allows_i32_exponent_assign() {
 
 #[test]
 fn allows_number_exponent_assign_with_i32_rhs() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("value ~Dec2 = 2.5\n~value ^= 2\n");
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let (ast, _, _) = parse_single_file_ast("value ~Dec2 = 2.5\n~value ^= 2\n");
+    let body = start_function_body(&ast);
 
     let NodeKind::Assignment { target, value } = &body[1].kind else {
         panic!("expected Dec exponent compound assignment");
@@ -530,17 +529,16 @@ fn allows_number_exponent_assign_with_i32_rhs() {
 fn grouped_rhs_ends_at_newline_for_plain_and_compound_assignment() {
     // A trailing parenthesised group must not swallow the statement newline:
     // the following statement parses on its own line.
-    let (ast, path_fork, string_table) =
+    let (ast, _, _) =
         parse_single_file_ast("value ~I32 = 2\n~value = (1 + 2)\nmarker I32 = value\n");
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
     assert!(
         matches!(&body[2].kind, NodeKind::VariableDeclaration(_)),
         "a trailing grouped RHS must leave the next statement intact"
     );
 
-    let (ast, path_fork, string_table) =
-        parse_single_file_ast("value ~Dec4 = 2\n~value ^= (1 + 2)\nmarker I32 = 1\n");
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let (ast, _, _) = parse_single_file_ast("value ~Dec4 = 2\n~value ^= (1 + 2)\nmarker I32 = 1\n");
+    let body = start_function_body(&ast);
     let NodeKind::Assignment { target, value } = &body[1].kind else {
         panic!("expected grouped Dec exponent compound assignment");
     };

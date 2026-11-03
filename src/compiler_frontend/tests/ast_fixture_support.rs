@@ -23,7 +23,6 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
 /// Creates a span-less synthetic source position for use in test fixtures.
 ///
@@ -107,6 +106,15 @@ pub(crate) fn function_node(
     span: Option<SourceSpan>,
 ) -> AstNode {
     node(NodeKind::Function(name, signature, body), span)
+}
+
+/// Builds the compiler-owned entry node a normal module root requires.
+///
+/// WHAT: pairs the entry signature with its retained top-level runtime body.
+/// WHY: HIR recognises the entry by this typed node alone, so fixtures must not model it as an
+///      authored function declaration.
+pub(crate) fn entry_start_node(signature: FunctionSignature, body: Vec<AstNode>) -> AstNode {
+    node(NodeKind::EntryStart(signature, body), None)
 }
 
 pub(crate) fn success_return_slot(type_id: TypeId) -> ReturnSlot {
@@ -233,12 +241,14 @@ pub(crate) fn function_body_by_name<'a>(
     }
 }
 
-pub(crate) fn start_function_body<'a>(
-    ast: &'a Ast,
-    path_fork: &PathInternerFork,
-    string_table: &StringTable,
-) -> &'a [AstNode] {
-    function_body_by_name(ast, path_fork, string_table, IMPLICIT_START_FUNC_NAME)
+pub(crate) fn start_function_body(ast: &Ast) -> &[AstNode] {
+    ast.nodes
+        .iter()
+        .find_map(|node| match &node.kind {
+            NodeKind::EntryStart(_, body) => Some(body.as_slice()),
+            _ => None,
+        })
+        .expect("expected the compiler-owned entry node in AST")
 }
 
 /// Builds a runtime template handoff expression through the live append and success-shape path.

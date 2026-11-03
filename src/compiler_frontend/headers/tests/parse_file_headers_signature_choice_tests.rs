@@ -222,7 +222,7 @@ fn duplicate_header_detection_ignores_qualified_match_arms() {
             &owner,
             current_index,
         ),
-        "qualified match arms in the start body are not choice declarations"
+        "qualified match arms in the entry body are not choice declarations"
     );
 }
 

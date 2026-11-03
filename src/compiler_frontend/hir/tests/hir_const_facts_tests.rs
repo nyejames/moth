@@ -19,28 +19,22 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::function_node;
 
 #[test]
 fn projects_ast_const_facts_into_hir_metadata() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let mut ast = build_ast_with_registered_types(
         vec![start_function],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -109,22 +103,17 @@ fn projects_ast_const_facts_into_hir_metadata() {
 fn empty_ast_const_facts_produces_empty_hir_const_facts() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_function],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),

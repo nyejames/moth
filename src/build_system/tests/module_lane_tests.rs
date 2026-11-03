@@ -74,7 +74,7 @@ use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
@@ -100,9 +100,12 @@ fn fixture_lane_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAsset
     }
 }
 
-/// Build the smallest valid HIR module with one entry start function, binding its name to a
-/// caller-supplied interned path in the caller-owned string table.
-fn minimal_hir_module(start_name_path: PathId) -> HirModule {
+/// Build the smallest valid HIR module with one compiler-owned entry start function.
+///
+/// WHAT: records the entry by `start_function` identity only, matching lowered modules.
+/// WHY: the implicit entry has no callable name path, so fixtures must not model one; tests that
+///      need a named HIR function bind the carrier explicitly.
+fn minimal_hir_module() -> HirModule {
     let mut module = HirModule::new();
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.blocks = vec![HirBlock {
@@ -124,9 +127,6 @@ fn minimal_hir_module(start_name_path: PathId) -> HirModule {
         .function_origins
         .insert(FunctionId(0), HirFunctionOrigin::EntryStart);
     module
-        .side_table
-        .bind_function_name(FunctionId(0), start_name_path);
-    module
         .function_provenance
         .insert(FunctionId(0), Default::default());
     module
@@ -141,12 +141,17 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
 
     let mut local_string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let start_name_path = path_fork
+    let bound_function_name = path_fork
         .try_intern_portable_path("start_entry", &mut local_string_table)
         .expect("test path fits");
 
     let option_value_name = local_string_table.intern("value");
-    let mut hir_module = minimal_hir_module(start_name_path);
+    let mut hir_module = minimal_hir_module();
+    // The implicit entry carries no name path; this fixture binds one explicitly because the
+    // string-id remap lane needs a named HIR function to exercise.
+    hir_module
+        .side_table
+        .bind_function_name(FunctionId(0), bound_function_name);
     let payload = hir_module
         .expressions
         .append_expression(HirExpression {
@@ -260,7 +265,7 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
         .hir
         .side_table
         .function_name_path(FunctionId(0))
-        .expect("start function name should be bound");
+        .expect("bound HIR function name should still resolve");
     let resolved_name = module
         .executable
         .path_table
@@ -323,7 +328,7 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
 
 #[test]
 fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
-    let mut hir_module = minimal_hir_module(PathId::ROOT);
+    let mut hir_module = minimal_hir_module();
     hir_module.blocks[0].statements.push(HirStatement {
         id: HirNodeId(99),
         kind: HirStatementKind::Call {
@@ -1493,11 +1498,7 @@ fn lane_module_with_generated_and_cross_module_calls(
     generated_call: Option<GeneratedFunctionIdentity>,
     cross_module_calls: &[OriginFunctionId],
 ) -> Module {
-    let mut path_fork = PathInternerFork::empty();
-    let start_name_path = path_fork
-        .try_intern_portable_path("start_entry", &mut StringTable::new())
-        .expect("test path fits");
-    let mut hir_module = minimal_hir_module(start_name_path);
+    let mut hir_module = minimal_hir_module();
     if let Some(identity) = generated_call {
         hir_module.blocks[0].statements.push(HirStatement {
             id: HirNodeId(7),
@@ -1769,11 +1770,7 @@ fn generated_test_summary() -> PublicCallSummary {
 }
 
 fn minimal_lane_module(entry_point: PathBuf, active_root: bool) -> Module {
-    let mut path_fork = PathInternerFork::empty();
-    let start_name_path = path_fork
-        .try_intern_portable_path("start_entry", &mut StringTable::new())
-        .expect("test path fits");
-    let hir_module = minimal_hir_module(start_name_path);
+    let hir_module = minimal_hir_module();
     let function_link_facts = collect_module_function_link_facts(&hir_module)
         .expect("test HIR should produce function link facts");
     Module {

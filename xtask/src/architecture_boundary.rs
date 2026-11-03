@@ -70,8 +70,8 @@ const FRONTEND_SEMANTIC_STAGE_OWNERS: &[&str] = &[
 /// What production `compiler_frontend` code must not name.
 ///
 /// The project tool's settings module is not banned wholesale: the compiler reads authored-name
-/// constants such as the implicit start function from it. The banned name is the mutable
-/// configuration container itself, which is what the layering rule is about.
+/// constants such as fixed file names from it. The banned name is the mutable configuration
+/// container itself, which is what the layering rule is about.
 const BUILD_AND_PROJECT_CONTAINERS: &[&str] = &["crate::build_system", "settings::Config"];
 
 /// What production Boracle oracle code must not name.

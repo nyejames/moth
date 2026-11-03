@@ -19,13 +19,14 @@ use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::entry_start_node;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, immutable_reference_expr, make_test_variable, node, symbol,
+    assignment_target, immutable_reference_expr, make_test_variable, node, symbol,
     test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
+use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
 use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
 use std::sync::Arc;
 
@@ -54,7 +55,6 @@ fn i32_expression(
 fn frontend_check_borrows_propagates_failures() {
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let type_environment = TypeEnvironment::new();
@@ -68,13 +68,10 @@ fn frontend_check_borrows_propagates_failures() {
         crate::compiler_frontend::source::LocalSpan::source_start(),
     );
 
-    let start_fn = function_node(
-    start_name,
-    FunctionSignature {
+    let start_fn = entry_start_node(FunctionSignature {
         parameters: vec![],
         returns: vec![],
-    },
-    vec![
+    }, vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
                 x,
@@ -110,19 +107,12 @@ fn frontend_check_borrows_propagates_failures() {
             )),
             Some(conflict_span),
         ),
-    ],
-    None,
-);
+    ]);
 
     let external_package_registry =
         Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::new());
-    let ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        const_values,
-        type_environment,
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_fn], builder, const_values, type_environment);
 
     let style_directives = StyleDirectiveRegistry::built_ins();
     let source_files = Arc::new(SourceDatabase::empty());
@@ -193,7 +183,6 @@ fn frontend_check_borrows_propagates_failures() {
 fn successful_borrow_report_can_be_stored_on_module() {
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -201,8 +190,7 @@ fn successful_borrow_report_can_be_stored_on_module() {
 
     let counter = symbol("counter", &mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -241,17 +229,10 @@ fn successful_borrow_report_can_be_stored_on_module() {
                 test_source_location(2),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start_fn],
-            entry_path,
-            builder,
-            const_values,
-            type_environment,
-        ),
+        build_ast_with_registered_types(vec![start_fn], builder, const_values, type_environment),
         &mut string_table,
         &mut path_fork,
         &external_package_registry,

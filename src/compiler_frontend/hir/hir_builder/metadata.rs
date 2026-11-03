@@ -8,7 +8,7 @@
 
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::AstDocFragmentKind;
-use crate::compiler_frontend::ast::ast_nodes::NodeKind;
+use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, NodeKind};
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
 use crate::compiler_frontend::ast::expressions::failure_classification::AstBuiltinFailureSummaries;
 use crate::compiler_frontend::ast::expressions::failure_facts::{
@@ -171,10 +171,24 @@ impl<'a> HirBuilder<'a> {
         )?;
 
         for node in &ast.nodes {
-            let NodeKind::Function(path, signature, _) = &node.kind else {
+            let signature = match &node.kind {
+                NodeKind::Function(_, signature, _) | NodeKind::EntryStart(signature, _) => {
+                    signature
+                }
+                _ => continue,
+            };
+            let Some(identity) = node.function_identity() else {
                 continue;
             };
-            let function_id = self.resolve_function_id_or_error(path)?;
+            let function_id = match identity {
+                AstFunctionIdentity::Authored(path) => self.resolve_function_id_or_error(&path)?,
+                AstFunctionIdentity::Entry => self.module.start_function.ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::HirConstruction,
+                        "completed AST has an entry body but HIR allocated no entry function",
+                    )
+                })?,
+            };
             let boundary = match signature.error_return_type_id() {
                 Some(error_type) if Some(error_type) == builtin_error_type => {
                     HirBuiltinFailureBoundary::BuiltinErrorSlot
@@ -182,7 +196,7 @@ impl<'a> HirBuilder<'a> {
                 Some(error_type) => HirBuiltinFailureBoundary::CustomErrorSlot(error_type),
                 None => HirBuiltinFailureBoundary::InferPrivate,
             };
-            let pending = summaries.function_facts(*path).ok_or_else(|| {
+            let pending = summaries.function_facts(identity).ok_or_else(|| {
                 InfrastructureFailure::internal(
                     CompilerStage::HirConstruction,
                     "completed function has no converged AST failure facts",
@@ -210,7 +224,12 @@ impl<'a> HirBuilder<'a> {
                 HirFunctionFailureFacts {
                     span: node.span,
                     boundary,
-                    infallible_cast_evidence: ast.infallible_cast_evidence.get(path).copied(),
+                    infallible_cast_evidence: match identity {
+                        AstFunctionIdentity::Authored(path) => {
+                            ast.infallible_cast_evidence.get(&path).copied()
+                        }
+                        AstFunctionIdentity::Entry => None,
+                    },
                     contributors,
                     assertion_message_calls,
                     deferred_custom_catches,

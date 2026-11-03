@@ -1,4 +1,4 @@
-//! Implicit entry-start body capture.
+//! Implicit entry body capture.
 //!
 //! WHAT: records source-owned token ranges for non-header top-level tokens and runtime templates.
 //! WHY: only the active root executes top-level runtime code; ordinary source executable code must

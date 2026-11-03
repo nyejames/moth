@@ -342,7 +342,7 @@ fn expand_node<'a>(
         // Type and function definitions.
         NodeKind::StructDefinition(_, fields) => expand_declarations(fields, context, out)?,
 
-        NodeKind::Function(_, signature, body) => {
+        NodeKind::Function(_, signature, body) | NodeKind::EntryStart(signature, body) => {
             validate_signature(signature, context)?;
             push_nodes(body, context, out);
         }

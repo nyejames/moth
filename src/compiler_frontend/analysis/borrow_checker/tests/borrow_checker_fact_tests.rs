@@ -45,6 +45,7 @@ use crate::compiler_frontend::hir::terminators::{
 use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::entry_start_node;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, function_node, immutable_reference_expr, make_test_variable, node,
     param_with_type_id, symbol, test_if_branch_metadata, test_source_location,
@@ -53,7 +54,7 @@ use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_borrow_error_view, assert_invalid_mutable_access_reason, run_borrow_checker,
 };
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
+use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     build_ast_with_registered_types, lower_ast, multi_bind_target,
@@ -112,7 +113,9 @@ fn shared_expression_row_merges_branch_roots_in_either_successor_order() {
 
     for reverse_successor_visit in [false, true] {
         let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-        let entry_path = ast.entry_path;
+        let entry_path = path_fork
+            .try_intern_portable_path("@page.moth", &mut string_table)
+            .expect("test entry path fits");
         let wrapper_name = path_fork
             .try_intern_child(entry_path, string_table.intern("wrapper"))
             .expect("test path fits");
@@ -369,15 +372,13 @@ fn statement_terminator_and_value_facts_are_populated() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
 
     let x = symbol("x", &mut path_fork, &mut string_table);
     let y = symbol("y", &mut path_fork, &mut string_table);
     let flag = symbol("flag", &mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -476,17 +477,10 @@ fn statement_terminator_and_value_facts_are_populated() {
                 test_source_location(3),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start_fn],
-            entry_path,
-            expression_builder,
-            const_values,
-            types,
-        ),
+        build_ast_with_registered_types(vec![start_fn], expression_builder, const_values, types),
         &mut string_table,
         &mut path_fork,
         &external_package_registry,
@@ -565,7 +559,6 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
 
     let data = symbol("data", &mut path_fork, &mut string_table);
@@ -573,13 +566,10 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
     let sink = symbol("sink", &mut path_fork, &mut string_table);
     let second_ref = symbol("second_ref", &mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-    start_name,
-    FunctionSignature {
+    let start_fn = entry_start_node(FunctionSignature {
         parameters: vec![],
         returns: vec![],
-    },
-    vec![
+    }, vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(data, i32_expression(&mut expression_builder, &mut const_values, 7, test_source_location(1), ValueMode::MutableOwned), &expression_builder)),
             test_source_location(1),
@@ -605,18 +595,10 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
             NodeKind::VariableDeclaration(make_test_variable(second_ref, expression_builder.reference_with_type_id(data, builtin_type_ids::fixed_scalar(FixedScalar::I32), test_source_location(4), ValueMode::MutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue).expect("valid expression fixture").id(), &expression_builder)),
             test_source_location(4),
         ),
-    ],
-    None,
-);
+    ]);
 
     let hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start_fn],
-            entry_path,
-            expression_builder,
-            const_values,
-            types,
-        ),
+        build_ast_with_registered_types(vec![start_fn], expression_builder, const_values, types),
         &mut string_table,
         &mut path_fork,
         &external_package_registry,
@@ -653,20 +635,16 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
 
     let source = symbol("source", &mut path_fork, &mut string_table);
     let target = symbol("target", &mut path_fork, &mut string_table);
     let sentinel = symbol("sentinel", &mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-    start_name,
-    FunctionSignature {
+    let start_fn = entry_start_node(FunctionSignature {
         parameters: vec![],
         returns: vec![],
-    },
-    vec![
+    }, vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(source, i32_expression(&mut expression_builder, &mut const_values, 7, test_source_location(10), ValueMode::MutableOwned), &expression_builder)),
             test_source_location(10),
@@ -679,18 +657,10 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
             NodeKind::VariableDeclaration(make_test_variable(sentinel, i32_expression(&mut expression_builder, &mut const_values, 0, test_source_location(12), ValueMode::ImmutableOwned), &expression_builder)),
             test_source_location(12),
         ),
-    ],
-    None,
-);
+    ]);
 
     let hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start_fn],
-            entry_path,
-            expression_builder,
-            const_values,
-            types,
-        ),
+        build_ast_with_registered_types(vec![start_fn], expression_builder, const_values, types),
         &mut string_table,
         &mut path_fork,
         &external_package_registry,
@@ -2444,7 +2414,9 @@ return identity(load_user()!)
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let entry_path = ast.entry_path;
+    let entry_path = path_fork
+        .try_intern_portable_path("@page.moth", &mut string_table)
+        .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(
         ast,
@@ -2552,7 +2524,6 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let mut external_package_registry = default_external_package_registry(&mut string_table);
     let external_id = Arc::make_mut(&mut external_package_registry)
         .register_function(ExternalFunctionDef {
@@ -2757,19 +2728,16 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
         ],
         None,
     );
-    let start = function_node(
-        start_name,
+    let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
     let hir = lower_hir(
         build_ast_with_registered_types(
             vec![unknown, caller, start],
-            entry_path,
             expression_builder,
             const_values,
             types,

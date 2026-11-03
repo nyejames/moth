@@ -1529,7 +1529,7 @@ pub struct FileFrontendPrepareOutput {
     pub runtime_fragment_count: usize,
     /// Whether this file is the active root and contains non-trivial top-level root/start code.
     pub has_non_trivial_root_body: bool,
-    /// Names and authored spans of bindings introduced by this file's implicit start body.
+    /// Names and authored spans of bindings introduced by this file's entry body.
     ///
     /// WHY: header parsing owns runtime-root symbol discovery. Later constant-context lookup
     /// reports one of these names as a non-constant reference instead of an unknown name, and

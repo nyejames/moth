@@ -77,7 +77,7 @@ builder needs to place its resources.
 
 ### Consume the entry outcome
 
-A normal executable entry's generated `start` has built-in `Error!` alongside
+A normal executable entry has built-in `Error!` alongside
 its fragment-collection success slots. The generated runtime caller invokes it
 once for that entry activation and branches on the typed outcome.
 

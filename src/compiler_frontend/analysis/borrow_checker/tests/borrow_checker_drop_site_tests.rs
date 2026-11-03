@@ -16,13 +16,14 @@ use crate::compiler_frontend::hir::statements::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::entry_start_node;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, immutable_reference_expr, make_test_variable, node, symbol,
+    assignment_target, immutable_reference_expr, make_test_variable, node, symbol,
     test_if_branch_metadata, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
+use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
 use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
 
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -50,15 +51,13 @@ fn i32_expression(
 fn emits_advisory_return_drop_sites() {
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let type_environment = TypeEnvironment::new();
 
     let value = symbol("value", &mut path_fork, &mut string_table);
-    let start_fn = function_node(
-        start_name,
+    let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -77,17 +76,10 @@ fn emits_advisory_return_drop_sites() {
             )),
             test_source_location(1),
         )],
-        None,
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start_fn],
-            entry_path,
-            builder,
-            const_values,
-            type_environment,
-        ),
+        build_ast_with_registered_types(vec![start_fn], builder, const_values, type_environment),
         &mut string_table,
         &mut path_fork,
         &external_package_registry,
@@ -120,7 +112,6 @@ fn emits_advisory_return_drop_sites() {
 fn emits_advisory_break_and_region_exit_drop_sites() {
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
@@ -128,8 +119,7 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
 
     let x = symbol("x", &mut path_fork, &mut string_table);
     let flag = symbol("flag", &mut path_fork, &mut string_table);
-    let start_fn = function_node(
-        start_name,
+    let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -229,17 +219,10 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
                 test_source_location(5),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start_fn],
-            entry_path,
-            builder,
-            const_values,
-            type_environment,
-        ),
+        build_ast_with_registered_types(vec![start_fn], builder, const_values, type_environment),
         &mut string_table,
         &mut path_fork,
         &external_package_registry,

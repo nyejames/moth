@@ -50,7 +50,6 @@ pub const CONFIG_FILE_NAME: &str = "config.moth";
 /// Special reserved names for functions and variables created by the compiler
 pub const TOP_LEVEL_TEMPLATE_NAME: &str = "#template";
 pub const TOP_LEVEL_CONST_TEMPLATE_NAME: &str = "#const_template";
-pub const IMPLICIT_START_FUNC_NAME: &str = "start";
 pub const TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY: &str = "template_const_loop_iteration_limit";
 pub const MAX_TEMPLATE_CONST_LOOP_ITERATIONS: usize = 1_000_000;
 

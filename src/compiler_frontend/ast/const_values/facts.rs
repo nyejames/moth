@@ -42,7 +42,7 @@ pub enum ConstBindingScope {
     /// Explicit `#=` constant at module top level.
     ExplicitTopLevel,
 
-    /// Inferred immutable declaration at module top level (start body).
+    /// Inferred immutable declaration at module top level (entry body).
     PrivateTopLevel,
 
     /// Inferred immutable declaration inside a function or block body.

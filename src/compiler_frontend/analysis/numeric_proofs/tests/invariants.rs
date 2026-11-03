@@ -353,6 +353,8 @@ impl ProofFixture {
             .function_origins
             .insert(FunctionId(0), HirFunctionOrigin::EntryStart);
         self.module.start_function = Some(FunctionId(0));
+        let source_path = self.path("main.moth");
+        self.module.start_source_file = Some(source_path);
         self.module
             .function_provenance
             .insert(FunctionId(0), Default::default());

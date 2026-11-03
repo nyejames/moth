@@ -4,7 +4,7 @@ use super::support::*;
 use crate::backends::js::JsEmitter;
 use crate::backends::js::symbols::build_field_symbol_raw;
 use crate::compiler_frontend::hir::blocks::HirBlock;
-use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{BlockId, FieldId, FunctionId, RegionId, StructId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::regions::HirRegion;
@@ -140,7 +140,7 @@ fn exposes_function_name_map_for_runtime_fragments() {
     module.side_table.bind_function_name(
         FunctionId(0),
         path_fork
-            .try_intern_portable_path("start", &mut string_table)
+            .try_intern_portable_path("entry_body", &mut string_table)
             .expect("test path fits"),
     );
     module.side_table.bind_function_name(
@@ -159,7 +159,7 @@ fn exposes_function_name_map_for_runtime_fragments() {
         &path_fork.snapshot_table(),
     )
     .expect("JS lowering should succeed");
-    let expected_start = expected_dev_function_name("start", 0);
+    let expected_start = expected_dev_function_name("entry_body", 0);
     let expected_fragment = expected_dev_function_name("__moth_frag_0", 1);
 
     assert_eq!(
@@ -179,3 +179,64 @@ fn exposes_function_name_map_for_runtime_fragments() {
 }
 
 // ---------------------------------------------------------------------------
+
+#[test]
+fn nameless_entry_lowers_to_a_generated_callable() {
+    let mut expressions = HirExpressionStore::default();
+    expressions.freeze();
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, _) = build_type_environment();
+    let entry_path = path_fork
+        .try_intern_portable_path("main.moth", &mut string_table)
+        .expect("test path fits");
+
+    let block = HirBlock {
+        id: BlockId(0),
+        region: RegionId(0),
+        locals: vec![],
+        statements: vec![],
+        terminator: HirTerminator::Return(HirValueRange::empty()),
+    };
+
+    let mut module = HirModule::new();
+    module.expressions = expressions;
+    module.blocks = vec![block];
+    module.start_function = Some(FunctionId(0));
+    module.start_source_file = Some(entry_path);
+    module.functions = vec![HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![],
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
+    }];
+    module
+        .function_origins
+        .insert(FunctionId(0), HirFunctionOrigin::EntryStart);
+    module.regions = vec![HirRegion::lexical(RegionId(0), None)];
+
+    let output = lower_hir_to_js(
+        &module,
+        &NumericProofs::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("a nameless entry should lower");
+
+    let entry_name = output
+        .function_name_by_id
+        .get(&FunctionId(0))
+        .expect("the nameless entry must receive a generated JS name")
+        .clone();
+    assert!(
+        !entry_name.is_empty(),
+        "the generated entry name must be usable as a JS identifier"
+    );
+    assert!(
+        output.source.contains(&format!("function {entry_name}(")),
+        "the generated entry name must appear as the emitted callable"
+    );
+}

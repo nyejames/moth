@@ -792,7 +792,7 @@ fn run_semantic_stages(
     // identity that this finalization joins; only concrete-local callables receive a
     // summary record here. Generic templates remain declaration contracts whose
     // generated summaries belong to the sidecar delta this transaction completes later,
-    // distinct from these direct concrete summaries. Private functions and implicit start retain local
+    // distinct from these direct concrete summaries. Private functions and the entry retain local
     // summaries but never enter declaration records.
     let public_interface = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendPublicInterfaceFinalise,

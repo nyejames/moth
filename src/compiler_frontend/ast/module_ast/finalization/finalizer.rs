@@ -13,7 +13,7 @@ use super::super::environment::AstModuleEnvironment;
 use super::const_fact_collection::ConstFactCollector;
 use super::normalize_ast::{TemplateNormalizationError, discard_inactive_assertion_messages};
 use super::static_if_specialization::{StaticIfCandidate, StaticIfSpecialization};
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStoreError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     ExprId, ExpressionFreezeRoots, PlaceId,
@@ -40,7 +40,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
-    choices_control_flow, generics_traits_api, token_lexical,
+    choices_control_flow, generics_traits_api,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::{
@@ -53,7 +53,6 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::CoreTraitKind;
 use crate::compiler_frontend::traits::evidence::environment::InfallibleCastEvidenceContract;
-use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use crate::timing_scope_attributed_opt;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::rc::Rc;
@@ -278,19 +277,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             self.template_normalization_error_messages(error, &mut emitted.warnings, string_table)
         })?;
 
-        let start_function_path = if self.context.root_role.has_implicit_start() {
-            Some(
-                self.path_fork
-                    .try_intern_child(
-                        self.context.entry_dir,
-                        string_table.intern(IMPLICIT_START_FUNC_NAME),
-                    )
-                    .ok_or_else(token_lexical::logical_path_capacity)?,
-            )
-        } else {
-            None
-        };
-
         // ----------------------------
         //  Specialise static Bool control flow
         // ----------------------------
@@ -309,13 +295,11 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         specialization.merge(template_specialization);
         self.validate_specialized_function_terminality(
             &emitted.ast,
-            start_function_path,
             &mut emitted.warnings,
             string_table,
         )?;
         self.validate_specialized_function_terminality(
             &emitted.validated_generic_template_bodies,
-            None,
             &mut emitted.warnings,
             string_table,
         )?;
@@ -368,7 +352,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &self.environment.type_environment,
             Some(self.context.external_package_registry.as_ref()),
         )
-        .collect(&emitted.ast, start_function_path.as_ref())
+        .collect(&emitted.ast)
         .map_err(|error| {
             self.template_normalization_error_messages(error, &mut emitted.warnings, string_table)
         })?;
@@ -490,7 +474,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             expression_builder,
             const_values,
             file_value_resolution,
-            entry_dir,
             root_role,
             ..
         } = self.context;
@@ -526,7 +509,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 expressions,
                 const_values,
                 doc_fragments,
-                entry_path: entry_dir,
                 root_role,
                 const_top_level_fragments,
                 warnings: emitted.warnings,
@@ -752,13 +734,24 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         )
         .map_err(|error| self.error_messages(error, warnings, string_table))?;
         for node in nodes {
-            let NodeKind::Function(path, signature, _) = &node.kind else {
+            let signature = match &node.kind {
+                NodeKind::Function(_, signature, _) | NodeKind::EntryStart(signature, _) => {
+                    signature
+                }
+                _ => continue,
+            };
+            let Some(identity) = node.function_identity() else {
                 continue;
             };
-            let Some(pending) = summaries.function_facts(*path) else {
+            let Some(pending) = summaries.function_facts(identity) else {
                 continue;
             };
-            if let Some(contract) = infallible_cast_evidence.get(path)
+            let authored_path = match identity {
+                AstFunctionIdentity::Authored(path) => Some(path),
+                AstFunctionIdentity::Entry => None,
+            };
+            if let Some(path) = authored_path
+                && let Some(contract) = infallible_cast_evidence.get(&path)
                 && let Some(contributor) = summaries.first_active(&pending.body.implicit)
             {
                 let witness = summaries.witness(contributor);
@@ -829,11 +822,12 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             let custom_error = match signature.error_return_type_id() {
                 Some(error_type) if Some(error_type) == builtin_error_type => continue,
                 Some(error_type) => Some(error_type),
-                None if self
-                    .environment
-                    .lookups
-                    .exported_callable_paths
-                    .contains(path) =>
+                None if authored_path.is_some_and(|path| {
+                    self.environment
+                        .lookups
+                        .exported_callable_paths
+                        .contains(&path)
+                }) =>
                 {
                     None
                 }
@@ -873,10 +867,10 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         let mut assertion_validation_paths = FxHashSet::default();
         if has_assertion_validation_candidates {
             for node in concrete_nodes {
-                let NodeKind::Function(path, ..) = node.kind else {
+                let Some(identity) = node.function_identity() else {
                     continue;
                 };
-                let Some(pending) = summaries.function_facts(path) else {
+                let Some(pending) = summaries.function_facts(identity) else {
                     continue;
                 };
                 for contributor in &pending.assertion_message_calls {
@@ -892,17 +886,18 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
     fn validate_specialized_function_terminality(
         &self,
         ast_nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
-        start_function_path: Option<PathId>,
         warnings: &mut Vec<DiagnosticDraft>,
         string_table: &mut StringTable,
     ) -> Result<(), PreparedFailure> {
         for node in ast_nodes {
-            let NodeKind::Function(path, signature, body) = &node.kind else {
-                continue;
+            let (signature, body) = match &node.kind {
+                NodeKind::Function(_, signature, body) => (signature, body),
+                NodeKind::EntryStart(signature, body) => (signature, body),
+                _ => continue,
             };
             let policy = terminality_policy_for_signature(
                 signature,
-                start_function_path.is_some_and(|start_path| start_path == *path),
+                matches!(&node.kind, NodeKind::EntryStart(..)),
             );
             let terminality_diagnostic = validate_function_body_terminality(
                 body,

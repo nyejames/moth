@@ -205,7 +205,7 @@ Use a typed diagnostic payload and retain the function declaration location. The
 
 An explicitly typed ordinary function may diverge on every current path without this diagnostic.
 
-Apply this rule only to user-authored callable declarations with an omitted return contract. The compiler-synthesised entry `start` keeps its builder-owned ordinary contract. Root runtime work may call a Never function and make `start` diverge without requiring impossible source syntax for `start`.
+Apply this rule only to user-authored callable declarations with an omitted return contract. The compiler-owned entry keeps its builder-owned ordinary contract. Root runtime work may call a Never function and make the entry diverge without requiring impossible source syntax.
 
 ## Declared Never body validation
 
@@ -826,7 +826,7 @@ Activate complete source syntax, body validation, exact interfaces and standalon
 - [ ] Reject fallthrough and every caller-returning exit.
 - [ ] Keep normal frontend checking in inactive branches before specialisation.
 - [ ] Diagnose all-path-divergent unannotated user functions with both contract choices.
-- [ ] Exclude compiler-synthesised `start` from that explicitness diagnostic.
+- [ ] Exclude the compiler-owned entry from that explicitness diagnostic.
 - [ ] Accept explicitly typed placeholder implementations that diverge.
 - [ ] Prevent same-cycle Never calls from proving one another in the first implementation.
 
@@ -1179,7 +1179,7 @@ Prove the full contract across local, cross-module, function-value, generic, tra
 - [ ] diagnostic offers permanent Never and temporary ordinary-type choices
 - [ ] explicitly typed equivalent is accepted
 - [ ] unannotated function that may complete stays ordinary no-value
-- [ ] compiler-synthesised `start` may diverge without source annotation
+- [ ] the compiler-owned entry may diverge without source annotation
 
 ## Required exact-interface coverage
 

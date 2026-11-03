@@ -16,7 +16,6 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::hir::const_facts::HirConstDeclarationFact;
 use crate::compiler_frontend::hir::constants::HirModuleConst;
-use crate::compiler_frontend::hir::hir_side_table::HirSideTable;
 use crate::compiler_frontend::hir::ids::{FunctionId, HirConstId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
@@ -40,13 +39,8 @@ fn test_module(string_table: &mut StringTable, path_fork: &mut PathInternerFork)
     let source_path = path_fork
         .try_intern_filesystem_path(PathBuf::from("docs/@page.moth").as_path(), string_table)
         .expect("test path should be UTF-8");
-    let start_path = path_fork
-        .try_intern_child(source_path, string_table.intern("start"))
-        .expect("test path should fit");
-    let mut side_table = HirSideTable::default();
-    side_table.bind_function_name(FunctionId(0), start_path);
     module.start_function = Some(FunctionId(0));
-    module.side_table = side_table;
+    module.start_source_file = Some(source_path);
     module
 }
 
@@ -114,9 +108,6 @@ fn extracts_reserved_entry_metadata() {
 
     let metadata = extract_html_page_metadata(
         &module,
-        module
-            .start_function
-            .expect("entry module should have start"),
         &path_fork.snapshot_table(),
         &ModuleResourceTable::new(),
         &mut DiagnosticStringBuilder::new(&mut string_table),
@@ -149,9 +140,6 @@ fn ignores_non_entry_constants() {
 
     let metadata = extract_html_page_metadata(
         &module,
-        module
-            .start_function
-            .expect("entry module should have start"),
         &path_fork.snapshot_table(),
         &ModuleResourceTable::new(),
         &mut DiagnosticStringBuilder::new(&mut string_table),
@@ -176,9 +164,6 @@ fn rejects_non_string_reserved_values() {
 
     let PageMetadataError::Diagnostic(error) = extract_html_page_metadata(
         &module,
-        module
-            .start_function
-            .expect("entry module should have start"),
         &path_fork.snapshot_table(),
         &ModuleResourceTable::new(),
         &mut DiagnosticStringBuilder::new(&mut string_table),
@@ -227,9 +212,6 @@ fn renders_structural_string_reserved_values() {
 
     let metadata = extract_html_page_metadata(
         &module,
-        module
-            .start_function
-            .expect("entry module should have start"),
         &path_fork.snapshot_table(),
         &resources,
         &mut DiagnosticStringBuilder::new(&mut string_table),
@@ -302,9 +284,6 @@ fn metadata_plan_keeps_authored_resource_and_site_root_uses() {
 
     let plan = extract_html_page_metadata(
         &module,
-        module
-            .start_function
-            .expect("entry module should have start"),
         &path_fork.snapshot_table(),
         &resources,
         &mut DiagnosticStringBuilder::new(&mut string_table),
@@ -332,9 +311,6 @@ fn rejects_duplicate_reserved_values() {
 
     let PageMetadataError::Diagnostic(error) = extract_html_page_metadata(
         &module,
-        module
-            .start_function
-            .expect("entry module should have start"),
         &path_fork.snapshot_table(),
         &ModuleResourceTable::new(),
         &mut DiagnosticStringBuilder::new(&mut string_table),

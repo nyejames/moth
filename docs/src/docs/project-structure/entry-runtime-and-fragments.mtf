@@ -1,6 +1,6 @@
 **Current support versus accepted design.** The Alpha builder still treats authored runtime work and fragments as HTML entry activity. The accepted queued design requires an explicit root purpose. Initially, only root-only `$page` supplies the HTML purpose. Dependency roots remain non-activating in both designs.
 
-Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-synthesised `start`. Entry assembly activates that module-owned `start` exactly once for a selected page. A dependency exposes declarations without activating its root.
+Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-owned entry. Entry assembly activates that module-owned entry exactly once for a selected page. A dependency exposes declarations without activating its root.
 
 ### Explicit root purpose for active roots
 
@@ -37,12 +37,12 @@ Their containing runtime code follows the normal purpose rule.
 ### Entry-activated root runtime
 
 The selected module root's top-level runtime code becomes a dormant
-compiler-synthesised `start` function. Entry assembly activates it exactly
+compiler-owned entry. Entry assembly activates it exactly
 once. This includes top-level bindings, function calls and other runtime
 statements. Helper files define reusable declarations. They do not own an
-export block, an independent `start` or an entry.
+export block or an entry.
 
-`start` has a built-in `Error!` contract. Checked numeric failure propagates to
+The entry has a built-in `Error!` contract. Checked numeric failure propagates to
 that contract, and compatible top-level postfix `!` is legal. Custom typed
 errors still need explicit recovery. A generated terminal handler closes the
 entry boundary; an unhandled built-in failure does not become an implicit panic.
@@ -53,7 +53,7 @@ See @../progress (Progress) for compiler support.
 Two forms of direct top-level template in a module root become page fragments:
 
 - A const fragment uses the `#` prefix before the opening bracket. It folds at compile time and is emitted as static HTML.
-- A runtime fragment uses the plain bracket form without `#`. The module's `start` evaluates it when entry assembly activates the module, but publication waits until that invocation succeeds.
+- A runtime fragment uses the plain bracket form without `#`. The module's entry evaluates it when entry assembly activates the module, but publication waits until that invocation succeeds.
 
 The builder preserves source order between static and runtime fragments. Static
 fragments remain in the document even when startup fails. Runtime fragments use
@@ -77,7 +77,7 @@ executable HIR, an artificial fragment or generated runtime code.
 ### Dependency roots
 
 Dependency module roots never activate their root runtime. When a module is
-bound for its public API, its top-level runtime code, `start` body and page
+bound for its public API, its top-level runtime code, entry body and page
 fragments remain dormant. Only exported declarations remain available.
 
 The purpose policy still applies when a root is compiled as a provider. A

@@ -58,16 +58,29 @@ impl<'a> HirValidator<'a> {
     }
 
     pub(super) fn validate_start_function(&self) -> Result<(), InfrastructureFailure> {
-        if let Some(start_function) = self.module.start_function
-            && !self.function_ids.contains(&start_function)
-        {
-            return Err(self.error_with_hir(format!(
-                "HIR start_function {:?} is not present in module functions",
+        // WHAT: the entry function ID and its source owner are one contract and must agree.
+        // WHY: root-scoped consumers such as page metadata branch on the source owner; a missing
+        //      half would silently skip entries or attribute them to the wrong root.
+        match (self.module.start_function, self.module.start_source_file) {
+            (None, None) => Ok(()),
+            (Some(start_function), Some(_)) => {
+                if self.function_ids.contains(&start_function) {
+                    Ok(())
+                } else {
+                    Err(self.error_with_hir(format!(
+                        "HIR start_function {:?} is not present in module functions",
+                        start_function
+                    )))
+                }
+            }
+            (Some(start_function), None) => Err(self.error_with_hir(format!(
+                "HIR start_function {:?} requires a start_source_file owner",
                 start_function
-            )));
+            ))),
+            (None, Some(_)) => Err(self.error_with_hir(
+                "HIR start_source_file owner requires a start_function".to_owned(),
+            )),
         }
-
-        Ok(())
     }
 
     pub(super) fn validate_function_origins(&self) -> Result<(), InfrastructureFailure> {
@@ -90,25 +103,37 @@ impl<'a> HirValidator<'a> {
             }
         }
 
-        if let Some(start_function) = self.module.start_function {
-            if !matches!(
-                self.module.function_origins.get(&start_function),
-                Some(HirFunctionOrigin::EntryStart)
-            ) {
+        // WHAT: exactly one function carries the entry origin, and it is `start_function`.
+        // WHY: backends select the entry by ID and by origin; a second EntryStart would make that
+        //      selection ambiguous while a mismatch would point at the wrong function.
+        let mut entry_origin_count = 0_u32;
+        let mut first_entry_origin = None;
+        for (function_id, origin) in &self.module.function_origins {
+            if matches!(origin, HirFunctionOrigin::EntryStart) {
+                entry_origin_count += 1;
+                first_entry_origin.get_or_insert(*function_id);
+            }
+        }
+
+        match (
+            self.module.start_function,
+            entry_origin_count,
+            first_entry_origin,
+        ) {
+            (Some(start_function), 1, Some(entry_origin)) if entry_origin == start_function => {}
+            (Some(start_function), _, _) => {
                 return Err(self.error_with_hir(format!(
-                    "HIR start function {:?} must be tagged as EntryStart",
+                    "HIR start function {:?} must be the only EntryStart origin; \
+                     found {entry_origin_count} EntryStart origins",
                     start_function
                 )));
             }
-        } else if self
-            .module
-            .function_origins
-            .values()
-            .any(|origin| matches!(origin, HirFunctionOrigin::EntryStart))
-        {
-            return Err(self.error_with_hir(
-                "HIR module without start_function contains an EntryStart origin".to_owned(),
-            ));
+            (None, 0, _) => {}
+            (None, _, _) => {
+                return Err(self.error_with_hir(format!(
+                    "HIR module without start_function contains {entry_origin_count} EntryStart origins"
+                )));
+            }
         }
 
         // Enforce that the stable origin-to-local-function relation is injective in both
@@ -130,12 +155,10 @@ impl<'a> HirValidator<'a> {
             )
         {
             if Some(*function_id) == self.module.start_function {
-                return Err(self.error_with_hir(
-                    format!(
-                        "HIR implicit start function {:?} must not carry a stable executable identity {}",
-                        function_id, identity
-                    ),
-                ));
+                return Err(self.error_with_hir(format!(
+                    "HIR compiler-owned entry {:?} must not carry a stable executable identity {}",
+                    function_id, identity
+                )));
             }
 
             if !self.function_ids.contains(function_id) {

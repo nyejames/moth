@@ -701,7 +701,7 @@ value = also_missing
 ";
     let result = parse_single_file_ast_diagnostic(source);
 
-    // The implicit start header is emitted last and keeps its own fail-fast boundary.
+    // The entry header is emitted last and keeps its own fail-fast boundary.
     assert_primary_errors(
         &result,
         &[("MOTH-RULE-0034", expected_source_span(source, "missing"))],

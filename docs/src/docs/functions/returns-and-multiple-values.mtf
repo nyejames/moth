@@ -103,7 +103,7 @@ or map it explicitly.
 Exported callables have closed error contracts. An exported callable without an
 error slot must discharge implicit failure or receive a compiler diagnostic.
 Traits and generic conformance cannot secretly widen that signature. The
-generated entry `start` has built-in `Error!`; compatible top-level postfix `!`
+compiler-owned entry has built-in `Error!`; compatible top-level postfix `!`
 is legal, while custom errors still need explicit recovery. See
 @../progress (Progress) for current compiler support.
 

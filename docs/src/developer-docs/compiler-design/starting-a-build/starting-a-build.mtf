@@ -107,7 +107,7 @@ The three commands also differ in how far they run:
 
 ## Self-contained project config
 
-`config.moth` is build-system-owned compile-time Moth source. It is **not** a module. It produces no HIR, no `start`, no runtime artefact and no package interface.
+`config.moth` is build-system-owned compile-time Moth source. It is **not** a module. It produces no HIR, no entry, no runtime artefact and no package interface.
 
 Config operates on exactly one authored file identity. It rejects source dependencies before path resolution. It never builds a config package graph.
 

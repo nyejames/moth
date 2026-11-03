@@ -12,7 +12,7 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::{function_node, node};
+use crate::compiler_frontend::tests::ast_fixture_support::node;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
@@ -25,8 +25,6 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 fn lowers_while_to_header_body_exit_shape() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
@@ -51,23 +49,16 @@ fn lowers_while_to_header_body_exit_shape() {
         None,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![while_node],
-        None,
     );
 
-    let ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        constants,
-        TypeEnvironment::new(),
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_fn], builder, constants, TypeEnvironment::new());
     let (module, _type_environment) = lower_ast(
         ast,
         &mut string_table,
@@ -111,8 +102,6 @@ fn lowers_while_to_header_body_exit_shape() {
 fn break_in_while_targets_loop_exit_block() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
@@ -125,23 +114,16 @@ fn break_in_while_targets_loop_exit_block() {
         None,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![while_node],
-        None,
     );
 
-    let ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        constants,
-        TypeEnvironment::new(),
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_fn], builder, constants, TypeEnvironment::new());
     let (module, _type_environment) = lower_ast(
         ast,
         &mut string_table,

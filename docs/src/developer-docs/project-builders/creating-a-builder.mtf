@@ -88,7 +88,7 @@ The example package has no output-relative resource strings.
 `require_package` returns the owner-bound assembly for the authored project
 facade. A missing facade produces a builder diagnostic. The facade selects its
 public surface through normal Moth visibility rules. It has no implicit
-`start`, page output or access to private declarations in other modules.
+entry work, page output or access to private declarations in other modules.
 
 `compile_wasm` compiles the selected assembly and its reachable dependencies.
 The result retains the import, export and runtime contract needed by an

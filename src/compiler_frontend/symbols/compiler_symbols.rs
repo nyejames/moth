@@ -10,7 +10,6 @@ use crate::compiler_frontend::builtins::error_type::{
     ERROR_FIELD_CODE, ERROR_FIELD_MESSAGE, ERROR_TYPE_NAME,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
 /// Owner for fixed compiler-owned symbols and deterministic table preseeding.
 ///
@@ -30,7 +29,6 @@ impl CompilerSymbolSet {
     /// source or project strings are interned. If user strings are already present in the table,
     /// the compiler symbols will not occupy the canonical prefix.
     pub fn preseed(string_table: &mut StringTable) {
-        string_table.intern(IMPLICIT_START_FUNC_NAME);
         string_table.intern("this");
         string_table.intern(ERROR_TYPE_NAME);
         string_table.intern(ERROR_FIELD_MESSAGE);

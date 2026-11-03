@@ -197,7 +197,7 @@ impl FunctionParameter {
 
     /// Body-scope binding row for this parameter.
     ///
-    /// WHAT: rebuilds the `Declaration` that a function or start body frame stores for the parameter.
+    /// WHAT: rebuilds the `Declaration` that a function or entry body frame stores for the parameter.
     /// WHY: the callable contract keeps the folded default as a `ConstValueId`; body frames use the
     ///      same `DeclarationValue::Default` / `Absent` shape that `signature_member_to_declaration`
     ///      produces, so scope lookups classify parameters as they did before the contract split.

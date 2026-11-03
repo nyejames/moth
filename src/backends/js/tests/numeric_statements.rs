@@ -11,7 +11,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
-use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
+use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::{
@@ -297,7 +297,7 @@ fn lower_float_boundary_module(
             FloatBoundaryLane::Fallible => Some(types.error),
         },
     };
-    let mut module = build_module(
+    let module = build_module(
         expressions,
         &mut path_fork,
         &mut string_table,
@@ -311,11 +311,6 @@ fn lower_float_boundary_module(
         ],
     );
 
-    // The fixture carries the entry-start tag production lowering records and passes the same HIR
-    // validation every lowered module does, so it cannot drift into a shape real HIR rejects.
-    module
-        .function_origins
-        .insert(FunctionId(0), HirFunctionOrigin::EntryStart);
     validate_hir_module(&module, &type_environment, &ExternalPackageRegistry::new())
         .expect("binary-float boundary fixture must satisfy production HIR validation");
 
@@ -1318,7 +1313,7 @@ fn lower_returned_operation(
         returns: vec![result_type].into_boxed_slice(),
         error_return: Some(types.error),
     };
-    let mut module = build_module(
+    let module = build_module(
         expressions,
         &mut path_fork,
         &mut string_table,
@@ -1327,9 +1322,6 @@ fn lower_returned_operation(
         function,
         &[(LocalId(0), "result"), (LocalId(1), "error")],
     );
-    module
-        .function_origins
-        .insert(FunctionId(0), HirFunctionOrigin::EntryStart);
     validate_hir_module(&module, &type_environment, &ExternalPackageRegistry::new())
         .expect("the D15 completion fixture must satisfy production HIR validation");
 

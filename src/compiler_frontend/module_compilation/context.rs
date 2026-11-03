@@ -27,7 +27,7 @@ pub(crate) struct ModuleCompilationContext<'a> {
     /// Compiler-owned settings, already projected from whatever configuration the caller uses.
     pub(crate) options: FrontendOptions,
     pub(crate) build_profile: FrontendBuildProfile,
-    /// Transient check-only units have no implicit start root; canonical modules derive this from
+    /// Transient check-only units have no entry root; canonical modules derive this from
     /// their graph-owned stable origin.
     pub(crate) root_role_override: Option<ModuleRootRole>,
     /// The canonical boundary owns the resolver; module compilation only borrows it.

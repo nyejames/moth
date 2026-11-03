@@ -4,7 +4,7 @@ Compilation and activation are different verbs.
 
 A module can compile completely, including its dormant top-level work, and still do nothing at runtime until an **entry** selects it. The seed can be fully formed and still sleep. Dependencies do not secretly run initialisers because someone mentioned a name.
 
-Current Alpha HTML selection still uses root runtime activity or fragments with reserved page metadata. The accepted queued design makes the root-only `$page` directive the HTML entry declaration: a metadata-only page is valid, while runtime work or fragments alone do not select an entry. The dormant `start` and non-activating dependency rules below remain part of both paths.
+Current Alpha HTML selection still uses root runtime activity or fragments with reserved page metadata. The accepted queued design makes the root-only `$page` directive the HTML entry declaration: a metadata-only page is valid, while runtime work or fragments alone do not select an entry. The dormant entry and non-activating dependency rules below remain part of both paths.
 
 ## Compile versus activate
 
@@ -12,24 +12,24 @@ Every normal root may carry dormant top-level runtime work and page fragments. T
 
 Under the accepted root-purpose policy, authored executable work or direct output requires a recognised purpose; `$page` is the only initial purpose. An unmarked root must not disappear merely because HTML entry filtering now selects explicit pages.
 
-The compiler synthesises an implicit **`start`** for a normal root. Properties that matter:
+The compiler synthesises an implicit **entry** for a normal root. The entry has no source-level name, so `start` remains an ordinary identifier. Properties that matter:
 
 - non-exported
 - non-bindable
 - built-in `Error!` alongside the existing fragment-collection success slots, including for a synthetic single-file root
 - owner of dormant top-level runtime work and runtime fragment string production in source order
 
-Compilation never activates `start`. Entry assembly may activate it once after the module already compiled.
+Compilation never activates the entry. Entry assembly may activate it once after the module already compiled.
 
-Implicit checked failure materialises as `Error` in `start`. Typed `Error!` propagates with `!`; custom errors need explicit recovery. Builders consume that typed outcome without adding an error-fragment channel. The @../../../docs/progress (Progress matrix) records current support.
+Implicit checked failure materialises as `Error` in the entry. Typed `Error!` propagates with `!`; custom errors need explicit recovery. Builders consume that typed outcome without adding an error-fragment channel. The @../../../docs/progress (Progress matrix) records current support.
 
-Support roots and the project package facade have no implicit `start`.
+Support roots and the project package facade have no implicit entry.
 
 In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `greeting.moth` is an ordinary source file inside that same directory-scoped module, not a separate module with a root of its own. Binding `greet` runs no page-level statements, because only an activated entry root runs root work.
 
 [diagram:
     [$insert("label"): Compiling is not activating]
-    [$insert("caption"): Every module goes through the full frontend. Only the entry decides which dormant start ever wakes up.]
+    [$insert("caption"): Every module goes through the full frontend. Only the entry decides which dormant root work ever wakes up.]
 
     [stage:
         [node:
@@ -61,7 +61,7 @@ In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `gr
             [$insert("href"): ./]
             [$insert("eyebrow"): Selected]
             [$insert("title"): One entry picks a root]
-            Entry assembly activates that root's implicit `start`, exactly once.
+            Entry assembly activates that root's implicit entry, exactly once.
         ]
     ]
 
@@ -70,7 +70,7 @@ In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `gr
             [$insert("href"): ../target-planning-and-validation/]
             [$insert("eyebrow"): Reachable]
             [$insert("title"): The function union]
-            Walk call edges from the activated `start`. Everything else stays compiled but unemitted.
+            Walk call edges from the activated entry. Everything else stays compiled but unemitted.
         ]
     ]
 ]
@@ -82,7 +82,7 @@ In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `gr
 Fragments split into useful kinds:
 
 - **folded compile-time fragments** already reduced to strings with insertion indexes
-- **runtime fragments** produced when `start` runs
+- **runtime fragments** produced when the entry runs
 - ordering metadata that preserves source indexes
 
 Dependency modules do not run their root work merely because a consumer bound a function. Activation is explicit and entry-scoped.
@@ -101,7 +101,7 @@ Builders consume compiled graphs and explicit plans. They do not rediscover sour
 
 ## Reachable function union
 
-From activated `start`, the linker walks call edges through:
+From the activated entry, the linker walks call edges through:
 
 - `greet` and other source functions
 - helpers
@@ -149,8 +149,8 @@ Target capability failures wait for the next article even when they appear adjac
 
 ## Roadmap and current status
 
-- **Accepted design:** entry-selected `start`, entry assembly and exact reachable union.
-- **Current implementation:** selected normal modules compile their dormant `start` work, and entry assembly activates the selected `start` exactly once. Imported and API-only roots expose interfaces without activating anything.
+- **Accepted design:** typed entry selection, entry assembly and exact reachable union.
+- **Current implementation:** selected normal modules compile their dormant entry work, and entry assembly activates the selected entry exactly once. Imported and API-only roots expose interfaces without activating anything.
 - **Queued work:** `html-page-directives-and-runtime-title-plan.md` carries the `$page` purpose, metadata cutover and runtime-title work.
 - **Deferred or outside scope:** link-time deferred source compilation.
 

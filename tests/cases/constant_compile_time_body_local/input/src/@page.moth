@@ -1,5 +1,5 @@
 -- Body-local compile-time constants with cross-reference.
--- Top-level statements live in the implicit start body, while function
+-- Top-level statements live in the compiler-owned entry body, while function
 -- declarations prove the same binding mode in explicit function bodies.
 
 make_value || -> I32:

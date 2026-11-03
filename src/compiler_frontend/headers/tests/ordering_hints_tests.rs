@@ -247,12 +247,12 @@ fn runtime_start_body_content_value_records_no_content_hint() {
         matches!(kind, HeaderKind::StartFunction)
     });
 
-    // The start body must genuinely contain a classified content occurrence, so the no-hint
+    // The entry body must genuinely contain a classified content occurrence, so the no-hint
     // assertion below cannot pass on a shape the collector never visits.
     assert_eq!(
         occurrences_of_class(&output, PreparedFileReferenceClass::ContentSource).len(),
         1,
-        "the start body should carry exactly one classified content occurrence"
+        "the entry body should carry exactly one classified content occurrence"
     );
     assert!(
         start_header.local_ordering_hints.is_empty(),

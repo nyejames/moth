@@ -31,39 +31,26 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::{entry_start_node, start_function_body};
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-fn start_function_node(
-    entry_dir: &PathId,
-    body: Vec<AstNode>,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> AstNode {
-    let start_path = path_fork
-        .try_intern_child(*entry_dir, string_table.intern(IMPLICIT_START_FUNC_NAME))
-        .expect("test path fits");
-    AstNode {
-        kind: NodeKind::Function(
-            start_path,
-            FunctionSignature {
-                parameters: vec![],
-                returns: vec![ReturnSlot {
-                    type_id: Some(builtin_type_ids::STRING),
-                    channel: ReturnChannel::Success,
-                }],
-            },
-            body,
-        ),
-        span: None,
-        scope: entry_dir.to_owned(),
-    }
+fn start_function_node(body: Vec<AstNode>) -> AstNode {
+    entry_start_node(
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![ReturnSlot {
+                type_id: Some(builtin_type_ids::STRING),
+                channel: ReturnChannel::Success,
+            }],
+        },
+        body,
+    )
 }
 
 fn push_start_runtime_fragment_node(
@@ -174,18 +161,11 @@ fn collects_and_strips_top_level_doc_comment_templates() {
         "<p>doc</p>"
     );
 
-    let entry_start = ast
-        .nodes
-        .iter()
-        .find(|node| matches!(node.kind, NodeKind::Function(_, _, _)))
-        .expect("entry start should exist");
-    let NodeKind::Function(_, _, body) = &entry_start.kind else {
-        panic!("entry start should remain a function");
-    };
+    let body = start_function_body(&ast);
     assert_eq!(
         body.len(),
         1,
-        "top-level doc template should be stripped from runtime start body"
+        "top-level doc template should be stripped from runtime entry body"
     );
 }
 
@@ -317,16 +297,11 @@ fn doc_fragment_folding_reads_directly_constructed_formatted_tir_root() {
         &mut const_values,
     );
 
-    let mut ast_nodes = vec![start_function_node(
-        &entry_dir,
-        vec![push_start_runtime_fragment_node(
-            &mut expression_builder,
-            doc_template,
-            entry_scope,
-        )],
-        &mut string_table,
-        &mut path_fork,
-    )];
+    let mut ast_nodes = vec![start_function_node(vec![push_start_runtime_fragment_node(
+        &mut expression_builder,
+        doc_template,
+        entry_scope,
+    )])];
 
     let doc_fragments = collect_and_strip_comment_templates_for_tests_with_store(
         &mut ast_nodes,

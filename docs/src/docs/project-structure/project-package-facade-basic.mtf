@@ -12,7 +12,7 @@ exports declarations that external consumers can bind. Without it, the project
 has no externally consumable package surface.
 
 The facade rejects top-level runtime work and page fragments. It cannot declare
-root-only `$page` metadata, has no implicit `start` and emits no route. Support
+root-only `$page` metadata, has no implicit entry and emits no route. Support
 roots follow the same API-only rule.
 
 ### How it reaches descendant modules

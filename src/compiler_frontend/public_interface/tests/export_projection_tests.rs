@@ -4,7 +4,7 @@
 //! WHAT: exercises the invariants of [`DirectExportSeed`] and the origin-index builders that
 //! integration output cannot inspect: direct export bindings cover exactly the public
 //! declarations authored in the active module root, category distinctions are exact, private
-//! declarations and the implicit start function are excluded, ordering is deterministic
+//! declarations and the compiler-owned entry are excluded, ordering is deterministic
 //! independent of declaration scheduling, and the active root origin is validated from the
 //! per-file source-origin table even when the public surface is empty. The source-nominal and
 //! source-trait origin indexes admit direct, imported-provider and alias-targeted declarations
@@ -604,7 +604,7 @@ fn external_binding_export_identity_resolves_in_independent_registry() {
 
 #[test]
 fn private_declarations_and_implicit_start_are_excluded() {
-    // `helper` and `Inner` are private; the implicit start function is always present for an
+    // `helper` and `Inner` are private; the compiler-owned entry is always present for an
     // active module root. Only the public `public_fn` must be recorded.
     let source = "\
 helper |value I32| -> I32:\n\
@@ -622,7 +622,7 @@ export:\n\
     assert_eq!(
         binding_names(&seed),
         vec!["public_fn"],
-        "private declarations and the implicit start function must be excluded"
+        "private declarations and the compiler-owned entry must be excluded"
     );
 }
 

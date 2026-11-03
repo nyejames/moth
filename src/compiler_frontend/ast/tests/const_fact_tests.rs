@@ -108,7 +108,7 @@ dev_folder = output_folder
 //  Private top-level forward reference not fact
 // ------------------------------
 
-// NOTE: The current parser rejects forward references in the start body with
+// NOTE: The current parser rejects forward references in the entry body with
 // `UnknownValueName` before AST finalization runs. This means the fact
 // collector never sees a forward reference in practice. The const resolver unit
 // tests in `src/compiler_frontend/ast/const_values/tests/mod.rs` verify that unresolved
@@ -132,6 +132,29 @@ greet || -> String:
     assert_eq!(fact.scope, ConstBindingScope::BodyLocal);
     assert_eq!(fact.source, ConstBindingSource::InferredImmutable);
     assert!(fact.span.is_some());
+}
+
+// ---------------------------------------------
+//  Entry-body children versus nested bindings
+// ---------------------------------------------
+
+#[test]
+fn entry_body_children_are_private_top_level_while_nested_bindings_are_body_local() {
+    // The authored function shares the entry's spelling `start`, so the split can only come
+    // from the typed entry node rather than from a start path comparison.
+    let source = r#"
+entry_value = "entry"
+start || -> String:
+    local_value = "local"
+    return local_value
+;
+"#;
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
+
+    let entry_fact = fact_for(&ast, &path_fork, &string_table, "entry_value");
+    assert_eq!(entry_fact.scope, ConstBindingScope::PrivateTopLevel);
+    let local_fact = fact_for(&ast, &path_fork, &string_table, "local_value");
+    assert_eq!(local_fact.scope, ConstBindingScope::BodyLocal);
 }
 
 // ------------------------------

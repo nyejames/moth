@@ -9,11 +9,11 @@
 //!
 //! Stage 3 resolves retained hints into top-level declaration dependency edges.
 //! Hints include type-surface and constant-initializer references.
-//! Executable function/start body references remain excluded.
+//! Executable function and entry-body references remain excluded.
 //!
-//! **`start` excluded from the graph.** `StartFunction` headers are not graph participants — they
-//! have no dependents and cannot be imported. They are appended after the sorted top-level
-//! headers so AST emission sees all top-level declarations before processing the start body.
+//! **Entry header excluded from the graph.** `StartFunction` headers are not graph participants —
+//! they have no dependents and cannot be imported. They are appended after the sorted top-level
+//! headers so AST emission sees all top-level declarations before processing the entry body.
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -481,7 +481,7 @@ type VisitResult = Result<(), DiagnosticDraft>;
 
 /// Topologically sort headers and finalize the header-owned module symbol package.
 ///
-/// WHAT: resolves retained hints, sorts top-level declaration headers (non-start) by the resulting
+/// WHAT: resolves retained hints, sorts top-level declaration headers (non-entry) by the resulting
 /// dependency edges, then appends `StartFunction` headers in source order. Builds the
 /// `declarations` Vec in sorted order and appends builtin declarations.
 ///
@@ -586,7 +586,7 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
     // ordered headers and append builtins.
     // WHY: declarations must be in sorted order so AST passes see dependencies before dependents.
     module_symbols
-        .build_sorted_declarations(&sorted, string_table, path_fork)
+        .build_sorted_declarations(&sorted)
         .map_err(PreparedFailure::from)?;
 
     add_frontend_counter(

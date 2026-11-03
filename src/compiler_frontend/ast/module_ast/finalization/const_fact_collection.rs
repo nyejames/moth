@@ -28,7 +28,6 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, add_ast_counter, increment_ast_counter,
 };
-use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
 
@@ -88,16 +87,15 @@ impl<'a> ConstFactCollector<'a> {
     /// Collect const facts from module constants and AST nodes.
     ///
     /// WHAT: resolves explicit module constants first (so private and body-local
-    ///       facts can reference them), then walks the start function body for
+    ///       facts can reference them), then walks the entry body for
     ///       private top-level facts, then walks all other function bodies for
     ///       body-local facts.
     pub(super) fn collect(
         mut self,
         ast_nodes: &[AstNode],
-        start_function_path: Option<&PathId>,
     ) -> Result<AstConstFacts, TemplateNormalizationError> {
         self.collect_explicit_top_level_facts();
-        self.collect_private_and_body_local_facts(ast_nodes, start_function_path)?;
+        self.collect_private_and_body_local_facts(ast_nodes)?;
         Ok(self.facts)
     }
 
@@ -136,20 +134,24 @@ impl<'a> ConstFactCollector<'a> {
     // ------------------------------------
 
     /// Walk AST nodes to collect private top-level and body-local const facts.
+    ///
+    /// WHY: direct children of the compiler-owned entry body are module-private top-level
+    ///      bindings, while a direct child of any authored function body is body-local.
     fn collect_private_and_body_local_facts(
         &mut self,
         ast_nodes: &[AstNode],
-        start_function_path: Option<&PathId>,
     ) -> Result<(), TemplateNormalizationError> {
         for node in ast_nodes {
-            if let NodeKind::Function(path, _, body) = &node.kind {
-                if start_function_path == Some(path) {
-                    let mut start_env = Self::scope_environment(&self.module_explicit_env);
-                    self.walk_start_body(body, &mut start_env)?;
-                } else {
+            match &node.kind {
+                NodeKind::EntryStart(_, body) => {
+                    let mut entry_env = Self::scope_environment(&self.module_explicit_env);
+                    self.walk_start_body(body, &mut entry_env)?;
+                }
+                NodeKind::Function(_, _, body) => {
                     let mut function_env = Self::scope_environment(&self.module_explicit_env);
                     self.walk_body_local(body, &mut function_env)?;
                 }
+                _ => {}
             }
         }
 
@@ -349,7 +351,7 @@ impl<'a> ConstFactCollector<'a> {
                 self.walk_body_local(body, &mut loop_env)?;
             }
 
-            NodeKind::Function(_, _, body) => {
+            NodeKind::Function(_, _, body) | NodeKind::EntryStart(_, body) => {
                 let mut nested_env = Self::scope_environment(env);
                 self.walk_body_local(body, &mut nested_env)?;
             }

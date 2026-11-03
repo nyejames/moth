@@ -150,6 +150,31 @@ pub struct AstNode {
     pub scope: PathId,
 }
 
+impl AstNode {
+    /// Identity of the function body this node owns, if it is a function node.
+    ///
+    /// WHAT: names an authored declaration body by its path and the compiler-owned entry body by
+    ///       its role.
+    /// WHY: later passes key per-function facts by this identity, so the entry needs no
+    ///      source-like spelling and authored functions keep their ordinary path identity.
+    pub(crate) fn function_identity(&self) -> Option<AstFunctionIdentity> {
+        match &self.kind {
+            NodeKind::Function(path, _, _) => Some(AstFunctionIdentity::Authored(*path)),
+            NodeKind::EntryStart(_, _) => Some(AstFunctionIdentity::Entry),
+            _ => None,
+        }
+    }
+}
+
+/// Key for per-function facts produced before HIR allocates function IDs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum AstFunctionIdentity {
+    /// The module's implicit entry body. It is not a declaration and has no path.
+    Entry,
+    /// An authored function declaration, identified by its ordered declaration path.
+    Authored(PathId),
+}
+
 /// Authored statement-branch facts retained until static selection.
 ///
 /// WHAT: carries each body's immediate lexical scope and provisional generic-request range.
@@ -280,12 +305,12 @@ pub enum NodeKind {
     // Basics
     VariableDeclaration(Declaration), // Variable name, Value, Visibility,
 
-    /// Accumulate a runtime string expression into the entry start() fragment list.
+    /// Accumulate a runtime string expression into the compiler-owned entry's fragment list.
     ///
     /// WHAT: marks a top-level runtime template for entry-start fragment emission.
     /// WHY: explicit intent avoids synthetic variable protocols and post-hoc fragment
-    /// extraction from the start body.
-    /// The HIR builder lowers this into a `PushRuntimeFragment` statement inside entry start().
+    /// extraction from the entry body.
+    /// The HIR builder lowers this into a `PushRuntimeFragment` statement inside the entry body.
     PushStartRuntimeFragment(ExprId),
 
     // example: new_struct_instance = MyStructDefinition(arg1, arg2)
@@ -296,6 +321,14 @@ pub enum NodeKind {
     ),
 
     Function(PathId, FunctionSignature, Vec<AstNode>),
+
+    /// The module's implicit entry body for the active normal root.
+    ///
+    /// WHAT: carries the compiler-owned entry signature and the retained top-level runtime body.
+    /// WHY: the entry is not an authored declaration, so it has no declaration path, name-table
+    ///      entry or callable surface. A distinct kind keeps every later stage recognising the
+    ///      entry by role instead of by a spelling that collides with ordinary user identifiers.
+    EntryStart(FunctionSignature, Vec<AstNode>),
     // Mutation of existing mutable variables
     Assignment {
         target: PlaceId, // Variable or field projection
@@ -419,7 +452,9 @@ fn visit_node_expressions<'a>(
                 stack.push(ExpressionVisit::Pattern(&arm.pattern));
             }
         }
-        NodeKind::LexicalScope { body } | NodeKind::Function(_, _, body) => {
+        NodeKind::LexicalScope { body }
+        | NodeKind::Function(_, _, body)
+        | NodeKind::EntryStart(_, body) => {
             push_body(stack, body);
         }
         NodeKind::RangeLoop {
@@ -551,7 +586,9 @@ fn visit_node_expressions_mut<'a>(
                 stack.push(ExpressionVisitMut::Pattern(&mut arm.pattern));
             }
         }
-        NodeKind::LexicalScope { body } | NodeKind::Function(_, _, body) => {
+        NodeKind::LexicalScope { body }
+        | NodeKind::Function(_, _, body)
+        | NodeKind::EntryStart(_, body) => {
             push_body_mut(stack, body);
         }
         NodeKind::RangeLoop {
@@ -636,6 +673,7 @@ impl AstNode {
                 }
                 NodeKind::LexicalScope { body }
                 | NodeKind::Function(_, _, body)
+                | NodeKind::EntryStart(_, body)
                 | NodeKind::RangeLoop { body, .. }
                 | NodeKind::CollectionLoop { body, .. }
                 | NodeKind::WhileLoop(_, body) => push_place_bodies_mut(&mut stack, body),
@@ -694,6 +732,7 @@ impl AstNode {
                 }
                 NodeKind::LexicalScope { body }
                 | NodeKind::Function(_, _, body)
+                | NodeKind::EntryStart(_, body)
                 | NodeKind::RangeLoop { body, .. }
                 | NodeKind::CollectionLoop { body, .. }
                 | NodeKind::WhileLoop(_, body) => push_place_bodies(&mut stack, body),

@@ -103,7 +103,7 @@ fn record_start_body_token_from_source(
 
 // Top-level declarations are same-module-visible by default; cross-module public visibility
 // comes only from the root `export:` block. Non-declaration statements are collected into the
-// implicit start-function header for that file.
+// compiler-owned entry header for that file.
 pub(super) fn parse_headers_in_file(
     cursor: &mut TokenCursor<'_>,
     file_id: SourceId,
@@ -440,7 +440,7 @@ fn handle_export_block(
         )));
     }
 
-    // The block terminator belongs to this parser mode and must not become an implicit start-body
+    // The block terminator belongs to this parser mode and must not become an entry-body
     // token for the surrounding file.
     cursor.advance();
     state.export_mode = HeaderExportMode::Private;
@@ -1074,7 +1074,7 @@ fn handle_runtime_template_item(
     context: &mut HeaderParseContext<'_>,
 ) -> FileParserResult<()> {
     // Runtime top-level templates stay in the start-function body and are evaluated in source
-    // order by entry start(). The runtime fragment count lets later const fragments record their
+    // order by the compiler-owned entry. The runtime fragment count lets later const fragments record their
     // insertion point relative to already-seen runtime fragments.
     let opening_index = cursor.position().index().checked_sub(1).ok_or_else(|| {
         HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
@@ -1210,7 +1210,7 @@ pub(super) fn finish_file_output(
     {
         let span = state
             .first_executable_start_body_span()
-            .expect("non-trivial start body has an executable token span");
+            .expect("non-trivial entry body has an executable token span");
         return Err(FileFrontendPrepareFailure::Diagnosed(state.into_error(
             names_declarations::invalid_top_level_runtime_statement(Some(span)),
         )));

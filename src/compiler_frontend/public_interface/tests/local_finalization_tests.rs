@@ -245,7 +245,7 @@ fn generic_receiver_template_has_no_base_concrete_summary() {
 
 #[test]
 fn finalization_excludes_private_and_start_summaries() {
-    // Three local functions carry borrow-observed call summaries: the implicit start
+    // Three local functions carry borrow-observed call summaries: the entry
     // (FunctionId 0), one exported public free function (FunctionId 1) and one private
     // free function (FunctionId 2). Only the public origin enters the draft, so the completed
     // phase must retain exactly that origin's summary and exclude both local-only summaries.

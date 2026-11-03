@@ -193,7 +193,7 @@ pub(crate) fn lower_statement(
         }
         HirStatementKind::PushRuntimeFragment { vec_local, value } => {
             // WHAT: lower a runtime fragment push into a Wasm vec-push sequence.
-            // WHY: entry start() accumulates runtime fragments via PushRuntimeFragment;
+            // WHY: the compiler-owned entry accumulates runtime fragments via PushRuntimeFragment;
             //      the Wasm backend must append the evaluated string to the fragment vec.
             lower_push_runtime_fragment(context, vec_local, *value, statements)
         }

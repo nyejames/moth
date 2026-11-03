@@ -24,11 +24,10 @@ use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_body_by_name, function_signature_by_name,
+    function_signature_by_name, start_function_body,
 };
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
 use crate::mon::Value;
-use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
 /// Source-side semantic identity retained next to the folded value payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,12 +138,7 @@ pub(super) fn observe_data_value(
         ));
     }
 
-    let start_body = function_body_by_name(
-        &build_result.ast,
-        path_fork,
-        string_table,
-        IMPLICIT_START_FUNC_NAME,
-    );
+    let start_body = start_function_body(&build_result.ast);
     start_body.iter().find_map(|node| match &node.kind {
         NodeKind::VariableDeclaration(declaration)
             if path_component_text(declaration.id, &context) == "data" =>
@@ -177,8 +171,7 @@ pub(super) fn observe_start_body_call_arguments(
         path_fork: &path_fork,
         string_table: &string_table,
     };
-    let start_body =
-        function_body_by_name(ast, &path_fork, &string_table, IMPLICIT_START_FUNC_NAME);
+    let start_body = start_function_body(ast);
     let arguments = start_body
         .iter()
         .find_map(|node| {
@@ -190,7 +183,7 @@ pub(super) fn observe_start_body_call_arguments(
                 )
             })
         })
-        .unwrap_or_else(|| panic!("start body did not contain a call to '{function_name}'"));
+        .unwrap_or_else(|| panic!("entry body did not contain a call to '{function_name}'"));
     let signature = function_signature_by_name(ast, &path_fork, &string_table, function_name);
 
     arguments
@@ -948,12 +941,7 @@ fn observe_expression(
             return observed;
         }
         ExpressionOperationView::Reference(path) => {
-            let start_body = function_body_by_name(
-                context.ast,
-                context.path_fork,
-                context.string_table,
-                IMPLICIT_START_FUNC_NAME,
-            );
+            let start_body = start_function_body(context.ast);
             let declaration = start_body.iter().find_map(|node| match &node.kind {
                 NodeKind::VariableDeclaration(declaration) if declaration.id == path => {
                     Some(declaration)

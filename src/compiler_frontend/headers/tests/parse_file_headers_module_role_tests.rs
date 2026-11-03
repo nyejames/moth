@@ -21,7 +21,7 @@ fn imported_module_root_discards_root_body_but_keeps_exportable_headers() {
             .filter(|header| matches!(header.kind, HeaderKind::StartFunction))
             .count(),
         0,
-        "imported roots must not produce an implicit start header"
+        "imported roots must not produce an entry header"
     );
     assert_eq!(headers.entry_runtime_fragment_count, 0);
     assert!(!headers.has_non_trivial_root_body);

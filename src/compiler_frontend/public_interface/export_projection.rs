@@ -1070,7 +1070,7 @@ fn reexport_declaration_origin(
 /// or `None` when the header is not a directly-defined public export.
 ///
 /// Returns `None` for receiver methods (handled by the receiver-surface path), private
-/// declarations, imported-module-root declarations, the implicit start function, const templates
+/// declarations, imported-module-root declarations, the compiler-owned entry, const templates
 /// and trait relations that are not declarations.
 fn free_export_declaration_origin(
     header: &Header,

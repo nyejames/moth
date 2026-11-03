@@ -57,14 +57,13 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    fresh_success_returns, function_node, node, symbol,
+    entry_start_node, fresh_success_returns, function_node, node, symbol,
 };
 use crate::compiler_frontend::tests::type_id_fixture_support::multi_bind_target;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     build_ast_with_registered_types, lower_ast,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 fn child(
@@ -78,14 +77,9 @@ fn child(
         .expect("test path fits")
 }
 
-/// Interns `main.moth` and its implicit start function, returning `(entry, start)`.
-fn entry_and_start(
-    path_fork: &mut PathInternerFork,
-    string_table: &mut StringTable,
-) -> (PathId, PathId) {
-    let entry = symbol("main.moth", path_fork, string_table);
-    let start = child(entry, IMPLICIT_START_FUNC_NAME, path_fork, string_table);
-    (entry, start)
+/// Interns the `main.moth` module root path that fixture declarations hang from.
+fn entry_path(path_fork: &mut PathInternerFork, string_table: &mut StringTable) -> PathId {
+    symbol("main.moth", path_fork, string_table)
 }
 
 fn no_returns() -> FunctionSignature {
@@ -343,9 +337,9 @@ impl FoldedValueMaterialiser for ConsumerFixtureMaterialiser {
 fn multi_bind_of_folded_slots_lowers_in_order_to_hir_and_js() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (entry, start) = entry_and_start(&mut path_fork, &mut string_table);
-    let a_path = child(start, "a", &mut path_fork, &mut string_table);
-    let b_path = child(start, "b", &mut path_fork, &mut string_table);
+    let entry = entry_path(&mut path_fork, &mut string_table);
+    let a_path = child(entry, "a", &mut path_fork, &mut string_table);
+    let b_path = child(entry, "b", &mut path_fork, &mut string_table);
     let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let mut builder =
@@ -394,10 +388,9 @@ fn multi_bind_of_folded_slots_lowers_in_order_to_hir_and_js() {
         },
         None,
     )];
-    let start_function = function_node(start, no_returns(), body, None);
+    let start_function = entry_start_node(no_returns(), body);
     let ast = build_ast_with_registered_types(
         vec![start_function],
-        entry,
         builder,
         constants,
         TypeEnvironment::new(),
@@ -494,11 +487,11 @@ fn i32_read(builder: &mut AstExpressionBuilder, path: PathId) -> ExprId {
 fn folded_slots_flow_through_a_then_row_into_a_multi_bind() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (entry, start) = entry_and_start(&mut path_fork, &mut string_table);
-    let a_path = child(start, "a", &mut path_fork, &mut string_table);
-    let b_path = child(start, "b", &mut path_fork, &mut string_table);
-    let x_path = child(start, "x", &mut path_fork, &mut string_table);
-    let y_path = child(start, "y", &mut path_fork, &mut string_table);
+    let entry = entry_path(&mut path_fork, &mut string_table);
+    let a_path = child(entry, "a", &mut path_fork, &mut string_table);
+    let b_path = child(entry, "b", &mut path_fork, &mut string_table);
+    let x_path = child(entry, "x", &mut path_fork, &mut string_table);
+    let y_path = child(entry, "y", &mut path_fork, &mut string_table);
     let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let mut builder =
@@ -562,7 +555,7 @@ fn folded_slots_flow_through_a_then_row_into_a_multi_bind() {
         .value_block(
             ValueBlock::LexicalScope(ValueLexicalScope {
                 body: vec![bind_a_and_b, yield_a_and_b],
-                scope: start,
+                scope: entry,
                 result_type_ids: vec![i32_type, i32_type],
             }),
             None,
@@ -594,10 +587,9 @@ fn folded_slots_flow_through_a_then_row_into_a_multi_bind() {
         },
         None,
     )];
-    let start_function = function_node(start, no_returns(), body, None);
+    let start_function = entry_start_node(no_returns(), body);
     let ast = build_ast_with_registered_types(
         vec![start_function],
-        entry,
         builder,
         constants,
         TypeEnvironment::new(),
@@ -640,7 +632,7 @@ fn return_of_two_result_carrier_yields_constants_in_order() {
     let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (entry, start) = entry_and_start(&mut path_fork, &mut string_table);
+    let entry = entry_path(&mut path_fork, &mut string_table);
     let pair_path = child(entry, "pair", &mut path_fork, &mut string_table);
 
     let mut builder =
@@ -672,10 +664,9 @@ fn return_of_two_result_carrier_yields_constants_in_order() {
     };
     let pair_body = vec![node(NodeKind::Return(vec![carrier]), None)];
     let pair_function = function_node(pair_path, pair_signature, pair_body, None);
-    let start_function = function_node(start, no_returns(), vec![], None);
+    let start_function = entry_start_node(no_returns(), vec![]);
     let ast = build_ast_with_registered_types(
         vec![pair_function, start_function],
-        entry,
         builder,
         constants,
         TypeEnvironment::new(),
@@ -727,9 +718,9 @@ fn mixed_bool_and_optional_carrier_binds_present_and_absent() {
         let present = optional_payload.is_some();
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let (entry, start) = entry_and_start(&mut path_fork, &mut string_table);
-        let flag_path = child(start, "flag", &mut path_fork, &mut string_table);
-        let maybe_path = child(start, "maybe", &mut path_fork, &mut string_table);
+        let entry = entry_path(&mut path_fork, &mut string_table);
+        let flag_path = child(entry, "flag", &mut path_fork, &mut string_table);
+        let maybe_path = child(entry, "maybe", &mut path_fork, &mut string_table);
 
         let mut type_environment = TypeEnvironment::new();
         let option_i32 = type_environment.intern_option(i32_type);
@@ -779,10 +770,9 @@ fn mixed_bool_and_optional_carrier_binds_present_and_absent() {
             },
             None,
         )];
-        let start_function = function_node(start, no_returns(), body, None);
+        let start_function = entry_start_node(no_returns(), body);
         let ast = build_ast_with_registered_types(
             vec![start_function],
-            entry,
             builder,
             constants,
             type_environment,
@@ -1025,7 +1015,7 @@ fn folded_slot_types_survive_constant_storage_export_and_import() {
             type_environment,
             mut path_fork,
         } = consumer;
-        let (entry, start) = entry_and_start(&mut path_fork, &mut consumer_strings);
+        let entry = entry_path(&mut path_fork, &mut consumer_strings);
         let imported_path = child(entry, "imported", &mut path_fork, &mut consumer_strings);
         let mut builder =
             AstExpressionBuilder::new().expect("test expression builder should construct");
@@ -1040,10 +1030,9 @@ fn folded_slot_types_survive_constant_storage_export_and_import() {
         let imported_body = vec![node(NodeKind::Return(vec![returned]), None)];
         let imported_function =
             function_node(imported_path, imported_signature, imported_body, None);
-        let start_function = function_node(start, no_returns(), vec![], None);
+        let start_function = entry_start_node(no_returns(), vec![]);
         let ast = build_ast_with_registered_types(
             vec![imported_function, start_function],
-            entry,
             builder,
             consumer_constants,
             type_environment,
@@ -1162,7 +1151,6 @@ fn folded_slot_types_survive_constant_storage_export_and_import() {
 fn zero_result_carrier_expression_statement_adds_no_hir_statement() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (entry, start) = entry_and_start(&mut path_fork, &mut string_table);
 
     let mut builder =
         AstExpressionBuilder::new().expect("test expression builder should construct");
@@ -1179,10 +1167,9 @@ fn zero_result_carrier_expression_statement_adds_no_hir_statement() {
         .id();
     let carrier = folded_host_carrier(&mut builder, &mut constants, call, &[], vec![]);
     let body = vec![node(NodeKind::ExpressionStatement(carrier), None)];
-    let start_function = function_node(start, no_returns(), body, None);
+    let start_function = entry_start_node(no_returns(), body);
     let ast = build_ast_with_registered_types(
         vec![start_function],
-        entry,
         builder,
         constants,
         TypeEnvironment::new(),

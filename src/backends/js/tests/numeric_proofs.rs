@@ -20,7 +20,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
-use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
+use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
@@ -99,9 +99,7 @@ fn lower_numeric_blocks(
 ) -> LoweredFixture {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    // Hand-built fixtures carry the same entry-start function-origin tag production lowering
-    // records, so the fixture shape matches what HIR validation accepts.
-    let mut module = build_module(
+    let module = build_module(
         expressions,
         &mut path_fork,
         &mut string_table,
@@ -110,9 +108,6 @@ fn lower_numeric_blocks(
         function,
         &local_names,
     );
-    module
-        .function_origins
-        .insert(FunctionId(0), HirFunctionOrigin::EntryStart);
     validate_hir_module(&module, &type_environment, &ExternalPackageRegistry::new())
         .expect("numeric fixture HIR must satisfy production HIR validation");
 

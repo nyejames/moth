@@ -94,8 +94,6 @@ fn int_pattern(
 fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let chooser = super::symbol("choose_match", &mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
@@ -145,19 +143,16 @@ fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
         None,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn, chooser_fn],
-        entry_path,
         builder,
         constants,
         TypeEnvironment::new(),
@@ -182,8 +177,6 @@ fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
 fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let label_fn_name = super::symbol("label_status", &mut path_fork, &mut string_table);
     let status_path = super::symbol("Status", &mut path_fork, &mut string_table);
     let status_local = super::symbol("status", &mut path_fork, &mut string_table);
@@ -264,19 +257,16 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
         None,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let ast = build_ast_with_choices(
         vec![start_fn, label_fn],
-        entry_path,
         vec![HirTestChoiceDefinition {
             nominal_path: status_path,
             variants: choice_variants,
@@ -311,8 +301,6 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
 fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
@@ -373,8 +361,7 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
         None,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 x,
@@ -385,16 +372,10 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
             returns: vec![],
         },
         vec![match_node],
-        None,
     );
 
-    let ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        constants,
-        TypeEnvironment::new(),
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_fn], builder, constants, TypeEnvironment::new());
     let (module, _type_environment) = lower_ast(
         ast,
         &mut string_table,
@@ -424,8 +405,6 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
 fn lowers_and_validates_fixed_scalar_match_pattern() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let value_name = super::symbol("value", &mut path_fork, &mut string_table);
     let u8_type = builtin_type_ids::fixed_scalar(FixedScalar::U8);
     let pattern_value = FixedScalarValue::unsigned(FixedScalar::U8, 200).expect("200 fits in U8");
@@ -474,22 +453,15 @@ fn lowers_and_validates_fixed_scalar_match_pattern() {
         },
         None,
     );
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(value_name, u8_type, false, None)],
             returns: vec![],
         },
         vec![match_node],
-        None,
     );
-    let ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        constants,
-        TypeEnvironment::new(),
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_fn], builder, constants, TypeEnvironment::new());
     let (module, type_environment) = lower_ast(
         ast,
         &mut string_table,
@@ -547,8 +519,6 @@ fn lowers_and_validates_fixed_scalar_match_pattern() {
 fn lowers_and_validates_fixed_scalar_option_literal_pattern() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let maybe_name = super::symbol("maybe", &mut path_fork, &mut string_table);
     let u8_type = builtin_type_ids::fixed_scalar(FixedScalar::U8);
     let mut type_environment = TypeEnvironment::new();
@@ -579,22 +549,15 @@ fn lowers_and_validates_fixed_scalar_option_literal_pattern() {
         },
         None,
     );
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(maybe_name, option_u8_type, false, None)],
             returns: vec![],
         },
         vec![match_node],
-        None,
     );
-    let mut ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        constants,
-        type_environment,
-    );
+    let mut ast =
+        build_ast_with_registered_types(vec![start_fn], builder, constants, type_environment);
     assert_eq!(
         ast.type_environment.intern_option(u8_type),
         option_u8_type,
@@ -640,8 +603,6 @@ fn lowers_and_validates_fixed_scalar_option_literal_pattern() {
 fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
@@ -677,8 +638,7 @@ fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
         None,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 x,
@@ -689,16 +649,10 @@ fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
             returns: vec![],
         },
         vec![match_node],
-        None,
     );
 
-    let ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        constants,
-        TypeEnvironment::new(),
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_fn], builder, constants, TypeEnvironment::new());
     let (module, _type_environment) = lower_ast(
         ast,
         &mut string_table,
@@ -731,8 +685,6 @@ fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
 fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
@@ -760,8 +712,7 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
         body: vec![],
     };
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 x,
@@ -786,16 +737,10 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
             },
             None,
         )],
-        None,
     );
 
-    let ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        constants,
-        TypeEnvironment::new(),
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_fn], builder, constants, TypeEnvironment::new());
     let err = lower_ast(
         ast,
         &mut string_table,
@@ -832,8 +777,6 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
 fn match_rejects_non_literal_pattern_expressions() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let constants = ConstValueStore::default();
@@ -845,8 +788,7 @@ fn match_rejects_non_literal_pattern_expressions() {
         ValueMode::ImmutableReference,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 x,
@@ -882,16 +824,10 @@ fn match_rejects_non_literal_pattern_expressions() {
             },
             None,
         )],
-        None,
     );
 
-    let ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        constants,
-        TypeEnvironment::new(),
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_fn], builder, constants, TypeEnvironment::new());
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         lower_ast(
             ast,
@@ -917,22 +853,17 @@ fn match_rejects_non_literal_pattern_expressions() {
 fn break_outside_loop_reports_hir_transformation_error() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Break, None)],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -958,22 +889,17 @@ fn break_outside_loop_reports_hir_transformation_error() {
 fn continue_outside_loop_reports_hir_transformation_error() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Continue, None)],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -999,24 +925,19 @@ fn continue_outside_loop_reports_hir_transformation_error() {
 fn top_level_return_reports_hir_transformation_error() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let top_level_return = node(NodeKind::Return(vec![]), None);
 
     let ast = build_ast_with_registered_types(
         vec![start_fn, top_level_return],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -1043,22 +964,17 @@ fn top_level_return_reports_hir_transformation_error() {
 fn unit_implicit_return_lowers_to_return_terminator() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -1082,8 +998,6 @@ fn unit_implicit_return_lowers_to_return_terminator() {
 fn side_table_maps_statement_and_terminator_spans() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
 
     let decl_span = SourceSpan::new(SourceId::from_index(1), LocalSpan::source_start());
@@ -1092,8 +1006,7 @@ fn side_table_maps_statement_and_terminator_spans() {
     let mut constants = ConstValueStore::default();
     let one = int_expr(&mut builder, &mut constants, 1, Some(decl_span));
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -1105,16 +1018,10 @@ fn side_table_maps_statement_and_terminator_spans() {
             ),
             node(NodeKind::Return(vec![]), Some(ret_span)),
         ],
-        None,
     );
 
-    let ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        constants,
-        TypeEnvironment::new(),
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_fn], builder, constants, TypeEnvironment::new());
     let (module, _type_environment) = lower_ast(
         ast,
         &mut string_table,
@@ -1134,8 +1041,6 @@ fn side_table_maps_statement_and_terminator_spans() {
 fn lowers_relational_pattern_to_hir_relational() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
@@ -1166,8 +1071,7 @@ fn lowers_relational_pattern_to_hir_relational() {
         None,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 x,
@@ -1178,16 +1082,10 @@ fn lowers_relational_pattern_to_hir_relational() {
             returns: vec![],
         },
         vec![match_node],
-        None,
     );
 
-    let ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        constants,
-        TypeEnvironment::new(),
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_fn], builder, constants, TypeEnvironment::new());
     let (module, _type_environment) = lower_ast(
         ast,
         &mut string_table,
@@ -1236,8 +1134,6 @@ fn lowers_relational_pattern_to_hir_relational() {
 fn lowers_guarded_relational_pattern_preserving_guard_separation() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
@@ -1272,8 +1168,7 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
         None,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 x,
@@ -1284,16 +1179,10 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
             returns: vec![],
         },
         vec![match_node],
-        None,
     );
 
-    let ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        constants,
-        TypeEnvironment::new(),
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_fn], builder, constants, TypeEnvironment::new());
     let (module, _type_environment) = lower_ast(
         ast,
         &mut string_table,
@@ -1332,8 +1221,6 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
 fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let status_path = super::symbol("Status", &mut path_fork, &mut string_table);
     let ready_name = string_table.intern("Ready");
     let busy_name = string_table.intern("Busy");
@@ -1396,8 +1283,7 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
         None,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 status_local,
@@ -1408,12 +1294,10 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
             returns: vec![],
         },
         vec![match_node],
-        None,
     );
 
     let ast = build_ast_with_choices(
         vec![start_fn],
-        entry_path,
         vec![HirTestChoiceDefinition {
             nominal_path: status_path,
             variants: choice_variants,
@@ -1478,8 +1362,6 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
 fn lowers_option_present_capture_to_payload_assignment() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let maybe_name = super::symbol("maybe", &mut path_fork, &mut string_table);
     let capture_name = string_table.intern("value");
     let capture_path = super::symbol("value", &mut path_fork, &mut string_table);
@@ -1527,8 +1409,7 @@ fn lowers_option_present_capture_to_payload_assignment() {
         None,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 maybe_name,
@@ -1539,16 +1420,10 @@ fn lowers_option_present_capture_to_payload_assignment() {
             returns: vec![],
         },
         vec![match_node],
-        None,
     );
 
-    let mut ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        constants,
-        type_environment,
-    );
+    let mut ast =
+        build_ast_with_registered_types(vec![start_fn], builder, constants, type_environment);
     let registered_option_type_id = ast
         .type_environment
         .intern_option(builtin_type_ids::fixed_scalar(FixedScalar::I32));

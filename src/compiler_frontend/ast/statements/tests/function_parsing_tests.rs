@@ -483,9 +483,9 @@ fn same_file_generic_calls_emit_requests_without_eager_function_bodies() {
         "generic function templates should not emit under their source name"
     );
 
-    let start_body = start_function_body(&ast, &path_fork, &string_table);
+    let start_body = start_function_body(&ast);
     let NodeKind::VariableDeclaration(declaration) = &start_body[0].kind else {
-        panic!("expected start body to store the generic call result")
+        panic!("expected entry body to store the generic call result")
     };
     let ExpressionOperationView::Call(call) = ast
         .expressions
@@ -636,7 +636,7 @@ fn fallible_generic_calls_remain_request_only() {
 
 #[test]
 fn static_true_assertion_retains_validation_only_generic_message_request() {
-    let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(
+    let (build_result, _, _) = parse_single_file_ast_build_result(
         "identity type T |value T| -> T:\n    return value\n;\n\nassert(true, identity(\"inactive\"))\n",
     )
     .expect("inactive generic assertion message should still be frontend-valid");
@@ -661,7 +661,7 @@ fn static_true_assertion_retains_validation_only_generic_message_request() {
         ),
         "validation-only candidates must not eagerly materialise executable bodies",
     );
-    let start_body = start_function_body(&build_result.ast, &path_fork, &string_table);
+    let start_body = start_function_body(&build_result.ast);
     assert!(
         start_body
             .iter()
@@ -904,7 +904,7 @@ fn start_function_distinguishes_user_and_host_calls() {
         "identity |value I32| -> I32:\n    return value\n;\n\nresult = identity(1)\nio.line([: [result]])\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
 
     let NodeKind::VariableDeclaration(result_decl) = &body[0].kind else {
         panic!("expected variable declaration for function result");
@@ -1077,11 +1077,11 @@ fn rejects_const_record_method_calls() {
 
 #[test]
 fn parses_mutable_receiver_methods_with_explicit_receiver_tilde() {
-    let (ast, path_fork, string_table) = parse_single_file_ast(
+    let (ast, _, _) = parse_single_file_ast(
         "Point = |\n    x I32 = 0,\n|\n\nreset |this ~Point|:\n    ~this.x = 0\n;\n\npoint ~= Point()\n~point.reset()\n",
     );
 
-    let body = start_function_body(&ast, &path_fork, &string_table);
+    let body = start_function_body(&ast);
     let NodeKind::ExpressionStatement(call_expr) = &body[1].kind else {
         panic!("expected receiver method statement");
     };

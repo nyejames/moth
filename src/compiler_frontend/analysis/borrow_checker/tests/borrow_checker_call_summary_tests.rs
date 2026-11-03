@@ -53,6 +53,7 @@ use crate::compiler_frontend::module_compilation::generated::infer_builtin_failu
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::entry_start_node;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, fresh_success_returns, function_node, immutable_reference_expr,
     make_test_variable, node, param_with_type_id, symbol, test_source_location,
@@ -63,7 +64,7 @@ use crate::compiler_frontend::tests::borrow_fixture_support::{
 use crate::compiler_frontend::tests::external_package_support::{
     default_external_package_registry, register_external_function,
 };
-use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
+use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     build_ast_with_registered_types, lower_ast,
@@ -133,7 +134,6 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
 
     let summary_target = symbol("summary_target", &mut path_fork, &mut string_table);
@@ -192,20 +192,17 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
         None,
     );
 
-    let start = function_node(
-        start_name,
+    let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let hir = lower_hir(
         build_ast_with_registered_types(
             vec![target, start],
-            entry_path,
             expression_builder,
             const_values,
             types,
@@ -302,26 +299,17 @@ fn incomplete_public_call_summary_metadata_uses_infrastructure_lane() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
-    let start = function_node(
-        start_name,
+    let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let mut hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start],
-            entry_path,
-            expression_builder,
-            const_values,
-            types,
-        ),
+        build_ast_with_registered_types(vec![start], expression_builder, const_values, types),
         &mut string_table,
         &mut path_fork,
         &external_package_registry,
@@ -344,7 +332,6 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
     let mutator_name = symbol("mutator", &mut path_fork, &mut string_table);
     let wrapper_name = symbol("wrapper", &mut path_fork, &mut string_table);
@@ -403,20 +390,17 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
         )],
         None,
     );
-    let start = function_node(
-        start_name,
+    let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let hir = lower_hir(
         build_ast_with_registered_types(
             vec![mutator, wrapper, start],
-            entry_path,
             expression_builder,
             const_values,
             types,
@@ -457,7 +441,9 @@ wrapper |shared I32, mutable ~I32|:
 mutator(shared, ~mutable)
 ;"#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let entry_path = ast.entry_path;
+    let entry_path = path_fork
+        .try_intern_portable_path("@page.moth", &mut string_table)
+        .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(
         ast,
@@ -509,7 +495,9 @@ fn local_call_mutation_summary_in_order(
         format!("{wrapper}\n{callee}")
     };
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
-    let entry_path = ast.entry_path;
+    let entry_path = path_fork
+        .try_intern_portable_path("@page.moth", &mut string_table)
+        .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(
         ast,
@@ -591,7 +579,9 @@ fn public_call_summary_map_set_only_writes_receiver_parameter() {
 ;
 ;"#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let entry_path = ast.entry_path;
+    let entry_path = path_fork
+        .try_intern_portable_path("@page.moth", &mut string_table)
+        .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(
         ast,
@@ -642,7 +632,6 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
     let reader_name = symbol("reader", &mut path_fork, &mut string_table);
     let value_name = symbol("value", &mut path_fork, &mut string_table);
@@ -661,8 +650,7 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
         vec![],
         None,
     );
-    let start = function_node(
-        start_name,
+    let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -708,13 +696,11 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
                 test_source_location(3),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
         build_ast_with_registered_types(
             vec![reader, start],
-            entry_path,
             expression_builder,
             const_values,
             types,
@@ -887,7 +873,6 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
 
     let alias_fn = symbol("alias_fn", &mut path_fork, &mut string_table);
@@ -921,8 +906,7 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
         None,
     );
 
-    let caller = function_node(
-        start_name,
+    let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -993,13 +977,11 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
                 test_source_location(12),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
         build_ast_with_registered_types(
             vec![callee, caller],
-            entry_path,
             expression_builder,
             const_values,
             types,
@@ -1050,7 +1032,6 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
 
     let source_fn = symbol("source_fn", &mut path_fork, &mut string_table);
@@ -1168,20 +1149,17 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
         None,
     );
 
-    let start = function_node(
-        start_name,
+    let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), test_source_location(40))],
-        None,
     );
 
     let hir = lower_hir(
         build_ast_with_registered_types(
             vec![source, forward, start],
-            entry_path,
             expression_builder,
             const_values,
             types,
@@ -1229,7 +1207,6 @@ fn fresh_user_return_does_not_alias_caller_roots() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
 
     let fresh_fn = symbol("fresh_fn", &mut path_fork, &mut string_table);
@@ -1262,8 +1239,7 @@ fn fresh_user_return_does_not_alias_caller_roots() {
         None,
     );
 
-    let caller = function_node(
-        start_name,
+    let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -1334,13 +1310,11 @@ fn fresh_user_return_does_not_alias_caller_roots() {
                 test_source_location(12),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
         build_ast_with_registered_types(
             vec![callee, caller],
-            entry_path,
             expression_builder,
             const_values,
             types,
@@ -1379,7 +1353,6 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let mut external_package_registry = default_external_package_registry(&mut string_table);
     let external_id = Arc::make_mut(&mut external_package_registry)
         .register_function(ExternalFunctionDef {
@@ -1493,20 +1466,17 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
         )],
         None,
     );
-    let start = function_node(
-        start_name,
+    let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let hir = lower_hir(
         build_ast_with_registered_types(
             vec![imprecise_return, forward, start],
-            entry_path,
             expression_builder,
             const_values,
             types,
@@ -1580,7 +1550,9 @@ return input + 1
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let entry_path = ast.entry_path;
+    let entry_path = path_fork
+        .try_intern_portable_path("@page.moth", &mut string_table)
+        .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(
         ast,
@@ -1621,7 +1593,9 @@ return ~scores.remove("key")!
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let entry_path = ast.entry_path;
+    let entry_path = path_fork
+        .try_intern_portable_path("@page.moth", &mut string_table)
+        .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(
         ast,
@@ -1771,7 +1745,6 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
 
     let unknown_fn = symbol("unknown_fn", &mut path_fork, &mut string_table);
@@ -1818,8 +1791,7 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
         None,
     );
 
-    let caller = function_node(
-        start_name,
+    let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -1890,13 +1862,11 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
                 test_source_location(12),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
         build_ast_with_registered_types(
             vec![callee, caller],
-            entry_path,
             expression_builder,
             const_values,
             types,
@@ -1916,7 +1886,6 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
 
     let mut_sink = symbol("mut_sink", &mut path_fork, &mut string_table);
@@ -1938,8 +1907,7 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
         None,
     );
 
-    let caller = function_node(
-        start_name,
+    let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -1985,13 +1953,11 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
                 test_source_location(11),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
         build_ast_with_registered_types(
             vec![callee, caller],
-            entry_path,
             expression_builder,
             const_values,
             types,
@@ -2063,7 +2029,6 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
 
     let mut2 = symbol("mut2", &mut path_fork, &mut string_table);
@@ -2094,8 +2059,7 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
         None,
     );
 
-    let caller = function_node(
-        start_name,
+    let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -2158,13 +2122,11 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
                 test_source_location(11),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
         build_ast_with_registered_types(
             vec![callee, caller],
-            entry_path,
             expression_builder,
             const_values,
             types,
@@ -2185,7 +2147,6 @@ fn host_mutable_parameter_requires_mutable_access() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let mut external_package_registry = default_external_package_registry(&mut string_table);
     let host_fn = register_external_function(
         &mut external_package_registry,
@@ -2196,8 +2157,7 @@ fn host_mutable_parameter_requires_mutable_access() {
     );
     let x = symbol("x", &mut path_fork, &mut string_table);
 
-    let start = function_node(
-        start_name,
+    let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -2243,17 +2203,10 @@ fn host_mutable_parameter_requires_mutable_access() {
                 test_source_location(2),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start],
-            entry_path,
-            expression_builder,
-            const_values,
-            types,
-        ),
+        build_ast_with_registered_types(vec![start], expression_builder, const_values, types),
         &mut string_table,
         &mut path_fork,
         &external_package_registry,
@@ -2270,7 +2223,6 @@ fn host_mutable_parameter_accepts_mutable_local_argument() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let mut external_package_registry = default_external_package_registry(&mut string_table);
     let host_fn = register_external_function(
         &mut external_package_registry,
@@ -2281,8 +2233,7 @@ fn host_mutable_parameter_accepts_mutable_local_argument() {
     );
     let x = symbol("x", &mut path_fork, &mut string_table);
 
-    let start = function_node(
-        start_name,
+    let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -2328,17 +2279,10 @@ fn host_mutable_parameter_accepts_mutable_local_argument() {
                 test_source_location(2),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start],
-            entry_path,
-            expression_builder,
-            const_values,
-            types,
-        ),
+        build_ast_with_registered_types(vec![start], expression_builder, const_values, types),
         &mut string_table,
         &mut path_fork,
         &external_package_registry,
@@ -2354,7 +2298,6 @@ fn host_shared_parameter_is_shared_only() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let mut external_package_registry = default_external_package_registry(&mut string_table);
     let host_fn = register_external_function(
         &mut external_package_registry,
@@ -2365,8 +2308,7 @@ fn host_shared_parameter_is_shared_only() {
     );
     let x = symbol("x", &mut path_fork, &mut string_table);
 
-    let start = function_node(
-        start_name,
+    let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -2412,17 +2354,10 @@ fn host_shared_parameter_is_shared_only() {
                 test_source_location(2),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start],
-            entry_path,
-            expression_builder,
-            const_values,
-            types,
-        ),
+        build_ast_with_registered_types(vec![start], expression_builder, const_values, types),
         &mut string_table,
         &mut path_fork,
         &external_package_registry,
@@ -2438,7 +2373,6 @@ fn two_mutable_args_to_same_root_are_rejected() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
 
     let mut2 = symbol("mut2", &mut path_fork, &mut string_table);
@@ -2470,8 +2404,7 @@ fn two_mutable_args_to_same_root_are_rejected() {
         None,
     );
 
-    let caller = function_node(
-        start_name,
+    let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -2545,13 +2478,11 @@ fn two_mutable_args_to_same_root_are_rejected() {
                 test_source_location(12),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
         build_ast_with_registered_types(
             vec![callee, caller],
-            entry_path,
             expression_builder,
             const_values,
             types,
@@ -2582,7 +2513,6 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
 
     let read_then_mut = symbol("read_then_mut", &mut path_fork, &mut string_table);
@@ -2613,8 +2543,7 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
         None,
     );
 
-    let caller = function_node(
-        start_name,
+    let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -2675,13 +2604,11 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
                 test_source_location(11),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
         build_ast_with_registered_types(
             vec![callee, caller],
-            entry_path,
             expression_builder,
             const_values,
             types,
@@ -2716,7 +2643,6 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let mut external_package_registry = default_external_package_registry(&mut string_table);
     let host_alias = register_external_function(
         &mut external_package_registry,
@@ -2753,8 +2679,7 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
     .expect("valid call fixture")
     .id();
 
-    let start = function_node(
-        start_name,
+    let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -2819,17 +2744,10 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
                 test_source_location(13),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start],
-            entry_path,
-            expression_builder,
-            const_values,
-            types,
-        ),
+        build_ast_with_registered_types(vec![start], expression_builder, const_values, types),
         &mut string_table,
         &mut path_fork,
         &external_package_registry,
@@ -3000,7 +2918,6 @@ fn unresolved_or_mismatched_host_signature_errors() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let mut external_package_registry = default_external_package_registry(&mut string_table);
     let one_arg = register_external_function(
         &mut external_package_registry,
@@ -3042,8 +2959,7 @@ fn unresolved_or_mismatched_host_signature_errors() {
         None,
     );
 
-    let start_mismatch = function_node(
-        start_name,
+    let start_mismatch = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -3074,13 +2990,11 @@ fn unresolved_or_mismatched_host_signature_errors() {
             },
             test_source_location(2),
         )],
-        None,
     );
 
     let mut hir = lower_hir(
         build_ast_with_registered_types(
             vec![start_missing, start_mismatch],
-            entry_path,
             expression_builder,
             const_values,
             types,
@@ -3146,7 +3060,6 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
 
     let mut_user = symbol("mut_user", &mut path_fork, &mut string_table);
@@ -3169,8 +3082,7 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
         None,
     );
 
-    let caller = function_node(
-        start_name,
+    let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -3229,13 +3141,11 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
                 test_source_location(12),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
         build_ast_with_registered_types(
             vec![callee, caller],
-            entry_path,
             expression_builder,
             const_values,
             types,
@@ -3256,7 +3166,6 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let mut external_package_registry = default_external_package_registry(&mut string_table);
     let bad_alias_host = register_external_function(
         &mut external_package_registry,
@@ -3274,8 +3183,7 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
     );
     let x = symbol("x", &mut path_fork, &mut string_table);
 
-    let start = function_node(
-        start_name,
+    let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -3321,17 +3229,10 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
                 test_source_location(11),
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(
-            vec![start],
-            entry_path,
-            expression_builder,
-            const_values,
-            types,
-        ),
+        build_ast_with_registered_types(vec![start], expression_builder, const_values, types),
         &mut string_table,
         &mut path_fork,
         &external_package_registry,
@@ -3353,7 +3254,6 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
 
     let mut_user = symbol("mut_user", &mut path_fork, &mut string_table);
@@ -3379,8 +3279,7 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
     // WHAT: both statements intentionally share one source line.
     // WHY: validates that borrow/move classification uses statement order keys, not line numbers.
     let same_line = None;
-    let caller = function_node(
-        start_name,
+    let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -3439,13 +3338,11 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
                 same_line,
             ),
         ],
-        None,
     );
 
     let hir = lower_hir(
         build_ast_with_registered_types(
             vec![callee, caller],
-            entry_path,
             expression_builder,
             const_values,
             types,
@@ -3466,7 +3363,6 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
     let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
 
     let rhs_name = symbol("rhs_short", &mut path_fork, &mut string_table);
@@ -3556,13 +3452,10 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
         )
     };
 
-    let start_function = function_node(
-    start_name,
-    FunctionSignature {
+    let start_function = entry_start_node(FunctionSignature {
         parameters: vec![],
         returns: vec![],
-    },
-    vec![
+    }, vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(lhs, expression_builder.bool(&mut const_values, false, test_source_location(10), ValueMode::ImmutableOwned).expect("valid expression fixture").id(), &expression_builder)),
             test_source_location(10),
@@ -3579,14 +3472,11 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
             NodeKind::VariableDeclaration(make_test_variable(sink, expression_builder.reference_with_type_id(calls, builtin_type_ids::fixed_scalar(FixedScalar::I32), test_source_location(12), ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue).expect("valid expression fixture").id(), &expression_builder)),
             test_source_location(12),
         ),
-    ],
-    None,
-);
+    ]);
 
     let hir = lower_hir(
         build_ast_with_registered_types(
             vec![rhs_function, start_function],
-            entry_path,
             expression_builder,
             const_values,
             types,
@@ -3609,7 +3499,9 @@ fn catch_private_call_return_alias_unions_success_and_parameter_derived_handler(
                       return fallback\n\
                   ;\n;\n";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let entry_path = ast.entry_path;
+    let entry_path = path_fork
+        .try_intern_portable_path("@page.moth", &mut string_table)
+        .expect("test entry path fits");
     let registry = default_external_package_registry(&mut string_table);
     let (mut hir, mut type_environment) =
         lower_ast(ast, &mut string_table, &mut path_fork, &registry)

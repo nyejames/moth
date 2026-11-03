@@ -74,7 +74,7 @@ Builder globals express stable semantic configuration. They never reveal a physi
 
 ### Self-contained `config.moth`
 
-`config.moth` is one build-owned compile-time source, not a semantic module. It creates no `start`, HIR, runtime artefact or package interface. Bootstrap creates no config dependency graph, companion source set, package resolver or second project scan.
+`config.moth` is one build-owned compile-time source, not a semantic module. It creates no entry, HIR, runtime artefact or package interface. Bootstrap creates no config dependency graph, companion source set, package resolver or second project scan.
 
 The build system calls the named compiler config service with the source, capability surface, retained explicit command-input spellings and exact typed programmatic/builder inputs. The compiler resolves each input against its declared exact contract, materialises directly from retained numeric spelling and returns folded directive arguments, input-contract results, key locations and diagnostics. The build system then applies validated project/builder settings. The compiler alone sequences preparation and folding.
 
@@ -292,7 +292,7 @@ A **module** is a directory-scoped compilation/visibility unit rooted by `@*.mot
 
 A directory has at most one root. `@*.moth` defines a normal module. A `+*.moth` inside the source tree defines an API-only scoped support module. One optional project-root `+*.moth` beside config defines the external package facade. Root filename suffixes are cosmetic. `config.moth` is not a root.
 
-Normal modules may own dormant runtime work/fragments. `$page` selects HTML entry purpose without changing module identity or making helpers independent entries. Compiler root-role rules define API-only restrictions and implicit `start`. Stage 0 ensures selected normal roots complete local semantic validation before activation, including unpurposed-work diagnostics.
+Normal modules may own dormant runtime work/fragments. `$page` selects HTML entry purpose without changing module identity or making helpers independent entries. Compiler root-role rules define API-only restrictions and implicit entry. Stage 0 ensures selected normal roots complete local semantic validation before activation, including unpurposed-work diagnostics.
 
 ### Module-root-relative dependency clauses
 
@@ -547,9 +547,9 @@ A canonical normal module may support multiple entry assemblies under a builder'
 
 ### Entry assembly
 
-An `EntryAssembly` selects an already compiled normal module's dormant `start`, runtime/static fragments, resolved page metadata and entry-owned runtime requirements. It activates only that root, never provider roots reached through dependencies.
+An `EntryAssembly` selects an already compiled normal module's dormant entry, runtime/static fragments, resolved page metadata and entry-owned runtime requirements. It activates only that root, never provider roots reached through dependencies.
 
-Assembly triggers no local parsing, typing, generic inference, HIR construction, borrow checking or local lifetime analysis. Subsequent link-level lifetime validation still instantiates the completed summaries with actual roots/lifecycles. The compiler owns `start`'s non-exported contract: built-in `Error!` alongside its fragment-collection success slots, including for a synthetic single-file root. Builders consume the typed outcome and add no error-fragment channel.
+Assembly triggers no local parsing, typing, generic inference, HIR construction, borrow checking or local lifetime analysis. Subsequent link-level lifetime validation still instantiates the completed summaries with actual roots/lifecycles. The compiler owns the entry's non-exported contract: built-in `Error!` alongside its fragment-collection success slots, including for a synthetic single-file root. Builders consume the typed outcome and add no error-fragment channel.
 
 ### Package assembly
 
@@ -563,7 +563,7 @@ Resource-bearing exported constants and selected static metadata can contribute 
 
 ### Target-validation roots
 
-Explicit roots include an entry's active `start`, its linked call graph, reachable generated functions, externally callable package exports and additional callable roots from the builder/tooling contract.
+Explicit roots include an entry's active body, its linked call graph, reachable generated functions, externally callable package exports and additional callable roots from the builder/tooling contract.
 
 The compiler validates those roots against build-owned target assignments. Check uses the same planning semantics, then stops before lowering. Root selection and target partitioning never change source semantic identity.
 
@@ -577,27 +577,27 @@ For each validated `$page` entry, the builder plans:
 
 1. Activation of that normal module's compiled dormant root.
 2. Compile-time fragments at their recorded runtime insertion indexes and slots for runtime fragments.
-3. Exactly one invocation of active `start` through the selected runtime path.
+3. Exactly one invocation of the active entry through the selected runtime path.
 4. Runtime fragment publication in source order, only after that invocation succeeds.
 5. Route HTML and companion outputs from folded page metadata and directory routes.
 
 This is generated runtime behaviour, not execution during semantic compilation. Plain JavaScript and mixed output share one ordinary fragment insertion contract. Templates produce String values and retain structural resource/site-root pieces until their normal output context resolves them. Fragment insertion grants no persistent Wiring observation or event-delivery lifecycle.
 
-The generated caller branches on `start`'s typed outcome. Only success publishes that invocation's runtime fragments. Failure leaves static HTML in place and does not undo earlier explicit IO. Release output shows a fixed safe notice, never application `Error` markup. Development presentation stays local to the failing invocation and does not fail the completed compilation or other entries.
+The generated caller branches on the entry's typed outcome. Only success publishes that invocation's runtime fragments. Failure leaves static HTML in place and does not undo earlier explicit IO. Release output shows a fixed safe notice, never application `Error` markup. Development presentation stays local to the failing invocation and does not fail the completed compilation or other entries.
 
-The compiler owns `start`'s signature, checks, failure mapping and explicit result control flow. The builder owns the generated caller and terminal presentation. It consumes the typed result and does not reinterpret HIR or catch ordinary Moth errors as host exceptions.
+The compiler owns the entry's signature, checks, failure mapping and explicit result control flow. The builder owns the generated caller and terminal presentation. It consumes the typed result and does not reinterpret HIR or catch ordinary Moth errors as host exceptions.
 
 On error, the generated caller reports one unsuccessful invocation and stops normal startup completion. There is no automatic retry, later-statement continuation or rollback. Propagation does not print at every layer. A terminal host writes to standard error and exits with a nonzero status independently of `Error.code`; code zero remains valid error data. An embedding host delivers the failed outcome to its owner. A test runner records runtime failure unless the expected outcome matches it. These rules apply to existing hosts. They do not require a new CLI runner, server-side renderer or embedding API.
 
 Compile-time diagnostics, compiler operational failures, compiler bugs and a compiled program returning `Error` stay different lanes. Reporting a browser entry failure does not fail the completed compilation.
 
-Runtime fragment results for one invocation stay staged until success. On error, discard unpublished results and never read undefined success slots. Staging is not a transaction over the DOM or application state: earlier explicit IO, title changes and host calls remain done. A wholly static page does not gain mandatory runtime code merely because the conceptual `start` contract permits `Error!`. Wrappers stay reachability-driven. An error handler covers this invocation only, not later callbacks.
+Runtime fragment results for one invocation stay staged until success. On error, discard unpublished results and never read undefined success slots. Staging is not a transaction over the DOM or application state: earlier explicit IO, title changes and host calls remain done. A wholly static page does not gain mandatory runtime code merely because the entry contract permits `Error!`. Wrappers stay reachability-driven. An error handler covers this invocation only, not later callbacks.
 
 Release presentation uses a small generic startup-failure notice, escaped as text and independent of the failed application template. It does not place the raw application `Error` message in public page content. Development presentation is specified under `Development entry-error reports`. See the progress matrix for current support.
 
 ### Development entry-error reports
 
-In `moth dev`, a `start` `Error` must be unmistakable even when the static page succeeded. Reuse the existing compiler-error presentation: a prominent view covers the affected page and retains hot reload, with a distinct runtime title and category. A console-only report is not enough.
+In `moth dev`, an entry `Error` must be unmistakable even when the static page succeeded. Reuse the existing compiler-error presentation: a prominent view covers the affected page and retains hot reload, with a distinct runtime title and category. A console-only report is not enough.
 
 Report in the affected browser and the server terminal. Reuse dev-client injection, origin-aware routing and error-page rendering. The browser-to-server report is the only added path. It carries entry, build and invocation identity, plus bounded category, message, code and available source information.
 
@@ -623,7 +623,7 @@ Faults that escape the generated startup lifecycle wrapper, including owned Wasm
 
 Three outcomes stay distinct:
 
-- Entry Error: `start` returned its declared `Error!` outcome.
+- Entry Error: the entry returned its declared `Error!` outcome.
 - Assertion failure: compiler-owned assertion identity identifies the fault, including through generated calls and glue. Never match message text.
 - Unexpected startup fault: another exception or trap escaped the owned wrapper. It may come from generated code, a host binding or runtime setup. Do not label every runtime exception as a compiler bug.
 
@@ -663,7 +663,7 @@ Output-context policies must be available for target capability validation. Conc
 
 Partition rules:
 
-- `start` is JavaScript-owned.
+- The entry body is JavaScript-owned.
 - DOM, browser, project JavaScript and other JS-required dependencies force their containing function to JavaScript, propagating backwards to transitive callers.
 - Neutral console IO does not force JavaScript. Remaining supported functions default to Wasm.
 - Wasm-owned Moth functions cannot call JavaScript-owned Moth functions after propagation. JavaScript-owned functions may call Wasm through generated wrappers.
@@ -770,7 +770,7 @@ Preparation/semantic validation never read or hash ordinary resource contents. O
 
 ### Exact resource unions
 
-Entry unions include selected `start`, reachable source/generated functions, runtime/static fragments, selected page metadata and reachable provider runtime requirements. Preserve authored metadata/use spans for diagnostics.
+Entry unions include selected entry, reachable source/generated functions, runtime/static fragments, selected page metadata and reachable provider runtime requirements. Preserve authored metadata/use spans for diagnostics.
 
 Package unions include selected exports, resource-bearing exported folded values, reachable implementations and provider runtime requirements allowed by that target. Compute unions from link facts and metadata, without rescanning HIR. Unused private resources contribute nothing.
 

@@ -1108,7 +1108,6 @@ pub enum ReservedNameOwner {
     BuiltinType,
     Keyword,
     CoreTrait,
-    ImplicitStart,
     ParameterContract,
 }
 

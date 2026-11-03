@@ -128,7 +128,14 @@ pub(crate) fn build_module(
         .collect();
 
     for (function, path, origin) in functions {
-        module.side_table.bind_function_name(function.id, path);
+        // Production entries are nameless: HIR records them through `start_function` and origin
+        // only, so binding a fixture name here would hide the fallback naming path. The entry
+        // still records its owning source file, as the frontend always does.
+        if origin == HirFunctionOrigin::EntryStart {
+            module.start_source_file = Some(path);
+        } else {
+            module.side_table.bind_function_name(function.id, path);
+        }
         module.function_origins.insert(function.id, origin);
     }
 

@@ -448,7 +448,7 @@ impl ScopeFrame {
     /// Replace the declarations in this frame.
     ///
     /// WHAT: rebuilds the name index and the declaration vec in one step. Used when a
-    ///       function or start body frame is initialised with parameter declarations.
+    ///       function or entry body frame is initialised with parameter declarations.
     pub(crate) fn set_local_declarations(
         &mut self,
         declarations: Vec<Declaration>,

@@ -99,13 +99,13 @@ pub enum HirStatementKind {
     /// Expression evaluated only for side effects.
     Expr(HirValueId),
 
-    /// Accumulate one runtime string value into the entry start() fragment vec.
+    /// Accumulate one runtime string value into the compiler-owned entry fragment vec.
     ///
     /// WHAT: explicit HIR primitive that lowers from `NodeKind::PushStartRuntimeFragment`.
     /// WHY: backends handle fragment accumulation without needing to inspect the entry start
     /// function body for heuristic push patterns.
     PushRuntimeFragment {
-        /// The local holding the Vec<String> accumulator inside entry start().
+        /// The local holding the Vec<String> accumulator inside the compiler-owned entry.
         vec_local: LocalId,
         /// Expression that produces the string value to push.
         value: HirValueId,

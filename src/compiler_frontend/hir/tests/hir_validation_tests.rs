@@ -3,9 +3,7 @@
 //! WHAT: exercises the post-lowering HIR validator against valid and intentionally broken modules.
 //! WHY: validator coverage needs focused tests that isolate invariants from the rest of lowering.
 
-use super::{
-    append_hir_expression, function_node, minimal_lowered_hir_module, node, start_entry_block_index,
-};
+use super::{append_hir_expression, minimal_lowered_hir_module, node, start_entry_block_index};
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
@@ -36,10 +34,11 @@ use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirMapEntry, HirVariantCarrier, HirVariantField,
     OPTION_SOME_VARIANT_INDEX, ValueKind,
 };
+use crate::compiler_frontend::hir::functions::HirFunctionOrigin;
 use crate::compiler_frontend::hir::hir_builder::validate_module_for_tests;
 use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 use crate::compiler_frontend::hir::ids::{
-    BlockId, ChoiceId, FieldId, HirNodeId, HirValueId, LocalId, RegionId, StructId,
+    BlockId, ChoiceId, FieldId, FunctionId, HirNodeId, HirValueId, LocalId, RegionId, StructId,
 };
 use crate::compiler_frontend::hir::module::{
     HirChoice, HirChoiceField, HirChoiceVariant, HirModule,
@@ -58,11 +57,12 @@ use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::{
     HirAssertionMessageEvaluation, HirFallibleOperation, HirJumpArgument, HirTerminator,
 };
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    make_test_variable, param_with_type_id,
+    function_node, make_test_variable, param_with_type_id,
 };
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     HirTestChoiceDefinition, build_ast_with_choices, build_ast_with_registered_types, lower_ast,
@@ -1767,22 +1767,17 @@ fn validator_requires_explicit_integer_to_number_comparison_conversion() {
 fn valid_module_passes_explicit_validation() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -2547,22 +2542,17 @@ fn validator_rejects_discharged_mode_on_float_and_range_step_statements() {
 fn validator_rejects_invalid_jump_target() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -3026,8 +3016,6 @@ fn validator_accepts_reordered_incoming_jump_destination_pairs() {
 fn validator_rejects_jump_sources_owned_by_another_function() {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let helper_name = super::symbol("helper", &mut path_fork, &mut string_table);
     let helper = function_node(
         helper_name,
@@ -3038,18 +3026,15 @@ fn validator_rejects_jump_sources_owned_by_another_function() {
         vec![node(NodeKind::Return(vec![]), None)],
         None,
     );
-    let start = function_node(
-        start_name,
+    let start = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
     let ast = build_ast_with_registered_types(
         vec![helper, start],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -3275,12 +3260,9 @@ fn validator_rejects_parameter_definition_destinations_but_accepts_updates() {
 fn validator_rejects_non_literal_match_pattern() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 x,
@@ -3291,12 +3273,10 @@ fn validator_rejects_non_literal_match_pattern() {
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -3560,8 +3540,6 @@ fn validator_rejects_option_labelled_fixed_scalar_match_pattern() {
 fn validator_rejects_missing_side_table_mappings() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let authored_span = Some(SourceSpan::new(
         SourceId::from_index(1),
@@ -3579,8 +3557,7 @@ fn validator_rejects_missing_side_table_mappings() {
         )
         .expect("fixture literal must be valid")
         .id();
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -3592,12 +3569,10 @@ fn validator_rejects_missing_side_table_mappings() {
             ),
             node(NodeKind::Return(vec![]), authored_span),
         ],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn],
-        entry_path,
         expressions,
         const_values,
         TypeEnvironment::new(),
@@ -3626,22 +3601,17 @@ fn validator_rejects_missing_side_table_mappings() {
 fn validator_rejects_unresolved_generic_parameter_types() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -3758,22 +3728,17 @@ fn validator_rejects_function_type_containing_generic_parameter() {
 fn validator_rejects_struct_field_type_containing_generic_parameter() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -3860,12 +3825,9 @@ fn validator_rejects_function_error_type_containing_generic_parameter() {
 fn validator_rejects_function_parameter_type_containing_generic_parameter() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let value_name = super::symbol("value", &mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 value_name,
@@ -3876,12 +3838,10 @@ fn validator_rejects_function_parameter_type_containing_generic_parameter() {
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -4078,22 +4038,17 @@ fn classify_hir_type_rejects_anonymous_const_record_marker() {
 fn validator_rejects_placeholder_terminator() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -4127,22 +4082,17 @@ fn validator_rejects_placeholder_terminator() {
 fn validator_rejects_region_cycle() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -5362,22 +5312,17 @@ fn validator_accepts_deep_mixed_shape_chain_on_small_stack() {
 fn validator_rejects_missing_region_parent() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -5407,8 +5352,6 @@ fn validator_rejects_missing_region_parent() {
 fn validator_rejects_cross_function_cfg_edges() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let helper_name = super::symbol("helper", &mut path_fork, &mut string_table);
 
     let helper = function_node(
@@ -5420,19 +5363,16 @@ fn validator_rejects_cross_function_cfg_edges() {
         vec![node(NodeKind::Return(vec![]), None)],
         None,
     );
-    let start = function_node(
-        start_name,
+    let start = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![helper, start],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -5479,8 +5419,6 @@ fn validator_rejects_cross_function_cfg_edges() {
 fn lowering_errors_preserve_string_table_context() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let missing_function = super::symbol("missing_fn", &mut path_fork, &mut string_table);
 
     let call_span = None;
@@ -5490,8 +5428,7 @@ fn lowering_errors_preserve_string_table_context() {
         .function_call_with_typed_arguments(missing_function, Vec::new(), Vec::new(), call_span)
         .expect("fixture call must have valid expression edges")
         .id();
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -5500,13 +5437,11 @@ fn lowering_errors_preserve_string_table_context() {
             node(NodeKind::ExpressionStatement(call), call_span),
             node(NodeKind::Return(vec![]), None),
         ],
-        None,
     );
 
     let messages = lower_ast(
         build_ast_with_registered_types(
             vec![start_fn],
-            entry_path,
             expressions,
             ConstValueStore::default(),
             TypeEnvironment::new(),
@@ -5527,22 +5462,17 @@ fn lowering_errors_preserve_string_table_context() {
 fn hir_variant_construct_option_invalid_index_rejected() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -5618,8 +5548,6 @@ fn hir_variant_construct_option_invalid_index_rejected() {
 fn hir_variant_construct_choice_wrong_field_name_rejected() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let response_param = super::symbol("response", &mut path_fork, &mut string_table);
     let ok_name = string_table.intern("Ok");
     let err_name = string_table.intern("Err");
@@ -5650,8 +5578,7 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
         },
     ];
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 response_param,
@@ -5662,12 +5589,10 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
 
     let ast = build_ast_with_choices(
         vec![start_fn],
-        entry_path,
         vec![HirTestChoiceDefinition {
             nominal_path: path_fork
                 .try_intern_portable_path("Response", &mut string_table)
@@ -5758,8 +5683,6 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
 fn hir_variant_construct_choice_wrong_field_type_rejected() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let response_param = super::symbol("response", &mut path_fork, &mut string_table);
     let ok_name = string_table.intern("Ok");
     let err_name = string_table.intern("Err");
@@ -5790,8 +5713,7 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
         },
     ];
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 response_param,
@@ -5802,12 +5724,10 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
 
     let ast = build_ast_with_choices(
         vec![start_fn],
-        entry_path,
         vec![HirTestChoiceDefinition {
             nominal_path: path_fork
                 .try_intern_portable_path("Response", &mut string_table)
@@ -5899,8 +5819,6 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
 fn hir_route_construct_with_input_missing_leading_capture_rejected() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let rename_name = string_table.intern("Rename");
     let record_field = |name: &str,
                         type_id: TypeId,
@@ -5937,18 +5855,15 @@ fn hir_route_construct_with_input_missing_leading_capture_rejected() {
         span: None,
     }];
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
-        None,
     );
     let ast = build_ast_with_choices(
         vec![start_fn],
-        entry_path,
         vec![HirTestChoiceDefinition {
             nominal_path: path_fork
                 .try_intern_portable_path("TodoMessage", &mut string_table)
@@ -6185,4 +6100,126 @@ fn validator_owns_pending_catch_handler_edges_and_rejects_dangling_or_cross_func
     )
     .expect_err("a pending handler cannot enter another function's CFG");
     assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+}
+
+#[test]
+fn validator_rejects_a_missing_entry_source_owner() {
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    assert!(
+        module.start_source_file.is_some(),
+        "the fixture must start from a complete entry contract"
+    );
+    module.start_source_file = None;
+
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("an entry without a source owner must fail validation");
+
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(
+        error.message.contains("requires a start_source_file owner"),
+        "error should name the missing entry ownership, got: {}",
+        error.message
+    );
+}
+
+#[test]
+fn validator_rejects_an_entry_source_owner_without_an_entry() {
+    let mut path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let declaration_path = super::symbol("exported_value", &mut path_fork, &mut string_table);
+    let declaration = function_node(
+        declaration_path,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![],
+        None,
+    );
+    let mut ast = build_ast_with_registered_types(
+        vec![declaration],
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    ast.root_role = ModuleRootRole::Support;
+
+    let (mut module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("API-only HIR lowering should succeed");
+    assert_eq!(module.start_function, None);
+    assert_eq!(module.start_source_file, None);
+    module.start_source_file = Some(declaration_path);
+
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("a source owner without an entry must fail validation");
+
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(
+        error
+            .message
+            .contains("start_source_file owner requires a start_function"),
+        "error should name the orphaned entry owner, got: {}",
+        error.message
+    );
+}
+
+#[test]
+fn validator_rejects_a_second_entry_origin() {
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let start_function = module
+        .start_function
+        .expect("normal test module should have start");
+    let duplicate_id = FunctionId(
+        module
+            .functions
+            .iter()
+            .map(|function| function.id.0)
+            .max()
+            .expect("the fixture has an entry function")
+            + 1,
+    );
+    let mut duplicate = module
+        .functions
+        .iter()
+        .find(|function| function.id == start_function)
+        .cloned()
+        .expect("the fixture has an entry function");
+    duplicate.id = duplicate_id;
+    module.functions.push(duplicate);
+    module
+        .function_origins
+        .insert(duplicate_id, HirFunctionOrigin::EntryStart);
+    module
+        .function_provenance
+        .insert(duplicate_id, Default::default());
+
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("two EntryStart origins must fail validation");
+
+    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
+    assert!(
+        error.message.contains("must be the only EntryStart origin"),
+        "error should reject the ambiguous entry origin, got: {}",
+        error.message
+    );
 }

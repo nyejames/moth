@@ -103,8 +103,6 @@ fn value_block_result_definition(
 fn lowers_if_to_then_else_merge_blocks() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let y = super::symbol("y", &mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
@@ -152,23 +150,16 @@ fn lowers_if_to_then_else_merge_blocks() {
         None,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![flag_decl, if_node],
-        None,
     );
 
-    let ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        constants,
-        TypeEnvironment::new(),
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_fn], builder, constants, TypeEnvironment::new());
     let (module, _type_environment) = lower_ast(
         ast,
         &mut string_table,
@@ -203,8 +194,6 @@ fn lowers_if_to_then_else_merge_blocks() {
 fn rejects_statically_decided_statement_if_at_hir_boundary() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
@@ -213,8 +202,7 @@ fn rejects_statically_decided_statement_if_at_hir_boundary() {
         .expect("fixture bool")
         .id();
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -223,16 +211,10 @@ fn rejects_statically_decided_statement_if_at_hir_boundary() {
             NodeKind::If(condition, vec![], None, test_if_branch_metadata(false)),
             location,
         )],
-        None,
     );
 
-    let ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        constants,
-        TypeEnvironment::new(),
-    );
+    let ast =
+        build_ast_with_registered_types(vec![start_fn], builder, constants, TypeEnvironment::new());
     lower_ast(
         ast,
         &mut string_table,
@@ -246,8 +228,6 @@ fn rejects_statically_decided_statement_if_at_hir_boundary() {
 fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let rhs_name = super::symbol("rhs_and", &mut path_fork, &mut string_table);
     let location = None;
     let mut builder = AstExpressionBuilder::new().unwrap();
@@ -291,8 +271,7 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
         &TypeEnvironment::new(),
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -315,13 +294,11 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
             ),
             location,
         )],
-        location,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![rhs_fn, start_fn],
-            entry_path,
             builder,
             constants,
             TypeEnvironment::new(),
@@ -404,8 +381,6 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
 fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let rhs_name = super::symbol("rhs_or", &mut path_fork, &mut string_table);
     let location = None;
     let mut builder = AstExpressionBuilder::new().unwrap();
@@ -449,8 +424,7 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
         &TypeEnvironment::new(),
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -473,13 +447,11 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
             ),
             location,
         )],
-        location,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![rhs_fn, start_fn],
-            entry_path,
             builder,
             constants,
             TypeEnvironment::new(),
@@ -554,8 +526,6 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
 fn short_circuit_place_rhs_materializes_value_load_before_edge_transfer() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let lhs_name = super::symbol("lhs", &mut path_fork, &mut string_table);
     let rhs_name = super::symbol("rhs", &mut path_fork, &mut string_table);
     let location = None;
@@ -601,8 +571,7 @@ fn short_circuit_place_rhs_materializes_value_load_before_edge_transfer() {
     let lhs_decl = make_test_variable(lhs_name, lhs_init, &builder);
     let rhs_decl = make_test_variable(rhs_name, rhs_init, &builder);
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -629,17 +598,10 @@ fn short_circuit_place_rhs_materializes_value_load_before_edge_transfer() {
                 location,
             ),
         ],
-        location,
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(
-            vec![start_fn],
-            entry_path,
-            builder,
-            constants,
-            TypeEnvironment::new(),
-        ),
+        build_ast_with_registered_types(vec![start_fn], builder, constants, TypeEnvironment::new()),
         &mut string_table,
         &mut path_fork,
         &super::ExternalPackageRegistry::new(),
@@ -690,8 +652,7 @@ fn short_circuit_place_rhs_materializes_value_load_before_edge_transfer() {
 fn value_if_then_place_materializes_value_load_before_result_definition() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let entry_path = super::symbol("main.moth", &mut path_fork, &mut string_table);
     let left_name = super::symbol("left", &mut path_fork, &mut string_table);
     let right_name = super::symbol("right", &mut path_fork, &mut string_table);
     let result_name = super::symbol("result", &mut path_fork, &mut string_table);
@@ -764,8 +725,7 @@ fn value_if_then_place_materializes_value_load_before_result_definition() {
         .expect("fixture value-if block")
         .id();
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -809,17 +769,10 @@ fn value_if_then_place_materializes_value_load_before_result_definition() {
                 location,
             ),
         ],
-        location,
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(
-            vec![start_fn],
-            entry_path,
-            builder,
-            constants,
-            TypeEnvironment::new(),
-        ),
+        build_ast_with_registered_types(vec![start_fn], builder, constants, TypeEnvironment::new()),
         &mut string_table,
         &mut path_fork,
         &super::ExternalPackageRegistry::new(),
@@ -888,8 +841,7 @@ fn value_if_then_place_materializes_value_load_before_result_definition() {
 fn assertion_failure_uses_message_value_block_tail() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let entry_path = super::symbol("main.moth", &mut path_fork, &mut string_table);
     let condition_name = super::symbol("condition", &mut path_fork, &mut string_table);
     let location = None;
     let mut builder = AstExpressionBuilder::new().unwrap();
@@ -958,8 +910,7 @@ fn assertion_failure_uses_message_value_block_tail() {
         .expect("fixture coercion")
         .id();
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 condition_name,
@@ -982,16 +933,10 @@ fn assertion_failure_uses_message_value_block_tail() {
             },
             location,
         )],
-        location,
     );
 
-    let mut ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        constants,
-        TypeEnvironment::new(),
-    );
+    let mut ast =
+        build_ast_with_registered_types(vec![start_fn], builder, constants, TypeEnvironment::new());
     assert_eq!(
         ast.type_environment.intern_option(builtin_type_ids::STRING),
         option_string,
@@ -1044,8 +989,6 @@ fn assertion_failure_uses_message_value_block_tail() {
 fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let message_name = super::symbol("runtime_message", &mut path_fork, &mut string_table);
     let location = None;
     let mut builder = AstExpressionBuilder::new().unwrap();
@@ -1098,8 +1041,7 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
         .expect("fixture coercion")
         .id();
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
@@ -1111,13 +1053,11 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
             },
             location,
         )],
-        location,
     );
 
     let (module, _type_environment) = lower_ast(
         build_ast_with_registered_types(
             vec![message_fn, start_fn],
-            entry_path,
             builder,
             constants,
             TypeEnvironment::new(),
@@ -1153,8 +1093,7 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
 fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failure() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let entry_path = super::symbol("main.moth", &mut path_fork, &mut string_table);
     let condition_name = super::symbol("message_condition", &mut path_fork, &mut string_table);
     let location = None;
     let mut builder = AstExpressionBuilder::new().unwrap();
@@ -1228,8 +1167,7 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
         .expect("fixture bool")
         .id();
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 condition_name,
@@ -1246,16 +1184,10 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
             },
             location,
         )],
-        location,
     );
 
-    let mut ast = build_ast_with_registered_types(
-        vec![start_fn],
-        entry_path,
-        builder,
-        constants,
-        TypeEnvironment::new(),
-    );
+    let mut ast =
+        build_ast_with_registered_types(vec![start_fn], builder, constants, TypeEnvironment::new());
     assert_eq!(
         ast.type_environment.intern_option(builtin_type_ids::STRING),
         option_string,
@@ -1292,8 +1224,6 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
 fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let chooser = super::symbol("chooser", &mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
     let mut constants = ConstValueStore::default();
@@ -1354,19 +1284,16 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
         None,
     );
 
-    let start_fn = function_node(
-        start_name,
+    let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_fn, chooser_fn],
-        entry_path,
         builder,
         constants,
         TypeEnvironment::new(),

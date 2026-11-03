@@ -1,7 +1,7 @@
 //! Per-file header parser state and output assembly.
 //!
 //! WHAT: owns the accumulators used while one token stream is split into declaration headers,
-//! dependency records, const-fragment metadata, and source ranges for the implicit start body.
+//! dependency records, const-fragment metadata, and source ranges for the entry body.
 //! WHY: keeping mutable file-local state behind one owner lets `file_parser` read as the
 //! high-level header-state machine instead of a long list of unrelated vectors and counters.
 

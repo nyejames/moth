@@ -72,8 +72,8 @@ impl HtmlWasmHelperExports {
 
 /// Builds the full HTML->Wasm export plan from builder-visible HIR semantics.
 ///
-/// WHAT: exports entry start() directly as "moth_start" plus all string interop helpers.
-/// WHY: entry start() is the sole runtime fragment producer. JS calls it once and decodes
+/// WHAT: exports the compiler-owned entry directly as "moth_start" plus all string interop helpers.
+/// WHY: the compiler-owned entry is the sole runtime fragment producer. JS calls it once and decodes
 ///      the returned fragment list. No entry-body call scanning is needed or correct.
 pub(crate) fn build_html_wasm_export_plan(
     hir_module: &HirModule,

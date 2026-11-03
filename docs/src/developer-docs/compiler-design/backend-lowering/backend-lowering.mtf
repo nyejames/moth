@@ -48,7 +48,7 @@ Because the plan is built after target partition and target validation, it is sc
 
 Those two variants share validated topology and source semantics. Their target, build profile, ABI identity, layout identity and runtime capability requirements can all differ, which is exactly why each one gets its own physical plan.
 
-For the walkthrough, target-labelled `start`, `greet` and template work arrive ready. The JavaScript path might own page orchestration. Neutral string work may sit in either partition depending on assignment.
+For the walkthrough, target-labelled entry, `greet` and template work arrive ready. The JavaScript path might own page orchestration. Neutral string work may sit in either partition depending on assignment.
 
 [diagram:
     [$insert("label"): One validated input, two target paths]

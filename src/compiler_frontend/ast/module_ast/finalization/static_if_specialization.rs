@@ -10,7 +10,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::resolver::{
     ConstResolutionError, ConstValueEnvironment, ConstValueResolver,
 };
@@ -105,7 +105,7 @@ pub(super) struct CommittedGenericRequests {
 pub(super) struct StaticIfSpecialization {
     inactive_generic_requests: Vec<GenericRequestRange>,
     selection_count: usize,
-    function_provenance: FxHashMap<PathId, SyntheticInterfaceProvenance>,
+    function_provenance: FxHashMap<AstFunctionIdentity, SyntheticInterfaceProvenance>,
 }
 
 impl StaticIfSpecialization {
@@ -125,7 +125,9 @@ impl StaticIfSpecialization {
         self.selection_count != 0
     }
 
-    pub(super) fn function_provenance(&self) -> &FxHashMap<PathId, SyntheticInterfaceProvenance> {
+    pub(super) fn function_provenance(
+        &self,
+    ) -> &FxHashMap<AstFunctionIdentity, SyntheticInterfaceProvenance> {
         &self.function_provenance
     }
 
@@ -151,7 +153,7 @@ impl StaticIfSpecialization {
             resolver,
             inactive_generic_requests: Vec::new(),
             selection_count: 0,
-            current_function_path: None,
+            current_function: None,
             function_provenance: FxHashMap::default(),
             expression_pending: Vec::new(),
             expression_results: Vec::new(),
@@ -250,8 +252,8 @@ struct StaticIfSpecializer<'a> {
     resolver: ConstValueResolver<'a>,
     inactive_generic_requests: Vec<GenericRequestRange>,
     selection_count: usize,
-    current_function_path: Option<PathId>,
-    function_provenance: FxHashMap<PathId, SyntheticInterfaceProvenance>,
+    current_function: Option<AstFunctionIdentity>,
+    function_provenance: FxHashMap<AstFunctionIdentity, SyntheticInterfaceProvenance>,
     expression_pending: Vec<SpecializationFrame>,
     expression_results: Vec<(ExprId, ExprId)>,
 }
@@ -274,6 +276,25 @@ impl StaticIfSpecializer<'_> {
             self.specialize_node(node, environment)?;
         }
         Ok(())
+    }
+
+    /// Specializes one function body under its own identity and constant environment.
+    ///
+    /// WHAT: saves and restores the enclosing function and gives the body an isolated
+    /// environment clone.
+    /// WHY: authored functions and the compiler-owned entry share the same traversal lifecycle
+    /// but must report provenance under distinct identities.
+    fn specialize_function_body(
+        &mut self,
+        identity: AstFunctionIdentity,
+        body: &mut [AstNode],
+        environment: &ConstValueEnvironment,
+    ) -> Result<(), TemplateNormalizationError> {
+        let previous_function = self.current_function.replace(identity);
+        let mut function_environment = environment.clone();
+        let result = self.specialize_body(body, &mut function_environment);
+        self.current_function = previous_function;
+        result
     }
 
     fn specialize_node(
@@ -384,11 +405,15 @@ impl StaticIfSpecializer<'_> {
                 None
             }
             NodeKind::Function(function_path, _, body) => {
-                let previous_function_path = self.current_function_path.replace(*function_path);
-                let mut function_environment = environment.clone();
-                let result = self.specialize_body(body, &mut function_environment);
-                self.current_function_path = previous_function_path;
-                result?;
+                self.specialize_function_body(
+                    AstFunctionIdentity::Authored(*function_path),
+                    body,
+                    environment,
+                )?;
+                None
+            }
+            NodeKind::EntryStart(_, body) => {
+                self.specialize_function_body(AstFunctionIdentity::Entry, body, environment)?;
                 None
             }
             NodeKind::Assert { condition, message } => {
@@ -680,7 +705,10 @@ impl StaticIfSpecializer<'_> {
         &mut self,
         body: &mut [AstNode],
         environment: &mut ConstValueEnvironment,
-    ) -> Result<FxHashMap<PathId, SyntheticInterfaceProvenance>, TemplateNormalizationError> {
+    ) -> Result<
+        FxHashMap<AstFunctionIdentity, SyntheticInterfaceProvenance>,
+        TemplateNormalizationError,
+    > {
         let saved_provenance = std::mem::take(&mut self.function_provenance);
         let result = self.specialize_body(body, environment);
         let branch_provenance = std::mem::take(&mut self.function_provenance);
@@ -690,14 +718,14 @@ impl StaticIfSpecializer<'_> {
 
     fn merge_provenance_map(
         &mut self,
-        branch_provenance: FxHashMap<PathId, SyntheticInterfaceProvenance>,
+        branch_provenance: FxHashMap<AstFunctionIdentity, SyntheticInterfaceProvenance>,
     ) {
-        for (function_path, provenance) in branch_provenance {
+        for (identity, provenance) in branch_provenance {
             if provenance.is_empty() {
                 continue;
             }
             self.function_provenance
-                .entry(function_path)
+                .entry(identity)
                 .or_default()
                 .merge(&provenance);
         }
@@ -707,11 +735,11 @@ impl StaticIfSpecializer<'_> {
         if provenance.is_empty() {
             return;
         }
-        let Some(function_path) = &self.current_function_path else {
+        let Some(identity) = self.current_function else {
             return;
         };
         self.function_provenance
-            .entry(*function_path)
+            .entry(identity)
             .or_default()
             .merge(provenance);
     }

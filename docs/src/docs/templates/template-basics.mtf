@@ -92,7 +92,7 @@ output only when its root has an explicit purpose with an applicable consumer.
 `$page` is the initial HTML purpose. Its exact root and metadata rules live in
 @../project-structure/#entry-config (Entry metadata and page directives).
 
-- top-level runtime templates run through entry-selected `start()` in source order
+- top-level runtime templates run through the entry-selected root runtime in source order
 - direct top-level const templates fold into compile-time fragments
 - a template assigned to a binding or returned from a function remains a `String`
   value and does not become a page fragment by itself

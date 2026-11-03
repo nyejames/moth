@@ -56,7 +56,7 @@ impl TokenizerEntryMode {
 
 /// Close-delimiter policy for tokenizers that start inside a template body.
 ///
-/// Normal authored templates can close their own opening `[`. Synthetic entry
+/// Normal authored templates can close their own opening `[`. Compiler-owned entry
 /// bodies have no authored outer `[`, so the initial `]` should be rejected
 /// instead of letting the stream silently escape to source-file mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

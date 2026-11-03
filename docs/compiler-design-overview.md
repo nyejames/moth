@@ -167,25 +167,25 @@ Compile-time page fragments never live in HIR. The artefact validator checks fol
 
 A normal module may define declarations, dormant top-level runtime work and page fragments. Authored root runtime work or direct output requires an explicit purpose with an applicable consumer. `$page` supplies the HTML purpose. Compilation validates dormant work before publication. A dependency exposes declarations without activating that work or inserting fragments.
 
-Support modules and the project package facade are API-only. They permit ordinary declarations and runtime function bodies, but have no implicit `start`, root runtime statements, page fragments, page purpose, route or builder artefact. Invalid root activity is diagnosed before executable HIR leaves the compiler.
+Support modules and the project package facade are API-only. They permit ordinary declarations and runtime function bodies, but have no implicit entry, root runtime statements, page fragments, page purpose, route or builder artefact. Invalid root activity is diagnosed before executable HIR leaves the compiler.
 
 The project facade consumes build-supplied facade visibility and produces an ordinary immutable module artefact. Its separate package assembly and project-wide assembly privilege remain build-owned.
 
 Public visibility uses compiler-owned export metadata. `$export` is the accepted directive direction. Prefix-only versus optional directive-block form remains unsettled. Keep one final visibility syntax while preserving facade privacy and public re-exports.
 
-### Normal-root `start`
+### Normal-root entry
 
-The normal root's implicit `start` is compiler-synthesised, non-exported and unavailable to dependency binding. Purpose directives create neither another start nor a per-file compilation unit.
+The normal root's implicit entry is compiler-owned, non-exported and unavailable to dependency binding. Purpose directives create neither another entry nor a per-file compilation unit.
 
-`start` owns dormant root runtime work and produces runtime fragment strings in source order. Entry assembly activates it at most once for that entry after compilation. Dependency binding and compilation never activate it.
+The entry owns dormant root runtime work and produces runtime fragment strings in source order. Entry assembly activates it at most once for that entry after compilation. Dependency binding and compilation never activate it.
 
-Frontend semantics gives every normal-root `start`, including a synthetic single-file root, built-in `Error!` alongside the existing fragment-collection success slots. Implicit checked failure materialises as `Error`. Typed `Error!` propagates with `!`; custom errors require explicit recovery.
+Frontend semantics gives every normal-root entry, including a synthetic single-file root, built-in `Error!` alongside the existing fragment-collection success slots. Implicit checked failure materialises as `Error`. Typed `Error!` propagates with `!`; custom errors require explicit recovery.
 
-After failure-summary convergence and private-lane installation, HIR drops `start`'s error channel
+After failure-summary convergence and private-lane installation, HIR drops the entry's error channel
 when no reachable `ReturnError` remains. This narrows only the executable contract. Its ordered
 fragment-collection success slots and source propagation rules stay unchanged.
 
-Builders consume this typed outcome. They add no error-fragment channel and never execute `start` during compilation. Assertions and fatal runtime resource exhaustion remain outside recoverable failure.
+Builders consume this typed outcome. They add no error-fragment channel and never execute the entry during compilation. Assertions and fatal runtime resource exhaustion remain outside recoverable failure.
 
 ## Diagnostics and deterministic identity
 
@@ -365,7 +365,7 @@ Each successful base module has five distinct fingerprint domains:
 |---|---|
 | Public interface | The complete canonical `PublicSemanticInterface`. Excludes private bodies, source locations, warnings, formatting metadata and non-public dormant root work. |
 | Implementation | Executable body semantics and non-interface implementation facts, including exported bodies whose public facts stay unchanged. Excludes dormant root work and generated sidecar bodies. |
-| Dormant root activity | Implicit `start`, top-level runtime work, fragments and folded root-local entry metadata. |
+| Dormant root activity | Implicit entry, top-level runtime work, fragments and folded root-local entry metadata. |
 | Runtime dependencies | Backend-neutral calls, helpers, capabilities, target-gated operations, glue requirements, resource uses and site-root requirements of executable functions/root work. |
 | Documentation | Public documentation, editor metadata and API-index data. |
 
@@ -420,7 +420,7 @@ Preparation is the sole owner of module-wide top-level declaration discovery. `P
 - declaration shells for constants, functions, structs, choices, aliases, traits and conformances
 - declaration modifiers, including `$config` input-contract shells
 - root metadata/purpose invocations and balanced argument ranges
-- dormant start-body separation and compile-time fragment placement information
+- dormant entry-body separation and compile-time fragment placement information
 - structural provider references and structural file references
 - conservative local declaration-ordering hints
 - diagnostics and identity/remap data
@@ -478,7 +478,7 @@ The config outcome returns its live source-local span owner on success and diagn
 
 ### Stage 3: local declaration ordering
 
-Stage 3 topologically orders retained local declaration shells, diagnoses cycles and preserves source order among independent declarations. Stage 0 has already ordered providers. Stage 3 appends builtins and dormant normal-root `start` after declarations.
+Stage 3 topologically orders retained local declaration shells, diagnoses cycles and preserves source order among independent declarations. Stage 0 has already ordered providers. Stage 3 appends builtins and the dormant normal-root entry after declarations.
 
 Same-file constants retain source-order semantics and reject forward references. Cross-file constants use header-provided local edges. Cross-module constants are already folded interface facts. Directive retention changes none of these rules.
 
@@ -486,7 +486,7 @@ A concrete required edge with no local declaration is a graph diagnostic. A cons
 
 AST consumes the resulting declaration order linearly. Local nominal identities are registered before alias targets resolve. Completed member shells follow the alias targets and capacity constants they require. An alias that folds a module constant is published at its own ordered position, never provisionally.
 
-Stage 3 does not order modules or body-local declarations, inspect executable body references or copy dependency symbols into its graph. Dormant `start` is not a dependency participant. Missing local edges belong in header preparation. Missing providers belong in Stage 0.
+Stage 3 does not order modules or body-local declarations, inspect executable body references or copy dependency symbols into its graph. The dormant entry is not a dependency participant. Missing local edges belong in header preparation. Missing providers belong in Stage 0.
 
 ### Stage 4: AST semantics
 
@@ -522,7 +522,7 @@ Handler types and fallback constraints are validated before failure analysis, ev
 
 Each ordinary concrete function body, including a concrete receiver method, is fail-fast. Its first primary error is reported with useful related labels and the rest of the body is abandoned. Body-local nested constructs belong to their containing body and are not separate recovery roots.
 
-After that first error, AST may check later ordinary concrete bodies in sorted header order through the existing signatures, bound visibility and bounded body token ranges. It never rescans for a function boundary or recovers statement by statement. A header needing no further semantic work, such as an already resolved struct shell, is passed over. Recovery ends at the first header that needs another semantic producer, such as generic-template validation, a const template or the implicit `start`, and at the first unavailable prerequisite. A shared-store capacity diagnostic also ends recovery, keeping the diagnostics already collected. These endings are fail-fast scope boundaries rather than budget stops, so they record no stop reason. Environment construction, declaration and signature completion, generated materialisation and const-template producers keep their fail-fast boundaries. Templates and generic calls inside an eligible body create no extra recovery root.
+After that first error, AST may check later ordinary concrete bodies in sorted header order through the existing signatures, bound visibility and bounded body token ranges. It never rescans for a function boundary or recovers statement by statement. A header needing no further semantic work, such as an already resolved struct shell, is passed over. Recovery ends at the first header that needs another semantic producer, such as generic-template validation, a const template or the implicit entry, and at the first unavailable prerequisite. A shared-store capacity diagnostic also ends recovery, keeping the diagnostics already collected. These endings are fail-fast scope boundaries rather than budget stops, so they record no stop reason. Environment construction, declaration and signature completion, generated materialisation and const-template producers keep their fail-fast boundaries. Templates and generic calls inside an eligible body create no extra recovery root.
 
 A valid signature stays usable when its body fails, so a wrong argument elsewhere remains an independent error. Checks that need body-derived failure, effect or other semantic facts from a failed or unvisited body are withheld. Recovery never installs a fabricated successful or infallible callee. A missing infallibility fact keeps its conservative may-fail meaning and produces no follow-on diagnostic.
 

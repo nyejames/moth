@@ -133,7 +133,6 @@ fn reserved_name_owner_label(reserved_by: ReservedNameOwner) -> &'static str {
         ReservedNameOwner::BuiltinType => "builtin type",
         ReservedNameOwner::Keyword => "keyword",
         ReservedNameOwner::CoreTrait => "core trait",
-        ReservedNameOwner::ImplicitStart => "compiler-owned entry point",
         ReservedNameOwner::ParameterContract => "compiler-owned parameter contract",
     }
 }

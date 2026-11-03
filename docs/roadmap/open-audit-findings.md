@@ -128,7 +128,7 @@ None.
   `MOTH-RULE-0031` at `@page.moth:3:5`. See the [triage record](./audits/AUD-0005-tokenizer-correctness.md#aud-0005-f02-consecutive-bare-cr-newlines-are-consumed-as-horizontal-whitespace-drifting-line-and-column-tracking).
 
 - AUD-0006-F06 was split: the missing authored-`start` valid-body fixture is accepted as part of
-  F01. The proposed rewrite of ~51 `compile_project_frontend` harness sites to
+  F01 and now exists as the `entry_root_authored_start_function_success` case. The proposed rewrite of ~51 `compile_project_frontend` harness sites to
   `CompilerSymbolSet::preseeded_table` was rejected — those tests have no numeric `StringId`
   assertions, `tests/cases/` already runs production preseeding, and `compiler_symbols_tests`
   already pin the preseed prefix. See the [triage record](./audits/AUD-0006-frontend-symbols-correctness.md#aud-0006-f06-linked-tests-lane-no-rust-harness-test-drives-the-frontend-with-a-preseeded-string-table-and-the-only-authored-start-fixture-cannot-reach-f01).
@@ -137,7 +137,9 @@ None.
   `MOTH-RULE-0039` (`ReservedNameOwner::ImplicitStart`) in `validate_declared_name`, skipping
   `HeaderKind::StartFunction`, keeping helper-file `start` legal, and renaming
   `this_local_declaration_error` off `start` so it still reports exactly `MOTH-RULE-0040`.
-  The unread `CompilerOwnedDeclaration.kind` field was deleted. See the
+  The unread `CompilerOwnedDeclaration.kind` field was deleted. The reservation is now
+  superseded by the typed compiler-owned entry identity: the entry has no source name, so
+  authored root `start` is an ordinary callable. See the
   [triage record](./audits/AUD-0006-frontend-symbols-correctness.md#aud-0006-f01-a-user-authored-root-level-start-function-reaches-the-compiler-invariant-lane-and-is-reported-as-a-compiler-bug).
 
 - AUD-0006-F02 was accepted and resolved by aligning identifier naming predicates with Unicode

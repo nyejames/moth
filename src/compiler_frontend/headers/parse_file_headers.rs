@@ -485,7 +485,7 @@ pub(super) fn find_config_qualifier_marker_in_declaration_defaults(
 
 /// Find retained declaration/body `#Config` markers through the canonical source owner.
 ///
-/// Contiguous declaration ranges use `Header::tokens`; the active start body uses its checked
+/// Contiguous declaration ranges use `Header::tokens`; the active entry body uses its checked
 /// `TokenSequenceId`. No body vector is materialized solely to inspect this two-token marker.
 pub(super) fn find_config_qualifier_marker_in_header(
     header: &Header,

@@ -4,7 +4,7 @@
 //!   moth_vec_new, moth_vec_push, moth_vec_len, moth_vec_get
 //!
 //! WHY: separated from helpers.rs to keep per-helper emission focused on one handle type.
-//! Vec handles are the runtime accumulator for entry start() fragment strings only — this is
+//! Vec handles are the runtime accumulator for the compiler-owned entry fragment strings only — this is
 //! not generic collection lowering.
 //!
 //! Vec handle layout (12 bytes):
@@ -40,7 +40,7 @@ pub(crate) fn emit_vec_helper(helper: WasmRuntimeHelper, alloc_index: u32) -> Fu
     match helper {
         WasmRuntimeHelper::VecNew => {
             // WHAT: allocate a 12-byte vec header {data_ptr, len, capacity}.
-            // WHY: entry start() returns Vec<String>, so runtime fragment accumulation
+            // WHY: the compiler-owned entry returns Vec<String>, so runtime fragment accumulation
             //      needs a stable handle layout parallel to string buffers.
             const VEC_HANDLE: u32 = 0;
 

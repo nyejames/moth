@@ -310,8 +310,7 @@ fn handler_block_for(module: &HirModule, function: FunctionId) -> BlockId {
 fn retains_direct_provenance_per_function() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let entry_path = super::symbol("main.moth", &mut path_fork, &mut string_table);
     let helper_name = path_fork
         .try_intern_child(entry_path, string_table.intern("helper"))
         .expect("test path fits");
@@ -336,14 +335,12 @@ fn retains_direct_provenance_per_function() {
 
     let ast = build_ast_with_registered_types(
         vec![
-            function_node(
-                start_name,
+            super::entry_start_node(
                 FunctionSignature {
                     parameters: vec![],
                     returns: vec![],
                 },
                 start_body,
-                None,
             ),
             function_node(
                 helper_name,
@@ -355,7 +352,6 @@ fn retains_direct_provenance_per_function() {
                 None,
             ),
         ],
-        entry_path,
         expressions,
         const_values,
         TypeEnvironment::new(),
@@ -413,22 +409,17 @@ fn retains_direct_provenance_per_function() {
 fn empty_function_has_explicit_empty_provenance() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
     let start_body = vec![node(NodeKind::Return(vec![]), None)];
 
     let ast = build_ast_with_registered_types(
-        vec![function_node(
-            start_name,
+        vec![super::entry_start_node(
             FunctionSignature {
                 parameters: vec![],
                 returns: vec![],
             },
             start_body,
-            None,
         )],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -460,20 +451,15 @@ fn validation_rejects_missing_provenance_coverage() {
     use crate::compiler_frontend::hir::validation::validate_hir_module;
 
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
     let ast = build_ast_with_registered_types(
-        vec![function_node(
-            start_name,
+        vec![super::entry_start_node(
             FunctionSignature {
                 parameters: vec![],
                 returns: vec![],
             },
             vec![node(NodeKind::Return(vec![]), None)],
-            None,
         )],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -508,20 +494,15 @@ fn validation_rejects_extra_provenance_entry() {
     use crate::compiler_frontend::hir::validation::validate_hir_module;
 
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
     let ast = build_ast_with_registered_types(
-        vec![function_node(
-            start_name,
+        vec![super::entry_start_node(
             FunctionSignature {
                 parameters: vec![],
                 returns: vec![],
             },
             vec![node(NodeKind::Return(vec![]), None)],
-            None,
         )],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),
@@ -558,20 +539,15 @@ fn validation_rejects_replaced_out_of_range_provenance_key() {
     use crate::compiler_frontend::hir::validation::validate_hir_module;
 
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
     let ast = build_ast_with_registered_types(
-        vec![function_node(
-            start_name,
+        vec![super::entry_start_node(
             FunctionSignature {
                 parameters: vec![],
                 returns: vec![],
             },
             vec![node(NodeKind::Return(vec![]), None)],
-            None,
         )],
-        entry_path,
         AstExpressionBuilder::new().unwrap(),
         ConstValueStore::default(),
         TypeEnvironment::new(),

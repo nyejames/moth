@@ -12,9 +12,7 @@ use crate::compiler_frontend::hir::blocks::HirLocal;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node, make_test_variable, node,
-};
+use crate::compiler_frontend::tests::ast_fixture_support::{make_test_variable, node};
 
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
@@ -68,8 +66,6 @@ fn local_by_name<'a>(
 fn compiler_generated_scope_lowers_through_child_region_and_rejoins_parent() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let inner = super::symbol("inner", &mut path_fork, &mut string_table);
     let after = super::symbol("after", &mut path_fork, &mut string_table);
     let mut builder = AstExpressionBuilder::new().unwrap();
@@ -103,19 +99,16 @@ fn compiler_generated_scope_lowers_through_child_region_and_rejoins_parent() {
         None,
     );
 
-    let start_function = function_node(
-        start_name,
+    let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
             returns: vec![],
         },
         vec![lexical_scope, after_declaration],
-        None,
     );
 
     let ast = build_ast_with_registered_types(
         vec![start_function],
-        entry_path,
         builder,
         constants,
         TypeEnvironment::new(),

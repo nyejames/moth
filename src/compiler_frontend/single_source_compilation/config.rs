@@ -69,7 +69,6 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternError, 
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
-use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -332,8 +331,7 @@ fn compile_prepared_config_source(
     // Reject authored start-body statements and mutable config bindings. Only top-level
     // compile-time constants are config entries, so these dialect rejections are owned by
     // this service and never reach build-side validation.
-    let config_rejections =
-        reject_authored_config_dialect(&ast, authored_scope, path_fork, string_table);
+    let config_rejections = reject_authored_config_dialect(&ast, authored_scope, path_fork);
     if config_rejections.has_errors() {
         return Err(capture_config_diagnostics(config_rejections, string_table));
     }
@@ -420,16 +418,14 @@ fn project_config_field_dependencies(
 /// Reject the authored config dialect surfaces that fold but are not config entries.
 ///
 /// Only top-level compile-time constants are config entries. Plain bindings and runtime
-/// statements in the start body, and mutable config bindings, are rejected here so build-side
+/// statements in the entry body, and mutable config bindings, are rejected here so build-side
 /// validation consumes folded declarations without walking AST nodes or inspecting value modes.
 fn reject_authored_config_dialect(
     ast: &Ast,
     authored_scope: PathId,
     path_fork: &PathInternerFork,
-    string_table: &StringTable,
 ) -> DiagnosticBag {
-    let mut rejections =
-        reject_authored_config_start_body(ast, authored_scope, path_fork, string_table);
+    let mut rejections = reject_authored_config_start_body(ast, authored_scope, path_fork);
     rejections.append(reject_mutable_config_bindings(
         ast,
         authored_scope,
@@ -438,31 +434,21 @@ fn reject_authored_config_dialect(
     rejections
 }
 
-/// Reject authored statements inside the config's start body.
+/// Reject authored statements inside the config's entry body.
 ///
-/// The implicit or authored `start` body is the only place runtime statements can reach the
-/// folded AST, so the walk is scoped to the start function and to statements authored in the
-/// config file itself.
+/// The compiler-owned entry body is the only place runtime statements can reach the folded AST,
+/// so the walk is scoped to that typed node and to statements authored in the config file itself.
 fn reject_authored_config_start_body(
     ast: &Ast,
     authored_scope: PathId,
     path_fork: &PathInternerFork,
-    string_table: &StringTable,
 ) -> DiagnosticBag {
     let mut rejections = DiagnosticBag::new();
 
     for node in &ast.nodes {
-        let NodeKind::Function(path, _, body) = &node.kind else {
+        let NodeKind::EntryStart(_, body) = &node.kind else {
             continue;
         };
-
-        if path_fork
-            .component(*path)
-            .map(|name| string_table.resolve(name))
-            != Some(IMPLICIT_START_FUNC_NAME)
-        {
-            continue;
-        }
 
         for body_node in body {
             // Only consider statements authored in the config file itself.
