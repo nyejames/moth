@@ -197,7 +197,12 @@ impl BackendBuilder for HtmlProjectBuilder {
         let mut entry_page_rel = None;
         let mut has_directory_homepage = false;
         let artifact_entries = project_compilation.entries();
-        for entry in artifact_entries.iter().cloned() {
+        // Build the owned runtime plan before consuming the entry views. It owns its asset and
+        // specifier facts, so the loop can move each entry instead of cloning the view.
+        let runtime_emission_plan = HtmlExternalRuntimeEmissionPlan::from_import_sets(
+            artifact_entries.iter().map(|entry| entry.external_imports),
+        );
+        for entry in artifact_entries {
             let module = entry.module;
             // Derive the canonical page route once. JS-only and HTML+Wasm output modes consume
             // projections from this same value — downstream code must not re-derive route semantics.
@@ -376,10 +381,6 @@ impl BackendBuilder for HtmlProjectBuilder {
                 &mut diagnostic_strings,
             )?;
         }
-
-        let runtime_emission_plan = HtmlExternalRuntimeEmissionPlan::from_import_sets(
-            artifact_entries.iter().map(|entry| entry.external_imports),
-        );
 
         // Provider JS assets become deferred resource outputs. Their canonical byte sources
         // attach to the shared registry and their declared destinations join the resource

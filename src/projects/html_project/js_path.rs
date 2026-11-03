@@ -30,7 +30,9 @@ use crate::projects::html_project::document_config::HtmlDocumentConfig;
 use crate::projects::html_project::document_shell::{
     HtmlDocumentShellInput, render_html_document_shell,
 };
-use crate::projects::html_project::external_js::runtime_glue::generate_module_glue;
+use crate::projects::html_project::external_js::runtime_glue::{
+    ModuleGlueResult, generate_module_glue,
+};
 use crate::projects::html_project::output_plan::CanonicalPageRoute;
 use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
@@ -72,6 +74,8 @@ pub(crate) struct HtmlDocumentRenderInput<'a> {
     pub route: &'a CanonicalPageRoute,
     pub project_name: &'a str,
     pub js_bundle: &'a str,
+    /// Optional module import preamble emitted before the bundle in the same script.
+    pub import_preamble: Option<&'a str>,
     pub function_names: &'a HashMap<FunctionId, String>,
     /// Lowering-owned fact from the emitted start's HIR return type.
     pub start_is_fallible: bool,
@@ -268,12 +272,12 @@ pub(crate) fn compile_html_module_js(
         input.build_profile.is_release(),
     )?;
 
-    let use_module_script = glue_result.bundle_import_preamble.is_some();
-    let bundle_with_imports = if let Some(ref preamble) = glue_result.bundle_import_preamble {
-        format!("{preamble}{}", js_module.source)
-    } else {
-        js_module.source.clone()
-    };
+    let ModuleGlueResult {
+        glue_output_files,
+        bundle_import_preamble,
+        import_map_html,
+    } = glue_result;
+    let use_module_script = bundle_import_preamble.is_some();
 
     let html = render_html_document(&HtmlDocumentRenderInput {
         hir_module: input.hir_module,
@@ -283,21 +287,22 @@ pub(crate) fn compile_html_module_js(
         document_config: input.document_config,
         route,
         project_name: input.project_name,
-        js_bundle: &bundle_with_imports,
+        js_bundle: &js_module.source,
+        import_preamble: bundle_import_preamble.as_deref(),
         function_names: &js_module.function_name_by_id,
         start_is_fallible: js_module.start_is_fallible,
         release_build: input.build_profile.is_release(),
         entry_runtime_fragment_count: input.root_activity.runtime_fragment_count,
-        import_map_html: glue_result.import_map_html,
+        import_map_html,
         use_module_script,
     })?;
 
-    let mut output_files = Vec::with_capacity(1 + glue_result.glue_output_files.len());
+    let mut output_files = Vec::with_capacity(1 + glue_output_files.len());
     output_files.push(OutputFile::new(
         route.logical_html_path.clone(),
         FileKind::Html(html),
     ));
-    output_files.extend(glue_result.glue_output_files);
+    output_files.extend(glue_output_files);
 
     Ok(CompiledHtmlJsModule {
         output_files,
@@ -429,6 +434,7 @@ pub(crate) fn render_html_document(
     let script_html = render_runtime_bootstrap_script_html(
         start_function_name,
         input.js_bundle,
+        input.import_preamble,
         &slot_ids,
         input.use_module_script,
         input.start_is_fallible,
@@ -446,24 +452,43 @@ pub(crate) fn render_html_document(
         import_map_html: input.import_map_html.clone(),
     })
 }
+
 fn render_runtime_bootstrap_script_html(
     start_function_name: &str,
     js_bundle: &str,
+    import_preamble: Option<&str>,
     slot_ids: &[String],
     is_module_script: bool,
     start_is_fallible: bool,
     release_build: bool,
 ) -> String {
-    // Escape the bundle so any `</script>` sequence inside string literals or comments cannot
-    // prematurely terminate the HTML script tag and corrupt the page.
-    let safe_bundle = escape_inline_script(js_bundle);
+    debug_assert!(
+        is_module_script || import_preamble.is_none(),
+        "an import preamble requires a module script"
+    );
 
     if is_module_script {
         // Emit a single module script so ES module imports are valid and share scope with
         // the bootstrap code.
         let mut html = String::new();
         html.push_str("<script type=\"module\">\n");
-        html.push_str(&safe_bundle);
+        if let Some(preamble) = import_preamble {
+            // The two slices share one script body, so a `</` split across their seam must
+            // still be escaped. Emit that one boundary match without joining the slices, then
+            // stream both remainders through the ordinary helper.
+            if let (Some(preamble), Some(bundle)) =
+                (preamble.strip_suffix('<'), js_bundle.strip_prefix('/'))
+            {
+                push_escaped_inline_script(&mut html, preamble);
+                html.push_str("<\\/");
+                push_escaped_inline_script(&mut html, bundle);
+            } else {
+                push_escaped_inline_script(&mut html, preamble);
+                push_escaped_inline_script(&mut html, js_bundle);
+            }
+        } else {
+            push_escaped_inline_script(&mut html, js_bundle);
+        }
         html.push('\n');
         html.push_str("(function () {\n");
         append_runtime_bootstrap(
@@ -481,7 +506,7 @@ fn render_runtime_bootstrap_script_html(
         // Classic script path: emit bundle and bootstrap in separate inline scripts.
         let mut html = String::new();
         html.push_str("<script>\n");
-        html.push_str(&safe_bundle);
+        push_escaped_inline_script(&mut html, js_bundle);
         html.push_str("\n</script>\n");
         html.push_str("<script>\n");
         html.push_str("(function () {\n");
@@ -595,16 +620,22 @@ fn append_startup_lifecycle(
     html.push_str(&format!("{indent}}}\n"));
 }
 
-/// Escapes JS source so it is safe to embed inside an HTML `<script>` block.
+/// Pushes JS source into an HTML `<script>` body while escaping every `</` occurrence.
 ///
-/// WHAT: replaces every `</` occurrence with `<\/` so the HTML parser cannot see a closing tag
-/// sequence inside the script content.
-/// WHY: a raw `</script>` anywhere in an inlined JS bundle — including inside string literals or
-/// comments — causes the browser to terminate the script tag early and corrupt the page.
+/// WHAT: replaces every `</` with `<\/` directly in the destination buffer.
+/// WHY: a raw `</script>` anywhere in an inlined JS bundle, including inside string literals or
+/// comments, causes the browser to terminate the script tag early and corrupt the page.
 /// `<\/` is a valid JS string escape sequence equivalent to `</`, so the JS semantics are
-/// preserved while the HTML parser sees a harmless non-tag sequence.
-pub(crate) fn escape_inline_script(js: &str) -> String {
-    js.replace("</", "<\\/")
+/// preserved while the HTML parser sees a harmless non-tag sequence. Writing into the final
+/// buffer avoids a complete intermediate copy of the bundle, including when no match exists.
+fn push_escaped_inline_script(html: &mut String, js: &str) {
+    let mut remaining = js;
+    while let Some(close_index) = remaining.find("</") {
+        html.push_str(&remaining[..close_index]);
+        html.push_str("<\\/");
+        remaining = &remaining[close_index + 2..];
+    }
+    html.push_str(remaining);
 }
 
 #[cfg(test)]

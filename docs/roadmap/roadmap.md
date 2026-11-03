@@ -29,8 +29,6 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 ## Sequenced work
 
-- [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked only on five-run benchmark evidence (Slice 0); investigation before narrow success-path fix
-
 - [Synthetic entry function identity](./plans/synthetic-entry-function-identity-plan.md) - Queued: replace the named implicit `start` with a typed AST entry and HIR `FunctionId`, freeing `start` as an ordinary user name. Preserve module activation, config diagnostics and JS/Wasm ABI.
 
 - [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: consume the shared MON argument owner, all fixed numeric input types and delivered destination-aware command literal materialisation for general directives, explicit $config contracts and strict $project/$html_builder configuration

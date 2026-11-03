@@ -31,6 +31,7 @@ fn bootstrap_script_calls_start_once_and_inserts_slots() {
     let script = render_runtime_bootstrap_script_html(
         "start_entry",
         "function start_entry() { return []; }",
+        None,
         &slot_ids,
         false,
         false,
@@ -253,6 +254,7 @@ fn no_runtime_fragments_still_emits_start_call() {
             route: &route,
             project_name: "",
             js_bundle: "function start_entry() { return []; }",
+            import_preamble: None,
             function_names: &function_names,
             start_is_fallible: false,
             release_build: false,
@@ -274,15 +276,38 @@ fn no_runtime_fragments_still_emits_start_call() {
 }
 
 #[test]
-fn escape_inline_script_replaces_closing_tag_sequence() {
-    let js = "const x = \"</script>\";";
-    let escaped = escape_inline_script(js);
+fn inline_script_escaping_writes_exact_bytes() {
+    // WHAT: every `</` becomes `<\/` in place, while separate `<` and `/` stay untouched.
+    // WHY: the input must be safe inside an HTML script tag without changing its JS bytes.
+    let cases = [
+        (
+            "unrelated angle brackets and slashes",
+            "const ratio = 1 < 2; const path = a / b;",
+            "const ratio = 1 < 2; const path = a / b;",
+        ),
+        (
+            "one closing tag sequence",
+            "const x = \"</script>\";",
+            "const x = \"<\\/script>\";",
+        ),
+        (
+            "multiple closing sequences",
+            "a</div></script>b",
+            "a<\\/div><\\/script>b",
+        ),
+        ("leading and trailing sequences", "</a></", "<\\/a><\\/"),
+    ];
 
-    assert_eq!(escaped, "const x = \"<\\/script>\";");
-    assert!(
-        !escaped.contains("</"),
-        "escaped JS must not contain any '</' sequence"
-    );
+    for (label, input, expected) in cases {
+        let mut output = String::new();
+        push_escaped_inline_script(&mut output, input);
+
+        assert_eq!(output, expected, "{label}");
+        assert!(
+            !output.contains("</"),
+            "{label}: escaped JS must not contain a raw '</' sequence"
+        );
+    }
 }
 
 #[test]
@@ -311,6 +336,7 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
             route: &route,
             project_name: "",
             js_bundle: "const msg = \"</script>\";\n",
+            import_preamble: None,
             function_names: &function_names,
             start_is_fallible: false,
             release_build: false,
@@ -321,14 +347,166 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
     )
     .expect("render_html_document should succeed");
 
+    let script_open = "<script>\n";
+    let script_start = html
+        .find(script_open)
+        .expect("classic script block must be present")
+        + script_open.len();
+    let script_end = script_start
+        + html[script_start..]
+            .find("\n</script>\n")
+            .expect("classic script block must close");
+    assert_eq!(
+        &html[script_start..script_end],
+        "const msg = \"<\\/script>\";\n",
+        "the inline bundle must keep its exact bytes apart from the escaped closing sequence"
+    );
     assert!(
-        !html.contains("</script>\";"),
+        !html[..script_end].contains("</script>\";"),
         "raw </script> inside a JS string must not appear unescaped in HTML output"
     );
+}
+
+#[test]
+fn module_script_places_escaped_import_preamble_before_the_bundle() {
+    // WHAT: a preamble and its bundle share one module script in that order.
+    // WHY: the preamble declares the imports the bundle calls, so reordering them or changing
+    //      how their shared script buffer is escaped would change the emitted page.
+    let hir_module = create_test_hir_module();
+    let function_names = HashMap::from([(
+        hir_module
+            .start_function
+            .expect("entry module should have start"),
+        String::from("start_entry"),
+    )]);
+
+    let route =
+        derive_logical_html_path(Path::new("@page.moth"), None).expect("root route should resolve");
+    let plan = HtmlResourceOutputPlan::new("");
+    let context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
+    let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
+    let page_metadata_plan = HtmlPageMetadataPlan::default();
+    let html = render_html_document(
+        &crate::projects::html_project::js_path::HtmlDocumentRenderInput {
+            hir_module: &hir_module,
+            page_metadata_plan: &page_metadata_plan,
+            const_fragments: &[],
+            structural_url_renderer: &renderer,
+            document_config: &HtmlDocumentConfig::default(),
+            route: &route,
+            project_name: "",
+            js_bundle: "const marker = 1;\n",
+            import_preamble: Some(
+                "import { fn } from \"./glue.js\";\nconst note = \"</script>\";\n",
+            ),
+            function_names: &function_names,
+            start_is_fallible: false,
+            release_build: false,
+            entry_runtime_fragment_count: 0,
+            import_map_html: None,
+            use_module_script: true,
+        },
+    )
+    .expect("render_html_document should succeed");
+
+    let script_open = "<script type=\"module\">\n";
+    let script_start = html
+        .find(script_open)
+        .expect("module script block must be present")
+        + script_open.len();
     assert!(
-        html.contains("<\\/script>"),
-        "the closing-tag sequence must be escaped as <\\/script> in the output"
+        html[script_start..].starts_with(
+            "import { fn } from \"./glue.js\";\nconst note = \"<\\/script>\";\nconst marker = 1;\n\n(function () {\n"
+        ),
+        "the escaped preamble must immediately precede the bundle in the module script"
     );
+}
+
+/// Returns the JS source between the module script opener and the bootstrap.
+fn module_script_source(script: &str) -> &str {
+    let open = "<script type=\"module\">\n";
+    let start = script
+        .find(open)
+        .expect("module script block must be present")
+        + open.len();
+    let end = start
+        + script[start..]
+            .find("\n(function () {\n")
+            .expect("bootstrap must follow the module source");
+    &script[start..end]
+}
+
+#[test]
+fn module_script_escapes_closing_sequence_split_across_the_seam() {
+    // WHAT: a `</` split between the import preamble and the bundle stays escaped.
+    // WHY: both slices share one script body, so escaping them independently would emit a
+    //      premature raw `</script>` even though neither slice contains the pair alone.
+    let script = render_runtime_bootstrap_script_html(
+        "start_entry",
+        "/script>\";\nconst rest = 1;\n",
+        Some("const message = \"<"),
+        &[],
+        true,
+        false,
+        false,
+    );
+
+    assert!(
+        script.starts_with(
+            "<script type=\"module\">\nconst message = \"<\\/script>\";\nconst rest = 1;\n\n(function () {\n"
+        ),
+        "the seam must escape to `<\\/` before the bootstrap, got: {script}"
+    );
+    assert_eq!(
+        script.matches("</script>").count(),
+        1,
+        "the script source must not contain a premature raw closing tag"
+    );
+    assert!(
+        script.ends_with("})();\n</script>\n"),
+        "the final closing tag must remain the only raw `</script>`"
+    );
+}
+
+#[test]
+fn module_script_escaping_matches_concatenated_contract() {
+    // WHAT: streaming the two slices must match escaping their concatenation.
+    // WHY: the old renderer escaped one joined string, so the seam is the only place where
+    //      separate escaping can differ.
+    let cases = [
+        ("no seam", "const a = 1;\n", "const b = 2;\n"),
+        ("seam match", "const a = \"<", "/script>\";\n"),
+        ("non-matching seam", "const a = \"<", "script>\";\n"),
+        ("matches in both parts", "a</div>\n", "b</span>\n"),
+        ("empty preamble", "", "const b = \"</x>\";\n"),
+        ("empty bundle", "const a = \"</x>\";\n", ""),
+        ("trailing < with empty bundle", "const a = \"<", ""),
+        ("utf-8 across seam", "const s = \"café <", "/thé\";\n"),
+    ];
+
+    for (label, preamble, bundle) in cases {
+        let script = render_runtime_bootstrap_script_html(
+            "start_entry",
+            bundle,
+            Some(preamble),
+            &[],
+            true,
+            false,
+            false,
+        );
+        let expected = format!("{preamble}{bundle}").replace("</", "<\\/");
+
+        assert_eq!(
+            module_script_source(&script),
+            expected,
+            "{label}: module script source must match concatenated escaping"
+        );
+        assert_eq!(
+            script.matches("</script>").count(),
+            1,
+            "{label}: exactly one raw closing tag"
+        );
+    }
 }
 
 #[test]
@@ -338,6 +516,7 @@ fn bootstrap_inserts_plain_runtime_fragments() {
     let script = render_runtime_bootstrap_script_html(
         "start_entry",
         "function start_entry() { return []; }",
+        None,
         &slot_ids,
         false,
         false,
@@ -362,6 +541,7 @@ fn infallible_bootstrap_invokes_once_with_or_without_fragments() {
                 r#"const events = [];
 function start_entry() { events.push("start"); return ["fragment"]; }
 const document = { getElementById() { return { insertAdjacentHTML(_, text) { events.push(text); } }; } };"#,
+                None,
                 &slots,
                 is_module_script,
                 false,
@@ -402,6 +582,7 @@ fn fallible_bootstrap_failure_records_details_once_without_publishing_applicatio
                 let caller = render_runtime_bootstrap_script_html(
                     "start_entry",
                     "",
+                    None,
                     &slots,
                     is_module_script,
                     true,
@@ -484,6 +665,7 @@ globalThis.document = {
                     let html = render_runtime_bootstrap_script_html(
                         "start_entry",
                         &bundle,
+                        None,
                         &slots,
                         is_module_script,
                         true,
@@ -584,6 +766,7 @@ fn startup_faults_are_classified_and_rethrown_without_intercepting_later_scripts
                 let html = render_runtime_bootstrap_script_html(
                     "start_entry",
                     &bundle,
+                    None,
                     &[String::from("moth-slot-0")],
                     is_module_script,
                     fallible,
@@ -643,6 +826,7 @@ const document = {
             let html = render_runtime_bootstrap_script_html(
                 "start_entry",
                 bundle,
+                None,
                 &slots,
                 is_module_script,
                 true,
