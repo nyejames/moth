@@ -37,7 +37,7 @@ init_docs_sidebar()!
     - Update a package row while working on that package so deferred extensions do not need to be
       rediscovered later.
     - Keep project-builder rows separate from backend implementation rows.
-    - Put user-facing package and builder explanations in `docs/src/docs/packages/**` and the relevant
+    - Put user-facing package and builder explanations in `docs/docs/packages/**` and the relevant
       project documentation.
     - Put implementation sequencing and unaccepted proposals in `docs/roadmap/roadmap.md`.
     - Use the status labels from this page's legend. Put backend-specific or deliberately deferred nuance
@@ -421,7 +421,7 @@ init_docs_sidebar()!
     - Record the important common missing operations while a package is being worked on.
     - Move implementation sequencing and unaccepted package ideas to `docs/roadmap/roadmap.md`.
     - Keep backend implementation status on @../ (the compiler progress matrix).
-    - Keep package API explanations and examples in `docs/src/docs/packages/**`.
+    - Keep package API explanations and examples in `docs/docs/packages/**`.
     - Add a new package row only after that package's scope and semantic contract have been deliberately considered.
     - Do not invent package origins or tiers to classify importance. Use only the package model accepted by the canonical package documentation.
 ]

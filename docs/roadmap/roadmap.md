@@ -10,10 +10,10 @@ happens in a separate isolated worktree and is not sequenced by this roadmap.
 Compiler integration consumes delivered capabilities without resuming paused
 compiler work. All user-facing tooling remains under `moth`.
 
-The next major plans are kept inside [plans](docs/roadmap/plans) and linked here in top to bottom order under the `Plans` heading.
+The next major plans are kept inside [plans](./plans) and linked here in top to bottom order under the `Plans` heading.
 
-Use the [Compiler Progress Matrix](docs/src/docs/progress/@page.moth) for language, compiler, memory and backend status.
-Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-and-builders/@page.moth) for package and project-builder status.
+Use the [Compiler Progress Matrix](../docs/progress/@page.moth) for language, compiler, memory and backend status.
+Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-builders/@page.moth) for package and project-builder status.
 
 ---
 
@@ -72,7 +72,7 @@ This roadmap owns the normal serial order. A plan owns its own work and nothing 
 
 **Delete a plan in the commit that completes it.** Do not mark it complete and commit that, then delete it later - the intermediate state is a file that claims to be work and is not. Removing it in the completion commit means the commit that finished the work is also the commit that retired the plan, so Git history alone answers "when did this land". A deleted plan is recoverable if it is genuinely needed again.
 
-**Do not cite a plan from another plan.** When two plans genuinely share a contract, that contract belongs in a canonical document under `docs/src/docs/` or `docs/*-design.md`, and both plans point there. If it is not stable enough to be canonical, it is not stable enough for another plan to depend on the wording.
+**Do not cite a plan from another plan.** When two plans genuinely share a contract, that contract belongs in a canonical document under `docs/docs/` or `docs/*-design.md`, and both plans point there. If it is not stable enough to be canonical, it is not stable enough for another plan to depend on the wording.
 
 **Package programme exception.** The umbrella and package-level plans under `docs/roadmap/plans/packages/` are living implementation companions rather than ordinary short-lived plans. They may link one another and specialised package implementation plans in that directory. Package-level plans remain after a current version completes so later work retains implementation rationale, quirks and blockers. Completed checklists should be removed or compressed. A specialised one-shot plan may still be retired after its durable decisions and follow-ups move into the living package plan. Canonical package documentation remains the semantic authority. The main roadmap links only the umbrella programme, and the normal deletion and no-plan-link rules still apply everywhere else.
 
@@ -100,7 +100,7 @@ Revisit these compiler representation and tooling capabilities only when their s
 | Broader compiler-wide ID bit packing | Each domain has a formal bound and measured retained-memory pressure. |
 | Cross-build or context diagnostic deduplication or caching | Repeated frozen reports are a material report-storage cost, with stable identity and invalidation specified. |
 | Full LSP protocol, incremental documents and cancellation | A separate tooling plan consumes the source, report and worker architecture. |
-| CLI/LSP diagnostic display limits and an all-generated-errors view | A separate presentation or tooling plan consumes the delivered bounded recovery, module allowance, work guard and stop metadata. [Build design](../build-system-design.md#diagnostic-budgets-and-scheduling-cutoff) and [project config](../src/docs/project-structure/project-config.mtf#diagnostic-limits) stay the permanent compiler contracts. Display limits stay separate from analysis, and a view never promises code the compiler skipped. |
+| CLI/LSP diagnostic display limits and an all-generated-errors view | A separate presentation or tooling plan consumes the delivered bounded recovery, module allowance, work guard and stop metadata. [Build design](../build-system-design.md#diagnostic-budgets-and-scheduling-cutoff) and [project config](../docs/project-structure/project-config.mtf#diagnostic-limits) stay the permanent compiler contracts. Display limits stay separate from analysis, and a view never promises code the compiler skipped. |
 | Further path cold-store packing | A later retained-memory profile identifies cold path-node storage as a material owner; traversal layout remains a separate AoS/SoA question. |
 | Token cold-store packing | Formal token-record bounds and aggregate retained-memory evidence show that cold token data are material; keep the 8-byte token shape until both conditions hold. |
 | Extended-span deduplication | The verified `LocalSpan` split (`L=10`) remains the baseline (661,044 spans, 355 extended rows / 2,840 B); revisit only if a retained-memory profile shows repeated extended-span rows are still material. |
@@ -114,11 +114,11 @@ Future LSP tooling may offer an optional infallible-catch advisory after failure
 convergence. Keep it separate from compiler warnings and source acceptance. Authored safety
 catches remain legal without an actual failure producer, and every handler still receives normal
 validation before unreachable executable work disappears. Consume the same
-[permanent tooling boundary](../src/docs/design-scope/deferred-and-outside-scope.mtf#numeric-and-generic-extensions).
+[permanent tooling boundary](../docs/design-scope/deferred-and-outside-scope.mtf#numeric-and-generic-extensions).
 
 ## Collector-free memory implementation
 
-Canonical memory design lives under [the memory management design docs](docs/src/developer-docs/memory-management).
+Canonical memory design lives under [the memory management design docs](../developer-docs/memory-management).
 
 Two temporary implementation plans remain in the tree. They are work items awaiting consolidation into one replacement implementation plan, not design authorities:
 
@@ -182,7 +182,7 @@ performs semantic symbol resolution or syntax diagnostics.
 - `$export` block support is undecided. The queued export-directive TODO owns the later choice of prefix-only versus optional block form. Keep one final visibility syntax.
 - A possible separate custom-metadata directive remains open design. `$project` stays a closed predefined-field signature in the meantime.
 
-Permanent owners: `docs/src/docs/directives/directives.mtf`, `docs/src/docs/design-scope/`, `docs/src/docs/async/@page.moth`, and the checked-proof-budget references. Do not treat these bullets as implementation-plan files.
+Permanent owners: `docs/docs/directives/directives.mtf`, `docs/docs/design-scope/`, `docs/docs/async/@page.moth`, and the checked-proof-budget references. Do not treat these bullets as implementation-plan files.
 
 ## Wiring follow-ups
 

@@ -982,7 +982,7 @@ Compatible route parameters can forward routes unchanged.
 Wires and routes can only appear as parameter capabilities. Their reads and captures follow ordinary access and lifetime rules.
 UI event delivery needs a builder or library that implements it.
 
-See @https://github.com/nyejames/moth/blob/main/docs/src/docs/wiring/wiring.mtf (Wiring contract).
+See @https://github.com/nyejames/moth/blob/main/docs/docs/wiring/wiring.mtf (Wiring contract).
 
 ## Dependencies and aliases
 
@@ -1052,7 +1052,7 @@ A root can have one non-empty `export:` block for public declarations and direct
 Runtime statements, fragments and whole namespaces aren't exports. Public signatures can't expose private types or required private trait evidence.
 Methods are visible wherever their receiver type is visible. They can't be imported or exported separately.
 
-A `+*.moth` root creates a named support package, such as `src/shared/+package.moth` exposed as `@shared`.
+A `+*.moth` root creates a named support package, such as `shared/+package.moth` exposed as `@shared`.
 Its `export:` facade lets normal sibling modules share code, while preserving private implementation boundaries.
 It is visible to its nearest normal owner and normal siblings/descendants in that scope.
 
@@ -1064,21 +1064,20 @@ For example, a project might contain:
 [codeblock, $code("text"):
     my-site/
       config.moth
-      src/
-        @site.moth
-        helpers.moth
-        tools/format.moth
-        vendor/format.js
-        shared/
-          +package.moth
-          badge.moth
-        pages/
-          @pages.moth
-          article/
-            @article.moth
+      @site.moth
+      helpers.moth
+      tools/format.moth
+      vendor/format.js
+      shared/
+        +package.moth
+        badge.moth
+      pages/
+        @pages.moth
+        article/
+          @article.moth
 ]
 
-From `src/@site.moth` (or `src/helpers.moth`), imports can bind:
+From `@site.moth` (or `helpers.moth`), imports can bind:
 
 [codeblock, $code("moth"):
     @tools/format format_title   -- ordinary file, same module
@@ -1090,14 +1089,14 @@ From `src/@site.moth` (or `src/helpers.moth`), imports can bind:
     @vendor/format.js emphasize  -- builder-provided JS binding
 ]
 
-The nested `src/pages/article/@article.moth` can import the same support package and Builder packages:
+The nested `pages/article/@article.moth` can import the same support package and Builder packages:
 
 [codeblock, $code("moth"):
     @shared badge
     @html table
 ]
 
-Even an ordinary file nested under `src/tools/` imports `@tools/format`, because paths always start at its module root.
+Even an ordinary file nested under `tools/` imports `@tools/format`, because paths always start at its module root.
 The `@pages` and `@shared` imports see only their exported facades.
 `@charts` assumes a declared project dependency. The `.js` binding requires an HTML builder capable of importing JavaScript.
 
@@ -1108,19 +1107,16 @@ See @../project-structure (Project structure) and @../packages (Package visibili
 `$name(arguments)` invokes a registered compile-time directive. With no arguments, write the bare directive (`$html_builder`), not empty parentheses.
 Directives are provided by the compiler or selected builder, not defined in source.
 
-Project-root `config.moth` contains compile-time values and configuration. It requires one `$project` and the selected builder's config.
+An authored project-root `config.moth` contains compile-time values and configuration. When present, it includes one `` and the selected builder config.
 Source imports, functions and runtime work belong in ordinary modules:
 
 [codeblock, $code("moth"):
-    $config
-    version #String = "0.1.0"
-
-    $project(name = "my_site", version = version)
+    $project(name = "my_site")
     $html_builder
 ]
 
-`$project` requires `name` and `version` Strings. Its `entry_root` defaults to `"src"` beneath the project root. Only predefined fields are accepted.
-`$html_builder` configures HTML output, not source-level target selection. Its default output folders are `dev` and `release`, with `origin = "/"`.
+`$project` accepts an optional `name` and an optional `version`. An omitted name uses the selected directory name, which must be a valid Moth project identifier. There is no `entry_root`; the selected directory is the source root. Only predefined fields are accepted.
+`$html_builder` configures HTML output, not source-level target selection. Its default output folders are `_dev` and `_release`, with `origin = "/"`.
 
 ### Build inputs
 
@@ -1160,7 +1156,7 @@ Project metadata is available only through explicit imports:
 ]
 
 `@project` exposes predefined fields, not arbitrary config helpers or inputs.
-Input-dependent values can't determine `name`, `entry_root` or `template_const_loop_iteration_limit`.
+Input-dependent values can't determine `name` or `template_const_loop_iteration_limit`.
 
 See @../project-structure/#project-config (Project configuration), @../project-structure/#build-inputs (Build inputs) and
 @../directives (Directives).
@@ -1208,7 +1204,7 @@ Direct constant fragments become static HTML. Runtime work runs once at page sta
 An error leaves static fragments in place but doesn't roll back earlier side effects.
 The release page shows a generic failure notice, not application error text.
 
-Routes derive from directory structure: `src/guide/@page.moth` creates `guide/index.html`. Root filenames have no route significance.
+Routes derive from directory structure: `guide/@page.moth` creates `guide/index.html`. Root filenames have no route significance.
 HTML builds need at least one page. `check` can validate a declaration-only, zero-page project while still rejecting unpurposed runtime work.
 
 See @../project-structure (Pages and entry behaviour).

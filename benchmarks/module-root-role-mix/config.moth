@@ -1,8 +1,0 @@
-project #= (
-    name = "module_root_role_mix",
-    entry_root = "src",
-)
-html #= (
-    dev_output = "scratch",
-    release_output = "generated",
-)

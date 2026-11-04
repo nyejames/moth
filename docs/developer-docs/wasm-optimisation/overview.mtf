@@ -11,7 +11,7 @@ routing reference.
 
 - `docs/compiler-design-overview.md` owns compiler stages and validated handoffs.
 - `docs/build-system-design.md` owns builder policy, linking and output planning.
-- `docs/src/developer-docs/memory-management/overview.mtf` routes to access,
+- `docs/developer-docs/memory-management/overview.mtf` routes to access,
   lifetime and physical memory contracts.
 - `crates/lappet/docs/design.md` owns native execution and Rust host bindings.
 - `crates/lappet/roadmap.md` owns Lappet's implementation checkpoints.

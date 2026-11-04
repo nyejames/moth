@@ -5,7 +5,7 @@
 `@core/text` is the portable Core package for deterministic `String` inspection, exact search and
 non-mutating text transformation.
 
-Canonical source semantics belong in `docs/src/docs/packages/core/text/` and the canonical `String`,
+Canonical source semantics belong in `docs/docs/packages/core/text/` and the canonical `String`,
 `Char`, Error and Option references. This living plan records implementation strategy, sequencing,
 performance knowledge, blockers and later extensions. Implementation code never becomes the semantic
 authority.
@@ -213,7 +213,7 @@ scalars are the guard against drift.
 | `src/backends/js/runtime/strings.rs` | reuse `__moth_string_value` only, do not move optional `@core/text` algorithms into the always-emitted general String runtime |
 | `src/compiler_frontend/builtins/error_codes.rs` | own stable Text runtime error codes |
 | `tests/cases/core_text_*` and owning external-package/backend unit tests | consolidate contract, parity, reachability and diagnostic coverage |
-| `docs/src/docs/packages/core/text/` and packages/builders progress | publish implemented semantics and retain deferred blockers |
+| `docs/docs/packages/core/text/` and packages/builders progress | publish implemented semantics and retain deferred blockers |
 
 Do not broaden `ExternalPackageRegistry`, HIR call representation or the general external ABI in this
 package slice. The prerequisite owns result-slot and const-eval infrastructure changes.

@@ -32,11 +32,10 @@ The `@` in `@page.moth` is a filesystem marker identifying a normal module root.
 Given this structure:
 
 [codeblock, $code("text"):
-    src/
-    ├── @site.moth
-    └── pages/
-        ├── @page.moth
-        └── article.moth
+    @site.moth
+    pages/
+    ├── @page.moth
+    └── article.moth
 ]
 
 Valid:

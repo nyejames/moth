@@ -19,7 +19,7 @@ Publish the accepted contracts in the permanent owners in Phase 1 before impleme
 
 ## Prerequisites and reading
 
-Follow `AGENTS.md` and read the style, testing and validation guides. Read both compiler/build design authorities and the routed canonical numeric, cast, error, directive, function, package and range-loop references. Use `docs/src/developer-docs/language/overview.mtf` for their current paths. Read both progress matrices, the Core Math reference and the living Core Math package plan. Follow the memory overview for failure-edge and scalar-storage handoffs.
+Follow `AGENTS.md` and read the style, testing and validation guides. Read both compiler/build design authorities and the routed canonical numeric, cast, error, directive, function, package and range-loop references. Use `docs/developer-docs/language/overview.mtf` for their current paths. Read both progress matrices, the Core Math reference and the living Core Math package plan. Follow the memory overview for failure-edge and scalar-storage handoffs.
 
 Consume these merged capabilities, without rebuilding them:
 
@@ -280,8 +280,8 @@ Reverify locators at activation. The preceding compiler foundation deliberately 
 | Trusted binding contracts | `src/compiler_frontend/external_packages/` and `src/builder_surface/` |
 | Runtime lowering | `src/backends/js/`, `src/backends/wasm/` and backend feature validation |
 | Core Math | `src/builder_surface/core_packages/math.rs`, package reference and living package plan |
-| Source contract | Create `docs/src/docs/directives/constraints.mtf` with a compact Basic companion, integrated into the directive page |
-| Developer backend contract | Create `docs/src/developer-docs/numeric-backend-contract/numeric-backend-contract.mtf` and its `@page.moth`, with a compact routing `overview.mtf` only if needed |
+| Source contract | Create `docs/docs/directives/constraints.mtf` with a compact Basic companion, integrated into the directive page |
+| Developer backend contract | Create `docs/developer-docs/numeric-backend-contract/numeric-backend-contract.mtf` and its `@page.moth`, with a compact routing `overview.mtf` only if needed |
 | Architecture | `docs/compiler-design-overview.md` and relevant capability/interface sections of `docs/build-system-design.md` |
 | Navigation | Developer/language overview, developer page navigation and `index.md` |
 

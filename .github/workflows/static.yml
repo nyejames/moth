@@ -141,13 +141,20 @@ jobs:
         timeout-minutes: 20
         run: cargo run --quiet -p moth-cli --bin moth -- build docs --release
 
+      - name: Verify release entry artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f docs/_release/index.html
+          test ! -e docs/release/index.html
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './docs/release'
+          path: './docs/_release'
 
       - name: Deploy to GitHub Pages
         id: deployment

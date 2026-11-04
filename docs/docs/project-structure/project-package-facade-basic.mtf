@@ -17,9 +17,12 @@ roots follow the same API-only rule.
 
 ### How it reaches descendant modules
 
-The facade can reference public interfaces of modules below `entry_root` even
-though ordinary module visibility wouldn't allow it. Stage 0 gives the facade
-a special assembly namespace for this purpose.
+The facade can reference public interfaces of modules below the selected
+project directory even though ordinary module visibility wouldn't allow it.
+Stage 0 gives the facade a special assembly namespace for this purpose.
+
+This is the pre-Phase-3 facade model. Unifying project-root `+` with normal
+support roots is accepted but pending.
 
 ### Privacy and inputs
 

@@ -34,8 +34,8 @@ init_docs_sidebar()!
 #[section, $md:
     # Project structure
 
-    A Moth project combines directory-scoped modules, one strict project config
-    and a builder that selects the final artefacts.
+    A Moth project combines directory-scoped modules, an optional root-level
+    project config and a builder that selects the final artefacts.
 
     Normal module roots start with `@`. Support and package-facade roots start
     with `+`. The rest of the filename stays cosmetic. `export:` currently

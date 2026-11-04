@@ -17,9 +17,9 @@ fingerprint_excludes = []
 [[workload]]
 id = "docs"
 entry = "docs"
-fingerprint_mode = "partitioned"
-fingerprint_roots = ["docs/config.moth", "docs/src"]
-fingerprint_excludes = []
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["docs"]
+fingerprint_excludes = ["docs/_dev", "docs/_release"]
 
 [[workload]]
 id = "template_stress"
@@ -205,43 +205,43 @@ fingerprint_excludes = []
 
 [[workload]]
 id = "module_graph"
-entry = "benchmarks/module-graph"
+entry = "benchmarks/module-graph/src"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/module-graph"]
-fingerprint_excludes = ["benchmarks/module-graph/dev", "benchmarks/module-graph/release"]
-generated_output_roots = ["dev", "release"]
+fingerprint_roots = ["benchmarks/module-graph/src"]
+fingerprint_excludes = ["benchmarks/module-graph/src/_dev", "benchmarks/module-graph/src/_release"]
+generated_output_roots = ["_dev", "_release"]
 
 [[workload]]
 id = "import_fanout"
-entry = "benchmarks/import-fanout"
+entry = "benchmarks/import-fanout/src"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/import-fanout"]
-fingerprint_excludes = ["benchmarks/import-fanout/dev", "benchmarks/import-fanout/release"]
-generated_output_roots = ["dev", "release"]
+fingerprint_roots = ["benchmarks/import-fanout/src"]
+fingerprint_excludes = ["benchmarks/import-fanout/src/_dev", "benchmarks/import-fanout/src/_release"]
+generated_output_roots = ["_dev", "_release"]
 
 [[workload]]
 id = "external_js_imports"
-entry = "benchmarks/external-js-imports"
+entry = "benchmarks/external-js-imports/src"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/external-js-imports"]
-fingerprint_excludes = ["benchmarks/external-js-imports/dev", "benchmarks/external-js-imports/release"]
-generated_output_roots = ["dev", "release"]
+fingerprint_roots = ["benchmarks/external-js-imports/src"]
+fingerprint_excludes = ["benchmarks/external-js-imports/src/_dev", "benchmarks/external-js-imports/src/_release"]
+generated_output_roots = ["_dev", "_release"]
 
 [[workload]]
 id = "module_root_stress"
-entry = "benchmarks/module-root-stress"
+entry = "benchmarks/module-root-stress/src"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/module-root-stress"]
-fingerprint_excludes = ["benchmarks/module-root-stress/dev", "benchmarks/module-root-stress/release"]
-generated_output_roots = ["dev", "release"]
+fingerprint_roots = ["benchmarks/module-root-stress/src"]
+fingerprint_excludes = ["benchmarks/module-root-stress/src/_dev", "benchmarks/module-root-stress/src/_release"]
+generated_output_roots = ["_dev", "_release"]
 
 [[workload]]
 id = "import_external_churn"
-entry = "benchmarks/adversarial/import-external-churn"
+entry = "benchmarks/adversarial/import-external-churn/src"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/adversarial/import-external-churn"]
-fingerprint_excludes = ["benchmarks/adversarial/import-external-churn/dev", "benchmarks/adversarial/import-external-churn/release"]
-generated_output_roots = ["dev", "release"]
+fingerprint_roots = ["benchmarks/adversarial/import-external-churn/src"]
+fingerprint_excludes = ["benchmarks/adversarial/import-external-churn/src/_dev", "benchmarks/adversarial/import-external-churn/src/_release"]
+generated_output_roots = ["_dev", "_release"]
 
 [[workload]]
 id = "borrow_stress"
@@ -252,79 +252,79 @@ fingerprint_excludes = []
 
 [[workload]]
 id = "module_root_role_mix"
-entry = "benchmarks/module-root-role-mix"
+entry = "benchmarks/module-root-role-mix/src"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/module-root-role-mix"]
-fingerprint_excludes = ["benchmarks/module-root-role-mix/scratch", "benchmarks/module-root-role-mix/generated"]
+fingerprint_roots = ["benchmarks/module-root-role-mix/src"]
+fingerprint_excludes = ["benchmarks/module-root-role-mix/src/_scratch", "benchmarks/module-root-role-mix/src/_generated"]
 
 [[workload]]
 id = "tiny_one_file"
-entry = "benchmarks/parallelism/tiny-one-file"
+entry = "benchmarks/parallelism/tiny-one-file/src"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/parallelism/tiny-one-file"]
-fingerprint_excludes = ["benchmarks/parallelism/tiny-one-file/dev", "benchmarks/parallelism/tiny-one-file/release"]
+fingerprint_roots = ["benchmarks/parallelism/tiny-one-file/src"]
+fingerprint_excludes = ["benchmarks/parallelism/tiny-one-file/src/_dev", "benchmarks/parallelism/tiny-one-file/src/_release"]
 
 [[workload]]
 id = "tiny_two_files"
-entry = "benchmarks/parallelism/tiny-two-files"
+entry = "benchmarks/parallelism/tiny-two-files/src"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/parallelism/tiny-two-files"]
-fingerprint_excludes = ["benchmarks/parallelism/tiny-two-files/dev", "benchmarks/parallelism/tiny-two-files/release"]
+fingerprint_roots = ["benchmarks/parallelism/tiny-two-files/src"]
+fingerprint_excludes = ["benchmarks/parallelism/tiny-two-files/src/_dev", "benchmarks/parallelism/tiny-two-files/src/_release"]
 
 [[workload]]
 id = "tiny_seven_files"
-entry = "benchmarks/parallelism/tiny-seven-files"
+entry = "benchmarks/parallelism/tiny-seven-files/src"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/parallelism/tiny-seven-files"]
-fingerprint_excludes = ["benchmarks/parallelism/tiny-seven-files/dev", "benchmarks/parallelism/tiny-seven-files/release"]
+fingerprint_roots = ["benchmarks/parallelism/tiny-seven-files/src"]
+fingerprint_excludes = ["benchmarks/parallelism/tiny-seven-files/src/_dev", "benchmarks/parallelism/tiny-seven-files/src/_release"]
 
 [[workload]]
 id = "tiny_eight_files"
-entry = "benchmarks/parallelism/tiny-eight-files"
+entry = "benchmarks/parallelism/tiny-eight-files/src"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/parallelism/tiny-eight-files"]
-fingerprint_excludes = ["benchmarks/parallelism/tiny-eight-files/dev", "benchmarks/parallelism/tiny-eight-files/release"]
+fingerprint_roots = ["benchmarks/parallelism/tiny-eight-files/src"]
+fingerprint_excludes = ["benchmarks/parallelism/tiny-eight-files/src/_dev", "benchmarks/parallelism/tiny-eight-files/src/_release"]
 
 [[workload]]
 id = "many_tiny_files"
-entry = "benchmarks/parallelism/many-tiny-files"
+entry = "benchmarks/parallelism/many-tiny-files/src"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/parallelism/many-tiny-files"]
-fingerprint_excludes = ["benchmarks/parallelism/many-tiny-files/dev", "benchmarks/parallelism/many-tiny-files/release"]
+fingerprint_roots = ["benchmarks/parallelism/many-tiny-files/src"]
+fingerprint_excludes = ["benchmarks/parallelism/many-tiny-files/src/_dev", "benchmarks/parallelism/many-tiny-files/src/_release"]
 
 [[workload]]
 id = "many_medium_files"
-entry = "benchmarks/parallelism/many-medium-files"
+entry = "benchmarks/parallelism/many-medium-files/src"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/parallelism/many-medium-files"]
-fingerprint_excludes = ["benchmarks/parallelism/many-medium-files/dev", "benchmarks/parallelism/many-medium-files/release"]
+fingerprint_roots = ["benchmarks/parallelism/many-medium-files/src"]
+fingerprint_excludes = ["benchmarks/parallelism/many-medium-files/src/_dev", "benchmarks/parallelism/many-medium-files/src/_release"]
 
 [[workload]]
 id = "many_markdown_assets"
-entry = "benchmarks/parallelism/many-markdown-assets"
+entry = "benchmarks/parallelism/many-markdown-assets/src"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/parallelism/many-markdown-assets"]
-fingerprint_excludes = ["benchmarks/parallelism/many-markdown-assets/dev", "benchmarks/parallelism/many-markdown-assets/release"]
+fingerprint_roots = ["benchmarks/parallelism/many-markdown-assets/src"]
+fingerprint_excludes = ["benchmarks/parallelism/many-markdown-assets/src/_dev", "benchmarks/parallelism/many-markdown-assets/src/_release"]
 
 [[workload]]
 id = "many_modules_one_file_each"
-entry = "benchmarks/parallelism/many-modules-one-file-each"
+entry = "benchmarks/parallelism/many-modules-one-file-each/src"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/parallelism/many-modules-one-file-each"]
-fingerprint_excludes = ["benchmarks/parallelism/many-modules-one-file-each/dev", "benchmarks/parallelism/many-modules-one-file-each/release"]
+fingerprint_roots = ["benchmarks/parallelism/many-modules-one-file-each/src"]
+fingerprint_excludes = ["benchmarks/parallelism/many-modules-one-file-each/src/_dev", "benchmarks/parallelism/many-modules-one-file-each/src/_release"]
 
 [[workload]]
 id = "few_modules_many_files_each"
-entry = "benchmarks/parallelism/few-modules-many-files-each"
+entry = "benchmarks/parallelism/few-modules-many-files-each/src"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/parallelism/few-modules-many-files-each"]
-fingerprint_excludes = ["benchmarks/parallelism/few-modules-many-files-each/dev", "benchmarks/parallelism/few-modules-many-files-each/release"]
+fingerprint_roots = ["benchmarks/parallelism/few-modules-many-files-each/src"]
+fingerprint_excludes = ["benchmarks/parallelism/few-modules-many-files-each/src/_dev", "benchmarks/parallelism/few-modules-many-files-each/src/_release"]
 
 [[workload]]
 id = "data_layout_diagnosed"
-entry = "benchmarks/data-layout/diagnosed"
+entry = "benchmarks/data-layout/diagnosed/src"
 fingerprint_mode = "full_tree"
-fingerprint_roots = ["benchmarks/data-layout/diagnosed"]
+fingerprint_roots = ["benchmarks/data-layout/diagnosed/src"]
 fingerprint_excludes = []
 
 [[workload]]

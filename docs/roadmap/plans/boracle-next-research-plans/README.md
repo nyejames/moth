@@ -77,7 +77,7 @@ Checkpoints on `boracle`:
 
 The oracle executes a normalized `BorrowProblem` directly rather than consulting the static solver. It carries a typed runtime state of dynamic generations and capabilities, enumerates branches and bounded loops deterministically, and classifies each problem against the static answer. Static acceptance plus an enumerated runtime conflict is a soundness failure and fails the lane loudly; every truncated exploration is typed `Inconclusive` with a named reason, never a safe result. A deterministic generator and a class-preserving reducer supply the campaign, and `just boracle` runs the default bounded corpus while `just boracle-campaign` runs the measured stress lane.
 
-`docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf` is the permanent operational authority. It states the oracle's exact limits: the shapes it refuses, the reasons it reports and the places where it is deliberately stricter or more approximate than the reference.
+`docs/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf` is the permanent operational authority. It states the oracle's exact limits: the shapes it refuses, the reasons it reports and the places where it is deliberately stricter or more approximate than the reference.
 
 Checkpoints on `boracle`:
 

@@ -33,10 +33,10 @@ ACTIVATION_GATE: representative profiling or counters must identify a material b
   neutral HIR boundary
 - `docs/build-system-design.md` for canonical source/module identity, fingerprints, dependency
   graphs, incremental compilation and output ownership
-- `docs/src/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
-- `docs/src/developer-docs/memory-management/overview.mtf` and selected leaves when source slices,
+- `docs/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
+- `docs/developer-docs/memory-management/overview.mtf` and selected leaves when source slices,
   arenas or borrowed storage change lifetime or ownership
-- `docs/src/docs/progress/@page.moth` for current support and backend coverage
+- `docs/docs/progress/@page.moth` for current support and backend coverage
 - delivered canonical module compilation and scoped packages, for stable source and
   module identities required by persistent reuse
 - the build and memory authorities' mixed-target output and runtime-string ownership contracts

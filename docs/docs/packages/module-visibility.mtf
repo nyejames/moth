@@ -7,11 +7,10 @@ Files within the same module can bind each other's declarations directly through
 Given this topology:
 
 [codeblock, $code("text"):
-    src/
-    ├── @site.moth
-    └── components/
-        ├── @api.moth
-        └── utils.moth
+    @site.moth
+    components/
+    ├── @api.moth
+    └── utils.moth
 ]
 
 `utils.moth` and `@api.moth` belong to the same `components` child module. Same-module dependency clauses can see private declarations.
@@ -19,7 +18,7 @@ Given this topology:
 Internal helper:
 
 [codeblock, $code("moth"):
-    -- src/components/utils.moth
+    -- components/utils.moth
     internal_value #= 42
 
     internal_fn || -> String:
@@ -30,7 +29,7 @@ Internal helper:
 Child root:
 
 [codeblock, $code("moth"):
-    -- src/components/@api.moth
+    -- components/@api.moth
     @utils internal_value, internal_fn
 
     export:
@@ -45,7 +44,7 @@ Same-module dependency clauses bypass the public-surface boundary. The declaring
 A different module can only access declarations marked public by the module root's `export:` block. Cross-module dependency clauses cannot bypass the public API.
 
 [codeblock, $code("moth"):
-    -- src/@site.moth
+    -- @site.moth
     @components internal_value
 ]
 

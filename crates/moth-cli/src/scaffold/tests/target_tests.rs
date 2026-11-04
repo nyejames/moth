@@ -317,27 +317,52 @@ fn missing_directory_confirms_or_cancels() {
 }
 
 #[test]
-fn project_name_defaults_overrides_or_trims() {
+fn project_name_defaults_proposes_or_preserves_explicit_identifiers() {
     let temp = tempfile::tempdir().unwrap();
     let current = temp.path().to_path_buf();
 
-    // An empty name defaults to the directory basename, sanitised to a package identifier.
+    // An empty name uses the visible conversion of the directory basename.
     let mut prompt = ScriptedPrompt::new(vec![String::from("y"), String::from("")]);
     let resolved =
         resolve_project_target(Some(String::from("my-site")), &current, &mut prompt).unwrap();
     assert_eq!(resolved.project_name, "my_site");
+    assert!(
+        prompt
+            .messages
+            .iter()
+            .any(|message| message.contains("Project name") && message.contains("my_site")),
+        "the proposed identifier must be visible before files are created"
+    );
 
-    // An explicit name overrides the basename and is sanitised the same way.
-    let mut prompt = ScriptedPrompt::new(vec![String::from("y"), String::from("My Custom Site")]);
+    // An explicit valid identifier keeps its exact spelling, including case and underscores.
+    let mut prompt = ScriptedPrompt::new(vec![String::from("y"), String::from("My_Site")]);
     let resolved =
         resolve_project_target(Some(String::from("my-site")), &current, &mut prompt).unwrap();
-    assert_eq!(resolved.project_name, "My_Custom_Site");
+    assert_eq!(resolved.project_name, "My_Site");
 
-    // A padded name is trimmed, then sanitised.
-    let mut prompt = ScriptedPrompt::new(vec![String::from("y"), String::from("  Padded Name  ")]);
+    // A padded valid identifier is trimmed without rewriting its spelling.
+    let mut prompt = ScriptedPrompt::new(vec![String::from("y"), String::from("  Padded_Name  ")]);
     let resolved =
         resolve_project_target(Some(String::from("dir")), &current, &mut prompt).unwrap();
     assert_eq!(resolved.project_name, "Padded_Name");
+
+    // A valid non-ASCII identifier keeps its exact spelling.
+    let mut prompt = ScriptedPrompt::new(vec![String::from("y"), String::from("Café")]);
+    let resolved =
+        resolve_project_target(Some(String::from("dir")), &current, &mut prompt).unwrap();
+    assert_eq!(resolved.project_name, "Café");
+
+    // A valid directory basename is the default without conversion.
+    let mut prompt = ScriptedPrompt::new(vec![String::from("y"), String::from("")]);
+    let resolved =
+        resolve_project_target(Some(String::from("Café")), &current, &mut prompt).unwrap();
+    assert_eq!(resolved.project_name, "Café");
+
+    // An invalid explicit identifier is rejected instead of being silently rewritten.
+    let mut prompt = ScriptedPrompt::new(vec![String::from("y"), String::from("My Custom Site")]);
+    let error =
+        resolve_project_target(Some(String::from("my-site")), &current, &mut prompt).unwrap_err();
+    assert!(error.contains("Invalid project name `My Custom Site`"));
 }
 
 #[test]

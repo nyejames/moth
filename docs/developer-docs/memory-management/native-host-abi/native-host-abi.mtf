@@ -9,7 +9,7 @@ The native host ABI is the physical Wasm boundary between compiled Moth and a na
 Owners:
 
 - This page owns physical carriers, frame layouts, the staged-text and call-scope protocols, resource-token carriage, import and export identity and the host manifest's contents.
-- `docs/src/developer-docs/project-builders/host-packages.mtf` owns the Rust signature profile and its Moth meaning.
+- `docs/developer-docs/project-builders/host-packages.mtf` owns the Rust signature profile and its Moth meaning.
 - `ValidatedMemoryPlan` still owns every allocation, cleanup and ownership decision inside Moth. The boundary layouts here don't constrain Moth's internal string, collection or family representations.
 - `crates/lappet/docs/host-abi.md` owns Lappet's adapter checks, staging table, resource table, host context and fault handling.
 - The build system owns target selection, package assembly, export selection and output publication.

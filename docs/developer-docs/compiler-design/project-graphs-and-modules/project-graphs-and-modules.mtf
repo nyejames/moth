@@ -24,7 +24,7 @@ Not every `@` clause makes an edge between modules, though. In the running examp
         [node:
             [$insert("href"): ./]
             [$insert("eyebrow"): One directory]
-            [$insert("title"): src/ rooted by @page.moth]
+            [$insert("title"): Project root rooted by @page.moth]
             A directory has at most one root. That root defines one compilation and visibility unit.
         ]
 

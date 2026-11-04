@@ -178,7 +178,7 @@ fn end_to_end_force_overwrites_scaffold_owned_files_only() {
 fn creates_full_default_scaffold_and_reports_every_path() {
     let temp = tempfile::tempdir().unwrap();
     let project_dir = temp.path().join("project");
-    let target = named_target(project_dir.clone(), "My Project", false);
+    let target = named_target(project_dir.clone(), "My_Project", false);
     let mut prompt = ScriptedPrompt::new(vec![String::from("y")]);
 
     let report = write_scaffold(&target, false, &mut prompt).unwrap();
@@ -202,16 +202,19 @@ fn creates_full_default_scaffold_and_reports_every_path() {
 fn generated_files_exactly_match_templates() {
     let temp = tempfile::tempdir().unwrap();
     let project_dir = temp.path().join("project");
-    let target = named_target(project_dir.clone(), "Test Site", false);
+    let target = named_target(project_dir.clone(), "Test_Site", false);
     let mut prompt = ScriptedPrompt::new(vec![String::from("y")]);
 
     write_scaffold(&target, false, &mut prompt).unwrap();
 
     let config = fs::read_to_string(project_dir.join("config.moth")).unwrap();
-    assert!(config.contains("name = \"Test Site\""));
+    assert!(config.contains("name = \"Test_Site\""));
     assert!(!config.contains("version"));
     assert!(!config.contains("entry_root"));
-    assert_eq!(config, start_page_scaffolding::config_template("Test Site"));
+    assert_eq!(
+        config,
+        start_page_scaffolding::config_template("Test_Site").unwrap()
+    );
     assert_eq!(
         fs::read_to_string(project_dir.join("@page.moth")).unwrap(),
         start_page_scaffolding::page_template()
@@ -224,7 +227,7 @@ fn gitignore_is_created_when_absent_and_confirmed_or_skipped_when_declined() {
     let temp = tempfile::tempdir().unwrap();
     let project_dir = temp.path().join("project");
     fs::create_dir(&project_dir).unwrap();
-    let target = named_target(project_dir.clone(), "Test Site", true);
+    let target = named_target(project_dir.clone(), "Test_Site", true);
     let mut prompt = ScriptedPrompt::new(vec![String::from("y")]);
 
     let report = write_scaffold(&target, false, &mut prompt).unwrap();
@@ -238,7 +241,7 @@ fn gitignore_is_created_when_absent_and_confirmed_or_skipped_when_declined() {
     let temp = tempfile::tempdir().unwrap();
     let project_dir = temp.path().join("project");
     fs::create_dir(&project_dir).unwrap();
-    let target = named_target(project_dir.clone(), "Test Site", true);
+    let target = named_target(project_dir.clone(), "Test_Site", true);
     let mut prompt = ScriptedPrompt::new(vec![String::from("n")]);
 
     let report = write_scaffold(&target, false, &mut prompt).unwrap();
@@ -253,7 +256,7 @@ fn gitignore_appends_when_present_without_moth_output_block_or_skips_when_declin
     let project_dir = temp.path().join("project");
     fs::create_dir(&project_dir).unwrap();
     fs::write(project_dir.join(".gitignore"), "node_modules/\n").unwrap();
-    let target = named_target(project_dir.clone(), "Test Site", true);
+    let target = named_target(project_dir.clone(), "Test_Site", true);
     let mut prompt = ScriptedPrompt::new(vec![String::from("y")]);
 
     let report = write_scaffold(&target, false, &mut prompt).unwrap();
@@ -269,7 +272,7 @@ fn gitignore_appends_when_present_without_moth_output_block_or_skips_when_declin
     let project_dir = temp.path().join("project");
     fs::create_dir(&project_dir).unwrap();
     fs::write(project_dir.join(".gitignore"), "node_modules/\n").unwrap();
-    let target = named_target(project_dir.clone(), "Test Site", true);
+    let target = named_target(project_dir.clone(), "Test_Site", true);
     let mut prompt = ScriptedPrompt::new(vec![String::from("n")]);
 
     let report = write_scaffold(&target, false, &mut prompt).unwrap();
@@ -287,7 +290,7 @@ fn gitignore_is_updated_when_only_the_old_dev_rule_is_present() {
     let project_dir = temp.path().join("project");
     fs::create_dir(&project_dir).unwrap();
     fs::write(project_dir.join(".gitignore"), "/dev\n").unwrap();
-    let target = named_target(project_dir.clone(), "Test Site", true);
+    let target = named_target(project_dir.clone(), "Test_Site", true);
     let mut prompt = ScriptedPrompt::new(vec![String::from("y")]);
 
     let report = write_scaffold(&target, false, &mut prompt).unwrap();
@@ -296,6 +299,41 @@ fn gitignore_is_updated_when_only_the_old_dev_rule_is_present() {
     assert!(content.lines().any(|line| line.trim() == "/_dev"));
     assert!(content.lines().any(|line| line.trim() == "/_release"));
     assert!(report.updated.contains(&PathBuf::from(".gitignore")));
+}
+
+#[test]
+fn gitignore_appends_only_missing_rules() {
+    // One existing rule must not be duplicated when the other rule is appended.
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().join("project");
+    fs::create_dir(&project_dir).unwrap();
+    fs::write(project_dir.join(".gitignore"), "/_dev\n").unwrap();
+    let target = named_target(project_dir.clone(), "Test_Site", true);
+    let mut prompt = ScriptedPrompt::new(vec![String::from("y")]);
+
+    write_scaffold(&target, false, &mut prompt).unwrap();
+    let content = fs::read_to_string(project_dir.join(".gitignore")).unwrap();
+    assert_eq!(
+        content
+            .lines()
+            .filter(|line| line.trim() == "/_dev")
+            .count(),
+        1
+    );
+    assert_eq!(
+        content
+            .lines()
+            .filter(|line| line.trim() == "/_release")
+            .count(),
+        1
+    );
+    assert_eq!(
+        content
+            .lines()
+            .filter(|line| line.trim() == "# Moth generated output")
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -311,7 +349,7 @@ fn gitignore_is_skipped_when_moth_output_block_already_present() {
         let project_dir = temp.path().join("project");
         fs::create_dir(&project_dir).unwrap();
         fs::write(project_dir.join(".gitignore"), existing).unwrap();
-        let target = named_target(project_dir.clone(), "Test Site", true);
+        let target = named_target(project_dir.clone(), "Test_Site", true);
         let mut prompt = ScriptedPrompt::new(Vec::new());
 
         let report = write_scaffold(&target, false, &mut prompt).unwrap();
@@ -325,16 +363,19 @@ fn gitignore_is_skipped_when_moth_output_block_already_present() {
 }
 
 #[test]
-fn project_name_is_escaped_in_config() {
+fn invalid_direct_scaffold_name_is_rejected_without_writing_files() {
     let temp = tempfile::tempdir().unwrap();
     let project_dir = temp.path().join("project");
-    let target = named_target(project_dir.clone(), r#"Say "hello"\back"#, false);
+    let target = named_target(project_dir.clone(), "My Site", false);
     let mut prompt = ScriptedPrompt::new(vec![String::from("y")]);
 
-    write_scaffold(&target, false, &mut prompt).unwrap();
+    let error = write_scaffold(&target, false, &mut prompt).unwrap_err();
 
-    let content = fs::read_to_string(project_dir.join("config.moth")).unwrap();
-    assert!(content.contains(r#"name = "Say \"hello\"\\back","#));
+    assert!(error.contains("Invalid project name `My Site`"));
+    assert!(
+        !project_dir.exists(),
+        "validation should precede file writes"
+    );
 }
 
 #[test]
@@ -354,7 +395,7 @@ fn force_replaces_scaffold_owned_files_only() {
     .unwrap();
     fs::write(project_dir.join("user-file.txt"), b"keep me").unwrap();
 
-    let target = named_target(project_dir.clone(), "Test Site", true);
+    let target = named_target(project_dir.clone(), "Test_Site", true);
     let mut prompt = ScriptedPrompt::new(vec![String::from("y"), String::from("y")]);
 
     let report = write_scaffold(&target, true, &mut prompt).unwrap();
@@ -381,7 +422,7 @@ fn gitignore_is_never_overwritten_even_with_force() {
     fs::create_dir(&project_dir).unwrap();
     fs::write(project_dir.join(".gitignore"), b"custom\n").unwrap();
 
-    let target = named_target(project_dir.clone(), "Test Site", true);
+    let target = named_target(project_dir.clone(), "Test_Site", true);
     let mut prompt = ScriptedPrompt::new(vec![String::from("n")]);
 
     let report = write_scaffold(&target, true, &mut prompt).unwrap();
@@ -395,7 +436,7 @@ fn gitignore_is_never_overwritten_even_with_force() {
 fn write_failure_returns_precise_error() {
     let temp = tempfile::tempdir().unwrap();
     let project_dir = temp.path().join("project");
-    let target = named_target(project_dir.clone(), "Test Site", false);
+    let target = named_target(project_dir.clone(), "Test_Site", false);
     let mut prompt = ScriptedPrompt::new(vec![String::from("y")]);
 
     // Create a file where the project directory should be to force create_dir_all to fail.

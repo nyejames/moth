@@ -1,0 +1,7 @@
+project #= (
+    name = "import_external_churn",
+)
+html #= (
+    dev_output = "_dev",
+    release_output = "_release",
+)

@@ -1,0 +1,7 @@
+project #= (
+    name = "module_root_stress",
+)
+html #= (
+    dev_output = "_dev",
+    release_output = "_release",
+)

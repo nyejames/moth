@@ -19,9 +19,9 @@ than executing inside Lappet.
 |---|---|
 | [Compiler](../../../docs/compiler-design-overview.md) | Language semantics, canonical identities, compilation and validated backend handoffs |
 | [Build system](../../../docs/build-system-design.md) | Project graphs, builder selection, assemblies, lifecycle inputs and output ownership |
-| [Builder SDK](../../../docs/src/developer-docs/project-builders/overview.mtf) | Rust-facing builder definitions and host-binding descriptors |
-| [Memory lowering](../../../docs/src/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf) | Value access, lifetime topology, physical ABI and validated memory plans |
-| [Wasm optimisation](../../../docs/src/developer-docs/wasm-optimisation/overview.mtf) | Optimisation goals, pass ownership and compiler/runtime measurement policy |
+| [Builder SDK](../../../docs/developer-docs/project-builders/overview.mtf) | Rust-facing builder definitions and host-binding descriptors |
+| [Memory lowering](../../../docs/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf) | Value access, lifetime topology, physical ABI and validated memory plans |
+| [Wasm optimisation](../../../docs/developer-docs/wasm-optimisation/overview.mtf) | Optimisation goals, pass ownership and compiler/runtime measurement policy |
 | [Package manager](package-manager.md) | Acquisition, managed-package eligibility and admission policy |
 
 Moth compiles and validates. Lappet executes the resulting Wasm with the
@@ -131,7 +131,7 @@ export, network endpoint or a revived `moth_start` convention.
 The V1 profile contains exact scalars except `F16`, strings, one optional layer,
 the builtin `Error!` channel, explicit host context and opaque Rust-owned
 resource parameters. Exports may also return ordered multiple results. The
-[native host ABI](../../../docs/src/developer-docs/memory-management/native-host-abi/native-host-abi.mtf)
+[native host ABI](../../../docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf)
 fixes their physical encoding and lists the V1 support table. Byte buffers,
 records, choices, collections, multiple results on host imports and resource
 results are deferred beyond V1. Each needs its own approved shape, conversion,

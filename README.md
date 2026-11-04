@@ -123,7 +123,7 @@ This compiles the project using the command-selected builder and writes output t
 
 <br>
 
-See [the design principles doc](./docs/src/docs/design-scope/design-principles.mtf) for what the language is deliberately *not* doing.
+See [the design principles doc](./docs/docs/design-scope/design-principles.mtf) for what the language is deliberately *not* doing.
 
 <div align="center">
 

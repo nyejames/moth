@@ -4,26 +4,24 @@
 //!       `.gitignore`.
 //! WHY: Centralises template strings so they are not scattered through write logic.
 
-/// Escape a string for use in a Moth config string literal.
-///
-/// Minimum escaping: backslash and double-quote.
-fn escape_moth_string_literal(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
 /// Generate the content for `config.moth`.
 ///
 /// The scaffold always writes an explicit valid project name so the created directory has a
 /// stable identity even though directory compilation does not require a config file.
-pub fn config_template(project_name: &str) -> String {
-    let escaped = escape_moth_string_literal(project_name);
-    format!(
+pub fn config_template(project_name: &str) -> Result<String, String> {
+    if !moth_lexical::identifier::is_identifier(project_name) {
+        return Err(format!(
+            "Invalid project name `{project_name}`. Use a Moth project identifier: \
+             letters, digits and underscores, not starting with a digit."
+        ));
+    }
+    Ok(format!(
         r#"project #= (
-    name = "{escaped}",
+    name = "{project_name}",
 )
 html #= ()
 "#
-    )
+    ))
 }
 
 /// Return the exact starter content for the root-level `@page.moth`.
@@ -53,9 +51,4 @@ page_head #= [$html:
 /// Return the default `.gitignore` content for a new HTML project.
 pub fn gitignore_template() -> &'static str {
     "# Moth generated output\n/_dev\n/_release\n\n# OS/editor noise\n.DS_Store\n.vscode/\n.idea/\n"
-}
-
-/// Return the block appended to an existing `.gitignore` when it is missing.
-pub fn gitignore_append_block() -> &'static str {
-    "\n# Moth generated output\n/_dev\n/_release\n"
 }

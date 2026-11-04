@@ -60,26 +60,26 @@ Read these from the active worktree before implementation. Re-read the affected 
 - `AGENTS.md`
 - `docs/compiler-design-overview.md` in full
 - `docs/build-system-design.md` opening authority, architectural invariants, generated-function boundary, entry/package linking, target validation and mixed-target sections
-- `docs/src/developer-docs/language/overview.mtf`
-- `docs/src/docs/functions/function-declarations.mtf`
-- `docs/src/docs/functions/calls-and-access.mtf`
-- `docs/src/docs/functions/returns-and-multiple-values.mtf`
-- `docs/src/docs/errors/assertions.mtf`
-- `docs/src/docs/branching/value-producing-if.mtf`
+- `docs/developer-docs/language/overview.mtf`
+- `docs/docs/functions/function-declarations.mtf`
+- `docs/docs/functions/calls-and-access.mtf`
+- `docs/docs/functions/returns-and-multiple-values.mtf`
+- `docs/docs/errors/assertions.mtf`
+- `docs/docs/branching/value-producing-if.mtf`
 - the canonical pattern-matching references affected by exit analysis
-- `docs/src/docs/loops/conditional-loops.mtf`
-- `docs/src/docs/loops/loop-control.mtf`
-- `docs/src/docs/traits/trait-requirements.mtf`
-- `docs/src/docs/traits/conformance.mtf`
-- `docs/src/docs/generics/generic-declarations.mtf`
-- `docs/src/docs/generics/generic-inference.mtf`
-- `docs/src/docs/packages/external-binding-contracts.mtf`
-- `docs/src/developer-docs/memory-management/overview.mtf` and its routed borrow, lifetime and external-boundary leaves
-- `docs/src/developer-docs/style-guide/style-guide.mtf`
-- `docs/src/developer-docs/style-guide/testing.mtf`
-- `docs/src/developer-docs/style-guide/validation.mtf`
-- `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf`
-- `docs/src/docs/progress/@page.moth`
+- `docs/docs/loops/conditional-loops.mtf`
+- `docs/docs/loops/loop-control.mtf`
+- `docs/docs/traits/trait-requirements.mtf`
+- `docs/docs/traits/conformance.mtf`
+- `docs/docs/generics/generic-declarations.mtf`
+- `docs/docs/generics/generic-inference.mtf`
+- `docs/docs/packages/external-binding-contracts.mtf`
+- `docs/developer-docs/memory-management/overview.mtf` and its routed borrow, lifetime and external-boundary leaves
+- `docs/developer-docs/style-guide/style-guide.mtf`
+- `docs/developer-docs/style-guide/testing.mtf`
+- `docs/developer-docs/style-guide/validation.mtf`
+- `docs/docs/cheatsheet/moth-language-cheatsheet.mtf`
+- `docs/docs/progress/@page.moth`
 - `docs/roadmap/roadmap.md`
 
 Permanent language references and compiler architecture must own the final semantics before this plan is retired.
@@ -1269,7 +1269,7 @@ Review `index.md` and update it only if owners or paths changed.
 
 ## Progress matrix
 
-Add or update one focused **Never return contracts** row in `docs/src/docs/progress/@page.moth`.
+Add or update one focused **Never return contracts** row in `docs/docs/progress/@page.moth`.
 
 Before implementation, an accepted-design row may be `Deferred` with coverage `None`. After this plan lands, set it to `Partial`, not `Supported`, because accepted proof gaps remain.
 

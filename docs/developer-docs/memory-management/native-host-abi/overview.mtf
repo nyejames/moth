@@ -19,7 +19,7 @@ The physical Wasm32 boundary between compiled Moth and native Rust host code.
 
 ## Read next
 
-- `docs/src/developer-docs/memory-management/native-host-abi/native-host-abi.mtf`
-- `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`
-- `docs/src/developer-docs/project-builders/host-packages.mtf`
+- `docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf`
+- `docs/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`
+- `docs/developer-docs/project-builders/host-packages.mtf`
 - `crates/lappet/docs/host-abi.md`

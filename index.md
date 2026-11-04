@@ -20,9 +20,9 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 
 - [Lappet crate](crates/lappet/README.md) and [library entry](crates/lappet/src/lib.rs): dependency-free initial workspace library, with no runtime API yet.
 - [Runtime design](crates/lappet/docs/design.md), [package-manager design](crates/lappet/docs/package-manager.md) and [independent roadmap](crates/lappet/roadmap.md): accepted contracts and isolated-worktree implementation checkpoints.
-- [Host ABI adapter responsibilities](crates/lappet/docs/host-abi.md): Lappet's installation, conversion, staging-table and resource-table duties over the compiler-owned [native host ABI](docs/src/developer-docs/memory-management/native-host-abi/native-host-abi.mtf).
-- [Wasm optimisation reference](docs/src/developer-docs/wasm-optimisation/overview.mtf) and [detailed authority](docs/src/developer-docs/wasm-optimisation/wasm-optimisation.mtf): shared compiler/native-code policy. Its [page](docs/src/developer-docs/wasm-optimisation/@page.moth) composes the site.
-- [Lappet introduction](docs/src/docs/lappet/lappet.mtf) and [page](docs/src/docs/lappet/@page.moth): application and embedding overview, with implementation status explicit.
+- [Host ABI adapter responsibilities](crates/lappet/docs/host-abi.md): Lappet's installation, conversion, staging-table and resource-table duties over the compiler-owned [native host ABI](docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf).
+- [Wasm optimisation reference](docs/developer-docs/wasm-optimisation/overview.mtf) and [detailed authority](docs/developer-docs/wasm-optimisation/wasm-optimisation.mtf): shared compiler/native-code policy. Its [page](docs/developer-docs/wasm-optimisation/@page.moth) composes the site.
+- [Lappet introduction](docs/docs/lappet/lappet.mtf) and [page](docs/docs/lappet/@page.moth): application and embedding overview, with implementation status explicit.
 
 ## Standalone lexical and MON crates
 
@@ -173,7 +173,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
     - [template_control_flow](src/compiler_frontend/ast/templates/template_control_flow/): const eval/folding/validation/remap.
     - [template_slots](src/compiler_frontend/ast/templates/template_slots/): slot schema, contributions, runtime plan construction.
     - [styles](src/compiler_frontend/ast/templates/styles/): directive-owned formatters (markdown, raw, whitespace).
-    - [template_types.rs](src/compiler_frontend/ast/templates/template_types.rs), [template_folding.rs](src/compiler_frontend/ast/templates/template_folding.rs).
+    - [template_types.rs](src/compiler_frontend/ast/templates/template.rs), [template_folding.rs](src/compiler_frontend/ast/templates/template_folding.rs).
     - [template_render_units.rs](src/compiler_frontend/ast/templates/template_render_units.rs), [template_renderability.rs](src/compiler_frontend/ast/templates/template_renderability.rs).
     - [create_template_node.rs](src/compiler_frontend/ast/templates/create_template_node.rs), [top_level_templates.rs](src/compiler_frontend/ast/templates/top_level_templates.rs), [doc_fragments.rs](src/compiler_frontend/ast/templates/doc_fragments.rs), [error.rs](src/compiler_frontend/ast/templates/error.rs).
     - [runtime_handoff.rs](src/compiler_frontend/ast/templates/runtime_handoff.rs): neutral owned AST-to-HIR template handoff vocabulary, with one selector/body conditional and canonical structural walkers.
@@ -229,7 +229,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 
 - [reachable unsupported-feature checks](src/backends/backend_feature_validation.rs)
 - [external call/package backend support](src/backends/external_package_validation.rs)
-- [shared backend error surface](src/backends/error_types.rs)
+- [shared backend error surface](src/backends/backend_feature_validation.rs)
 - [JS backend](src/backends/js/): HIR → JS. kw — readable JS, GC baseline, reachable emission.
     - [emitter.rs](src/backends/js/emitter.rs), [js_expr.rs](src/backends/js/js_expr.rs), [js_statement.rs](src/backends/js/js_statement.rs), [js_function.rs](src/backends/js/js_function.rs), [js_calls.rs](src/backends/js/js_calls.rs), [output.rs](src/backends/js/output.rs), [reachability.rs](src/backends/js/reachability.rs)
     - [runtime/numeric.rs](src/backends/js/runtime/numeric.rs): demand-emitted numeric helpers, including explicit-precision external binary-float validation with carrier rejection before rounding.
@@ -285,13 +285,13 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 - [docs entry point](docs/): comprehensive compiler and language documentation.
 - [compiler design overview](docs/compiler-design-overview.md)
 - [build system design overview](docs/build-system-design.md)
-- [language semantics reference index](docs/src/developer-docs/language/overview.mtf)
-- [Wiring](docs/src/docs/wiring/@page.moth), Basic lessons and the sole canonical reference [wiring.mtf](docs/src/docs/wiring/wiring.mtf): accepted parameter contracts and the bounded Wire/Route foundation; current support status lives in the progress matrix.
-- [general directives](docs/src/docs/directives/directives.mtf); [directive contributor routing](docs/src/docs/directives/overview.mtf)
-- [entry metadata and page directives](docs/src/docs/project-structure/entry-config.mtf)
-- [memory management design](docs/src/developer-docs/memory-management/overview.mtf)
-- [codebase style guide](docs/src/developer-docs/style-guide/style-guide.mtf)
-- [language cheatsheet](docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf)
-- [docs website source](docs/src/docs/); [developer docs source](docs/src/developer-docs/); [generated output](docs/release/)
-- [language support progress matrix](docs/src/docs/progress/@page.moth)
+- [language semantics reference index](docs/developer-docs/language/overview.mtf)
+- [Wiring](docs/docs/wiring/@page.moth), Basic lessons and the sole canonical reference [wiring.mtf](docs/docs/wiring/wiring.mtf): accepted parameter contracts and the bounded Wire/Route foundation; current support status lives in the progress matrix.
+- [general directives](docs/docs/directives/directives.mtf); [directive contributor routing](docs/docs/directives/overview.mtf)
+- [entry metadata and page directives](docs/docs/project-structure/entry-config.mtf)
+- [memory management design](docs/developer-docs/memory-management/overview.mtf)
+- [codebase style guide](docs/developer-docs/style-guide/style-guide.mtf)
+- [language cheatsheet](docs/docs/cheatsheet/moth-language-cheatsheet.mtf)
+- [docs website source](docs/docs/); [developer docs source](docs/developer-docs/); [generated output](docs/_release/)
+- [language support progress matrix](docs/docs/progress/@page.moth)
 - [planned work and implementation plans](docs/roadmap/)

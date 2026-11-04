@@ -2,7 +2,7 @@
 
 Boracle's operational oracle is a bounded executor for normalized `BorrowProblem` input. This document is its permanent design authority. It gives one explicit executable meaning to every normalized event the oracle executes, states the dynamic state the oracle owns and fixes the exact rules by which an execution reports conflicts, refusals and truncation.
 
-The reference solver this oracle deliberately differs from is specified in `docs/src/developer-docs/memory-management/boracle/boracle-reference-solver.mtf`. The live production checker inventory, known handoff issues and queued Boracle tooling work are tracked in `docs/roadmap/plans/production-borrow-checker.md`.
+The reference solver this oracle deliberately differs from is specified in `docs/developer-docs/memory-management/boracle/boracle-reference-solver.mtf`. The live production checker inventory, known handoff issues and queued Boracle tooling work are tracked in `docs/roadmap/plans/production-borrow-checker.md`.
 
 ## Purpose and locked constraints
 
@@ -1050,7 +1050,7 @@ See the Reduction workflow section for generator and reducer behaviour.
 
 ## Related reading for the operational oracle
 
-- `docs/src/developer-docs/memory-management/boracle/boracle-reference-solver.mtf`
-- `docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`
+- `docs/developer-docs/memory-management/boracle/boracle-reference-solver.mtf`
+- `docs/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`
 - `docs/compiler-design-overview.md`
-- `docs/src/developer-docs/style-guide/testing.mtf`
+- `docs/developer-docs/style-guide/testing.mtf`

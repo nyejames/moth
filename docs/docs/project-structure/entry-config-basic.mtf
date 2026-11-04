@@ -24,7 +24,7 @@ Bare `$page` uses defaults. `$page()` is invalid. Title, description, language, 
 
 `$page` is the initial document metadata. Runtime `io.set_title` is a later capability-checked call, not a rewrite of that metadata.
 
-HTML `build` and `dev` need a page somewhere under `entry_root`. `check` can accept a valid project with no page. Future `$test` is a later non-page purpose.
+HTML `build` and `dev` need a page somewhere under the selected project root. `check` can accept a valid project with no page. Future `$test` is a later non-page purpose.
 
 ### Concepts related to entry basics
 

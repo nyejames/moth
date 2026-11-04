@@ -4,7 +4,7 @@ A dependency clause and a file path in expression position are two different sem
 
 ### Path families
 
-- **Module-root-relative**: dependency clauses resolve from the declaring file's owning module root. Example: inside `src/internal/deep/renderer.moth`, `@accounts Account` resolves to `src/accounts.moth`, not `src/internal/deep/accounts.moth`.
+- **Module-root-relative**: dependency clauses resolve from the declaring file's owning module root. Example: inside `internal/deep/renderer.moth`, `@accounts Account` resolves to `accounts.moth`, not `internal/deep/accounts.moth`.
 - **Child module**: reaching a child normal module ends filesystem traversal and exposes only its `export:` facade. Dependency clauses cannot bypass that facade with paths such as `@child/internal`.
 - **Support package**: scoped `+*.moth` support packages are depended on by package name. Consumers do not encode ancestor paths.
 - **Core binding-backed package**: `@core/math`, `@core/text` and current peers are registered by the builder.

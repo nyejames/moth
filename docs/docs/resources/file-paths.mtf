@@ -50,11 +50,11 @@ Dependency-clause source rules are unchanged. `@docs/intro content` is the claus
 Resolution starts at the owning module root, exactly like dependency paths. The physical directory of the declaring file has no effect.
 
 [codeblock, $code("moth"):
-    -- in src/internal/deep/renderer.moth, whose module root is src/
+    -- in internal/deep/renderer.moth, whose module root is the selected project root
     logo #= @images/logo.svg
 ]
 
-That resolves to `src/images/logo.svg`.
+That resolves to `images/logo.svg`.
 
 Each physical-target-bearing file path is resolved once. Repeating it in the same module reuses the already resolved result. A `SourceKindNoFileValue` occurrence has no physical target and is not resolved.
 

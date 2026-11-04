@@ -1216,7 +1216,7 @@ with concrete dynamic generations and concrete control flow. That semantics is d
 different from the reference rule-set. It exists for counterexamples and precision evidence, not
 as a second production checker. Bounded execution is evidence and is never proof for unbounded
 loops. Its result is a third result kind, neither a reference rule set nor an experiment. The
-contract for it is `docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf`.
+contract for it is `docs/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf`.
 
 ### Reference gaps the oracle has found
 
@@ -1581,15 +1581,15 @@ Do not turn Boracle into:
 
 ## Related reading
 
-- `docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf`
+- `docs/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf`
 - `docs/compiler-design-overview.md`, especially Stage 5 and Stage 6
-- `docs/src/developer-docs/memory-management/overview.mtf`
-- `docs/src/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`
-- `docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`
-- `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
-- `docs/src/developer-docs/memory-management/ownership-and-drops/ownership-and-drops.mtf`
-- `docs/src/developer-docs/memory-management/retained-edge-counting/overview.mtf`
-- `docs/src/developer-docs/style-guide/testing.mtf`
-- `docs/src/developer-docs/style-guide/validation.mtf`
+- `docs/developer-docs/memory-management/overview.mtf`
+- `docs/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`
+- `docs/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`
+- `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+- `docs/developer-docs/memory-management/ownership-and-drops/ownership-and-drops.mtf`
+- `docs/developer-docs/memory-management/retained-edge-counting/overview.mtf`
+- `docs/developer-docs/style-guide/testing.mtf`
+- `docs/developer-docs/style-guide/validation.mtf`
 
 Useful external research anchors include the current rustc Polonius implementation under `compiler/rustc_borrowck/src/polonius/` and Rust's tests for flow-sensitive loan liveness. These are research inputs, not Moth authorities.

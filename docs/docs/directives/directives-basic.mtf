@@ -9,17 +9,14 @@ parenthesised `project` and `html` records, and pages still use reserved names
 such as `page_title`. The accepted configuration shape is:
 
 [codeblock, $code("moth"):
-    $config
-    version #String = "0.1.0"
-
     $project(
         name = "my_site",
-        version = version,
-        entry_root = "src",
     )
 
     $html_builder
 ]
+
+Version is optional, and there is no `entry_root`; the selected directory is the source root.
 
 `$page` will be legal only on a normal module root, or on an explicitly selected synthetic single-file root. Helper files cannot declare pages.
 

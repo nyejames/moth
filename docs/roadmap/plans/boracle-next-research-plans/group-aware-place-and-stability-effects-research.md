@@ -168,4 +168,4 @@ These links document other projects' stated designs and experiments. They are re
 - [Rust 2026: The Borrow Checker Within](https://goals.rust-lang.org/2026/roadmap-borrow-checker-within.html)
 - [Fang: Cyclic References and mutation effects](https://gist.github.com/devast8a/128988bf7dde7911a237e3e37a9e94de)
 
-Canonical Moth owners remain `docs/compiler-design-overview.md`, `docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`, `docs/src/developer-docs/memory-management/boracle/boracle-reference-solver.mtf` and the lifetime/retained-edge references routed by `docs/src/developer-docs/memory-management/overview.mtf`.
+Canonical Moth owners remain `docs/compiler-design-overview.md`, `docs/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`, `docs/developer-docs/memory-management/boracle/boracle-reference-solver.mtf` and the lifetime/retained-edge references routed by `docs/developer-docs/memory-management/overview.mtf`.

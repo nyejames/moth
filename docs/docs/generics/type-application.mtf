@@ -2,7 +2,7 @@ Concrete generic instances are created with `of` in type position.
 
 `of` takes its meaning from the head before it. This reference owns ordinary
 generic application. Compiler-owned `Wire` and `Route` heads instead describe
-parameter capabilities under the @https://github.com/nyejames/moth/blob/main/docs/src/docs/wiring/wiring.mtf (Wiring reference).
+parameter capabilities under the @https://github.com/nyejames/moth/blob/main/docs/docs/wiring/wiring.mtf (Wiring reference).
 They do not become ordinary type arguments or change generic nesting rules.
 
 ### Type application syntax

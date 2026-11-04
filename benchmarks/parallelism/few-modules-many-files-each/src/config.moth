@@ -1,0 +1,7 @@
+project #= (
+    name = "few_modules_many_files_each",
+)
+html #= (
+    dev_output = "_dev",
+    release_output = "_release",
+)

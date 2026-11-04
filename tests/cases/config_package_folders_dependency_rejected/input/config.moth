@@ -2,4 +2,4 @@ project #= (
     name = "test_project")
 html #= ()
 @helper value
-entry_root #= value
+sample_key #= value

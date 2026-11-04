@@ -29,10 +29,10 @@ configuration, assembly, lifecycle inputs and output ownership.
 the host boundary. It reuses this SDK rather than defining another registration
 system. `crates/lappet/docs/package-manager.md` owns official/custom package
 admission. Using Lappet never certifies a custom builder. The shared optimisation
-policy is routed by `docs/src/developer-docs/wasm-optimisation/overview.mtf`.
+policy is routed by `docs/developer-docs/wasm-optimisation/overview.mtf`.
 
 Exact source directive contracts belong to
-`docs/src/docs/directives/directives.mtf`. Language and memory references remain
+`docs/docs/directives/directives.mtf`. Language and memory references remain
 authoritative for value semantics. This SDK supplies constrained registrations
 and consumer services rather than an alternate source language.
 

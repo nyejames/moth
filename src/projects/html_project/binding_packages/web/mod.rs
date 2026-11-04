@@ -8,7 +8,7 @@
 //!
 //! Each package directory also holds a `README.md`. It owns the package's living design, development
 //! plan, binding prerequisites and future ideas. Accepted public API and semantics live under
-//! `docs/src/docs/packages/builder/`, and current status lives in the packages and builders progress
+//! `docs/docs/packages/builder/`, and current status lives in the packages and builders progress
 //! matrix.
 
 use crate::builder_surface::PackageOrigin;

@@ -1,0 +1,7 @@
+project #= (
+    name = "module_graph",
+)
+html #= (
+    dev_output = "_dev",
+    release_output = "_release",
+)

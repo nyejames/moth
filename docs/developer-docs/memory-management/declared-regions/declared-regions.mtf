@@ -31,7 +31,7 @@ Declared regions extend, rather than replace, Moth's existing memory model:
 
 A garbage-collected representation must not weaken declared-region escape rules. A GC-native backend may ignore physical declared-region cleanup, but it must accept and reject the same declared-region source as every other backend.
 
-Canonical general topology rules, including the one-owner invariant, the stored-edge outlives rule, narrowing and widening, cycles and projection families, live in `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/`.
+Canonical general topology rules, including the one-owner invariant, the stored-edge outlives rule, narrowing and widening, cycles and projection families, live in `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/`.
 
 ## Terminology
 

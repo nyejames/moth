@@ -12,7 +12,7 @@ Other Unicode whitespace remains horizontal trivia.
 
 Numeric destination facts never come from a semantic profile. Whole-number text materialises directly at the requested exact range, including the full `U64` range. Decimal/exponent spelling cannot satisfy an integer destination. Binary-float text rounds directly to the requested precision using nearest, ties-to-even, with finite-result checks and no default `F64` value followed by narrowing. The `f64` carrier preserves completed `F16` and `F32` values without changing their scalar identity.
 
-The compiler owns source inference and the fixed `I32`/`F64` defaults. MON owns explicit schemas and its lossless `Integer` and `Decimal` data families. This crate selects neither. See the [numeric reference](../../docs/src/docs/numbers/numeric-literals.mtf) for source semantics and the [MON reference](../../docs/src/docs/mon/mon-format.mtf) for schema-directed data.
+The compiler owns source inference and the fixed `I32`/`F64` defaults. MON owns explicit schemas and its lossless `Integer` and `Decimal` data families. This crate selects neither. See the [numeric reference](../../docs/docs/numbers/numeric-literals.mtf) for source semantics and the [MON reference](../../docs/docs/mon/mon-format.mtf) for schema-directed data.
 
 The crate provides no file I/O, document parsing, compiler token storage, type lookup, expression evaluation, arbitrary-precision coefficient arithmetic or numeric runtime. Its numeric operations return structured failure reasons for consumers to project into their own error boundary. Immutable prepared schemas, owned document values and `MonError` with `Display`/`std::error::Error` belong to `moth-mon`.
 

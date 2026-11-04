@@ -3,19 +3,16 @@ inputs with grouped parenthesised config and reserved page metadata. The accepte
 `$config`/`$project`/`$html_builder` and root-only `$page` forms are queued.
 `moth new` does not emit them yet.
 
-A Moth project has one config file, one source root and generated output
-folders.
+A Moth project is the directory you select. That directory is both the build
+root and the source root. There is no implicit `src/` folder.
 
 ### Accepted starter config
 
-[codeblock, $code("moth"):
-    $config
-    version #String = "0.1.0"
+The queued directive form leaves version optional and has no `entry_root`:
 
+[codeblock, $code("moth"):
     $project(
         name = "my_site",
-        version = version,
-        entry_root = "src",
     )
 
     $html_builder
@@ -23,9 +20,9 @@ folders.
 
 ### Where things live
 
-- `config.moth` at the project root controls build settings.
-- `src/` (or whatever `entry_root` says) holds your source files.
-- `dev/` and `release/` are generated output. Do not edit them.
+- `config.moth` at the selected root is optional and controls build settings.
+- Everything below the selected root is source unless it is excluded or is a generated hidden output.
+- `_dev/` and `_release/` are generated output. Do not edit them.
 
 ### One root file per module directory
 
@@ -38,8 +35,8 @@ when it declares a root-only page:
     $page
 ]
 
-The current scaffold's `src/@page.moth` filename doesn't mean it already has
-this accepted page syntax.
+The current scaffold's `@page.moth` filename doesn't mean it already has this
+accepted page syntax.
 
 ### Shared scoped packages
 
@@ -49,10 +46,7 @@ sibling modules and their descendants may depend on it. Other support packages
 in the same scope and the package's private implementation subtree cannot. A
 directory cannot contain both `@*.moth` and `+*.moth` roots.
 
-The current scaffold creates an empty legacy `lib/` folder. It has no special
-meaning in the accepted package design.
-
 ### Outputs are generated
 
-The build command creates output folders. They are not source. The builder
-cleans up stale artefacts automatically.
+The build command creates hidden output folders. They are not source. The
+builder cleans up stale artefacts automatically.

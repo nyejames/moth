@@ -160,7 +160,7 @@ pub(super) fn execute_call_effect<'a>(
         }
 
         // The independent static four-way provenance dispatch is at boracle/origins.rs:1547.
-        // Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
+        // Independence contract: boracle/oracle/mod.rs:5-6 and docs/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
         let target = match provenance {
             CallResultProvenance::Fresh => {
                 // As with the value-producing events the write-through check precedes the

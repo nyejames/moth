@@ -511,6 +511,43 @@ fn directory_projects_default_a_missing_config() {
 }
 
 #[test]
+fn directory_project_with_minimal_config_uses_directory_name_and_defaults() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().join("docs");
+    fs::create_dir_all(&root).expect("should create a directory project root");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= ()\nhtml #= ()\n",
+    )
+    .expect("should write minimal config");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let services = ProjectConfigParseServices {
+        style_directives: &style_directives,
+        frontend_surface: &frontend_surface,
+        build_config_inputs: &build_config_inputs,
+    };
+    let mut string_table = StringTable::new();
+    let mut source_builder = Some(SourceDatabaseBuilder::new(SourceDatabase::empty()));
+
+    let outputs = load_project_config(
+        &mut config,
+        &services,
+        &mut source_builder,
+        &mut string_table,
+    )
+    .unwrap_or_else(|_| panic!("a minimal config should load"))
+    .expect("directory output defaults should validate");
+    assert_eq!(config.project_name, "docs");
+    assert_eq!(config.version, None);
+    assert_eq!(outputs.dev.resolved_path, root.join("_dev"));
+    assert_eq!(outputs.release.resolved_path, root.join("_release"));
+}
+
+#[test]
 fn directory_project_with_invalid_name_requires_explicit_project_name() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().join("my-site");
@@ -1467,7 +1504,7 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
 }
 
 #[test]
-fn entry_root_requires_at_least_one_root_entry_file() {
+fn selected_root_requires_at_least_one_root_entry_file() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src")).expect("should create src");
@@ -1493,4 +1530,139 @@ fn entry_root_requires_at_least_one_root_entry_file() {
         first_invalid_config(&result).reason,
         InvalidConfigCode::NoRootModuleEntries
     );
+}
+
+#[cfg(unix)]
+fn load_config_for_path_test(
+    root: &Path,
+) -> (
+    Config,
+    Result<
+        Option<crate::build_system::output::ValidatedDirectoryOutputSettings>,
+        crate::build_system::project_config::ProjectConfigFailure,
+    >,
+) {
+    let mut config = Config::new(root.to_path_buf());
+    let style_directives = test_style_directives();
+    let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let services = ProjectConfigParseServices {
+        style_directives: &style_directives,
+        frontend_surface: &frontend_surface,
+        build_config_inputs: &build_config_inputs,
+    };
+    let mut string_table = StringTable::new();
+    let mut source_builder = Some(SourceDatabaseBuilder::new(SourceDatabase::empty()));
+    let result = load_project_config(
+        &mut config,
+        &services,
+        &mut source_builder,
+        &mut string_table,
+    );
+    (config, result)
+}
+
+#[cfg(unix)]
+fn assert_config_path_infrastructure_error(
+    failure: crate::build_system::project_config::ProjectConfigFailure,
+    expected_message: &str,
+) {
+    let crate::build_system::project_config::ProjectConfigFailure::Prepared(
+        PreparedFailure::Infrastructure(errors),
+    ) = failure
+    else {
+        panic!("expected an infrastructure failure");
+    };
+    assert!(
+        format!("{errors:?}").contains(expected_message),
+        "expected `{expected_message}` in {errors:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn dangling_config_symlink_diagnoses_instead_of_defaulting() {
+    use std::os::unix::fs::symlink;
+
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().join("docs");
+    fs::create_dir_all(&root).expect("should create directory project root");
+    symlink(
+        root.join("missing.moth"),
+        root.join(settings::CONFIG_FILE_NAME),
+    )
+    .expect("should create dangling config symlink");
+
+    let (config, result) = load_config_for_path_test(&root);
+    assert_config_path_infrastructure_error(
+        result.expect_err("a dangling config symlink must not use defaults"),
+        "Failed to canonicalize config path",
+    );
+    assert_eq!(
+        config.project_name, "",
+        "a broken config source must not invent a project name"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn config_symlink_outside_the_selected_root_diagnoses() {
+    use std::os::unix::fs::symlink;
+
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().join("docs");
+    let outside = _temp.path().join("outside.moth");
+    fs::create_dir_all(&root).expect("should create directory project root");
+    fs::write(
+        &outside,
+        "project #= (\n    name = \"outside\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write external config");
+    symlink(&outside, root.join(settings::CONFIG_FILE_NAME))
+        .expect("should create external config symlink");
+
+    let (config, result) = load_config_for_path_test(&root);
+    assert_config_path_infrastructure_error(
+        result.expect_err("an external config symlink must not configure this project"),
+        "config.moth resolves outside the selected project directory",
+    );
+    assert_eq!(config.project_name, "");
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_config_diagnoses_when_permissions_are_enforced() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().join("docs");
+    fs::create_dir_all(&root).expect("should create directory project root");
+    let config_path = root.join(settings::CONFIG_FILE_NAME);
+    fs::write(&config_path, "project #= (name = \"docs\")\nhtml #= ()\n")
+        .expect("should write config");
+    fs::set_permissions(&config_path, fs::Permissions::from_mode(0o000))
+        .expect("should remove config permissions");
+
+    if fs::read_to_string(&config_path).is_ok() {
+        fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600))
+            .expect("should restore config permissions");
+        eprintln!("skipping unreadable-config assertion: process can still read the file");
+        return;
+    }
+
+    let (config, result) = load_config_for_path_test(&root);
+    fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600))
+        .expect("should restore config permissions");
+    assert!(
+        matches!(
+            result,
+            Err(
+                crate::build_system::project_config::ProjectConfigFailure::Prepared(
+                    PreparedFailure::Infrastructure(_)
+                )
+            )
+        ),
+        "an unreadable config must diagnose"
+    );
+    assert_eq!(config.project_name, "");
 }

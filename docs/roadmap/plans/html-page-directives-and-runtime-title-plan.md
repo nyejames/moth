@@ -21,11 +21,11 @@ The accepted interview replaces the old entry-local `config:` proposal and the r
 
 Read `AGENTS.md`, the full codebase style/testing guides and both compiler/build architecture authorities. Read the current language route and these canonical references:
 
-- `docs/src/docs/directives/directives.mtf`.
-- `docs/src/docs/project-structure/module-roots.mtf`, `entry-runtime-and-fragments.mtf`, `html-routing-and-artifacts.mtf`, `entry-config.mtf`, `project-config.mtf` and `build-inputs.mtf`.
+- `docs/docs/directives/directives.mtf`.
+- `docs/docs/project-structure/module-roots.mtf`, `entry-runtime-and-fragments.mtf`, `html-routing-and-artifacts.mtf`, `entry-config.mtf`, `project-config.mtf` and `build-inputs.mtf`.
 - Template basics, directives and constant-template references.
-- `docs/src/docs/resources/file-paths.mtf` and `file-values.mtf`.
-- `docs/src/docs/packages/core/io/io.mtf` and the binding/capability contracts.
+- `docs/docs/resources/file-paths.mtf` and `file-values.mtf`.
+- `docs/docs/packages/core/io/io.mtf` and the binding/capability contracts.
 - `docs/compiler-data-layout-design.md`, both progress matrices and the validation guide.
 
 Read the owning lifetime/builder-lifecycle references if a handoff changes. This plan consumes existing mandatory validation paths and does not implement the separate deferred memory programme.
@@ -119,17 +119,17 @@ Purpose is distinct from ordinary metadata. A future deprecation or documentatio
 
 Only normal module-root files can declare application pages. Preserve the existing one-root-per-directory rule. The suffix of `@page.moth`, `@site.moth` or another normal-root filename remains cosmetic.
 
-With `entry_root = "src"`, each example below produces its output only when its root declares `$page`:
+Each example below produces its output only when its root declares `$page`:
 
 | Source root | HTML output |
 |---|---|
-| `src/@site.moth` | `index.html` |
-| `src/about/@page.moth` | `about/index.html` |
-| `src/docs/basics/@module.moth` | `docs/basics/index.html` |
+| `@site.moth` | `index.html` |
+| `about/@page.moth` | `about/index.html` |
+| `docs/basics/@module.moth` | `docs/basics/index.html` |
 
-An ordinary `src/about.moth` cannot declare a page. An ordinary `index.moth` gains no new meaning. Add no route override parameter, filename-derived routes, page aliases or automatic redirection.
+An ordinary `about.moth` cannot declare a page. An ordinary `index.moth` gains no new meaning. Add no route override parameter, filename-derived routes, page aliases or automatic redirection.
 
-The normal module at `entry_root` may remain declaration-only while child modules declare pages. An HTML application needs at least one page anywhere in its own selected application source tree, not necessarily a homepage at `entry_root`.
+The normal module at the selected project root may remain declaration-only while child modules declare pages. An HTML application needs at least one page anywhere in its own selected application source tree, not necessarily a homepage at that root.
 
 Dependency resolution and file-value resolution remain module-root-relative. Resource containment, support/package boundaries, source namespace collisions, site-origin policy and URL rendering are unchanged. `.moth` still has no file-value meaning. `$page` does not create a source expression that resolves a page URL.
 
@@ -224,7 +224,7 @@ Delete reserved HIR-constant scanning, entry-scope prefix matching, key-name tab
 
 Delete the implicit rule that runtime work or fragments alone select a page. Delete homepage-at-entry-root enforcement, replacing it with command-specific no-page policy. Preserve directory routing, output conflicts, manifests and ownership.
 
-Update `page_template` so generated `src/@page.moth` contains `$page` and uses its metadata arguments. Retain the live MON-bootstrap scaffold (declaration-owned `#Config` plus grouped `project #= (...)`/`html #= (...)`) until general directives lands; then carry the `$config`-version plus required `$project`-version example. Test the combined real scaffold after this cutover.
+Update `page_template` so the generated root-level `@page.moth` contains `$page` and uses its metadata arguments. Retain the live MON-bootstrap scaffold (declaration-owned `#Config` plus grouped `project #= (...)`/`html #= (...)`) until general directives lands; then carry a minimal `$project` name and optional version example. Test the combined real scaffold after this cutover.
 
 Do not mass-insert `$page` into every test source. Frontend-only declaration cases and negative placement/purpose cases have different intents. Public HTML positive cases requiring an artefact should author the directive explicitly. Internal helpers must not bypass the public policy to make missing-purpose cases pass.
 
@@ -310,7 +310,7 @@ Each phase leaves one coherent path. Do not retain a period where both reserved 
 | Resources | Metadata-only favicon emission, correct use spans, URL contexts, missing input, unused resource non-emission and conflicts with HTML/JS/Wasm outputs. |
 | Name release | Ordinary `page_*` constants of otherwise legal types have no metadata effect and no migration warnings. |
 | Title capability | Reachable HTML-JS helper, exact runtime assignment, unsupported standalone JS and HTML-Wasm rejection, no helper for inactive/unreachable calls. |
-| Starter | Real `moth new html` project checks/builds, contains explicit version config and page declarations and retains version override behaviour. |
+| Starter | Real `moth new html` project checks/builds, contains a minimal explicit name and page declarations, and supports an authored version override. |
 | Output ownership | Profile/builder manifests, stale-page removal and resource collisions remain validated before writing. |
 
 Use the existing manifest and backend-specific expectations. Keep one primary owner per public behaviour. Subsystem tests cover real registry/remap/call invariants, not copies of end-to-end examples.

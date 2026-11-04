@@ -729,7 +729,7 @@ Allowed examples include:
 - files under `docs/**`
 - an explicitly requested root documentation file such as `README.md`,
   `CONTRIBUTING.md` or `AGENTS.md`
-- generated files under `docs/release/**`
+- generated files under `docs/_release/**`
 
 A documentation-only slice must not change Rust, tests, libraries, build
 configuration, manifests, scripts, benchmark code or fixtures, compiler
@@ -952,7 +952,7 @@ The `ship` recipe formats the workspace before full validation.
 
 ### Generated documentation
 
-Do not edit files under `docs/release/**` directly.
+Do not edit files under `docs/_release/**` directly.
 
 The documentation release build is:
 

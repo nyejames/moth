@@ -32,6 +32,7 @@ test_compiler_bug = ["moth/test_compiler_bug"]
 [dependencies]
 lappet = { path = "../lappet" }
 moth = { path = "../.." }
+moth-lexical = { path = "../moth-lexical" }
 saying = "0.1.8"
 
 [dev-dependencies]

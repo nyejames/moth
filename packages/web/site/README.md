@@ -7,7 +7,7 @@
 | Owner | Holds |
 |---|---|
 | This README | Package boundary and deferred extensions |
-| `docs/src/docs/packages/builder/` | Accepted public API and semantics |
+| `docs/docs/packages/builder/` | Accepted public API and semantics |
 | Packages and builders progress matrix | Current implementation status and accepted next gaps |
 | `docs/build-system-design.md` | Builder source-package registration and structural URL rendering |
 

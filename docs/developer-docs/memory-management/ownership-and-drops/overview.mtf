@@ -20,8 +20,8 @@ Source legality and lifetime topology are already fixed before ownership lowerin
 
 ## Read next
 
-- `docs/src/developer-docs/memory-management/ownership-and-drops/ownership-and-drops.mtf`
-- `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
-- `docs/src/developer-docs/memory-management/borrow-validation/overview.mtf`
-- `docs/src/developer-docs/memory-management/retained-edge-counting/overview.mtf`
-- `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`
+- `docs/developer-docs/memory-management/ownership-and-drops/ownership-and-drops.mtf`
+- `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+- `docs/developer-docs/memory-management/borrow-validation/overview.mtf`
+- `docs/developer-docs/memory-management/retained-edge-counting/overview.mtf`
+- `docs/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`

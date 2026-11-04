@@ -5,16 +5,15 @@ Project-local source-backed packages are scoped `+*.moth` support packages disco
 [codeblock, $code("text"):
     project-root/
     ├── config.moth
-    ├── src/
-    │   ├── @site.moth
-    │   ├── markdown/
-    │   │   ├── +package.moth
-    │   │   ├── parser/
-    │   │   │   └── @parser.moth
-    │   │   └── rendering/
-    │   │       └── @rendering.moth
-    │   └── pages/
-    │       └── @pages.moth
+    ├── @site.moth
+    ├── markdown/
+    │   ├── +package.moth
+    │   ├── parser/
+    │   │   └── @parser.moth
+    │   └── rendering/
+    │       └── @rendering.moth
+    ├── pages/
+    │   └── @pages.moth
     └── +package.moth
 ]
 

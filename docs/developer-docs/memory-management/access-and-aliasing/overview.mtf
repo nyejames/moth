@@ -21,6 +21,6 @@ Shared reads, explicit copies and `~` access.
 
 ## Read next
 
-- `docs/src/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`
-- `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+- `docs/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`
+- `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
 - `docs/compiler-design-overview.md`, especially Stage 4 and Stage 5

@@ -271,6 +271,7 @@ version = "0.1.12"
 dependencies = [
  "lappet",
  "moth",
+ "moth-lexical",
  "saying",
  "tempfile",
 ]

@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::ops::Bound::{Excluded, Unbounded};
 
 // The independent static-origin and shared structural overlap lanes stay distinct at boracle/relations.rs:237 and problem/places.rs:64.
-// Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
+// Independence contract: boracle/oracle/mod.rs:5-6 and docs/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DynamicOverlap {
     Disjoint,
@@ -28,7 +28,7 @@ pub(crate) enum DynamicOverlap {
 }
 
 // The independent static loan-liveness logic is at boracle/loans.rs:989.
-// Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
+// Independence contract: boracle/oracle/mod.rs:5-6 and docs/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 pub(crate) fn exercise_capabilities(
     problem: &BorrowProblem,
     state: &mut OracleState,

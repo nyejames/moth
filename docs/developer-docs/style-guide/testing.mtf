@@ -799,7 +799,7 @@ An alias, a reformat or an equivalent reimplementation all pass it.
 - Prefer `tempfile::tempdir()` for temporary directories and files.
 - Use unmanaged paths only when the test intentionally owns cleanup.
 - Keep fixtures local to their owner.
-- Do not commit generated `dev/` or `release/` outputs from test or benchmark projects.
+- Do not commit generated `_dev/` or `_release/` outputs from test or benchmark projects.
 - Avoid shared fixture builders that hide important source shape.
 
 ### Pruning and duplicate coverage

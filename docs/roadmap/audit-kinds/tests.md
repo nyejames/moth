@@ -2,13 +2,13 @@
 
 Looking for: real contracts with no owner, coverage under the wrong owner, and assertions too weak to catch the failure they imply.
 
-Read [testing standards](../../src/developer-docs/style-guide/testing.mtf) in full before running this kind.
+Read [testing standards](../../developer-docs/style-guide/testing.mtf) in full before running this kind.
 
 **Evidence bar:** a named contract and what does or does not protect it. Test count and line coverage prove nothing.
 
 ## Build the contract inventory first
 
-From canonical docs and the [progress matrix](../../src/docs/progress/@page.moth), list the supported success and failure contracts, target and command variations, and the internal invariants that normal output cannot observe. Separate supported from partial, experimental and deferred - deferred surfaces do not need coverage.
+From canonical docs and the [progress matrix](../../docs/progress/@page.moth), list the supported success and failure contracts, target and command variations, and the internal invariants that normal output cannot observe. Separate supported from partial, experimental and deferred - deferred surfaces do not need coverage.
 
 ## One primary owner per contract
 

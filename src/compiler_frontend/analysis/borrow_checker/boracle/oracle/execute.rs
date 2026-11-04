@@ -361,7 +361,7 @@ pub(super) fn finish_definition_transition(
 /// Write-through definitions still validate their ignored inputs, but resolving those inputs
 /// would create generations and could make an otherwise allocation-free event inconclusive.
 // The independent static place-ancestor prefix logic is at boracle/origins.rs:1499.
-// Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
+// Independence contract: boracle/oracle/mod.rs:5-6 and docs/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 pub(super) fn is_place_available_without_materialising(
     problem: &BorrowProblem,
     state: &OracleState,

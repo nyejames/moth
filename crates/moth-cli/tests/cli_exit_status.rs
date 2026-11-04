@@ -7,12 +7,13 @@ use std::ffi::OsStr;
 #[cfg(unix)]
 use std::ffi::OsString;
 use std::fs;
+use std::io::Write;
 #[cfg(target_os = "linux")]
 use std::os::unix::ffi::OsStrExt;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 use tempfile::tempdir;
 
@@ -661,4 +662,63 @@ fn assert_no_status_record(output: &Output) {
         records.is_empty(),
         "unexpected benchmark status output: {stdout}"
     );
+}
+
+#[test]
+fn scaffolded_project_checks_and_builds_with_generated_config() {
+    let temp = tempdir().expect("should create temp dir");
+    let project = temp.path().join("my-site");
+    let project_argument = project.to_string_lossy().into_owned();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_moth"))
+        .args(["new", "html", &project_argument])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("should start moth new");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should be piped")
+        .write_all(b"y\n\nY\n")
+        .expect("should answer scaffold prompts");
+    let scaffold = child.wait_with_output().expect("should finish moth new");
+    assert!(
+        scaffold.status.success(),
+        "scaffold failed: {}",
+        String::from_utf8_lossy(&scaffold.stderr)
+    );
+
+    let config = fs::read_to_string(project.join("config.moth"))
+        .expect("generated config should be readable");
+    assert!(
+        config.contains("name = \"my_site\""),
+        "invalid generated config: {config}"
+    );
+    assert!(!config.contains("entry_root"));
+    assert!(!config.contains("version"));
+
+    let check = run_moth(&["check", &project_argument, "--terse"]);
+    assert!(
+        check.status.success(),
+        "scaffolded check failed: {}",
+        String::from_utf8_lossy(&check.stdout)
+    );
+
+    let build = run_moth(&["build", &project_argument]);
+    assert!(
+        build.status.success(),
+        "scaffolded dev build failed: {}",
+        String::from_utf8_lossy(&build.stdout)
+    );
+    assert!(project.join("_dev/index.html").is_file());
+
+    let release = run_moth(&["build", &project_argument, "--release"]);
+    assert!(
+        release.status.success(),
+        "scaffolded release build failed: {}",
+        String::from_utf8_lossy(&release.stdout)
+    );
+    assert!(project.join("_release/index.html").is_file());
 }

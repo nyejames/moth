@@ -248,7 +248,7 @@ The `ValidatedMemoryPlan` carries:
 - cleanup and destruction plans
 - REC layout decisions and physical coalescing decisions
 
-`docs/src/developer-docs/memory-management/runtime-and-backend-lowering/` owns the full plan contract and its validation invariants. It is produced once per target/profile physical variant, after build-owned target partition and target validation. The compiler-owned planner also settles obligation reclassification and concrete count transitions before lowering.
+`docs/developer-docs/memory-management/runtime-and-backend-lowering/` owns the full plan contract and its validation invariants. It is produced once per target/profile physical variant, after build-owned target partition and target validation. The compiler-owned planner also settles obligation reclassification and concrete count transitions before lowering.
 
 Last-use and capable-source-death facts first support retained-edge liveness and cleanup frontiers. The memory planner then uses them with validated topology for affine transfer, obligation reclassification and REC selection. Backends consume that settled plan rather than interpreting borrow facts or advisory drop sites directly.
 

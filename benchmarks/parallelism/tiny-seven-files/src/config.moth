@@ -1,0 +1,7 @@
+project #= (
+    name = "tiny_seven_files",
+)
+html #= (
+    dev_output = "_dev",
+    release_output = "_release",
+)

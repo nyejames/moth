@@ -1,0 +1,7 @@
+project #= (
+    name = "import_fanout",
+)
+html #= (
+    dev_output = "_dev",
+    release_output = "_release",
+)

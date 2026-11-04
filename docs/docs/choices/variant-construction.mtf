@@ -37,7 +37,7 @@ A payload variant requires constructor parentheses.
 An immediate `Route of ...` parameter supplies one bounded exception to complete
 construction: a direct constructor may capture a leading payload prefix and
 leave the trailing field for its future input. The ordinary rules above still
-apply outside that boundary. The @https://github.com/nyejames/moth/blob/main/docs/src/docs/wiring/wiring.mtf (Wiring reference)
+apply outside that boundary. The @https://github.com/nyejames/moth/blob/main/docs/docs/wiring/wiring.mtf (Wiring reference)
 owns the exact zero/one-input contract, capture order and forwarding limits.
 
 Constructed payload fields are immutable.

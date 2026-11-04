@@ -7,10 +7,10 @@ This README is the package's living development document. It holds design direct
 | Owner | Holds |
 |---|---|
 | This README | Living design, development plan, investigations and future ideas |
-| `docs/src/docs/packages/builder/canvas/` | Accepted public API and semantics |
+| `docs/docs/packages/builder/canvas/` | Accepted public API and semantics |
 | Packages and builders progress matrix | Current implementation status and accepted next gaps |
 | `docs/compiler-design-overview.md`, `docs/build-system-design.md` | Cross-package compiler and build architecture |
-| `docs/src/docs/packages/external-binding-contracts.mtf` | The annotated JavaScript binding contract the package is written against |
+| `docs/docs/packages/external-binding-contracts.mtf` | The annotated JavaScript binding contract the package is written against |
 
 ## Current state
 
@@ -32,7 +32,7 @@ WebGL belongs in `@web/graphics`, never here. `@web/canvas` stays the owner of t
 ## Implementation notes
 
 - The binding ABI is concrete, synchronous and scalar or opaque only. Browser overloads and union source types become explicitly named wrappers, such as the `to_data_url*` and `create_image*` families.
-- Numeric annotations name `I32` dimensions, indices and pixel channels, and `F64` coordinates and measurements. Generated wrappers validate successful scalar payloads against those exact contracts. A declared `Error!` result preserves its error channel, while the shared finite-result boundary handles non-finite float success values. The [external binding contract](../../../../../../docs/src/docs/packages/external-binding-contracts.mtf) owns validation and failure delivery. Exact numeric types don't supply a Wasm lowering.
+- Numeric annotations name `I32` dimensions, indices and pixel channels, and `F64` coordinates and measurements. Generated wrappers validate successful scalar payloads against those exact contracts. A declared `Error!` result preserves its error channel, while the shared finite-result boundary handles non-finite float success values. The [external binding contract](../../../../../../docs/docs/packages/external-binding-contracts.mtf) owns validation and failure delivery. Exact numeric types don't supply a Wasm lowering.
 - `create_image` returns the element immediately while the browser keeps loading it. Drawing stays fallible through `assertLoadedImage` until loading completes.
 - Pixel channels cross as `I32` values clamped to 0 through 255 because the annotation subset has no `U8`. Any future binary-data design keeps numeric `U8` channels distinct from `Byte` octets. They share one-byte storage but aren't interchangeable, and this package doesn't settle a Core byte API or bitwise syntax.
 - Handles have no teardown functions. The host JavaScript runtime manages their lifetime.

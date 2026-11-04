@@ -131,19 +131,16 @@ Rejected shape includes dependency clauses, runtime declarations, functions, tra
 The accepted starter shape is:
 
 [codeblock, $code("moth"):
-$config
-version #String = "0.1.0"
-
 $project(
     name = "compiler_walkthrough",
-    version = version,
-    entry_root = "src",
 )
 
 $html_builder
 ]
 
-The generated starter is queued with the implementation plan; `moth new` does not emit this form yet.
+Version is optional, and there is no `entry_root`; the selected directory is the
+source root. The generated starter is queued with the implementation plan;
+`moth new` does not emit this form yet.
 
 Config runs through one named **compiler service**, not a build-owned copy of the frontend. The build system hands over the single authored source and receives folded values, authored key locations and diagnostics. Config schema and how folded values apply to the project record stay build-owned. Source-module input defaults remain literal-only and resolve after graph discovery; that later resolution uses the canonical module service, not another evaluator.
 
@@ -166,7 +163,7 @@ without an initialiser requires an input. An optional declaration resolves to
 `U64`, `F16`, `F32`, `F64` and one optional layer around a supported primitive.
 They exclude `Byte`, `Dec`, aliases, inferred types, collections and records.
 
-Project identity, source discovery and compiler-control arguments remain fixed-only. `$config` dependence is rejected in `$project`'s `name`, `entry_root` and `template_const_loop_iteration_limit`, including through helper constants. `$project` has strict predefined fields; it does not become an open metadata record.
+Project identity, source discovery and compiler-control arguments remain fixed-only. `$config` dependence is rejected in `$project`'s `name` and `template_const_loop_iteration_limit`, including through helper constants. `$project` has strict predefined fields; it does not become an open metadata record.
 
 Bootstrap contracts resolve in this order:
 
@@ -203,7 +200,7 @@ The folded `$project` result becomes a specialised immutable **`ProjectGlobalsIn
 
 Normal modules may bind `@project` explicitly. Nothing injects it silently. Child modules, dependency aliases and packages cannot steal the `@project` root. Direct re-export of `@project` is forbidden.
 
-For the greeting walkthrough, the bootstrap facts needed for Stage 0 are the project name, entry root and builder settings. The separate input-contract results travel alongside them; neither set is reconstructed by scanning `@project`.
+For the greeting walkthrough, the bootstrap facts needed for Stage 0 are the project name, the selected directory root and builder settings. The separate input-contract results travel alongside them; neither set is reconstructed by scanning `@project`.
 
 Resolved source `$config` values become ordinary folded constants. They can feed ordinary `if` for static `Bool` specialisation after source discovery. Both branches remain frontend-valid, and ordinary static `if` cannot remove declarations or dependencies. Future compiler-owned `$feature` is a separate deferred structural-selection mechanism before graph and declaration publication, not another evaluator.
 
@@ -243,7 +240,7 @@ The compiler owns general directive syntax, `$config` contracts and `$project` s
 
 - unknown or unsupported directive, or a known directive in a config-only or root-invalid context
 - invalid config shape, forbidden config dependency or missing required input
-- strict `$project` field, required-version or configuration-dependence violation
+- strict `$project` field, invalid optional version or configuration-dependence violation
 
 The command and config service report these as structured diagnostics. Entry purpose and page selection are validated later by the build system; they are not recovered by reopening `config.moth`.
 

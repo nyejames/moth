@@ -95,6 +95,7 @@ pub(crate) fn write_scaffold(
     force: bool,
     prompt: &mut impl Prompt,
 ) -> Result<CreateProjectReport, String> {
+    let config_contents = start_page_scaffolding::config_template(&target.project_name)?;
     let project_dir = &target.project_dir;
 
     // 1. Create missing directories (including the project dir itself).
@@ -130,10 +131,7 @@ pub(crate) fn write_scaffold(
     };
 
     // 2. Config file.
-    write_scaffold_file(
-        CONFIG_FILE_NAME,
-        &start_page_scaffolding::config_template(&target.project_name),
-    )?;
+    write_scaffold_file(CONFIG_FILE_NAME, &config_contents)?;
 
     // 3. Starter page.
     write_scaffold_file(PAGE_FILE, start_page_scaffolding::page_template())?;
@@ -221,10 +219,14 @@ fn handle_gitignore(
     )?;
     if should_append {
         let mut appended = existing;
+        let block = moth_output_append_block(&appended);
         if !appended.ends_with('\n') {
             appended.push('\n');
         }
-        appended.push_str(start_page_scaffolding::gitignore_append_block());
+        if !appended.ends_with("\n\n") {
+            appended.push('\n');
+        }
+        appended.push_str(&block);
         fs::write(&gitignore_path, appended).map_err(|e| {
             format!(
                 "Project creation failed while appending to .gitignore: {e}.\n\
@@ -254,12 +256,34 @@ fn handle_gitignore(
 /// after trimming, not substring matching, so near matches such as `/_device`,
 /// `prefix/_dev`, `/_dev/**` and commented rules are not treated as present.
 pub(super) fn existing_contains_moth_output_block(content: &str) -> bool {
-    let contains_rule = |rule: &str| {
-        let with_slash = format!("{rule}/");
-        content.lines().any(|line| {
-            let trimmed = line.trim();
-            trimmed == rule || trimmed == with_slash
-        })
-    };
-    contains_rule("/_dev") && contains_rule("/_release")
+    contains_moth_output_rule(content, "/_dev") && contains_moth_output_rule(content, "/_release")
+}
+
+fn contains_moth_output_rule(content: &str, rule: &str) -> bool {
+    let with_slash = format!("{rule}/");
+    content.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == rule || trimmed == with_slash
+    })
+}
+
+/// Build the append block containing only rules that are still missing.
+///
+/// WHAT: emits the Moth header once and only absent output rules.
+/// WHY: appending the whole block when one rule already exists duplicates that rule.
+fn moth_output_append_block(existing: &str) -> String {
+    let mut block = String::new();
+    if !existing
+        .lines()
+        .any(|line| line.trim() == "# Moth generated output")
+    {
+        block.push_str("# Moth generated output\n");
+    }
+    for rule in ["/_dev", "/_release"] {
+        if !contains_moth_output_rule(existing, rule) {
+            block.push_str(rule);
+            block.push('\n');
+        }
+    }
+    block
 }

@@ -20,10 +20,10 @@ The compiler currently reserves valid `name:` headers with a deferred-feature di
 
 ## Read next
 
-- `docs/src/developer-docs/memory-management/declared-regions/declared-regions.mtf`
-- `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
-- `docs/src/developer-docs/memory-management/access-and-aliasing/overview.mtf`
-- `docs/src/developer-docs/memory-management/retained-edge-counting/overview.mtf`
+- `docs/developer-docs/memory-management/declared-regions/declared-regions.mtf`
+- `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+- `docs/developer-docs/memory-management/access-and-aliasing/overview.mtf`
+- `docs/developer-docs/memory-management/retained-edge-counting/overview.mtf`
 - `docs/roadmap/roadmap.md`
-- `docs/src/docs/memory/declared-regions.mtf`
-- `docs/src/docs/progress/@page.moth`
+- `docs/docs/memory/declared-regions.mtf`
+- `docs/docs/progress/@page.moth`

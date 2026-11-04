@@ -96,7 +96,7 @@ Top-level executable work or direct output requires a recognised purpose with a 
 
 ### Command policy
 
-A declaration-only root at `entry_root` is valid. HTML application `build` and `dev` need a page somewhere below it, not necessarily a homepage at `entry_root`. `check` accepts valid zero-page projects and still rejects unpurposed runtime work. Single-file HTML output requires `$page`.
+A declaration-only root at the selected project directory is valid. HTML application `build` and `dev` need a page somewhere below it, not necessarily a homepage at that root. `check` accepts valid zero-page projects and still rejects unpurposed runtime work. Single-file HTML output requires `$page`.
 
 ### Current page metadata
 

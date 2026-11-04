@@ -112,7 +112,7 @@ pub(crate) struct ProjectConfigParseServices<'a> {
 
 /// Load and validate the project config from `config.moth` before compilation begins (Stage 0).
 ///
-/// Directory projects require `config.moth`. Single-file compilation keeps its separate
+/// Directory projects treat `config.moth` as optional. Single-file compilation keeps its separate
 /// no-config policy because `entry_dir` is not a directory.
 pub fn load_project_config(
     config: &mut Config,
@@ -122,47 +122,53 @@ pub fn load_project_config(
 ) -> Result<Option<ValidatedDirectoryOutputSettings>, ProjectConfigFailure> {
     let config_path = config.config_file_path();
 
-    if !config_path.exists() {
-        // A reload without a config source must not retain authored provenance, builder
-        // settings or spans from a previous load.
-        config.project_name.clear();
-        config.version = None;
-        config.author = None;
-        config.license = None;
-        config.config_resolution_records.clear();
-        config.project_field_config_dependencies.clear();
-        config.extra_project_fields.clear();
-        config.setting_spans.clear();
-        config.output_roots = OutputRootSettings::default();
-        config.builder_settings = BuilderSettings::default();
-        config.max_errors_per_module = Some(DEFAULT_MAX_ERRORS_PER_MODULE);
-        config.max_errors_per_project = Some(DEFAULT_MAX_ERRORS_PER_PROJECT);
-
-        if config.entry_dir.is_dir() {
-            let defaults_result = {
-                let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-                validation::apply_defaults_without_config(
-                    config,
-                    &services.frontend_surface.config_schemas,
-                    &mut diagnostic_strings,
-                )
-            };
-            if let Err(ConfigApplyError::Diagnostics(errors)) = defaults_result {
-                return Err(ProjectConfigFailure::Prepared(capture_root_diagnostics(
-                    errors,
-                    string_table,
-                )));
-            }
-            if let Err(ConfigApplyError::Compiler(error)) = defaults_result {
-                return Err(ProjectConfigFailure::Prepared(PreparedFailure::from(error)));
-            }
-            apply_directory_name_default(config, string_table)
-                .map_err(ProjectConfigFailure::Prepared)?;
-        }
-
-        return validate_directory_output_settings_if_needed(config, string_table)
-            .map_err(ProjectConfigFailure::Prepared);
+    // Single-file compilation uses its separate synthetic path and must not probe a
+    // `<file>/config.moth` path. Directory projects alone select an authored config.
+    if !config.entry_dir.is_dir() {
+        reset_project_config_state(config);
+        return Ok(None);
     }
+
+    match std::fs::symlink_metadata(&config_path) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            reset_project_config_state(config);
+
+            if config.entry_dir.is_dir() {
+                let defaults_result = {
+                    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+                    validation::apply_defaults_without_config(
+                        config,
+                        &services.frontend_surface.config_schemas,
+                        &mut diagnostic_strings,
+                    )
+                };
+                if let Err(ConfigApplyError::Diagnostics(errors)) = defaults_result {
+                    return Err(ProjectConfigFailure::Prepared(capture_root_diagnostics(
+                        errors,
+                        string_table,
+                    )));
+                }
+                if let Err(ConfigApplyError::Compiler(error)) = defaults_result {
+                    return Err(ProjectConfigFailure::Prepared(PreparedFailure::from(error)));
+                }
+                apply_directory_name_default(config, string_table)
+                    .map_err(ProjectConfigFailure::Prepared)?;
+            }
+
+            return validate_directory_output_settings_if_needed(config, string_table)
+                .map_err(ProjectConfigFailure::Prepared);
+        }
+        Err(error) => {
+            return Err(PreparedFailure::from(InfrastructureFailure::filesystem(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                &config_path,
+                format!("Failed to inspect config path: {error}"),
+            ))
+            .into());
+        }
+    }
+
     if project_source_builder.is_none() {
         return Err(PreparedFailure::from(InfrastructureFailure::internal(
             crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
@@ -183,6 +189,22 @@ pub fn load_project_config(
             .map_err(ProjectConfigFailure::Prepared)?;
     }
     Ok(outputs)
+}
+
+/// Clear authored project/config state so one reload cannot retain another config's facts.
+fn reset_project_config_state(config: &mut Config) {
+    config.project_name.clear();
+    config.version = None;
+    config.author = None;
+    config.license = None;
+    config.config_resolution_records.clear();
+    config.project_field_config_dependencies.clear();
+    config.extra_project_fields.clear();
+    config.setting_spans.clear();
+    config.output_roots = OutputRootSettings::default();
+    config.builder_settings = BuilderSettings::default();
+    config.max_errors_per_module = Some(DEFAULT_MAX_ERRORS_PER_MODULE);
+    config.max_errors_per_project = Some(DEFAULT_MAX_ERRORS_PER_PROJECT);
 }
 
 /// Apply the selected directory name as the default project identity.
@@ -264,27 +286,13 @@ pub(crate) fn compile_project_config_file(
     project_source_builder: &mut Option<SourceDatabaseBuilder>,
     string_table: &mut StringTable,
 ) -> Result<Option<ValidatedDirectoryOutputSettings>, ProjectConfigFailure> {
-    config.project_name.clear();
-    config.version = None;
-    config.author = None;
-    config.license = None;
-    config.config_resolution_records.clear();
-    config.project_field_config_dependencies.clear();
-    config.extra_project_fields.clear();
-    config.setting_spans.clear();
+    reset_project_config_state(config);
     let source_builder = project_source_builder.as_mut().ok_or_else(|| {
         PreparedFailure::from(InfrastructureFailure::internal(
             crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
             "project config source database is absent",
         ))
     })?;
-    config.output_roots = OutputRootSettings::default();
-    config.builder_settings = BuilderSettings::default();
-    // Diagnostic limits belong to the config being loaded, so a reload resets them before folding
-    // or validating. An invalid or missing project record therefore leaves the defaults rather
-    // than the previous load's limits, and a valid record reapplies present values after this.
-    config.max_errors_per_module = Some(DEFAULT_MAX_ERRORS_PER_MODULE);
-    config.max_errors_per_project = Some(DEFAULT_MAX_ERRORS_PER_PROJECT);
     let canonical_config_path = std::fs::canonicalize(config_path).map_err(|error| {
         PreparedFailure::from(InfrastructureFailure::filesystem(
             crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
@@ -292,10 +300,25 @@ pub(crate) fn compile_project_config_file(
             format!("Failed to canonicalize config path: {error}"),
         ))
     })?;
+    let canonical_project_root = std::fs::canonicalize(&config.entry_dir).map_err(|error| {
+        PreparedFailure::from(InfrastructureFailure::filesystem(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            &config.entry_dir,
+            format!("Failed to canonicalize selected project directory: {error}"),
+        ))
+    })?;
+    if !canonical_config_path.starts_with(&canonical_project_root) {
+        return Err(PreparedFailure::from(InfrastructureFailure::filesystem(
+            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            &canonical_config_path,
+            "config.moth resolves outside the selected project directory; project config must not be linked from outside the build root",
+        ))
+        .into());
+    }
 
     // Register config before tokenization so its retained syntax and diagnostics share the
-    // project identity context with every source discovered later. Config sits outside the entry
-    // root, so its own directory roots the logical path and yields a bare `config.moth`.
+    // project identity context with every source discovered later. Config lives at the selected
+    // project root, so its own directory roots the logical path and yields a bare `config.moth`.
     let config_file_id = source_builder
         .sources_mut()
         .insert(

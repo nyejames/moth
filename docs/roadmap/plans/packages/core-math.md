@@ -5,7 +5,7 @@
 `@core/math` is the portable Core package for F64-only scalar mathematics: trigonometry, logarithms,
 exponentials, roots, rounding and bounded selection.
 
-Canonical source semantics belong to `docs/src/docs/packages/core/math/` and the canonical numeric,
+Canonical source semantics belong to `docs/docs/packages/core/math/` and the canonical numeric,
 `Error` and dependency references. This living plan records implementation strategy, sequencing,
 coverage ownership, open semantic questions and blockers. Implementation code never becomes the
 semantic authority, and this plan cannot accept public API.

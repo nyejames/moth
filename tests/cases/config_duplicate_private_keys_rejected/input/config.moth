@@ -1,2 +1,2 @@
-entry_root = "src"
-entry_root = "other"
+sample_key = "src"
+sample_key = "other"

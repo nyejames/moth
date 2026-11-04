@@ -17,9 +17,8 @@ The project tree enters as authored text:
 [codeblock, $code("text"):
 compiler_walkthrough/
 ├── config.moth
-└── src/
-    ├── @page.moth
-    └── greeting.moth
+├── @page.moth
+└── greeting.moth
 ]
 
 Those files hold characters on disk. They do not yet hold a typed call graph, a borrow fact or a Wasm export. Meaning arrives when a stage applies language rules and records the result in a structure later stages trust.

@@ -14,15 +14,15 @@ Inferred regions are compiler-generated non-lexical CFG intervals. This analysis
 
 Cycle validation runs over direct retained edges that may coexist in one reachable committed program state, not over a path-insensitive union of pre-commit and post-commit edges. Where coexistence cannot be disproved, the topology is not proven legal and receives the normal topology diagnostic. A real direct source-created cycle still requires one declared region.
 
-Implementation of this analysis is deferred. Canonical declared-region semantics live under `docs/src/developer-docs/memory-management/declared-regions/`. The roadmap file owns implementation sequencing and deferred follow-up only.
+Implementation of this analysis is deferred. Canonical declared-region semantics live under `docs/developer-docs/memory-management/declared-regions/`. The roadmap file owns implementation sequencing and deferred follow-up only.
 
 ## Read next
 
-- `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.mtf`
-- `docs/src/developer-docs/memory-management/declared-regions/overview.mtf`
-- `docs/src/developer-docs/memory-management/borrow-validation/overview.mtf`
-- `docs/src/developer-docs/memory-management/ownership-and-drops/overview.mtf`
-- `docs/src/developer-docs/memory-management/retained-edge-counting/overview.mtf`
-- `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`
+- `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.mtf`
+- `docs/developer-docs/memory-management/declared-regions/overview.mtf`
+- `docs/developer-docs/memory-management/borrow-validation/overview.mtf`
+- `docs/developer-docs/memory-management/ownership-and-drops/overview.mtf`
+- `docs/developer-docs/memory-management/retained-edge-counting/overview.mtf`
+- `docs/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`

@@ -1,8 +1,8 @@
 # Codebase documentation
 
-`docs/src/developer-docs/**` owns memory design, implementation style, testing and validation.
+`docs/developer-docs/**` owns memory design, implementation style, testing and validation.
 
-`docs/src/developer-docs/language/overview.mtf` routes contributors to the
+`docs/developer-docs/language/overview.mtf` routes contributors to the
 canonical focused references for source syntax and observable language
 semantics.
 
@@ -10,31 +10,31 @@ Use the progress matrix for current support. Use the roadmap for sequencing, act
 
 ## Core reading
 
-- `docs/src/developer-docs/style-guide/style-guide.mtf`
-- `docs/src/developer-docs/memory-management/overview.mtf`
+- `docs/developer-docs/style-guide/style-guide.mtf`
+- `docs/developer-docs/memory-management/overview.mtf`
 
-Read `docs/src/developer-docs/style-guide/validation.mtf` before completing or
+Read `docs/developer-docs/style-guide/validation.mtf` before completing or
 reviewing a non-trivial change.
 
-Read `docs/src/developer-docs/style-guide/testing.mtf` when work changes
+Read `docs/developer-docs/style-guide/testing.mtf` when work changes
 behaviour, diagnostics, compiler stages, backends, tests or fixtures.
 
 For compiler architecture and stage ownership, use
 `docs/compiler-design-overview.md`, the canonical technical design reference.
 
 For design-boundary questions, read the public Design Scope authority at
-`docs/src/docs/design-scope/`.
+`docs/docs/design-scope/`.
 
 For build-system or project orchestration questions, read `docs/build-system-design.md`.
 
 For backend optimisation goals and the division between Moth and native code
-generation, read `docs/src/developer-docs/wasm-optimisation/overview.mtf`.
+generation, read `docs/developer-docs/wasm-optimisation/overview.mtf`.
 Lappet's runtime and package-manager designs live in `crates/lappet/docs/`, with
 independent implementation checkpoints in `crates/lappet/roadmap.md`.
 
 For the public Rust builder API, use
-`docs/src/developer-docs/project-builders/overview.mtf`. The tutorial starts at
-`docs/src/developer-docs/project-builders/creating-a-builder.mtf`.
+`docs/developer-docs/project-builders/overview.mtf`. The tutorial starts at
+`docs/developer-docs/project-builders/creating-a-builder.mtf`.
 
 ## Compiler flow
 
@@ -83,5 +83,5 @@ Keep detailed contracts in `docs/compiler-design-overview.md` and `docs/build-sy
 - Keep cleanup responsibility, memory strategy and backend optimisation behind stable source semantics.
 - Distinguish unimplemented design from intentionally excluded design.
 
-See `docs/src/docs/design-scope/` for the high-level rationale and
+See `docs/docs/design-scope/` for the high-level rationale and
 `docs/compiler-design-overview.md` for concrete compiler architecture.

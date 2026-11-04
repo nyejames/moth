@@ -70,7 +70,7 @@ init_docs_sidebar()!
 #[section, $md:
     ## Reference map
 
-    `docs/src/developer-docs/language/overview.mtf` lists every canonical file and
+    `docs/developer-docs/language/overview.mtf` lists every canonical file and
     routes formal compiler, build and memory ownership.
 ]
 

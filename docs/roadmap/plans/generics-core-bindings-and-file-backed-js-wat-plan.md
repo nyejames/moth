@@ -63,12 +63,12 @@ Required permanent owners include:
 - `docs/compiler-design-overview.md`
 - `docs/build-system-design.md`
 - `docs/compiler-data-layout-design.md`
-- `docs/src/developer-docs/style-guide/style-guide.mtf`
-- `docs/src/developer-docs/style-guide/testing.mtf`
-- `docs/src/developer-docs/style-guide/validation.mtf`
-- `docs/src/developer-docs/language/overview.mtf` and its relevant unsuffixed references
-- `docs/src/developer-docs/memory-management/overview.mtf` and its routed call, return-provenance, external-boundary and physical-ABI references
-- `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf`
+- `docs/developer-docs/style-guide/style-guide.mtf`
+- `docs/developer-docs/style-guide/testing.mtf`
+- `docs/developer-docs/style-guide/validation.mtf`
+- `docs/developer-docs/language/overview.mtf` and its relevant unsuffixed references
+- `docs/developer-docs/memory-management/overview.mtf` and its routed call, return-provenance, external-boundary and physical-ABI references
+- `docs/docs/cheatsheet/moth-language-cheatsheet.mtf`
 - Both progress matrices, current roadmap and relevant retained performance reports
 
 Consume these capabilities when they are delivered at activation:
@@ -817,7 +817,7 @@ Inspection of the newly pushed main established these starting points. They are 
 | Exact numeric semantics are now on main and the old numeric plan is retired | Canonical numeric/generic references and roadmap | Consume delivered D15 and numeric-origin inference rather than reimplementing them |
 | Generic calls have ready and retained lanes | `ast/generic_functions/calls.rs` | Extend `ParsedCallArguments`, retained calls and completion rather than reverting to eager calls |
 | Source generic calls and nominal construction share numeric-origin linking | `ast/generic_functions/numeric_origins.rs` | Preserve shared known-shape substitution while removing argument-only nominal inference |
-| Nested concrete expected-type forwarding is still explicitly excluded | `docs/src/docs/generics/generic-inference.mtf` and `GenericCallExpectedContext` | This plan owns the deliberate extension and corresponding negative-test conversion |
+| Nested concrete expected-type forwarding is still explicitly excluded | `docs/docs/generics/generic-inference.mtf` and `GenericCallExpectedContext` | This plan owns the deliberate extension and corresponding negative-test conversion |
 | Shared host signatures still use JS-specific parser data and diagnostics | `external_js/parser/signature_parser.rs` and `parsed_js_module.rs` | Extract the semantic signature layer while keeping host scanners local |
 | Ordinary JS numeric annotations have a narrower adapter profile than Moth numerics | `packages/external-binding-contracts.mtf` | Preserve that boundary when trusted Core gains broader representations |
 | Math is a homogeneous concrete F64 registration with inline JS | `builder_surface/core_packages/math.rs` | Replace only the four selected public signatures and their implementation path |
@@ -1411,28 +1411,28 @@ Publish final-design contracts in their permanent owners during Phase 0 and keep
 
 | Owner | Required edit |
 |---|---|
-| `docs/src/docs/generics/generic-declarations.mtf` and its Basic companion | Replace signature-local `type` introduction with all three reusable declaration forms, one-limit rules, compile-time-only `#Type`, file privacy and near-use style guidance |
-| `docs/src/docs/generics/generic-inference.mtf` and its Basic companion | Explain immediate concrete receivers, sibling evidence, numeric-origin sharing, unresolved calls and the exact absence of body/trait/backend type search |
-| `docs/src/docs/generics/type-application.mtf` | Distinguish nominal `of` parameter introduction from applied type use, preserve ordered arguments and document required constructor receiving context |
-| `docs/src/docs/generics/generic-instances.mtf` | Owner-local parameter identity, independent instances, aligned receiver methods, explicit construction and public nominal contracts |
-| `docs/src/docs/generics/generic-limits.mtf` | Eight exact-case numeric families, ordinary single trait limit, universal operator/result/literal rules and V1 exclusions |
+| `docs/docs/generics/generic-declarations.mtf` and its Basic companion | Replace signature-local `type` introduction with all three reusable declaration forms, one-limit rules, compile-time-only `#Type`, file privacy and near-use style guidance |
+| `docs/docs/generics/generic-inference.mtf` and its Basic companion | Explain immediate concrete receivers, sibling evidence, numeric-origin sharing, unresolved calls and the exact absence of body/trait/backend type search |
+| `docs/docs/generics/type-application.mtf` | Distinguish nominal `of` parameter introduction from applied type use, preserve ordered arguments and document required constructor receiving context |
+| `docs/docs/generics/generic-instances.mtf` | Owner-local parameter identity, independent instances, aligned receiver methods, explicit construction and public nominal contracts |
+| `docs/docs/generics/generic-limits.mtf` | Eight exact-case numeric families, ordinary single trait limit, universal operator/result/literal rules and V1 exclusions |
 | Generic `@page.moth` and Basic page composition | Present the learning sequence below and link the detailed rules without duplicating a second capability catalogue |
-| `docs/src/docs/traits/generic-trait-bounds.mtf` and relevant trait pages | Convert source syntax and terminology to reusable generic declarations with one trait limit, preserve explicit conformance and explain that numeric families are compiler-owned limits rather than implementable traits |
+| `docs/docs/traits/generic-trait-bounds.mtf` and relevant trait pages | Convert source syntax and terminology to reusable generic declarations with one trait limit, preserve explicit conformance and explain that numeric families are compiler-owned limits rather than implementable traits |
 | Struct, choice, function and receiver references | New nominal declaration syntax, applied constructor receivers, signature-derived function parameters, aligned receiver rules and examples for empty/payload-free construction |
-| `docs/src/docs/aliases/type-aliases.mtf` | Preserve concrete aliases and explain that reusable generic copying/aliasing is excluded, with no reversal of ordinary alias syntax |
+| `docs/docs/aliases/type-aliases.mtf` | Preserve concrete aliases and explain that reusable generic copying/aliasing is excluded, with no reversal of ordinary alias syntax |
 | Binding and constant references | Separate generic declaration metadata from ordinary runtime or folded values, including the specific `#Type` role and invalid `Type` forms |
 | Numeric, cast and error references | Show generic uses of existing exact semantics without changing D15, generic-cast exclusions or ordinary explicit call-error handling |
-| `docs/src/docs/design-scope/deferred-and-outside-scope.mtf` | Replace the provisional Numeric and generic extensions handoff with the accepted V1 design and precise remaining extensions |
-| `docs/src/docs/design-scope/excluded-language-families.mtf` | Narrow previous blanket exclusions only for this closed design, retaining user-defined type-set languages, generic aliases, reflection, body-inferred limits, operator overloading and conditional error signatures as excluded/outside this work |
-| `docs/src/docs/packages/external-binding-contracts.mtf` | Common annotation semantics, ordinary JS/WAT capability profiles, trusted registration distinction, explicit adapters and exact failure/integrity boundaries |
-| A focused WAT topic under `docs/src/docs/packages/`, with package page composition | End-to-end scalar file, Moth import, signature validation, helper imports, target capability and unsupported representation examples |
-| `docs/src/docs/packages/core/math/math.mtf` | Generic min/max/clamp/abs, same-type parameters, uniform abs Error!, unchanged clamp and zero-sign policy, target matrix and remaining F64 surface |
+| `docs/docs/design-scope/deferred-and-outside-scope.mtf` | Replace the provisional Numeric and generic extensions handoff with the accepted V1 design and precise remaining extensions |
+| `docs/docs/design-scope/excluded-language-families.mtf` | Narrow previous blanket exclusions only for this closed design, retaining user-defined type-set languages, generic aliases, reflection, body-inferred limits, operator overloading and conditional error signatures as excluded/outside this work |
+| `docs/docs/packages/external-binding-contracts.mtf` | Common annotation semantics, ordinary JS/WAT capability profiles, trusted registration distinction, explicit adapters and exact failure/integrity boundaries |
+| A focused WAT topic under `docs/docs/packages/`, with package page composition | End-to-end scalar file, Moth import, signature validation, helper imports, target capability and unsupported representation examples |
+| `docs/docs/packages/core/math/math.mtf` | Generic min/max/clamp/abs, same-type parameters, uniform abs Error!, unchanged clamp and zero-sign policy, target matrix and remaining F64 surface |
 | `docs/compiler-design-overview.md` | Generic declaration preparation, limit checking, concrete call readiness, source versus binding instantiation, canonical identities and fully typed HIR handoff |
 | `docs/build-system-design.md` | File-backed provider inputs, explicit helper closure, readiness, asset and module ownership, target/adapter selection and invalidation without a mixed-backend dependency |
 | `docs/compiler-data-layout-design.md` | New source kinds/comment span ownership and uncommon declaration/diagnostic data, preserving locked common record sizes and exact byte spans |
 | Routed memory/call/ABI references | Scalar binding access and return provenance, especially Dec selection, explicit Wasm adapters and the ordinary-versus-trusted boundary |
-| `docs/src/developer-docs/language/overview.mtf` and compiler/build teaching pages | Route to the new permanent owners and remove stale signature-local generic examples |
-| `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf` | Compact complete examples for declarations, numeric limits, Pair/Maybe `of`, contextual calls and rejected shorthand, with no implementation-status clutter |
+| `docs/developer-docs/language/overview.mtf` and compiler/build teaching pages | Route to the new permanent owners and remove stale signature-local generic examples |
+| `docs/docs/cheatsheet/moth-language-cheatsheet.mtf` | Compact complete examples for declarations, numeric limits, Pair/Maybe `of`, contextual calls and rejected shorthand, with no implementation-status clutter |
 | Both progress matrices | Distinguish accepted syntax, implemented limits/inference, Core binding support, actual JS/WAT execution and unsupported representation/target cases |
 | Standalone lexical/MON documentation and tests | Describe only relevant shared naming changes, without claiming that `#Type` or generic declarations are MON data |
 | Highlighter, editor grammar, source-word tables and docs code blocks | Update `#Type`, family names and `of` context, remove old generic keyword presentation and add enough WAT highlighting for readable examples without semantic inference in the formatter |
@@ -1662,14 +1662,14 @@ GitHub code search still returned some paths from the older indexed parent durin
 | R01 | `AGENTS.md` and `docs/roadmap/roadmap.md` | Authority, test/validation workflow, serial insertion point and exact placeholder removal |
 | R02 | `docs/compiler-design-overview.md` | Generic publication, source-owned metadata, numeric handoff, native result direction, call/proof and Wiring boundaries |
 | R03 | `docs/build-system-design.md` and `docs/compiler-data-layout-design.md` | Provider ownership, source/physical identity, capabilities, locked spans and diagnostic lanes |
-| R04 | `docs/src/developer-docs/style-guide/{style-guide,testing,validation}.mtf` | Small coherent changes, primary test ownership, assertion preservation and final gate policy |
+| R04 | `docs/developer-docs/style-guide/{style-guide,testing,validation}.mtf` | Small coherent changes, primary test ownership, assertion preservation and final gate policy |
 | R05 | `src/compiler_frontend/ast/generic_functions/calls.rs` | Shared instance/template-validation lanes, ready/retained arguments, deferred requests and source-ordered tickets |
 | R06 | `src/compiler_frontend/ast/generic_functions/numeric_origins.rs` | Signature-only numeric origins, known-shape relationships, receiver evidence and deferred nominal linking |
 | R07 | Generic declaration, instance, inference, limit and type-application references plus canonical generic parameter/template owners | Old syntax, current nominal inference and stable declaration-owned parameter identities |
-| R08 | `docs/src/docs/numbers/operators.mtf` and exact numeric handoff references | D15 invariants and arithmetic exceptions consumed rather than redesigned |
-| R09 | `src/builder_surface/core_packages/math.rs` and `docs/src/docs/packages/core/math/math.mtf` | Current 31-function F64 registration, six constants, clamp/zero/failure contracts and missing Wasm implementations |
+| R08 | `docs/docs/numbers/operators.mtf` and exact numeric handoff references | D15 invariants and arithmetic exceptions consumed rather than redesigned |
+| R09 | `src/builder_surface/core_packages/math.rs` and `docs/docs/packages/core/math/math.mtf` | Current 31-function F64 registration, six constants, clamp/zero/failure contracts and missing Wasm implementations |
 | R10 | `src/projects/html_project/external_js/parser/` and `signature_parser.rs` | Shared-parser extraction opportunity and intentionally restricted ordinary foreign signature |
-| R11 | `docs/src/docs/packages/external-binding-contracts.mtf` | Current JS annotation subset, exact adapters, constant-only assets and fatal versus declared Error delivery |
+| R11 | `docs/docs/packages/external-binding-contracts.mtf` | Current JS annotation subset, exact adapters, constant-only assets and fatal versus declared Error delivery |
 | R12 | `src/builder_surface/external_import_providers/provider.rs` | Provider kinds, logical identities, runtime asset records and explicit runtime imports |
 | R13 | `Cargo.toml` and `index.md` | Existing wasmparser/wasm-encoder tooling family, standalone crates, features and ownership locators |
 | R14 | Existing facade/receiver/generic materialisation cases and prior focused generic source reads | Regression starting points, not a claim that every future affected test has been audited |

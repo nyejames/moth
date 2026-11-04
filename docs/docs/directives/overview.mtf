@@ -4,9 +4,9 @@ This index routes contributors to the accepted general-directive contract and th
 
 ## Canonical language reference
 
-- `docs/src/docs/directives/directives.mtf` owns general marker, ownership, context, arguments, attachment and unknown/unavailable/placement rules.
-- `docs/src/docs/directives/directives-basic.mtf` teaches the short accepted surface.
-- Template-specific meanings stay in `docs/src/docs/templates/template-directives.mtf`.
+- `docs/docs/directives/directives.mtf` owns general marker, ownership, context, arguments, attachment and unknown/unavailable/placement rules.
+- `docs/docs/directives/directives-basic.mtf` teaches the short accepted surface.
+- Template-specific meanings stay in `docs/docs/templates/template-directives.mtf`.
 - Exact `$project`, `$config`, `$html_builder` and `$page` signatures stay in the project-structure references.
 
 ## Compiler handoffs
@@ -32,6 +32,6 @@ Read `docs/build-system-design.md`:
 
 ## Status and sequencing
 
-- `docs/src/docs/progress/@page.moth` owns current support.
+- `docs/docs/progress/@page.moth` owns current support.
 - `docs/roadmap/roadmap.md` owns implementation order.
-- Design-scope files under `docs/src/docs/design-scope/` own accepted, deferred and excluded boundaries.
+- Design-scope files under `docs/docs/design-scope/` own accepted, deferred and excluded boundaries.

@@ -26,7 +26,7 @@ backend REC encoding
 
 Retained-edge and cardinality summaries are backend-neutral and precede target partition. Selected REC representation does not: REC selection happens inside target/profile-aware memory planning, after build-owned target partition and target-contract validation, and is therefore scoped to one physical variant.
 
-Final count transitions operate on direct post-refinement persistent edges, evaluated per target allocation family. The planner fuses and normalises each semantic commit before lowering, so a same-family replacement never lowers as a decrement to zero followed by an increment. One affine root can replace at most one newly created direct persistent edge, so a storage operation that creates several direct edges into one family still changes the count. The normative per-family transition equation lives in `docs/src/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`.
+Final count transitions operate on direct post-refinement persistent edges, evaluated per target allocation family. The planner fuses and normalises each semantic commit before lowering, so a same-family replacement never lowers as a decrement to zero followed by an increment. One affine root can replace at most one newly created direct persistent edge, so a storage operation that creates several direct edges into one family still changes the count. The normative per-family transition equation lives in `docs/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`.
 
 Every REC family keeps its statically proven fallback lifetime region. REC can only reclaim that family earlier than the fallback region frontier. If counting did not exist or failed to improve precision, the static region would still make the program collector-free and correct. The planner fixes the representation before lowering: an uncounted strategy never upgrades to REC at runtime, and an REC-selected strategy never abandons counting or downgrades to an uncounted representation at runtime.
 
@@ -36,9 +36,9 @@ Implementation of this analysis is deferred.
 
 ## Read next
 
-- `docs/src/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`
-- `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
-- `docs/src/developer-docs/memory-management/ownership-and-drops/overview.mtf`
-- `docs/src/developer-docs/memory-management/declared-regions/overview.mtf`
-- `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`
+- `docs/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`
+- `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+- `docs/developer-docs/memory-management/ownership-and-drops/overview.mtf`
+- `docs/developer-docs/memory-management/declared-regions/overview.mtf`
+- `docs/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`
 - `docs/roadmap/roadmap.md`

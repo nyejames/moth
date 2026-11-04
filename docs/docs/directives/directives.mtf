@@ -110,21 +110,30 @@ Recognition, permitted placement, diagnostics and tooling share one registration
 Accepted `config.moth` shape:
 
 [codeblock, $code("moth"):
-    $config
-    version #String = "0.1.0"
-
     $project(
         name = "my_site",
-        version = version,
-        entry_root = "src",
     )
 
     $html_builder
 ]
 
-A fixed literal version also works. A contract named `version` does not satisfy an omitted `$project` argument. A project field named `version` does not satisfy a source input contract.
+Version is optional. To supply one, declare an earlier `$config` contract or use a fixed literal:
 
-Exact field tables, required version, explicit-only input providers and HTML settings live in @../project-structure/#project-config (Project config) and @../project-structure/#build-inputs (Build configuration values).
+[codeblock, $code("moth"):
+    $config
+    version #String? = none
+
+    $project(
+        name = "my_site",
+        version = version,
+    )
+
+    $html_builder
+]
+
+A project field named `version` does not satisfy a source input contract. `$project` has no `entry_root`; the selected directory is the source root.
+
+Exact field tables, optional version, explicit-only input providers and HTML settings live in @../project-structure/#project-config (Project config) and @../project-structure/#build-inputs (Build configuration values).
 
 ### Page example
 

@@ -18,29 +18,29 @@ Read the selected heading through the next heading of the same or higher level. 
 
 ### Task routing
 
-- **ALWAYS READ** `docs/src/developer-docs/style-guide/style-guide.mtf` in full. For work primarily inside `crates/lappet/`, read its nested `AGENTS.md` and follow its scoped routes; load the Moth cheatsheet when language syntax or semantics matter. For other work, also read `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf` for a baseline understanding of Moth.
+- **ALWAYS READ** `docs/developer-docs/style-guide/style-guide.mtf` in full. For work primarily inside `crates/lappet/`, read its nested `AGENTS.md` and follow its scoped routes; load the Moth cheatsheet when language syntax or semantics matter. For other work, also read `docs/docs/cheatsheet/moth-language-cheatsheet.mtf` for a baseline understanding of Moth.
 - **Lappet runtime, embedding and package infrastructure:** use `crates/lappet/AGENTS.md` to route Lappet-specific reading. If work changes compiler, build or language contracts, also follow the relevant routes below. The nested file supplements repository-wide rules and cannot override canonical authorities.
 - **Compiler stages, semantic data or handoffs:** read the opening authority text and `Architectural invariants` in `docs/compiler-design-overview.md`, then its routed task sections and affected producer or consumer handoffs.
 - **Source identity, spans, retained tokens, diagnostic storage and failure lanes:** read `docs/compiler-data-layout-design.md`. It is the canonical authority for the physical representation, ownership and lifetime of source records, spans, paths, tokens and diagnostics, and for the boundary between user diagnostics, operational infrastructure failures and compiler bugs. Read it with the routed compiler or build authority whenever a change touches those representations.
 - **Build system and project orchestration:** read the opening authority text and `Architectural invariants` in both `docs/compiler-design-overview.md` and `docs/build-system-design.md`, then routed build sections and relevant compiler handoffs. This includes Stage 0, config, imports, modules, packages, builders, tooling, linking, backend project assembly, outputs, incremental builds and the dev server.
-- **Memory and value flow:** read `docs/src/developer-docs/memory-management/overview.mtf`, use its task-reading guide and read the selected leaves. This includes access, copies, ownership, borrowing, lifetimes, last use, retained-edge liveness, cleanup frontiers, declared regions, allocation, memory-strategy selection, Retained Edge Counting, drops, builder lifecycle roots, runtime handles and ABI work.
-- **Boracle reference solver, the bounded operational oracle, normalized borrow problems or modular last-use work:** read `docs/src/developer-docs/memory-management/boracle/boracle-reference-solver.mtf`, `docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf` and `docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`, together with the routed memory and compiler authorities. The reference solver owns static borrow reasoning and the operational oracle owns the bounded executable semantics, its differential comparison and reduction.
-- **General Moth language understanding or source authoring:** read `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf` for a compact overview of the accepted end-state language surface. When source must work with the current Alpha compiler or current implementation or target support matters, also read `docs/src/docs/progress/@page.moth`. The cheatsheet is an orientation and source-writing reference, not the authority for exact semantic edge cases.
-- **Exact language syntax or user-visible semantic work:** read `docs/src/developer-docs/language/overview.mtf` and every relevant canonical unsuffixed reference it selects. This route is required when a task changes or depends on the precise contract of a language feature. Also read routed memory material when behaviour touches access, copies, borrows, lifetimes, declared regions or ownership. Read paired `-basic.mtf` files and `@page.moth` only for teaching, presentation or site structure.
-- **Tests:** read relevant sections of `docs/src/developer-docs/style-guide/testing.mtf` before choosing, adding, changing or reviewing coverage. Read it in full for test infrastructure, suite policy, broad fixture cleanup or audits.
+- **Memory and value flow:** read `docs/developer-docs/memory-management/overview.mtf`, use its task-reading guide and read the selected leaves. This includes access, copies, ownership, borrowing, lifetimes, last use, retained-edge liveness, cleanup frontiers, declared regions, allocation, memory-strategy selection, Retained Edge Counting, drops, builder lifecycle roots, runtime handles and ABI work.
+- **Boracle reference solver, the bounded operational oracle, normalized borrow problems or modular last-use work:** read `docs/developer-docs/memory-management/boracle/boracle-reference-solver.mtf`, `docs/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf` and `docs/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`, together with the routed memory and compiler authorities. The reference solver owns static borrow reasoning and the operational oracle owns the bounded executable semantics, its differential comparison and reduction.
+- **General Moth language understanding or source authoring:** read `docs/docs/cheatsheet/moth-language-cheatsheet.mtf` for a compact overview of the accepted end-state language surface. When source must work with the current Alpha compiler or current implementation or target support matters, also read `docs/docs/progress/@page.moth`. The cheatsheet is an orientation and source-writing reference, not the authority for exact semantic edge cases.
+- **Exact language syntax or user-visible semantic work:** read `docs/developer-docs/language/overview.mtf` and every relevant canonical unsuffixed reference it selects. This route is required when a task changes or depends on the precise contract of a language feature. Also read routed memory material when behaviour touches access, copies, borrows, lifetimes, declared regions or ownership. Read paired `-basic.mtf` files and `@page.moth` only for teaching, presentation or site structure.
+- **Tests:** read relevant sections of `docs/developer-docs/style-guide/testing.mtf` before choosing, adding, changing or reviewing coverage. Read it in full for test infrastructure, suite policy, broad fixture cleanup or audits.
 - **Structured codebase audits and accepted audit fixes:** read `docs/roadmap/audit-guide.md`, the selected guide under `docs/roadmap/audit-kinds/`, `docs/roadmap/audit-log.md`, `docs/roadmap/open-audit-findings.md` and the owning report when one exists. This is the explicitly invoked audit framework, not the Slice review. Audit runs are read-only. Implement accepted findings in a separate task and preserve every invariant and change lane named by the report.
-- **Validation:** read `docs/src/developer-docs/style-guide/validation.mtf` before selecting or reporting checks. Choose by branch, checkpoint and affected behaviour rather than treating every slice as merge readiness.
+- **Validation:** read `docs/developer-docs/style-guide/validation.mtf` before selecting or reporting checks. Choose by branch, checkpoint and affected behaviour rather than treating every slice as merge readiness.
 - **Architecture plans, cross-stage ownership changes, broad refactors and thorough reviews:** read every relevant authority in full, including adjacent handoff authorities, current status and active sequencing.
 
 Before changing tokenization, parsing, type checking, language semantics, diagnostics, lowering, semantic tests or authoritative language documentation for a feature, read that feature's canonical unsuffixed reference. Also read the canonical reference when correctness depends on precise feature semantics or edge cases not fully specified by the cheatsheet. Do not infer the exact language contract from examples, tests, compiler behaviour, the cheatsheet or a Basic page.
 
 Use:
-- `docs/src/docs/progress/@page.moth` for current implementation status and coverage
+- `docs/docs/progress/@page.moth` for current implementation status and coverage
 - `docs/roadmap/roadmap.md` for sequencing, active plans, genuinely deferred design, and the rules for adding and maintaining plans
 - `docs/roadmap/audit-log.md` for what has been audited, when, and what has never been audited
 - `index.md` only as a file and module locator
 
-The public unsuffixed files under `docs/src/docs/design-scope/` own accepted deferred implementation, open questions and excluded language boundaries. The progress matrix tracks implementation of accepted design only.
+The public unsuffixed files under `docs/docs/design-scope/` own accepted deferred implementation, open questions and excluded language boundaries. The progress matrix tracks implementation of accepted design only.
 
 ## Authority and architecture
 
@@ -64,7 +64,7 @@ Core contracts:
 - Missing optional transfer proof falls back conservatively without rejecting legal source. Missing mandatory topology proof is a source diagnostic, not a GC fallback.
 - A backend that advertises full memory control must lower release builds without a tracing or reachability collector. A missing physical strategy after successful topology validation is `InfrastructureFailure`. There is no source-visible or project-visible no-GC mode.
 - Mandatory lifetime topology and backend-neutral memory requirements are target-independent. Build-owned target partition and target validation happen before target/profile-aware physical memory planning. The compiler-owned memory planner produces one `ValidatedMemoryPlan` per physical variant. Backend lowerers only realise that plan.
-- Retained Edge Counting is a compiler-selected physical representation, never source semantics. Its canonical page is `docs/src/developer-docs/memory-management/retained-edge-counting/`.
+- Retained Edge Counting is a compiler-selected physical representation, never source semantics. Its canonical page is `docs/developer-docs/memory-management/retained-edge-counting/`.
 - Backends do not reparse source, reconstruct imports, infer source semantics or reconsider borrow and lifetime legality.
 
 ## Rules before writing a patch
@@ -96,7 +96,7 @@ For multi-phase work, re-check ownership, duplication, stale paths and test gaps
 
 ## Testing
 
-Follow `docs/src/developer-docs/style-guide/testing.mtf`.
+Follow `docs/developer-docs/style-guide/testing.mtf`.
 
 - User-visible language and project behaviour belongs under `tests/cases/`.
 - Focused subsystem-local invariant tests belong under that module's test directory, not in production implementation files.
@@ -116,11 +116,11 @@ Exceptions:
 - Structured audit tasks update their report, the open-findings index and the audit log as required by `docs/roadmap/audit-guide.md`.
 - Implementation and verification tasks mark an audit-log row stale when they materially change what it records. Only an audit run may record new coverage.
 
-Report documentation made inaccurate by implementation as a separate follow-up. Do not edit generated files under `docs/release/**` directly. Rebuild them through the compiler.
+Report documentation made inaccurate by implementation as a separate follow-up. Do not edit generated files under `docs/_release/**` directly. Rebuild them through the compiler.
 
 ## Validation and benchmarking
 
-Use the lightest checks that cover the current change. `docs/src/developer-docs/style-guide/validation.mtf` owns gate scope and cadence, including generic validation instructions in older plans. A slice review or feature-branch commit is not automatically a full-validation checkpoint.
+Use the lightest checks that cover the current change. `docs/developer-docs/style-guide/validation.mtf` owns gate scope and cadence, including generic validation instructions in older plans. A slice review or feature-branch commit is not automatically a full-validation checkpoint.
 
 - During feature-branch work, prefer targeted Cargo checks, filtered tests, selected integration cases and affected feature lanes. These are sufficient for intermediate commits when they cover the changed behaviour.
 - Run `just validate` at important branch boundaries and broader integration checkpoints. Ordinary feature-branch commits do not require `just validate-full`, including intermediate validation/toolchain changes.

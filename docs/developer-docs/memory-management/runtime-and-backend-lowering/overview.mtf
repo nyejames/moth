@@ -43,9 +43,9 @@ Physical memory strategies and the collector-free release guarantee.
 
 ## Read next
 
-- `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf`
-- `docs/src/developer-docs/memory-management/ownership-and-drops/overview.mtf`
-- `docs/src/developer-docs/memory-management/retained-edge-counting/overview.mtf`
-- `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+- `docs/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf`
+- `docs/developer-docs/memory-management/ownership-and-drops/overview.mtf`
+- `docs/developer-docs/memory-management/retained-edge-counting/overview.mtf`
+- `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
 - `docs/compiler-design-overview.md`, especially Stage 6, lifetime-region validation, and backend handoff
 - `docs/build-system-design.md`, especially mixed-target planning and runtime/memory

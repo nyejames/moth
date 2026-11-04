@@ -8,7 +8,7 @@
 > as one permitted physical representation of an already legal topology, and
 > requires backends that advertise full memory control to lower release builds
 > without a tracing collector. See
-> `docs/src/developer-docs/memory-management/overview.mtf` and `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`. The Wasm
+> `docs/developer-docs/memory-management/overview.mtf` and `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`. The Wasm
 > and component-model research in this report remains useful.
 >
 > **Superseded package-model note.** The proposal below to make components and WIT the primary representation of Moth packages is also superseded. `MothSource` packages retain Moth semantic interfaces and Moth-to-Moth link contracts. WIT is the foreign Wasm/component boundary and may later be generated as an optional foreign projection of a Moth package surface.

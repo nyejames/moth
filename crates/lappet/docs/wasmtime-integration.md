@@ -56,7 +56,7 @@ and [config source](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/cr
   [configuration source](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/crates/wasmtime/src/config.rs#L1538-L1587)
   and [single-pass warning](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/crates/wasmtime/src/config.rs#L3699-L3725).
 - Lappet does not run a Wasm post-optimiser or duplicate Moth's semantic
-  passes. The [shared optimisation authority](../../../docs/src/developer-docs/wasm-optimisation/wasm-optimisation.mtf)
+  passes. The [shared optimisation authority](../../../docs/developer-docs/wasm-optimisation/wasm-optimisation.mtf)
   owns that boundary.
 - Validate the compiler's Wasm proposal requirements against Cranelift
   and the actual host CPU. Multi-value is enabled by default and Memory64

@@ -6,8 +6,8 @@ Companion authorities:
 
 - `docs/compiler-design-overview.md` owns compiler-stage and artefact architecture
 - `docs/build-system-design.md` owns project, link and builder lifecycle orchestration
-- `docs/src/developer-docs/language/overview.mtf` and its selected unsuffixed references own source syntax
-- `docs/src/docs/progress/@page.moth` indexes general implementation support
+- `docs/developer-docs/language/overview.mtf` and its selected unsuffixed references own source syntax
+- `docs/docs/progress/@page.moth` indexes general implementation support
 - `docs/roadmap/plans/production-borrow-checker.md` owns live Stage 6 implementation status, production implementation decisions and borrow/Boracle follow-ups
 - `docs/roadmap/roadmap.md` owns sequencing and deferred implementation order
 
@@ -17,7 +17,7 @@ The source language stays small: existing values use shared access by default, m
 
 These pages record the accepted memory model and target backend architecture. They include design decisions that are not yet implemented, particularly around lifetime-topology validation, retained-edge liveness, declared regions, Retained Edge Counting and collector-free backend lowering.
 
-They are not an implementation-status report. Use `docs/src/docs/progress/@page.moth` for general support, and `docs/roadmap/plans/production-borrow-checker.md` for the verified current borrow-checker inventory and its work queue.
+They are not an implementation-status report. Use `docs/docs/progress/@page.moth` for general support, and `docs/roadmap/plans/production-borrow-checker.md` for the verified current borrow-checker inventory and its work queue.
 
 ## The model in one paragraph
 
@@ -179,7 +179,7 @@ One future-use substrate feeds several systems. Borrow validation supplies the f
     ]
 ]
 
-`docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf` owns the complete stable fact contract.
+`docs/developer-docs/memory-management/borrow-validation/borrow-validation.mtf` owns the complete stable fact contract.
 
 ## Collector-free correctness argument
 
@@ -255,101 +255,101 @@ Local module compilation produces local lifetime constraints and exported summar
 
     [td:
         [: AST calls, mutability, copies, collections or maps]
-        [: `docs/src/developer-docs/memory-management/access-and-aliasing/overview.mtf`]
-        [: `docs/src/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`]
+        [: `docs/developer-docs/memory-management/access-and-aliasing/overview.mtf`]
+        [: `docs/developer-docs/memory-management/access-and-aliasing/access-and-aliasing.mtf`]
     ]
 
     [td:
         [: HIR, borrow checker, last-use facts, alias diagnostics or captured-value access]
-        [: `docs/src/developer-docs/memory-management/borrow-validation/overview.mtf`]
-        [: `docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`]
+        [: `docs/developer-docs/memory-management/borrow-validation/overview.mtf`]
+        [: `docs/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`]
     ]
 
     [td:
         [: Returns, escaping aliases, regions, non-lexical intervals, builder lifecycle roots, cross-region cycles or external retention]
         [:
-            - `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
-            - `docs/src/developer-docs/memory-management/borrow-validation/overview.mtf`
+            - `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+            - `docs/developer-docs/memory-management/borrow-validation/overview.mtf`
         ]
         [:
-            - `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.mtf`
-            - `docs/src/developer-docs/memory-management/declared-regions/declared-regions.mtf`
+            - `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.mtf`
+            - `docs/developer-docs/memory-management/declared-regions/declared-regions.mtf`
         ]
     ]
 
     [td:
         [: Collection retention effects, whole-domain kills, `clear`, cleanup frontiers or region epochs]
         [:
-            - `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
-            - `docs/src/developer-docs/memory-management/retained-edge-counting/overview.mtf`
+            - `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+            - `docs/developer-docs/memory-management/retained-edge-counting/overview.mtf`
         ]
         [:
-            - `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.mtf`
-            - `docs/src/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`
+            - `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/lifetime-regions-and-escape-validation.mtf`
+            - `docs/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`
         ]
     ]
 
     [td:
         [: REC selection, elision, counters, tagged handles or iterative destruction]
-        [: `docs/src/developer-docs/memory-management/retained-edge-counting/overview.mtf`]
-        [: `docs/src/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`]
+        [: `docs/developer-docs/memory-management/retained-edge-counting/overview.mtf`]
+        [: `docs/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`]
     ]
 
     [td:
         [: `name:` / `into name`, destination scope, hard declared-region exits, nested declared regions]
         [:
-            - `docs/src/developer-docs/memory-management/declared-regions/overview.mtf`
-            - `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+            - `docs/developer-docs/memory-management/declared-regions/overview.mtf`
+            - `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
         ]
-        [: `docs/src/developer-docs/memory-management/declared-regions/declared-regions.mtf`]
+        [: `docs/developer-docs/memory-management/declared-regions/declared-regions.mtf`]
     ]
 
     [td:
         [: Last use, affine cleanup transfer, control-flow exits or drop placement]
         [:
-            - `docs/src/developer-docs/memory-management/ownership-and-drops/overview.mtf`
-            - `docs/src/developer-docs/memory-management/borrow-validation/overview.mtf`
+            - `docs/developer-docs/memory-management/ownership-and-drops/overview.mtf`
+            - `docs/developer-docs/memory-management/borrow-validation/overview.mtf`
         ]
         [:
-            - `docs/src/developer-docs/memory-management/ownership-and-drops/ownership-and-drops.mtf`
-            - `docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`
+            - `docs/developer-docs/memory-management/ownership-and-drops/ownership-and-drops.mtf`
+            - `docs/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`
         ]
     ]
 
     [td:
         [: JS, Wasm, runtime handles, ABI, external boundaries, memory lowering or collector-free verification]
         [:
-            - `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`
-            - `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
-            - `docs/src/developer-docs/memory-management/ownership-and-drops/overview.mtf`
+            - `docs/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`
+            - `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+            - `docs/developer-docs/memory-management/ownership-and-drops/overview.mtf`
         ]
         [:
-            - `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf`
-            - `docs/src/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`
-            - `docs/src/developer-docs/memory-management/ownership-and-drops/ownership-and-drops.mtf`
+            - `docs/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf`
+            - `docs/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`
+            - `docs/developer-docs/memory-management/ownership-and-drops/ownership-and-drops.mtf`
         ]
     ]
 
     [td:
         [: Native Rust host imports, selected exports, result frames, staged text, resource tokens or the host manifest]
         [:
-            - `docs/src/developer-docs/memory-management/native-host-abi/overview.mtf`
-            - `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`
+            - `docs/developer-docs/memory-management/native-host-abi/overview.mtf`
+            - `docs/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`
         ]
         [:
-            - `docs/src/developer-docs/memory-management/native-host-abi/native-host-abi.mtf`
-            - `docs/src/developer-docs/project-builders/host-packages.mtf`
+            - `docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf`
+            - `docs/developer-docs/project-builders/host-packages.mtf`
         ]
     ]
 
     [td:
         [: Changing the memory model]
         [:
-            - `docs/src/developer-docs/memory-management/overview.mtf`
-            - `docs/src/developer-docs/memory-management/<relevant-leaf>/overview.mtf`
+            - `docs/developer-docs/memory-management/overview.mtf`
+            - `docs/developer-docs/memory-management/<relevant-leaf>/overview.mtf`
         ]
         [:
-            - `docs/src/developer-docs/memory-management/<relevant-leaf>/<relevant-leaf>.mtf`
+            - `docs/developer-docs/memory-management/<relevant-leaf>/<relevant-leaf>.mtf`
         ]
     ]
 ]

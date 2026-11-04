@@ -63,7 +63,7 @@ managed Core-dependent package admission are separate package-manager policies,
 not a consequence of a matching capability surface. The
 [Lappet design](../crates/lappet/docs/design.md) owns native implementation policy.
 Tooling overlays inspect the selected environment rather than owning another
-runtime. The [Wasm optimisation authority](src/developer-docs/wasm-optimisation/overview.mtf)
+runtime. The [Wasm optimisation authority](developer-docs/wasm-optimisation/overview.mtf)
 owns optimisation goals and the separate Moth-profile/native-strategy choices.
 
 Frontend names and builtins remain authoritative. Registration rejects duplicates and overrides. Unknown directives, wrong-context uses and recognised unavailable capabilities receive distinct diagnostics rather than silent acceptance. Registries grant constrained powers, not arbitrary semantic callbacks.
@@ -74,7 +74,7 @@ Builder globals express stable semantic configuration. They never reveal a physi
 
 ### Self-contained `config.moth`
 
-`config.moth` is one build-owned compile-time source, not a semantic module. It creates no entry, HIR, runtime artefact or package interface. Bootstrap creates no config dependency graph, companion source set, package resolver or second project scan.
+When present, `config.moth` is one build-owned compile-time source, not a semantic module. It creates no entry, HIR, runtime artefact or package interface. Bootstrap creates no config dependency graph, companion source set, package resolver or second project scan. When the file is genuinely absent, bootstrap applies validated builder defaults and a directory-derived project identity without synthesizing a config source, span or input declaration. A nested `config.moth` is reserved and inert to the enclosing build. The selected config path is inspected with explicit metadata handling: a broken or inaccessible path diagnoses through the filesystem lane, and its canonical location must remain inside the selected project directory. A dangling or external symlink never silently selects defaults or another project's configuration.
 
 The build system calls the named compiler config service with the source, capability surface, retained explicit command-input spellings and exact typed programmatic/builder inputs. The compiler resolves each input against its declared exact contract, materialises directly from retained numeric spelling and returns folded directive arguments, input-contract results, key locations and diagnostics. The build system then applies validated project/builder settings. The compiler alone sequences preparation and folding.
 
@@ -92,15 +92,15 @@ The accepted replacement contract is `docs/roadmap/plans/general-directives-and-
 
 ### Project directive
 
-One closed `$project` invocation supplies project identity/settings. It creates no ordinary symbol named `project`. `docs/src/docs/project-structure/project-config.mtf` > `$project` owns the complete positional signature and defaults.
+One closed `$project` invocation supplies project identity/settings. It creates no ordinary symbol named `project`. `docs/docs/project-structure/project-config.mtf` > `$project` owns the complete positional signature and defaults.
 
-`name` and `version` are required Strings. The name is a valid Moth project identifier, never inferred from the checkout directory. Version has no default. A starter's `"0.1.0"` input fallback is not a project-field default, and a same-named input contract does not satisfy an omitted directive argument.
+`name` and `version` are optional. An omitted name derives from the exact final component of the selected directory and must validly parse as a Moth project identifier; it is never silently rewritten. An explicit name is a valid Moth project identifier. An omitted version means unversioned; no implicit `0.1.0` exists. A starter's `"0.1.0"` input fallback is not a project-field default, and a same-named input contract does not satisfy an omitted directive argument.
 
 Only predefined fields are accepted and published through `@project`. The compiler-control diagnostic limits `max_errors_per_module` and `max_errors_per_project` are predefined but never published. Arbitrary metadata, misspellings and `metadata = ...` are errors. Reusable project constants belong in ordinary source/support packages, not an open config record.
 
-Project identity, discovery and compiler-control fields are fixed-only. Reject `$config` dependence in `name`, `entry_root`, `template_const_loop_iteration_limit`, `max_errors_per_module` and `max_errors_per_project`, including indirect dependence through helpers. An equal folded literal does not erase input provenance. Ordinary input-independent constant expressions remain valid.
+Project identity, discovery and compiler-control fields are fixed-only. Reject `$config` dependence in `name`, `template_const_loop_iteration_limit`, `max_errors_per_module` and `max_errors_per_project`, including indirect dependence through helpers. An equal folded literal does not erase input provenance. Ordinary input-independent constant expressions remain valid.
 
-`entry_root` defaults to `"src"` and obeys the containment rules under `Source indexing and source sets`. The loop limit uses one compiler-owned default and resource-bound validator, independently of source literal ranges and numeric type selection.
+There is no `entry_root`: the selected directory is both the build root and the top of the discoverable source tree. The loop limit uses one compiler-owned default and resource-bound validator, independently of source literal ranges and numeric type selection.
 
 ### Bootstrap `$config` declarations
 
@@ -117,7 +117,7 @@ Bootstrap resolution order is:
 3. The validated declaration fallback or optional absence.
 4. A required-input diagnostic.
 
-Config fallbacks may fold the permitted single-file surface and earlier helper constants. They finish as a supported primitive/optional and retain normal same-file forward-reference errors. Resolution occurs inside config compilation before settings such as `entry_root` are applied.
+Config fallbacks may fold the permitted single-file surface and earlier helper constants. They finish as a supported primitive/optional and retain normal same-file forward-reference errors. Resolution occurs inside config compilation before project settings are applied.
 
 After resolution, numeric inputs are owned as values of their exact canonical type with a lossless value, and original input provenance remains available for diagnostics and dependency tracking. Existing semantic fingerprint domains include the exact type and canonical value; they do not use raw spelling or source location as a second semantic input.
 
@@ -208,7 +208,7 @@ select command, builder, build profile and overlays
 -> construct the compiler/builder capability surface
 -> compile the config source, resolve its exact input contracts and apply folded settings
 -> publish predefined project globals and resolved config input values separately
--> derive entry_root and construct canonical source/provider graphs
+-> construct canonical source/provider graphs from the selected directory
 -> collect and validate selected-source input contracts
 -> materialise remaining CLI spellings directly to exact contract types and resolve all source inputs
 -> compile dependency-ordered waves through the module service
@@ -225,9 +225,11 @@ Structural `$feature` selection must use bootstrap-available facts and act befor
 
 ## Source indexing and source sets
 
-After config supplies `entry_root`, Stage 0 builds one canonical source index per project/package boundary. A directory project's entry root is a relative directory strictly below the project root. Reject empty paths, `.`, parent components, absolute/escaping paths and symlink resolution to the project root itself. Single-file compilation is a separate synthetic-module mode.
+Stage 0 builds one canonical source index per project/package boundary from the selected directory. A directory project's source root is the selected directory itself; there is no configurable entry directory beneath it. A nested module can be compiled independently by selecting its directory as a new root. Single-file compilation is a separate synthetic-module mode.
 
 The index inventories normal/support roots, an optional project facade, nearest ownership, supported source-kind candidates, provider-owned files, logical source/namespace identities, path collisions and deterministic order. It does not scan arbitrary `.moth` files as page entries. Root-purpose selection consumes retained facts.
+
+A directory component below the selected build root whose final filename starts with `_` is excluded from the entire compilation: normal and support roots, helpers, `.mtf`, resources, check-only inventory, providers, dependency resolution, incremental watches and other discovered inputs. The explicitly selected root is exempt for that root component only. Check both lexical components and canonical ancestry so a visible symlink alias cannot reveal a hidden physical subtree. Retain independently justified non-source skips such as `.git`, `target`, `node_modules` and `.cache`; do not skip visible `dev`, `release`, `dist` or `build` by name.
 
 Project-local packages are structural support roots or the project facade, not a configurable `package_folders` list or implicit `/lib` scan.
 
@@ -341,7 +343,7 @@ The same name may occur in disjoint scopes. Overlapping visible scopes are rejec
 
 ### Project package facade
 
-The optional project-root facade compiles as an ordinary API-only module with a special Stage 0 assembly namespace rooted at `entry_root`. It may define its own declarations and reference descendant public interfaces below that root regardless of ordinary lexical module visibility.
+The optional project-root facade currently compiles as an ordinary API-only module with a pre-Phase-3 Stage 0 assembly namespace rooted at the selected project directory. It may define its own declarations and reference descendant public interfaces below that directory regardless of ordinary lexical module visibility. The accepted direction replaces this physical facade role with the normal/support pairing owned by each rooted directory; that unification is pending and must not be treated as landed.
 
 The facade never bypasses public boundaries, is invisible to internal modules, cannot import `@project` and cannot expose prohibited project-dependent facts. Provider edges ensure its dependencies compile first. It has no root runtime activation or route.
 
@@ -497,7 +499,7 @@ A linkable `ProjectCompilation` contains the canonical structure, project global
 
 Build compiles the union required by selected artefact entries, any project package facade, transitive source providers, required Core/Builder/dependency packages and generated work. After successful compilation it performs link/target/memory validation, lowering and owned output emission.
 
-HTML application build requires at least one `$page` under `entry_root`, not necessarily a homepage. Synthetic single-file HTML output requires `$page` on that root. A package facade is not an implicit page.
+HTML application build requires at least one `$page` below the selected project directory, not necessarily a homepage. Synthetic single-file HTML output requires `$page` on that root. A package facade is not an implicit page.
 
 ### `dev`
 
@@ -509,7 +511,7 @@ Each compilation request uniquely owns its mutable worker state. A long-lived ho
 
 ### `check`
 
-Check compiles every discovered project module below `entry_root`, check-only orphan units, the project facade and required packages/generated work. A valid zero-page tree or declaration-only synthetic root is allowed. Unpurposed root runtime/output still fails.
+Check compiles every discovered project module below the selected project directory, check-only orphan units, the project facade and required packages/generated work. A valid zero-page tree or declaration-only synthetic root is allowed. Unpurposed root runtime/output still fails.
 
 Actual linkable roots receive the same selected-target and memory-plan validation as build. Check performs no backend code generation or output writing. Unsupported features in unreachable private functions impose no target failure.
 
@@ -776,7 +778,7 @@ Package unions include selected exports, resource-bearing exported folded values
 
 ### Output placement
 
-Project-local resources preserve their paths relative to `entry_root`. Source/Core/Builder/dependency package resources use an injective package prefix followed by the package-relative path. Provider-managed/generated resources use their declared stable output paths and byte sources.
+Project-local resources preserve their paths relative to the selected project directory. Source/Core/Builder/dependency package resources use an injective package prefix followed by the package-relative path. Provider-managed/generated resources use their declared stable output paths and byte sources.
 
 One encoder owns package prefixes. Injective means distinct stable package origins/names/instances cannot map to the same prefix. Consumer aliases never change output identity. A future package-instance policy must remain part of that identity rather than relying on display names.
 
@@ -802,9 +804,9 @@ Stable-origin changes follow semantic fingerprint rules. Byte-only changes inval
 
 ## Output ownership
 
-Artefact builders own output settings/defaults through their config contracts. Non-emitting builders register none. HTML defaults to `dev` and `release`, with overrides through `$html_builder`.
+Artefact builders own output settings/defaults through their config contracts. Non-emitting builders register none. HTML defaults to `_dev` and `_release`, with overrides through `$html_builder`.
 
-Output roots are relative to the project root, outside `entry_root`, free of parent traversal and contained by project output policy. The build system validates paths/conflicts, skips unchanged writes, maintains manifests and removes stale artefacts. Builders and lowerers return records rather than writing final outputs directly.
+Output roots are relative to the selected project root. A single-component output name is prefixed once with `_` when needed; a multi-component output path preserves its spelling but requires an underscore-prefixed directory component enclosing the emitted root. Normalize before containment and manifest checks. Reject absolute paths where unauthorized, parent traversal, invalid components, paths resolving to the build root and canonical or lexical source/output overlap that would expose generated content as source. Hidden output roots legitimately live inside the selected source tree. The `_` prefix grants no overwrite or delete rights: the output manifest, owner identity, managed extensions and stale-cleanup policy remain the sole ownership authorities. The build system validates paths/conflicts, skips unchanged writes, maintains manifests and removes stale artefacts. Builders and lowerers return records rather than writing final outputs directly.
 
 Manifest ownership is keyed by stable builder identity and build profile. Development and release cannot silently claim the same root. A conflicting existing owner is diagnosed before writes. One builder never deletes another manifest's files, and normal invocations have no force-overwrite escape hatch.
 

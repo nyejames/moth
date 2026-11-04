@@ -4,7 +4,7 @@
 > diagnostic representations, their lifetimes, and the boundary between user diagnostics,
 > infrastructure failures and compiler bugs.
 >
-> `docs/src/docs/progress/@page.moth` records implementation support. This document describes the
+> `docs/docs/progress/@page.moth` records implementation support. This document describes the
 > current data and ownership contracts.
 
 
@@ -33,10 +33,10 @@ It does not override:
 
 - `docs/compiler-design-overview.md` for compiler stage and semantic ownership
 - `docs/build-system-design.md` for Stage 0, graph scheduling, project tooling and host orchestration
-- `docs/src/docs/mon/mon-format.mtf` for MON literal-data format semantics
-- `docs/src/developer-docs/language/overview.mtf` and its selected canonical references for source-language behaviour
+- `docs/docs/mon/mon-format.mtf` for MON literal-data format semantics
+- `docs/developer-docs/language/overview.mtf` and its selected canonical references for source-language behaviour
 - the memory-management authorities for Moth program semantics
-- `docs/src/docs/progress/@page.moth` for current implementation status
+- `docs/docs/progress/@page.moth` for current implementation status
 - `docs/roadmap/roadmap.md` for sequencing and deferred work
 
 Update every shared boundary in both owning authorities in the same change. This document sets
@@ -1360,7 +1360,7 @@ type aliases. Shared `moth-lexical` materialises directly to the selected
 receiver without a second parser or binary-float intermediate. The buffer's
 decoded-byte accounting appears below. Compiler diagnostic storage keeps its
 compact architecture, and MON never becomes source compilation.
-`docs/src/docs/mon/mon-format.mtf` owns the literal-data format.
+`docs/docs/mon/mon-format.mtf` owns the literal-data format.
 
 ### Caller-owned input snapshot and cursor lifetime
 

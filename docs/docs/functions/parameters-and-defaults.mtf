@@ -24,7 +24,7 @@ or parameter capability contract.
 `Wire of T` and the zero/one-input `Route of ...` forms are separate parameter
 contracts, not ordinary wrapper types or mutable access modes. They have no
 defaults and `$` supplies no parameter mode. Their exact receiving and forwarding
-rules belong to the @https://github.com/nyejames/moth/blob/main/docs/src/docs/wiring/wiring.mtf (Wiring reference).
+rules belong to the @https://github.com/nyejames/moth/blob/main/docs/docs/wiring/wiring.mtf (Wiring reference).
 
 Directive calls share the ordinary argument parser and slot routing. Ordinary `f()`
 remains valid. Only directive syntax rejects an authored empty `()`.

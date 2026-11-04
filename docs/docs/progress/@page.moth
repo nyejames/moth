@@ -50,7 +50,7 @@ init_docs_sidebar()!
 
     - Keep rows focused on current compiler, core build-system and backend behavior.
     - Put package and project-builder status in @./packages-and-builders (Packages and Builders Progress).
-    - Put user-facing explanations and examples in docs pages under `docs/src/docs/**`.
+    - Put user-facing explanations and examples in docs pages under `docs/docs/**`.
     - Put implementation sequencing, active project plans and proposals that have
       not been accepted as design in `docs/roadmap/roadmap.md`.
     - Put accepted end-state architecture in the relevant compiler, memory or
@@ -395,7 +395,7 @@ init_docs_sidebar()!
             [: Deferred]
             [: None]
             [: Backend-neutral design]
-            [: Accepted design only. Retained Edge Counting is a compiler-selected physical representation for runtime-many persistent retained edges, never source semantics. The canonical contract lives under `docs/src/developer-docs/memory-management/retained-edge-counting/`. Complete when the companion analysis and its decision reporting are implemented.]
+            [: Accepted design only. Retained Edge Counting is a compiler-selected physical representation for runtime-many persistent retained edges, never source semantics. The canonical contract lives under `docs/developer-docs/memory-management/retained-edge-counting/`. Complete when the companion analysis and its decision reporting are implemented.]
         ]
 
         [data:
@@ -543,6 +543,14 @@ init_docs_sidebar()!
         ]
 
         [data:
+            [: Selected-directory project root]
+            [: Supported]
+            [$md: Directory commands compile the selected directory as build and source root. Missing [$html:<code>config.moth</code>] applies validated builder defaults and a directory-derived name. Hidden [$html:<code>_</code>] source components are excluded with lexical and canonical symlink checks. Directory outputs default to [$html:<code>_dev</code>] and [$html:<code>_release</code>] and are hidden from source discovery. Scaffolds emit a root-level [$html:<code>@page.moth</code>] and a minimal explicit config.]
+            [: Build system / CLI]
+            [: Paired normal/support roots and facade unification remain Phase 3 work. See @../project-structure (Project structure).]
+        ]
+
+        [data:
             [: General non-template directives]
             [: Deferred]
             [: None]
@@ -563,7 +571,7 @@ init_docs_sidebar()!
             [: Deferred]
             [: None]
             [: Frontend / build system]
-            [$md: Accepted queued design. Closed six-parameter signature with required String [$html:<code>name</code>] and required String [$html:<code>version</code>]. No default version, arbitrary fields or [$html:<code>metadata</code>] argument. HTML [$html:<code>$html_builder</code>] status lives in @./packages-and-builders (Packages and Builders).]
+            [$md: Accepted queued design. Closed predefined signature with optional String name (directory-name default) and optional version. No entry_root, arbitrary fields or metadata argument. HTML $html_builder status lives in @./packages-and-builders (Packages and Builders).]
         ]
 
         [data:
@@ -851,7 +859,7 @@ init_docs_sidebar()!
       not been accepted as design to `docs/roadmap/roadmap.md`.
     - Move accepted end-state architecture to the canonical compiler, memory or
       language design reference, even when implementation is incomplete.
-    - Move syntax examples and beginner explanations to docs pages under `docs/src/docs/**`.
+    - Move syntax examples and beginner explanations to docs pages under `docs/docs/**`.
     - Move compiler architecture details to `docs/compiler-design-overview.md`.
     - Keep this page focused on core language/compiler support, partial implementation, target gating, experimental backends and accepted deferred implementation. Put open design questions and outside-scope features in @../design-scope (Design scope).
 ]

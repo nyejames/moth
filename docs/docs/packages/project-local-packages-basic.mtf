@@ -3,11 +3,10 @@ Scoped support packages are `+*.moth` roots in the project source tree. The cont
 ### A simple support package
 
 [codeblock, $code("text"):
-    src/
-    ├── @site.moth
-    └── blog/
-        ├── +package.moth
-        └── helpers/dates.moth
+    @site.moth
+    blog/
+    ├── +package.moth
+    └── helpers/dates.moth
 ]
 
 `+package.moth` makes `@blog` a scoped support package visible to `@site` and its sibling modules.

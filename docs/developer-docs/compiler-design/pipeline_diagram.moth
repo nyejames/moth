@@ -1,4 +1,4 @@
--- Example composition for docs/src/developer-docs/compiler-design/@page.moth.
+-- Example composition for docs/developer-docs/compiler-design/@page.moth.
 -- The reusable layout and styling come from @diagrams.
 
 @diagrams diagram,

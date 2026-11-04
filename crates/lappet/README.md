@@ -13,7 +13,7 @@ public execution API or package-installation command.
 - [Package management](docs/package-manager.md) defines package eligibility,
   dependency assessment and the future fail-closed admission workflow.
 - [Roadmap](roadmap.md) tracks delivery and the design checkpoints that block it.
-- [Wasm optimisation](../../docs/src/developer-docs/wasm-optimisation/overview.mtf)
+- [Wasm optimisation](../../docs/developer-docs/wasm-optimisation/overview.mtf)
   routes to the shared compiler/runtime optimisation authority.
 
 Develop Lappet in its own isolated worktree. Its roadmap runs independently of

@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-- **Status:** accepted design, queued for implementation. The behavior specified here is not a claim about current compiler support.
+- **Status:** accepted design; selected-directory roots, optional config, hidden source exclusion, hidden outputs and scaffold migration are implemented. Paired normal/support roots and facade unification remain Phase 3 work.
 - **Goal:** compile a selected directory directly, with optional configuration, structural modules that may have separate `@` and `+` interfaces, mechanically excluded `_` directories and safe hidden output roots.
 - **Implementation owners:** the existing Stage 0 source index, module identity and graph, module namespaces, compiler semantic compilation, config boundary and build-owned output policy.
 - **Follow-ups:** a separate compiler-owned directive/configuration plan and a separate HTML `$entry` migration. Neither directive change belongs in this implementation.
@@ -20,7 +20,7 @@ This plan supersedes the conflicting project-root, `entry_root`, root-count and 
 
 ## Authorities and preparation
 
-Read the active worktree's `AGENTS.md`, `docs/src/developer-docs/style-guide/style-guide.mtf`, its testing and validation companions, the Moth cheatsheet and `moth-code-review-guide.md`. Read `docs/compiler-design-overview.md` and `docs/build-system-design.md` in full because this changes Stage 0, public-interface identity, scheduling and build ownership. Follow the routed references in those authorities, including `docs/compiler-data-layout-design.md` and the project structure, module visibility, package, path and resource reference pages. Read the accepted project/package and HTML entry plans where their contracts meet this change. Use `index.md` only for navigation.
+Read the active worktree's `AGENTS.md`, `docs/developer-docs/style-guide/style-guide.mtf`, its testing and validation companions, the Moth cheatsheet and `moth-code-review-guide.md`. Read `docs/compiler-design-overview.md` and `docs/build-system-design.md` in full because this changes Stage 0, public-interface identity, scheduling and build ownership. Follow the routed references in those authorities, including `docs/compiler-data-layout-design.md` and the project structure, module visibility, package, path and resource reference pages. Read the accepted project/package and HTML entry plans where their contracts meet this change. Use `index.md` only for navigation.
 
 Start from the active `main` commit in a dedicated branch/worktree. Record the revision and run the applicable baseline tests before moving source layouts. Check existing first-party projects, package registries, the HTML builder, CLI scaffold and incremental rebuild behavior. The repository paths under **Implementation anchors** below were checked against `main` during plan review and must be rechecked if they move.
 

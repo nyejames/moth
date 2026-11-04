@@ -1,39 +1,27 @@
-**Current support versus accepted design.** Today `config.moth` uses declaration-owned `#Config of T` inputs with parenthesised grouped `project` and `html` records. `$project`, `$html_builder` and a required `version` argument are accepted queued design. `moth new` does not yet emit them. See @../progress (Progress).
+**Current support versus accepted design.** Today `config.moth` uses declaration-owned `#Config of T` inputs with parenthesised grouped `project` and `html` records. `$project` and `$html_builder` are accepted queued design. `moth new` does not yet emit them. See @../progress (Progress).
 
-`config.moth` at the project root controls build settings. It is one self-contained compile-time source file with no source dependencies.
+`config.moth` at the selected project root is optional and controls build settings. It is one self-contained compile-time source file with no source dependencies. A nested `config.moth` is inert.
 
 ### Accepted starter
 
 [codeblock, $code("moth"):
-    $config
-    version #String = "0.1.0"
-
     $project(
         name = "my_site",
-        version = version,
-        entry_root = "src",
     )
 
     $html_builder
 ]
 
-`version` is required on `$project`. The `"0.1.0"` default belongs to the example `$config` contract, not to `$project`. Passing `version = version` is explicit; the name match alone is not enough.
-
-`$html_builder` configures the already selected HTML builder. Bare `$html_builder` uses defaults. Empty parentheses are invalid.
+Version is optional. An omitted name uses the selected directory name and must be a valid Moth project identifier. There is no `entry_root`; the selected directory is the source root.
 
 ### Current grouped config in brief
 
 [codeblock, $code("moth"):
-    version #Config of String = "0.1.0"
-
     project #= (
-        name = "my_project",
-        version = version,
-        entry_root = "src",
+        name = "my_site",
     )
 
-    html #= (
-        dev_output = "dev",
-        release_output = "release",
-    )
+    html #= ()
 ]
+
+The `project` record may omit `name`, `version`, or both. The `html` section supplies the active builder settings and defaults to `_dev` and `_release` outputs. Retired flat keys and `entry_root` are rejected.

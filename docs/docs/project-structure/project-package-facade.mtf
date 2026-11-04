@@ -18,9 +18,14 @@ structs, choices, type aliases, traits and compile-time constants.
 
 ### Special assembly namespace
 
-Stage 0 gives the facade a special assembly namespace rooted at `entry_root`.
-Through that namespace it may reference the public interfaces of descendant
-modules below `entry_root`, regardless of ordinary lexical module visibility.
+Stage 0 gives the facade a special assembly namespace rooted at the selected
+project directory. Through that namespace it may reference the public
+interfaces of descendant modules below the selected directory, regardless of
+ordinary lexical module visibility.
+
+This physical facade role is the pre-Phase-3 model. The accepted direction
+replaces it with the normal/support pairing owned by each rooted directory. That
+unification is pending and is not implemented at this checkpoint.
 
 ### Facade restrictions
 

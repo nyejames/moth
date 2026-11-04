@@ -5,10 +5,10 @@
 | Owner | Holds |
 |---|---|
 | This README | Package direction and deferred extensions |
-| `docs/src/docs/packages/builder/` | Accepted public API and semantics |
+| `docs/docs/packages/builder/` | Accepted public API and semantics |
 | Packages and builders progress matrix | Current implementation status and accepted next gaps |
 | `docs/compiler-design-overview.md`, `docs/build-system-design.md` | Cross-package compiler and build architecture |
-| `docs/src/docs/packages/external-binding-contracts.mtf` | Annotated JavaScript binding contract |
+| `docs/docs/packages/external-binding-contracts.mtf` | Annotated JavaScript binding contract |
 
 ## V1 API
 
