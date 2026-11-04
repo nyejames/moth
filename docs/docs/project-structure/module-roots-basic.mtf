@@ -1,13 +1,16 @@
 **Current versus accepted.** The Alpha builder still finds HTML entries from root activity. The accepted design uses a root-only `$page` declaration. Current `export:` blocks are implemented; later `$export` migration remains deferred.
 
-Each source directory can contain one module root. A normal module uses an
-`@*.moth` root, while an API-only support package uses a `+*.moth` root.
+Each source directory forms at most one structural module. A normal module
+uses an `@*.moth` root, while an API-only support package uses a `+*.moth` root. A
+directory may contain one root of each role, forming one paired module with a
+normal interface and a separately published support interface.
 
-### One root per folder
+### One root per role
 
 The filename after `@` or `+` does not matter. `@page.moth`, `@mod.moth` and
 `@api.moth` all create the same normal-root role. One directory cannot contain
-two roots or mix an `@*.moth` root with a `+*.moth` root.
+two roots of the same role. A normal root and a support root may coexist, but
+they must resolve to distinct physical source files owned by that module.
 
 ### Bind the module, not the root file
 

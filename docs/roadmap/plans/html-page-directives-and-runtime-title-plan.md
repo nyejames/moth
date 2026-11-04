@@ -117,7 +117,7 @@ Purpose is distinct from ordinary metadata. A future deprecation or documentatio
 
 ## 3. Preserve module and route structure
 
-Only normal module-root files can declare application pages. Preserve the existing one-root-per-directory rule. The suffix of `@page.moth`, `@site.moth` or another normal-root filename remains cosmetic.
+Only normal module-root files can declare application pages. Preserve the existing one-structural-module-per-directory rule. The suffix of `@page.moth`, `@site.moth` or another normal-root filename remains cosmetic.
 
 Each example below produces its output only when its root declares `$page`:
 

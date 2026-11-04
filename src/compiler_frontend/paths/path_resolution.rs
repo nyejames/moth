@@ -158,7 +158,10 @@ impl ProjectPathResolver {
         })
     }
 
-    /// Returns each source-backed package's unique normal-root file as its public surface.
+    /// Returns each source-backed package's selected public-root file as its public surface.
+    ///
+    /// A support root is the external surface when the package is paired or support-only;
+    /// otherwise the normal root is selected.
     pub(crate) fn source_package_public_surface_files(
         &self,
     ) -> impl Iterator<Item = (&String, &PathBuf)> {

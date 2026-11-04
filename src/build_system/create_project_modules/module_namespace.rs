@@ -865,6 +865,8 @@ fn populate_cross_module_targets(
     }
 
     for support_id in identities.module_ids() {
+        // The shared visibility predicate excludes self, but keep this local guard so namespace
+        // construction can never expose a module's own support surface to itself.
         if support_id == module_id {
             continue;
         }

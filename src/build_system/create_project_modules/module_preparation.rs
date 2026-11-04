@@ -656,9 +656,10 @@ impl ModulePreparationContext<'_> {
         // module prefix and merge back in canonical chunk order after the string delta.
         let path_fork_source = path_fork.fork_source();
 
-        // Offsets are only relevant for the active module root, and there is exactly one root per
-        // module. Imported and ordinary files produce zero const templates and runtime fragments, so
-        // every file can safely start from offset zero without name collisions.
+        // Offsets are only relevant for the active module root files, and a structural module
+        // has at most one normal and one support root. Imported and ordinary files produce zero
+        // const templates and runtime fragments, so every file can safely start from offset zero
+        // without name collisions.
         let const_template_offset = 0usize;
         let runtime_fragment_offset = 0usize;
 

@@ -25,7 +25,7 @@ Not every `@` clause makes an edge between modules, though. In the running examp
             [$insert("href"): ./]
             [$insert("eyebrow"): One directory]
             [$insert("title"): Project root rooted by @page.moth]
-            A directory has at most one root. That root defines one compilation and visibility unit.
+            A directory forms at most one structural module. Its one normal root or one normal/support root pair defines one compilation and visibility unit.
         ]
 
         [$insert("details"):
@@ -131,7 +131,7 @@ Determinism lets parallel compilation merge results in canonical order. Diagnost
 
 - **Accepted design:** canonical graph, provider-first waves and immutable module compilation once per boundary.
 - **Current implementation:** canonical module compilation and scoped packages already landed. The progress matrix rows for project config and project-local packages carry the remaining partial coverage.
-- **Queued work:** `html-page-directives-and-runtime-title-plan.md` adds root-purpose validation and explicit page selection without changing the one-root-per-directory graph.
+- **Queued work:** `html-page-directives-and-runtime-title-plan.md` adds root-purpose validation and explicit page selection without changing the one-structural-module-per-directory graph.
 - **Deferred or outside scope:** old flat module handoff and default package-folder scanning as the primary model.
 
 ## Exit state

@@ -15,9 +15,19 @@ A non-config file whose name starts with `@` and ends with `.moth` is the module
 
 The compiler treats each spelling as the root for its directory. The HTML route comes from the directory position, not from the root filename. After the page cutover, a root declares an HTML artefact only with a root-only `$page` directive.
 
-### One root per directory
+### One structural module per directory
 
-A source directory may contain at most one non-config `@*.moth` file. Two or more normal module-root files in one directory are rejected with `MOTH-CONFIG-0001`. The explicitly selected synthetic single-file root forms its own module and follows the single-file page rule.
+A source directory forms at most one structural module. It may contain at most one non-config
+`@*.moth` normal root and at most one non-config `+*.moth` support root. A directory with both is
+one paired module with two separately published interfaces: the normal interface and the support
+interface. Two roots for the same role in one directory are rejected with `MOTH-CONFIG-0001`.
+
+An authored root marker may be a symlink, but every root must resolve to a distinct physical
+source file owned by its module. Two root markers may not alias one file, and a root may not
+resolve into another structural module.
+
+The explicitly selected synthetic single-file root forms its own module and follows the
+single-file page rule.
 
 ### Config files are not module roots
 

@@ -488,6 +488,8 @@ unit_code! {
         InvalidOutputFolderVisiblePathWithoutFolder = 87,
         InvalidOutputFolderVisiblePathWithFolder = 88,
         InvalidArtefactOutputPathVisiblePath = 89,
+        AliasedModuleRootFiles = 90,
+        ModuleRootFileOutsideClaimingModule = 91,
     }
 }
 
@@ -560,6 +562,10 @@ impl InvalidConfigCode {
             }
             InvalidConfigReason::NoRootModuleEntries { .. } => Self::NoRootModuleEntries,
             InvalidConfigReason::MultipleModuleRootFiles { .. } => Self::MultipleModuleRootFiles,
+            InvalidConfigReason::AliasedModuleRootFiles { .. } => Self::AliasedModuleRootFiles,
+            InvalidConfigReason::ModuleRootFileOutsideClaimingModule { .. } => {
+                Self::ModuleRootFileOutsideClaimingModule
+            }
             InvalidConfigReason::ConfigImportUnsupported => Self::ConfigImportUnsupported,
             InvalidConfigReason::FileValuePathUnsupported => Self::FileValuePathUnsupported,
             InvalidConfigReason::SourceFileFolderCollision { .. } => {
@@ -987,6 +993,16 @@ fn invalid_config_string_ids(
             strings.push(*directory);
             strings.extend(candidates.iter().copied());
         }
+        InvalidConfigReason::AliasedModuleRootFiles {
+            first_root,
+            second_root,
+            target,
+        } => strings.extend([*first_root, *second_root, *target]),
+        InvalidConfigReason::ModuleRootFileOutsideClaimingModule {
+            root_file,
+            claiming_directory,
+            target,
+        } => strings.extend([*root_file, *claiming_directory, *target]),
         InvalidConfigReason::SourceFileFolderCollision {
             file_name,
             folder_name,
@@ -1280,6 +1296,18 @@ pub(crate) fn decode_invalid_config(
             InvalidConfigReason::MultipleModuleRootFiles {
                 directory: strings.take()?,
                 candidates: strings.take_remaining(),
+            }
+        }
+        InvalidConfigCode::AliasedModuleRootFiles => InvalidConfigReason::AliasedModuleRootFiles {
+            first_root: strings.take()?,
+            second_root: strings.take()?,
+            target: strings.take()?,
+        },
+        InvalidConfigCode::ModuleRootFileOutsideClaimingModule => {
+            InvalidConfigReason::ModuleRootFileOutsideClaimingModule {
+                root_file: strings.take()?,
+                claiming_directory: strings.take()?,
+                target: strings.take()?,
             }
         }
         InvalidConfigCode::ConfigImportUnsupported => {

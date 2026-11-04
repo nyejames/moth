@@ -169,6 +169,8 @@ define_stable_reason_keys! {
         &InvalidConfigCode::SourcePackageMultipleRoots => "invalid_config.source_package_multiple_roots",
         &InvalidConfigCode::NoRootModuleEntries => "invalid_config.no_root_module_entries",
         &InvalidConfigCode::MultipleModuleRootFiles => "invalid_config.multiple_module_root_files",
+        &InvalidConfigCode::AliasedModuleRootFiles => "invalid_config.aliased_module_root_files",
+        &InvalidConfigCode::ModuleRootFileOutsideClaimingModule => "invalid_config.module_root_file_outside_claiming_module",
         &InvalidConfigCode::ConfigImportUnsupported => "invalid_config.config_import_unsupported",
         &InvalidConfigCode::FileValuePathUnsupported => "invalid_config.file_value_path_unsupported",
         &InvalidConfigCode::SourceFileFolderCollision => "invalid_config.source_file_folder_collision",

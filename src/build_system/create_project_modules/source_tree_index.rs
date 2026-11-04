@@ -188,8 +188,27 @@ struct DiscoveredDirectoryRoot {
 /// The optional normal and support surfaces discovered in one rooted directory.
 #[derive(Default)]
 struct ClassifiedDirectoryRoots {
+    normal_root: Option<DiscoveredDirectoryRoot>,
+    support_root: Option<DiscoveredDirectoryRoot>,
+}
+
+/// One canonical root-file claim discovered before structural module identities are built.
+///
+/// Canonical paths decide physical identity, while both authored and canonical spellings remain
+/// available for diagnostics. Claims are collected before source IDs exist so a file can be
+/// rejected when two modules claim it or when it resolves outside the module that roots it.
+struct DiscoveredModuleRootClaim {
+    directory: PathBuf,
+    root_file: PathBuf,
+    visible_root_file: PathBuf,
+}
+
+/// One rooted directory discovered before its structural identity record is constructed.
+struct DiscoveredModuleRecord {
+    directory: PathBuf,
     normal_root_file: Option<PathBuf>,
     support_root_file: Option<PathBuf>,
+    logical_module_path: PathBuf,
 }
 
 /// One recognized source candidate discovered by the Stage 0 traversal, before ownership
@@ -578,6 +597,8 @@ impl SourceTreeIndex {
         let mut queue = VecDeque::from([entry_root.clone()]);
         let mut visited_directories = BTreeSet::new();
         let mut records = Vec::new();
+        let mut root_claims = Vec::new();
+        let mut root_claim_by_canonical = FxHashMap::<PathBuf, usize>::default();
         let mut recognized_candidates: Vec<DiscoveredSourceCandidate> = Vec::new();
 
         while let Some(directory) = queue.pop_front() {
@@ -877,10 +898,10 @@ impl SourceTreeIndex {
                 }
             }
 
-            // Package boundaries require exactly one root at the package root directory and
-            // report package-specific missing/multiple-root diagnostics there. Every other
-            // directory (and all project-boundary directories) uses the shared one-root-per-
-            // directory classification with its mixed/multiple-root diagnostic.
+            // Package boundaries require a root at the package root directory and report
+            // package-specific missing/multiple-root diagnostics there. Every other directory
+            // (and all project-boundary directories) uses the shared per-directory classifier,
+            // which accepts one normal and one support surface per structural module.
             let directory_root = match kind {
                 SourceTreeBoundaryKind::Package { package_prefix } if directory == entry_root => {
                     classify_package_root_directory(
@@ -894,29 +915,57 @@ impl SourceTreeIndex {
                     classify_directory_root(&directory, &mut directory_roots, string_table)?
                 }
             };
-            let has_any_root = directory_root.normal_root_file.is_some()
-                || directory_root.support_root_file.is_some();
+            let ClassifiedDirectoryRoots {
+                normal_root,
+                support_root,
+            } = directory_root;
+            let has_any_root = normal_root.is_some() || support_root.is_some();
             if has_any_root {
+                for root in [normal_root.as_ref(), support_root.as_ref()]
+                    .into_iter()
+                    .flatten()
+                {
+                    register_module_root_claim(
+                        &mut root_claims,
+                        &mut root_claim_by_canonical,
+                        &directory,
+                        root,
+                        string_table,
+                    )?;
+                }
+
                 // WHY: `directory` is canonical (canonicalized when popped), so it is the record's
                 // identity; re-canonicalizing would repeat the same syscall for the same answer.
                 let logical_module_path = logical_module_path_from(&directory, &entry_root)?;
 
                 stats.module_roots_found += 1;
-                records.push(ModuleIdentityRecord::new(
+                records.push(DiscoveredModuleRecord {
                     directory,
-                    directory_root.normal_root_file,
-                    directory_root.support_root_file,
+                    normal_root_file: normal_root.map(|root| root.root_file),
+                    support_root_file: support_root.map(|root| root.root_file),
                     logical_module_path,
-                    &boundary_package,
-                )?);
+                });
             }
 
             subdirectories.sort();
             queue.extend(subdirectories);
         }
 
+        validate_module_root_claims(&root_claims, string_table)?;
         record_discovery_metrics(&stats);
 
+        let records = records
+            .into_iter()
+            .map(|record| {
+                ModuleIdentityRecord::new(
+                    record.directory,
+                    record.normal_root_file,
+                    record.support_root_file,
+                    record.logical_module_path,
+                    &boundary_package,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let module_identities = ModuleIdentityTable::from_records(records);
         let module_roots = module_identities.derive_module_root_table();
         let module_count = module_identities.module_ids().count();
@@ -1207,9 +1256,107 @@ fn classify_directory_root(
     }
 
     Ok(ClassifiedDirectoryRoots {
-        normal_root_file: normal.pop().map(|root| root.root_file),
-        support_root_file: support.pop().map(|root| root.root_file),
+        normal_root: normal.pop(),
+        support_root: support.pop(),
     })
+}
+
+/// Record one canonical root-file claim and reject a second structural module claiming it.
+///
+/// The check runs during traversal, before any module identity or source identity is built. A
+/// visible root marker and its canonical target are one claim; only a second authored root marker
+/// resolving to the same file conflicts.
+fn register_module_root_claim(
+    claims: &mut Vec<DiscoveredModuleRootClaim>,
+    claim_by_canonical: &mut FxHashMap<PathBuf, usize>,
+    directory: &Path,
+    root: &DiscoveredDirectoryRoot,
+    string_table: &mut StringTable,
+) -> Result<(), PreparedFailure> {
+    if let Some(previous_index) = claim_by_canonical.get(&root.root_file).copied() {
+        let previous = &claims[previous_index];
+        return Err(aliased_module_root_files_error(
+            &previous.visible_root_file,
+            &root.visible_root_file,
+            &root.root_file,
+            string_table,
+        ));
+    }
+
+    claim_by_canonical.insert(root.root_file.clone(), claims.len());
+    claims.push(DiscoveredModuleRootClaim {
+        directory: directory.to_path_buf(),
+        root_file: root.root_file.clone(),
+        visible_root_file: root.visible_root_file.clone(),
+    });
+    Ok(())
+}
+
+/// Reject a root file that resolves outside the structural module it roots.
+///
+/// A root symlink may point at an ordinary source file in the same module, including an unrooted
+/// subdirectory. It may not point into another structural module or an unrooted part of the entry
+/// root, because Stage 0 would then assign the file to a different owner and the claiming module
+/// would have no root source.
+fn validate_module_root_claims(
+    claims: &[DiscoveredModuleRootClaim],
+    string_table: &mut StringTable,
+) -> Result<(), PreparedFailure> {
+    for claim in claims {
+        let Some(canonical_parent) = claim.root_file.parent() else {
+            return Err(module_root_outside_claim_error(claim, string_table));
+        };
+        let owner = claims
+            .iter()
+            .map(|candidate| candidate.directory.as_path())
+            .filter(|directory| canonical_parent.starts_with(directory))
+            .max_by_key(|directory| directory.components().count());
+        if owner != Some(claim.directory.as_path()) {
+            return Err(module_root_outside_claim_error(claim, string_table));
+        }
+    }
+    Ok(())
+}
+
+fn aliased_module_root_files_error(
+    first_root: &Path,
+    second_root: &Path,
+    target: &Path,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let diagnostic = project_structure_diagnostic(InvalidConfigReason::AliasedModuleRootFiles {
+        first_root: path_id(first_root, &mut diagnostic_strings),
+        second_root: path_id(second_root, &mut diagnostic_strings),
+        target: path_id(target, &mut diagnostic_strings),
+    });
+    let table = string_table.take_for_handoff();
+    PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        table,
+        None,
+        None,
+    ))
+}
+
+fn module_root_outside_claim_error(
+    claim: &DiscoveredModuleRootClaim,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let diagnostic =
+        project_structure_diagnostic(InvalidConfigReason::ModuleRootFileOutsideClaimingModule {
+            root_file: path_id(&claim.visible_root_file, &mut diagnostic_strings),
+            claiming_directory: path_id(&claim.directory, &mut diagnostic_strings),
+            target: path_id(&claim.root_file, &mut diagnostic_strings),
+        });
+    let table = string_table.take_for_handoff();
+    PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        table,
+        None,
+        None,
+    ))
 }
 
 /// Reject one physical source file reached through both structural root markers.

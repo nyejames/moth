@@ -576,8 +576,8 @@ impl CompiledSourcePackage {
     /// Validate package identity and root ownership before registry publication.
     ///
     /// WHAT: proves the root `ModuleId` is in range, the root node belongs to this package's
-    ///       stable identity, the root role is a normal API-compatible package entry root, the
-    ///       root reached a final outcome, and a successful root interface agrees with the graph
+    ///       stable identity, the root role is the selected public package surface role, the root
+    ///       reached a final outcome, and a successful root interface agrees with the graph
     ///       node's origin. The boundary must already be finished (or be validated by this call
     ///       through the embedded boundary proof).
     /// WHY: `CompletedSourcePackageRegistry::publish` mutates registry state, so the package

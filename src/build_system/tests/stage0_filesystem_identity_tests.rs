@@ -965,48 +965,64 @@ mod module_identity_tests {
         discover_result(root, entry_root_relative).expect("source tree index should build")
     }
 
-    fn assert_aliased_roots_rejected(
+    fn assert_root_ownership_rejected(
         failure: PreparedFailure,
-        expected_normal_root: &Path,
-        expected_support_root: &Path,
+        expected_code: crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidConfigCode,
+        expected_paths: &[&Path],
     ) {
-        use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
-            InvalidConfigCode, InvalidConfigView,
-        };
+        use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidConfigView;
 
         let reports = prepared_failure_reports(failure);
         let (report, diagnostic) = reports
             .iter_severity(DiagnosticSeverity::Error)
             .next()
-            .expect("aliased roots should retain a diagnostic");
+            .expect("root ownership conflicts should retain a diagnostic");
         let facts = diagnostic
             .family_view::<InvalidConfigView>()
-            .expect("aliased roots should retain typed config facts");
-        assert_eq!(facts.reason, InvalidConfigCode::MultipleModuleRootFiles);
+            .expect("root ownership conflicts should retain typed config facts");
+        assert_eq!(facts.reason, expected_code);
         let strings = report.context().strings();
         let rendered = diagnostic
             .string_ids()
             .iter()
             .map(|id| strings.resolve(*id))
             .collect::<Vec<_>>();
-        for expected in [expected_normal_root, expected_support_root] {
-            let expected = fs::canonicalize(
-                expected
-                    .parent()
-                    .expect("an authored root should have a parent"),
-            )
-            .expect("the authored root's parent should canonicalize")
-            .join(
-                expected
-                    .file_name()
-                    .expect("an authored root should have a file name"),
-            );
+        for expected in expected_paths {
+            let expected = if expected.is_dir() {
+                fs::canonicalize(expected).expect("expected directory should canonicalize")
+            } else {
+                fs::canonicalize(
+                    expected
+                        .parent()
+                        .expect("expected path should have a parent"),
+                )
+                .expect("expected path's parent should canonicalize")
+                .join(
+                    expected
+                        .file_name()
+                        .expect("expected path should have a file name"),
+                )
+            };
             let expected = expected.display().to_string();
             assert!(
                 rendered.iter().any(|candidate| *candidate == expected),
-                "diagnostic must name authored root {expected}: {rendered:?}"
+                "diagnostic must name {expected}: {rendered:?}"
             );
         }
+    }
+
+    fn assert_aliased_roots_rejected(
+        failure: PreparedFailure,
+        expected_normal_root: &Path,
+        expected_support_root: &Path,
+    ) {
+        use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidConfigCode;
+
+        assert_root_ownership_rejected(
+            failure,
+            InvalidConfigCode::MultipleModuleRootFiles,
+            &[expected_normal_root, expected_support_root],
+        );
     }
 
     #[cfg(unix)]
@@ -1047,6 +1063,108 @@ mod module_identity_tests {
         let failure = discover_result(&root, "src")
             .expect_err("a support alias to the normal root must be rejected");
         assert_aliased_roots_rejected(failure, &normal_root, &support_root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn normal_roots_in_different_directories_cannot_alias_one_source() {
+        use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidConfigCode;
+        use std::os::unix::fs::symlink;
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(src.join("child")).expect("should create child directory");
+        let site_root = src.join("@site.moth");
+        let child_root = src.join("child/@child.moth");
+        fs::write(&site_root, "").expect("should write site root");
+        symlink(&site_root, &child_root).expect("should create child root symlink");
+
+        let failure = discover_result(&root, "src")
+            .expect_err("two structural modules must not claim one physical root file");
+        assert_root_ownership_rejected(
+            failure,
+            InvalidConfigCode::AliasedModuleRootFiles,
+            &[&site_root, &child_root],
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn support_and_normal_roots_in_different_directories_cannot_alias_one_source() {
+        use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidConfigCode;
+        use std::os::unix::fs::symlink;
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(src.join("child")).expect("should create child directory");
+        let site_root = src.join("@site.moth");
+        let child_support_root = src.join("child/+package.moth");
+        fs::write(&site_root, "").expect("should write site root");
+        symlink(&site_root, &child_support_root).expect("should create support root symlink");
+
+        let failure = discover_result(&root, "src")
+            .expect_err("a normal root cannot be claimed by another module's support root");
+        assert_root_ownership_rejected(
+            failure,
+            InvalidConfigCode::AliasedModuleRootFiles,
+            &[&site_root, &child_support_root],
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn two_root_aliases_to_one_ordinary_source_are_rejected() {
+        use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidConfigCode;
+        use std::os::unix::fs::symlink;
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(src.join("alpha")).expect("should create alpha");
+        fs::create_dir_all(src.join("beta")).expect("should create beta");
+        let target = src.join("ordinary.moth");
+        let alpha_root = src.join("alpha/@alpha.moth");
+        let beta_root = src.join("beta/@beta.moth");
+        fs::write(&target, "").expect("should write ordinary target");
+        symlink(&target, &alpha_root).expect("should create alpha root symlink");
+        symlink(&target, &beta_root).expect("should create beta root symlink");
+
+        let failure = discover_result(&root, "src")
+            .expect_err("one ordinary source cannot back two module roots");
+        assert_root_ownership_rejected(
+            failure,
+            InvalidConfigCode::AliasedModuleRootFiles,
+            &[&alpha_root, &beta_root],
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn root_symlink_into_another_modules_private_source_is_rejected() {
+        use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidConfigCode;
+        use std::os::unix::fs::symlink;
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(src.join("private")).expect("should create private module");
+        fs::create_dir_all(src.join("child")).expect("should create child directory");
+        fs::write(src.join("@site.moth"), "").expect("should write site root");
+        fs::write(src.join("private/@private.moth"), "").expect("should write private root");
+        let private_source = src.join("private/source.moth");
+        fs::write(&private_source, "").expect("should write private source");
+        let child_root = src.join("child/@child.moth");
+        symlink(&private_source, &child_root).expect("should create child root symlink");
+
+        let failure = discover_result(&root, "src")
+            .expect_err("a root cannot resolve into another module's private source");
+        assert_root_ownership_rejected(
+            failure,
+            InvalidConfigCode::ModuleRootFileOutsideClaimingModule,
+            &[&child_root, &src.join("child"), &private_source],
+        );
     }
 
     #[cfg(unix)]
@@ -3191,6 +3309,68 @@ mod project_module_graph_tests {
         assert!(
             !graph.is_support_visible_to_consumer(parser_id, support_id),
             "querying visibility for a non-support module returns false"
+        );
+    }
+
+    #[test]
+    fn paired_support_visibility_excludes_self_in_graph_and_identity_table() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(src.join("pages/peer")).expect("should create pages peer");
+        fs::write(src.join("@site.moth"), "").expect("should write site root");
+        fs::write(src.join("pages/@pages.moth"), "").expect("should write pages normal root");
+        fs::write(src.join("pages/+package.moth"), "").expect("should write pages support root");
+        fs::write(src.join("pages/peer/+peer.moth"), "").expect("should write peer support root");
+
+        let (index, _project_root, _entry_root) = discover_index(&root, "src");
+        let graph = ProjectModuleGraph::from_source_tree_index(&index);
+        let identities = index.module_identities();
+        let paired_id = module_id_for(&index, ModuleRootRole::Normal, "pages");
+        let site_id = module_id_for(&index, ModuleRootRole::Normal, "");
+        let peer_id = module_id_for(&index, ModuleRootRole::Support, "pages/peer");
+
+        assert!(
+            !graph.is_support_visible_to_consumer_role(
+                paired_id,
+                paired_id,
+                ModuleRootRole::Normal
+            ),
+            "a paired normal surface must not import its own support surface"
+        );
+        assert!(
+            !graph.is_support_visible_to_consumer_role(
+                paired_id,
+                paired_id,
+                ModuleRootRole::Support
+            ),
+            "a paired support surface must not import itself"
+        );
+        assert!(
+            graph.is_support_visible_to_consumer_role(paired_id, site_id, ModuleRootRole::Normal),
+            "the owning normal parent must see the paired support surface"
+        );
+        assert!(
+            !graph.is_support_visible_to_consumer_role(paired_id, peer_id, ModuleRootRole::Support),
+            "a same-scope support sibling must not see the paired support surface"
+        );
+        assert!(
+            !super::project_module_graph::is_support_visible_in_identity_table(
+                identities, paired_id, paired_id
+            ),
+            "the identity-table visibility path must also exclude self"
+        );
+        assert!(
+            super::project_module_graph::is_support_visible_in_identity_table(
+                identities, paired_id, site_id
+            ),
+            "the identity-table visibility path must keep the owning parent visible"
+        );
+        assert!(
+            !super::project_module_graph::is_support_visible_in_identity_table(
+                identities, paired_id, peer_id
+            ),
+            "the identity-table visibility path must keep same-scope support siblings hidden"
         );
     }
 

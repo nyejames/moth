@@ -481,6 +481,16 @@ pub enum InvalidConfigReason {
         directory: StringId,
         candidates: Vec<StringId>,
     },
+    AliasedModuleRootFiles {
+        first_root: StringId,
+        second_root: StringId,
+        target: StringId,
+    },
+    ModuleRootFileOutsideClaimingModule {
+        root_file: StringId,
+        claiming_directory: StringId,
+        target: StringId,
+    },
     ConfigImportUnsupported,
     FileValuePathUnsupported,
     SourceFileFolderCollision {

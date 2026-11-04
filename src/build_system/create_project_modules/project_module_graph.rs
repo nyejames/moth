@@ -953,9 +953,10 @@ fn support_is_visible_for_role(
 
     match consumer_role {
         ModuleRootRole::Normal => {
-            consumer_id == owner
-                || (is_ancestor_of(topology, owner, consumer_id)
-                    && !is_ancestor_of(topology, support_id, consumer_id))
+            consumer_id != support_id
+                && (consumer_id == owner
+                    || (is_ancestor_of(topology, owner, consumer_id)
+                        && !is_ancestor_of(topology, support_id, consumer_id)))
         }
 
         ModuleRootRole::Support => {

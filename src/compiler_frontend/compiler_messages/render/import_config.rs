@@ -290,6 +290,26 @@ pub(crate) fn invalid_config_message(
                 candidates,
             )
         }
+        InvalidConfigReason::AliasedModuleRootFiles {
+            first_root,
+            second_root,
+            target,
+        } => format!(
+            "Module root files '{}' and '{}' resolve to the same physical source file '{}'. Each physical module root file may be claimed by only one structural module. Keep one root file per structural module or give each root marker its own source file.",
+            string_table.resolve(*first_root),
+            string_table.resolve(*second_root),
+            string_table.resolve(*target),
+        ),
+        InvalidConfigReason::ModuleRootFileOutsideClaimingModule {
+            root_file,
+            claiming_directory,
+            target,
+        } => format!(
+            "Module root file '{}' in directory '{}' resolves to '{}', which is not owned by that structural module. A module root must resolve to a source file inside the module it roots.",
+            string_table.resolve(*root_file),
+            string_table.resolve(*claiming_directory),
+            string_table.resolve(*target),
+        ),
         InvalidConfigReason::SourceFileFolderCollision {
             file_name,
             folder_name,

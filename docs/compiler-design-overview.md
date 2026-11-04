@@ -171,8 +171,6 @@ Support surfaces and the project package surface are API-only. They permit ordin
 
 The project package surface consumes build-supplied package visibility and produces an ordinary immutable module artefact. Its separate package assembly and project-wide assembly privilege remain build-owned.
 
-**Phase 3 status:** Stage 0, the structural graph, namespace construction and module semantic transaction now assign one `ModuleId` per rooted directory with optional normal `@*.moth` and support `+*.moth` surfaces. Both roots are prepared from one source set, helpers compile once with role-neutral origins, and one successful transaction publishes normal and support interfaces atomically. Provider binding, project package assembly and source-package publication select the surface named by the dependency or package policy instead of a primary-root fallback. The physical project-facade role is removed from filesystem discovery and graph topology; a selected-root `+` is an ordinary support surface. Remaining Phase 3 work is migration and documentation closeout.
-
 Public visibility uses compiler-owned export metadata. `$export` is the accepted directive direction. Prefix-only versus optional directive-block form remains unsettled. Keep one final visibility syntax while preserving facade privacy and public re-exports.
 
 ### Normal-root entry

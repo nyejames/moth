@@ -111,6 +111,116 @@ fn valid_single_file_check_exits_successfully() {
     assert!(output.status.success());
 }
 
+#[cfg(unix)]
+#[test]
+fn cross_directory_root_alias_is_a_typed_diagnostic_not_a_compiler_bug() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempdir().expect("temporary directory should be created");
+    let project = root.path().join("project");
+    fs::create_dir_all(project.join("child")).expect("child directory should be created");
+    write_directory_html_project(&project, "page_title #= \"root\"\n");
+    symlink(
+        project.join("@page.moth"),
+        project.join("child/@child.moth"),
+    )
+    .expect("child root symlink should be created");
+
+    let output = run_moth(&["check", project.to_str().expect("path should be UTF-8")]);
+    let report = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert_eq!(output.status.code(), Some(1), "report: {report}");
+    assert!(
+        report.contains("resolve to the same physical source file"),
+        "the root alias must be a typed layout diagnostic: {report}"
+    );
+    assert!(
+        !report.contains("COMPILER BUG"),
+        "the root alias must not escape as a compiler bug: {report}"
+    );
+}
+
+fn write_support_scope_project(project: &Path) {
+    fs::create_dir_all(project.join("pages/extras")).expect("pages extras should be created");
+    write_source(
+        project,
+        "config.moth",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    );
+    write_source(project, "@site.moth", "");
+    write_source(project, "pages/@pages.moth", "");
+    write_source(
+        project,
+        "pages/extras/+extras.moth",
+        "export:\n    extra #= 1\n;\n",
+    );
+}
+
+fn terse_diagnostic_detail(report: &str, code: &str) -> String {
+    report
+        .lines()
+        .find(|line| line.starts_with(&format!("E|{code}|")))
+        .and_then(|line| line.splitn(5, '|').nth(4))
+        .unwrap_or_else(|| panic!("expected a terse {code} diagnostic in: {report}"))
+        .to_owned()
+}
+
+#[test]
+fn support_scope_diagnostic_matches_canonical_and_check_only_lanes() {
+    let root = tempdir().expect("temporary directory should be created");
+    let canonical_project = root.path().join("canonical");
+    write_support_scope_project(&canonical_project);
+    write_source(&canonical_project, "pages/+package.moth", "@extras extra\n");
+
+    let canonical = run_moth(&[
+        "check",
+        canonical_project
+            .to_str()
+            .expect("canonical path should be UTF-8"),
+        "--terse",
+    ]);
+    let canonical_report = format!(
+        "{}{}",
+        String::from_utf8_lossy(&canonical.stdout),
+        String::from_utf8_lossy(&canonical.stderr)
+    );
+    assert_eq!(canonical.status.code(), Some(1), "{canonical_report}");
+    let canonical_detail = terse_diagnostic_detail(&canonical_report, "MOTH-IMPORT-0015");
+
+    let check_only_project = root.path().join("check_only");
+    write_support_scope_project(&check_only_project);
+    write_source(
+        &check_only_project,
+        "pages/+package.moth",
+        "export:\n    marker #= 1\n;\n",
+    );
+    write_source(&check_only_project, "pages/orphan.moth", "@extras extra\n");
+
+    let check_only = run_moth(&[
+        "check",
+        check_only_project
+            .to_str()
+            .expect("check-only path should be UTF-8"),
+        "--terse",
+    ]);
+    let check_only_report = format!(
+        "{}{}",
+        String::from_utf8_lossy(&check_only.stdout),
+        String::from_utf8_lossy(&check_only.stderr)
+    );
+    assert_eq!(check_only.status.code(), Some(1), "{check_only_report}");
+    let check_only_detail = terse_diagnostic_detail(&check_only_report, "MOTH-IMPORT-0015");
+
+    assert_eq!(
+        check_only_detail, canonical_detail,
+        "canonical and check-only preparation must emit the same support diagnostic"
+    );
+}
+
 #[test]
 fn paired_provider_check_only_uses_the_selected_surface() {
     let root = tempdir().expect("temporary directory should be created");

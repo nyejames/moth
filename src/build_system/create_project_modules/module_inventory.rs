@@ -947,21 +947,13 @@ fn prepare_check_only_module(
                         .module_origin()
                         .map(|origin| origin.role())
                         .unwrap_or(ModuleRootRole::Normal);
-                    let consumer_needs_support_scope_check = match consumer_role {
-                        ModuleRootRole::Support => true,
-                        ModuleRootRole::Shared => project_module_graph
-                            .node(owner_module_id)
-                            .has_surface(ModuleRootRole::Support),
-                        ModuleRootRole::Normal | ModuleRootRole::SyntheticProjectContext => false,
-                    };
-                    if provider_surface == ModuleRootRole::Support
-                        && consumer_needs_support_scope_check
-                        && !project_module_graph.is_support_visible_to_consumer_role(
-                            provider_module_id,
-                            owner_module_id,
-                            ModuleRootRole::Support,
-                        )
-                    {
+                    if !cross_module_support_import_is_visible(
+                        project_module_graph,
+                        provider_module_id,
+                        provider_surface,
+                        owner_module_id,
+                        consumer_role,
+                    ) {
                         let path_table = Arc::new(syntax.path_fork_mut().shared_table());
                         let table = syntax.string_table_mut().take_for_handoff();
                         let batch = PreparedDiagnosticBatch::capture_with_required_paths(
@@ -1156,6 +1148,37 @@ fn insert_resolved_dependency_edges(
     }
 
     Ok(())
+}
+
+/// Whether one resolved support-surface dependency is visible to a cross-module consumer.
+///
+/// A normal consumer is not rechecked here: namespace construction already exposes only support
+/// surfaces legal for its normal position. Support roots always require the strict support-scope
+/// check, and a shared helper requires it whenever its owning module also has a support surface,
+/// because the helper is visible from both authored roots. Returns `true` when the provider is not
+/// a support surface or no check applies.
+fn cross_module_support_import_is_visible(
+    graph: &ProjectModuleGraph,
+    provider_module_id: ModuleId,
+    provider_surface: ModuleRootRole,
+    module_id: ModuleId,
+    consumer_role: ModuleRootRole,
+) -> bool {
+    if provider_surface != ModuleRootRole::Support {
+        return true;
+    }
+
+    let needs_support_scope_check = match consumer_role {
+        ModuleRootRole::Support => true,
+        ModuleRootRole::Shared => graph.node(module_id).has_surface(ModuleRootRole::Support),
+        ModuleRootRole::Normal | ModuleRootRole::SyntheticProjectContext => false,
+    };
+    !needs_support_scope_check
+        || graph.is_support_visible_to_consumer_role(
+            provider_module_id,
+            module_id,
+            ModuleRootRole::Support,
+        )
 }
 
 /// Raise a compiler-bug report when the project module graph and discovered inventories disagree.
@@ -1521,28 +1544,13 @@ fn discover_modules_serial_provider_capable(
                             .module_origin()
                             .map(|origin| origin.role())
                             .unwrap_or(ModuleRootRole::Normal);
-                        // A shared helper belongs to the module's common scope, so a support-only
-                        // dependency is legal only when the module's support surface may also see
-                        // it. Checking only helper-authored clauses against the normal surface
-                        // would let a support root import the helper and reach a lateral support
-                        // package that the support root itself cannot import.
-                        let consumer_needs_support_scope_check = match consumer_role {
-                            ModuleRootRole::Support => true,
-                            ModuleRootRole::Shared => project_module_graph
-                                .node(seed.module_id)
-                                .has_surface(ModuleRootRole::Support),
-                            ModuleRootRole::Normal | ModuleRootRole::SyntheticProjectContext => {
-                                false
-                            }
-                        };
-                        if provider_surface == ModuleRootRole::Support
-                            && consumer_needs_support_scope_check
-                            && !project_module_graph.is_support_visible_to_consumer_role(
-                                provider_module_id,
-                                seed.module_id,
-                                ModuleRootRole::Support,
-                            )
-                        {
+                        if !cross_module_support_import_is_visible(
+                            project_module_graph,
+                            provider_module_id,
+                            provider_surface,
+                            seed.module_id,
+                            consumer_role,
+                        ) {
                             let path_table = Arc::new(syntax.path_fork_mut().shared_table());
                             let table = syntax.string_table_mut().take_for_handoff();
                             let batch = PreparedDiagnosticBatch::capture_with_required_paths(
