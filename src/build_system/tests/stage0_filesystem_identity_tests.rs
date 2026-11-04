@@ -2795,6 +2795,43 @@ mod project_module_graph_tests {
     }
 
     #[test]
+    fn project_package_surface_is_the_selected_root_support_surface() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        fs::write(root.join("@page.moth"), "").expect("should write normal root");
+        fs::write(root.join("+package.moth"), "").expect("should write support root");
+
+        let (index, _project_root, entry_root) = discover_index(&root, ".");
+        let graph = ProjectModuleGraph::from_source_tree_index(&index);
+        let module_id = index
+            .module_identities()
+            .module_id_for_directory(&entry_root)
+            .expect("paired roots should define one structural module");
+        assert_eq!(
+            graph.project_package_surface(),
+            Some(module_id),
+            "a selected-root support surface is the project package surface"
+        );
+
+        let _support_only = tempfile::tempdir().expect("should create temp dir");
+        let support_only_root = _support_only.path().to_path_buf();
+        fs::write(support_only_root.join("+package.moth"), "")
+            .expect("should write support-only root");
+        let (support_index, _project_root, support_entry_root) =
+            discover_index(&support_only_root, ".");
+        let support_graph = ProjectModuleGraph::from_source_tree_index(&support_index);
+        let support_module_id = support_index
+            .module_identities()
+            .module_id_for_directory(&support_entry_root)
+            .expect("support-only root should define one structural module");
+        assert_eq!(
+            support_graph.project_package_surface(),
+            Some(support_module_id),
+            "a support-only selected root is still a valid project package surface"
+        );
+    }
+
+    #[test]
     fn support_visibility_is_visible_to_owner_and_normal_descendants_outside_subtree() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
