@@ -671,6 +671,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 None,
                 None,
                 None,
+                None,
                 module_context,
             )
         }
@@ -684,6 +685,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 prepared,
                 preparation_warnings,
                 known_generated,
+                None,
                 None,
                 None,
                 None,
@@ -711,6 +713,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         check_only_source_package_dependencies: Option<
             &[module_inventory::CheckOnlySourcePackageDependency],
         >,
+        check_only_source_role: Option<ModuleRootRole>,
         external_packages: Option<Arc<ExternalPackageRegistry>>,
         external_dependency_resolution_table: Option<&ExternalImportResolutionTable>,
         module_error_allowance_override: Option<NonZeroU32>,
@@ -800,9 +803,11 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             options: frontend_options,
             build_profile: self.boundary.build_profile,
             source_files: &self.boundary.source_files,
-            root_role_override: (check_only_provider_bindings.is_some()
-                || check_only_source_package_dependencies.is_some())
-            .then_some(ModuleRootRole::Support),
+            root_role_override: check_only_source_role.or_else(|| {
+                (check_only_provider_bindings.is_some()
+                    || check_only_source_package_dependencies.is_some())
+                .then_some(ModuleRootRole::Support)
+            }),
             project_path_resolver: Some(self.boundary.project_path_resolver),
             style_directives: self.boundary.style_directives,
             external_packages: effective_external_packages,
@@ -868,6 +873,7 @@ fn compile_check_only_job(
 ) -> DirectoryModuleTaskResult {
     let module_inventory::CheckOnlyModuleCompilationJob {
         owner_module_id: module_id,
+        source_role,
         path_base_len,
         string_table_base_len: base_len,
         provider_bindings,
@@ -935,6 +941,7 @@ fn compile_check_only_job(
             Some(&check_only_build_config_values),
             Some(&provider_bindings),
             Some(&source_package_dependencies),
+            Some(source_role),
             Some(external_packages),
             Some(&external_dependency_resolution_table),
             module_error_allowance_override,
@@ -954,6 +961,7 @@ fn compile_check_only_job(
             Some(&check_only_build_config_values),
             Some(&provider_bindings),
             Some(&source_package_dependencies),
+            Some(source_role),
             Some(external_packages),
             Some(&external_dependency_resolution_table),
             module_error_allowance_override,

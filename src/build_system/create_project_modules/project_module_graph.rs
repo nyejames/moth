@@ -152,7 +152,7 @@ impl ProjectModuleGraphNode {
             .expect("the selected public surface must own an origin")
     }
 
-    /// The primary cross-build origin for legacy single-surface consumers.
+    /// The primary cross-build origin for consumers that need one representative surface.
     pub(crate) fn stable_origin(&self) -> &StableModuleOriginIdentity {
         self.normal_origin
             .as_ref()
@@ -161,7 +161,7 @@ impl ProjectModuleGraphNode {
     }
 
     #[allow(dead_code)]
-    /// The primary structural surface role for legacy consumers.
+    /// The primary structural surface role for consumers that need one representative surface.
     pub(crate) fn role(&self) -> ModuleRootRole {
         if self.normal_origin.is_some() {
             ModuleRootRole::Normal
@@ -190,7 +190,7 @@ impl ProjectModuleGraphNode {
         self.support_root_file.as_deref()
     }
 
-    /// The canonical primary root file for legacy single-surface consumers.
+    /// The canonical primary root file for consumers that need one representative surface.
     pub(crate) fn root_file(&self) -> &Path {
         self.normal_root_file
             .as_deref()

@@ -167,7 +167,7 @@ impl ModuleIdentityRecord {
             .expect("the selected public surface must own a root file")
     }
 
-    /// The primary root file for legacy single-surface consumers.
+    /// The primary root file for consumers that need one representative surface.
     ///
     /// A paired structural module prefers its normal root. Paired consumers must select a
     /// surface explicitly instead of relying on this compatibility accessor.
@@ -189,7 +189,7 @@ impl ModuleIdentityRecord {
         }
     }
 
-    /// The primary surface role for legacy single-surface consumers.
+    /// The primary surface role for consumers that need one representative surface.
     pub(crate) fn role(&self) -> ModuleRootRole {
         if self.has_normal_root() {
             ModuleRootRole::Normal

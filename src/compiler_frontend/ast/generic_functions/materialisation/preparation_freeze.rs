@@ -1766,8 +1766,11 @@ impl ModuleMaterialisationCapture {
                 let mut scratch = Vec::new();
                 path_fork.render_portable(path, &self.string_table, &mut scratch)
             };
-            let identity =
-                ModulePrivateNominalIdentity::new(module_origin.clone(), defining_path, category);
+            let identity = ModulePrivateNominalIdentity::new(
+                self.surface_origin_for_path(module_origin, &path, path_fork),
+                defining_path,
+                category,
+            );
             self.type_environment.register_canonical_identity(
                 CanonicalTypeIdentity::ModulePrivateNominal(identity.clone()),
                 type_id,
@@ -1805,7 +1808,7 @@ impl ModuleMaterialisationCapture {
                 .map(CanonicalTraitIdentity::Source)
                 .unwrap_or_else(|| {
                     CanonicalTraitIdentity::Source(OriginTraitId::new(
-                        module_origin.clone(),
+                        self.surface_origin_for_path(module_origin, &trait_path, path_fork),
                         defining_name,
                     ))
                 });
@@ -1836,13 +1839,14 @@ impl ModuleMaterialisationCapture {
                         &mut scratch,
                     )
                 };
-                Ok((definition.id, defining_path))
+                Ok((definition.id, definition.canonical_path, defining_path))
             })
             .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
-        for (trait_id, defining_path) in private_traits {
+        for (trait_id, trait_path, defining_path) in private_traits {
+            let module_origin = self.surface_origin_for_path(module_origin, &trait_path, path_fork);
             Rc::make_mut(&mut self.trait_environment).register_canonical_identity(
                 CanonicalTraitIdentity::ModulePrivate(ModulePrivateTraitIdentity::new(
-                    module_origin.clone(),
+                    module_origin,
                     defining_path,
                 )),
                 trait_id,
@@ -1850,6 +1854,27 @@ impl ModuleMaterialisationCapture {
         }
 
         Ok(())
+    }
+
+    /// The declaring source surface origin for one declaration path.
+    ///
+    /// WHAT: a declaration path's parent is its source file; the captured file-role table maps
+    ///       that source to the normal, support or shared origin of this structural module.
+    fn surface_origin_for_path(
+        &self,
+        module_origin: &StableModuleOriginIdentity,
+        declaration_path: &PathId,
+        path_fork: &PathInternerFork,
+    ) -> StableModuleOriginIdentity {
+        let source_path = path_fork
+            .try_parent(*declaration_path)
+            .unwrap_or(PathId::ROOT);
+        let role = self
+            .source_roles_by_path
+            .get(&source_path)
+            .copied()
+            .unwrap_or(module_origin.role());
+        module_origin.with_role(role)
     }
 
     fn private_executable_identity(
@@ -1889,14 +1914,8 @@ impl ModuleMaterialisationCapture {
             paths.render_portable(parent, &self.string_table, &mut scratch)
         };
 
-        let source_path = paths.try_parent(*path).unwrap_or(PathId::ROOT);
-        let role = self
-            .source_roles_by_path
-            .get(&source_path)
-            .copied()
-            .unwrap_or(module_origin.role());
         Ok(ModulePrivateExecutableIdentity::new(
-            module_origin.with_role(role),
+            self.surface_origin_for_path(module_origin, path, path_fork),
             declaring_source,
             category,
             name,

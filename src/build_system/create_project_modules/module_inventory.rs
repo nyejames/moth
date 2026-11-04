@@ -122,6 +122,7 @@ struct CheckOnlyModuleSpec {
     source_index: SourceRecordIndex,
     candidate_source_indices: Vec<SourceRecordIndex>,
     stable_origin: StableModuleOriginIdentity,
+    source_role: ModuleRootRole,
 }
 
 /// One transient semantic unit for one owned, unselected `.moth` source.
@@ -134,6 +135,8 @@ struct CheckOnlyModuleSpec {
 pub(crate) struct CheckOnlyModuleCompilationJob {
     /// Canonical module that owns this transient source.
     pub(crate) owner_module_id: ModuleId,
+    /// Authored surface role of the transient source being checked.
+    pub(crate) source_role: ModuleRootRole,
     /// Prefix length used when merging this job's local string table.
     pub(crate) string_table_base_len: usize,
     /// Prefix length used when merging this job's local path fork.
@@ -293,6 +296,7 @@ impl ModuleCompilationSchedule {
         project_path_resolver: &ProjectPathResolver,
         external_imports: &mut ExternalImportDiscoveryState<'_>,
         directory_dependency_resolution: DirectoryDependencyResolution<'_>,
+        project_module_graph: &super::project_module_graph::ProjectModuleGraph,
         string_table: &StringTable,
         path_interner: &PathInternerBuilder,
         selected_source_texts: &mut SelectedSourceTextMap,
@@ -321,10 +325,12 @@ impl ModuleCompilationSchedule {
                 source_index,
                 candidate_source_indices,
                 stable_origin,
+                source_role,
             } = spec;
             let job = prepare_check_only_module(
                 owner_module_id,
                 source_index,
+                source_role,
                 &candidate_source_indices,
                 source_tree_index,
                 style_directives,
@@ -333,6 +339,7 @@ impl ModuleCompilationSchedule {
                 project_path_resolver,
                 external_imports,
                 directory_dependency_resolution,
+                project_module_graph,
                 Arc::clone(&self.source_module_origins),
                 stable_origin,
                 &fork_source,
@@ -719,6 +726,7 @@ fn finalize_owned_module_source_spans(
 fn prepare_check_only_module(
     owner_module_id: ModuleId,
     source_index: SourceRecordIndex,
+    source_role: ModuleRootRole,
     candidate_source_indices: &[SourceRecordIndex],
     source_tree_index: &super::source_tree_index::SourceTreeIndex,
     style_directives: &StyleDirectiveRegistry,
@@ -727,6 +735,7 @@ fn prepare_check_only_module(
     project_path_resolver: &ProjectPathResolver,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
+    project_module_graph: &super::project_module_graph::ProjectModuleGraph,
     source_module_origins: Arc<SourceModuleOriginTable>,
     stable_origin: StableModuleOriginIdentity,
     fork_source: &StringTableForkSource,
@@ -933,6 +942,39 @@ fn prepare_check_only_module(
                         return Err(graph_inventory_mismatch_error("Check-only cross-module dependency resolved to another consumer module"
                             .to_owned()));
                     }
+                    let consumer_role = source
+                        .logical_identity()
+                        .module_origin()
+                        .map(|origin| origin.role())
+                        .unwrap_or(ModuleRootRole::Normal);
+                    let consumer_needs_support_scope_check = match consumer_role {
+                        ModuleRootRole::Support => true,
+                        ModuleRootRole::Shared => project_module_graph
+                            .node(owner_module_id)
+                            .has_surface(ModuleRootRole::Support),
+                        ModuleRootRole::Normal | ModuleRootRole::SyntheticProjectContext => false,
+                    };
+                    if provider_surface == ModuleRootRole::Support
+                        && consumer_needs_support_scope_check
+                        && !project_module_graph.is_support_visible_to_consumer_role(
+                            provider_module_id,
+                            owner_module_id,
+                            ModuleRootRole::Support,
+                        )
+                    {
+                        let path_table = Arc::new(syntax.path_fork_mut().shared_table());
+                        let table = syntax.string_table_mut().take_for_handoff();
+                        let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                            DiagnosticBag::from(imports::cross_module_import_not_exported(
+                                provider.path,
+                                Some(provider.span),
+                            )),
+                            table,
+                            None,
+                            || Some(path_table),
+                        )?;
+                        return Err(PreparedFailure::Diagnosed(batch));
+                    }
                     add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
                     provider_bindings.push(CheckOnlyProviderBinding {
                         dependency_shell_id: provider.dependency_shell_id,
@@ -1067,6 +1109,7 @@ fn prepare_check_only_module(
     let (prepared, preparation_warnings) = syntax.finish()?;
     Ok(CheckOnlyModuleCompilationJob {
         owner_module_id,
+        source_role,
         string_table_base_len,
         path_base_len,
         provider_bindings,
@@ -1603,6 +1646,7 @@ fn discover_modules_serial_provider_capable(
                 owner_module_id: seed.module_id,
                 source_index: check_only_source_index,
                 candidate_source_indices: candidate_source_indices.clone(),
+                source_role: check_only_origin.role(),
                 stable_origin: check_only_origin,
             });
         }

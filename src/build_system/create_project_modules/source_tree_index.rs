@@ -3,8 +3,9 @@
 //! WHAT: performs one deterministic traversal per project or source-package boundary, preparing
 //! canonical module identities, source ownership and sibling dependency-name collision facts. Project
 //! boundaries also own entry/package-prefix collisions;
-//! package boundaries own their required public normal-root validation. Each discovered root gets
-//! a deterministic `ModuleId`, explicit `ModuleRootRole` and boundary-relative logical module path.
+//! package boundaries own their required public normal-root validation. Each rooted directory gets
+//! one deterministic `ModuleId`, explicit normal/support surface facts and one boundary-relative
+//! logical module path; shared helpers belong to that one structural module.
 //! WHY: filesystem discovery belongs to Stage 0. Keeping it here prevents the frontend resolver,
 //! module inventory, and collision validators from repeating the same expensive walk.
 //!

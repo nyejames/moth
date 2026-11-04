@@ -4,6 +4,8 @@ A `.mtf` file sees a small compile-time scope. The implicit template body can ac
 
 Exported compile-time constants and const records from the same-directory module root are visible inside a `.mtf` file. This is the primary way to parameterise moth template content.
 
+Only an unpaired module root contributes this implicit scope. A `.mtf` file in a directory with both `@` and `+` roots is a shared helper and sees neither root's declarations. Parameterise it through builder-provided helpers or an explicit module that imports the intended surface.
+
 [codeblock, $code("moth"):
     -- docs/@docs.moth
     export:

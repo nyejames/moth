@@ -743,20 +743,35 @@ fn run_semantic_stages(
     materialisation_context_builder.finalize_generic_template_identity_index()?;
     // Detach syntax, defaults and module constants while AST value owners are still live.
     // Same-module generated requests and publication consume this single stable capture.
-    let primary_draft = &surface_builds
-        .first()
-        .ok_or_else(|| {
-            InfrastructureFailure::internal(
-                CompilerStage::ProjectBuildAssembly,
-                "semantic module compilation: no public surface was projected",
-            )
-        })?
-        .1
-        .draft;
+    // Materialisation is module-wide, not surface-local. A support generic body may depend on a
+    // support-only public declaration or evidence that the normal draft does not export, so detach
+    // the deduplicated union of both validated drafts in surface order.
+    let mut materialisation_declarations = Vec::new();
+    let mut materialisation_evidence = Vec::new();
+    for (_, build) in &surface_builds {
+        for declaration in &build.draft.declarations {
+            if !materialisation_declarations.iter().any(
+                |existing: &crate::compiler_frontend::public_interface::PublicDeclarationRecord| {
+                    existing.origin == declaration.origin
+                },
+            ) {
+                materialisation_declarations.push(declaration.clone());
+            }
+        }
+        for evidence in &build.draft.reusable_evidence {
+            if !materialisation_evidence.iter().any(
+                |existing: &crate::compiler_frontend::public_interface::PublicEvidenceRecord| {
+                    existing.identity == evidence.identity
+                },
+            ) {
+                materialisation_evidence.push(evidence.clone());
+            }
+        }
+    }
     let mut materialisation_context_builder = materialisation_context_builder.detach(
         &module_ast.const_values,
-        &primary_draft.declarations,
-        &primary_draft.reusable_evidence,
+        &materialisation_declarations,
+        &materialisation_evidence,
         &module_resources.borrow(),
         &compiler.path_fork,
     )?;

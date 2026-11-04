@@ -783,3 +783,47 @@ fn scaffolded_project_checks_and_builds_with_generated_config() {
     );
     assert!(project.join("_release/index.html").is_file());
 }
+
+#[test]
+fn check_only_shared_helper_rejects_lateral_support_import() {
+    let root = tempdir().expect("temporary directory should be created");
+    let project = root.path().join("project");
+    fs::create_dir_all(project.join("pkg")).expect("provider directory should be created");
+
+    write_source(
+        &project,
+        "config.moth",
+        "project #= (name = \"check_only\")\nhtml #= ()\n",
+    );
+    write_source(&project, "@page.moth", "[:ok]\n");
+    write_source(
+        &project,
+        "+package.moth",
+        "export:\n    root_support #= \"root\"\n;\n",
+    );
+    write_source(
+        &project,
+        "shared.moth",
+        "@pkg support_only\n\nhelper || -> String:\n    return support_only\n;\n",
+    );
+    write_source(
+        &project,
+        "pkg/+package.moth",
+        "export:\n    support_only #= \"support\"\n;\n",
+    );
+
+    let check = run_moth_from_dir(&project, &["check", ".", "--terse"]);
+    let report = format!(
+        "{}{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(
+        !check.status.success(),
+        "a check-only shared helper must reject a lateral support import: {report}"
+    );
+    assert!(
+        report.contains("MOTH-IMPORT-0015") && report.contains("shared.moth"),
+        "expected shared-helper support rejection, got: {report}"
+    );
+}
