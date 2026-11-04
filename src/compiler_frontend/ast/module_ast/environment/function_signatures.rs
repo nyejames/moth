@@ -87,19 +87,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             // The module root's surface decides which functions are public, so a function
             // re-exported from another file is checked too. Receiver methods are never exported;
             // the receiver gate below checks their bounds once the receiver type is known.
-            if !generic_parameters.is_empty()
-                && self.source_path_is_public_from_root_file(
-                    &header.declaration_path,
-                    &self.header_source_path(header),
-                )
-            {
-                self.validate_public_generic_bounds(
-                    header,
-                    PublicGenericOwnerKind::Function,
-                    generic_parameters,
-                    &resolved_bounds_by_local,
-                    trait_environment,
-                )?;
+            if !generic_parameters.is_empty() {
+                for public_root_file in self.public_export_roots_for_header(header) {
+                    self.validate_public_generic_bounds(
+                        header,
+                        &public_root_file,
+                        PublicGenericOwnerKind::Function,
+                        generic_parameters,
+                        &resolved_bounds_by_local,
+                        trait_environment,
+                    )?;
+                }
             }
 
             let registered_generic_parameters = if generic_parameters.is_empty() {
@@ -208,15 +206,33 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             if let Some(ReceiverKey::Struct(receiver_path) | ReceiverKey::Choice(receiver_path)) =
                 &resolved_signature.receiver
             {
-                let public_root_file = self.header_source_path(header);
-                if self.source_path_is_public_from_root_file(receiver_path, &public_root_file) {
-                    self.validate_public_generic_bounds(
-                        header,
-                        PublicGenericOwnerKind::ReceiverMethod,
-                        generic_parameters,
-                        &resolved_bounds_by_local,
-                        trait_environment,
-                    )?;
+                let header_source = self.header_source_path(header);
+                let receiver_roots =
+                    self.public_export_roots_for_path(receiver_path, header_source);
+                if receiver_roots.is_empty() {
+                    // An imported receiver can be public through its provider interface without a
+                    // local exporting root; preserve the provider-root check for that path.
+                    if self.source_path_is_public_from_root_file(receiver_path, &header_source) {
+                        self.validate_public_generic_bounds(
+                            header,
+                            &header_source,
+                            PublicGenericOwnerKind::ReceiverMethod,
+                            generic_parameters,
+                            &resolved_bounds_by_local,
+                            trait_environment,
+                        )?;
+                    }
+                } else {
+                    for public_root_file in receiver_roots {
+                        self.validate_public_generic_bounds(
+                            header,
+                            &public_root_file,
+                            PublicGenericOwnerKind::ReceiverMethod,
+                            generic_parameters,
+                            &resolved_bounds_by_local,
+                            trait_environment,
+                        )?;
+                    }
                 }
             }
 

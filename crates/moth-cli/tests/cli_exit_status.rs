@@ -112,6 +112,67 @@ fn valid_single_file_check_exits_successfully() {
 }
 
 #[test]
+fn paired_provider_check_only_uses_the_selected_surface() {
+    let root = tempdir().expect("temporary directory should be created");
+    let project = root.path().join("project");
+    fs::create_dir_all(project.join("consumer")).expect("consumer directory should be created");
+    fs::create_dir_all(project.join("pkg")).expect("provider directory should be created");
+
+    write_source(
+        &project,
+        "config.moth",
+        "project #= (name = \"check_only\")\nhtml #= ()\n",
+    );
+    write_source(&project, "@page.moth", "@consumer run\n[:run]\n");
+    write_source(
+        &project,
+        "consumer/@consumer.moth",
+        "export:\n    run #= \"ok\"\n;\n",
+    );
+    write_source(
+        &project,
+        "consumer/orphan.moth",
+        "@pkg support_only\norphan || -> String:\n    return support_only\n;\n",
+    );
+    write_source(
+        &project,
+        "pkg/+package.moth",
+        "export:\n    support_only #= \"support\"\n;\n",
+    );
+    write_source(
+        &project,
+        "pkg/@mod.moth",
+        "export:\n    normal_only #= \"normal\"\n;\n",
+    );
+
+    let check = run_moth_from_dir(&project, &["check", ".", "--terse"]);
+    assert!(
+        check.status.success(),
+        "check-only support import failed: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+
+    // The orphan must really enter check-only compilation, and it must bind the support
+    // interface rather than silently falling back to the paired normal interface.
+    write_source(
+        &project,
+        "consumer/orphan.moth",
+        "@pkg normal_only\norphan || -> String:\n    return normal_only\n;\n",
+    );
+    let wrong_surface = run_moth_from_dir(&project, &["check", ".", "--terse"]);
+    let report = format!(
+        "{}{}",
+        String::from_utf8_lossy(&wrong_surface.stdout),
+        String::from_utf8_lossy(&wrong_surface.stderr)
+    );
+    assert!(!wrong_surface.status.success());
+    assert!(
+        report.contains("MOTH-IMPORT-0011"),
+        "expected support-surface rejection, got: {report}"
+    );
+}
+
+#[test]
 fn invalid_syntax_check_exits_with_failure() {
     let root = tempdir().expect("temporary directory should be created");
     let source = write_source(root.path(), "main.moth", "value = (\n");

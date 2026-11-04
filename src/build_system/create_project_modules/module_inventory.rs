@@ -1478,12 +1478,26 @@ fn discover_modules_serial_provider_capable(
                             .module_origin()
                             .map(|origin| origin.role())
                             .unwrap_or(ModuleRootRole::Normal);
+                        // A shared helper belongs to the module's common scope, so a support-only
+                        // dependency is legal only when the module's support surface may also see
+                        // it. Checking only helper-authored clauses against the normal surface
+                        // would let a support root import the helper and reach a lateral support
+                        // package that the support root itself cannot import.
+                        let consumer_needs_support_scope_check = match consumer_role {
+                            ModuleRootRole::Support => true,
+                            ModuleRootRole::Shared => project_module_graph
+                                .node(seed.module_id)
+                                .has_surface(ModuleRootRole::Support),
+                            ModuleRootRole::Normal | ModuleRootRole::SyntheticProjectContext => {
+                                false
+                            }
+                        };
                         if provider_surface == ModuleRootRole::Support
-                            && consumer_role == ModuleRootRole::Support
+                            && consumer_needs_support_scope_check
                             && !project_module_graph.is_support_visible_to_consumer_role(
                                 provider_module_id,
                                 seed.module_id,
-                                consumer_role,
+                                ModuleRootRole::Support,
                             )
                         {
                             let path_table = Arc::new(syntax.path_fork_mut().shared_table());

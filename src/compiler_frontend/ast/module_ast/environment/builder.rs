@@ -1229,12 +1229,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(in crate::compiler_frontend::ast) fn validate_public_generic_bounds(
         &self,
         header: &Header,
+        public_root_file: &PathId,
         owner_kind: PublicGenericOwnerKind,
         generic_parameters: &GenericParameterList,
         resolved_bounds_by_local: &FxHashMap<TypeParameterId, Vec<TraitId>>,
         trait_environment: &TraitEnvironment,
     ) -> Result<(), ExpressionParseError> {
-        let public_root_file = self.header_source_path(header);
         for parameter in &generic_parameters.parameters {
             let Some(resolved_bounds) = resolved_bounds_by_local.get(&parameter.id) else {
                 continue;
@@ -1267,7 +1267,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 // bound trait must be public at its owner. The trait need not be re-exported here.
                 if self.public_trait_definition_is_nameable(
                     trait_definition,
-                    &public_root_file,
+                    public_root_file,
                     trait_environment,
                 ) {
                     continue;

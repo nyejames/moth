@@ -1,0 +1,11 @@
+LOCAL_DISPLAY must:
+    display |This| -> String
+;
+
+Box type T = |
+    value T,
+|
+
+render type T is LOCAL_DISPLAY |this Box of T| -> String:
+    return this.value.display()
+;

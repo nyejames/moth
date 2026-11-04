@@ -1,0 +1,11 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0082"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0082"
+path = "input/internal.moth"
+line = 5

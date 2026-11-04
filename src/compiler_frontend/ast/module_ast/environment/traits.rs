@@ -402,11 +402,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             next_requirement_id.0 += 1;
         }
 
-        if self.header_is_public_export_declaration(header) {
+        for public_root_file in self.public_export_roots_for_header(header) {
             self.validate_exported_trait_surface(
                 declaration.name,
                 &requirements,
-                &self.header_source_path(header),
+                &public_root_file,
                 trait_environment,
             )?;
         }

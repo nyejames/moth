@@ -1,0 +1,5 @@
+@pkg value
+
+helper_value || -> String:
+    return value
+;

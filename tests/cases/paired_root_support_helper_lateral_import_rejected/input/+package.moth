@@ -1,0 +1,5 @@
+@shared helper_value
+
+support_value || -> String:
+    return helper_value()
+;

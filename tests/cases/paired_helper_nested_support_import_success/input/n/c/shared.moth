@@ -1,5 +1,5 @@
 @pkg support_only
 
-orphan || -> String:
+helper_value || -> String:
     return support_only
 ;

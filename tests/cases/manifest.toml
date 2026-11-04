@@ -11656,10 +11656,38 @@ contract = "language.project_structure.support_surface_import_visibility"
 role = "primary"
 
 [[case]]
-id = "paired_provider_check_only_surface_success"
-path = "paired_provider_check_only_surface_success"
-tags = ["integration", "modules", "visibility", "root-boundaries", "check-only", "positive"]
-contract = "language.project_structure.check_only_surface_selection"
+id = "paired_root_support_helper_lateral_import_rejected"
+path = "paired_root_support_helper_lateral_import_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "negative"]
+contract = "language.project_structure.shared_helper_support_visibility"
+role = "primary"
+
+[[case]]
+id = "paired_support_helper_private_param_rejected"
+path = "paired_support_helper_private_param_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "public-api", "negative"]
+contract = "language.project_structure.paired_helper_public_surface_validation"
+role = "primary"
+
+[[case]]
+id = "paired_support_helper_normal_only_type_rejected"
+path = "paired_support_helper_normal_only_type_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "public-api", "negative"]
+contract = "language.project_structure.paired_helper_normal_only_type_validation"
+role = "primary"
+
+[[case]]
+id = "paired_helper_nested_support_import_success"
+path = "paired_helper_nested_support_import_success"
+tags = ["integration", "modules", "visibility", "root-boundaries", "positive"]
+contract = "language.project_structure.shared_helper_nested_support_visibility"
+role = "primary"
+
+[[case]]
+id = "paired_support_helper_receiver_private_bound_rejected"
+path = "paired_support_helper_receiver_private_bound_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "public-api", "generics", "negative"]
+contract = "language.project_structure.paired_helper_receiver_bound_validation"
 role = "primary"
 
 [[case]]

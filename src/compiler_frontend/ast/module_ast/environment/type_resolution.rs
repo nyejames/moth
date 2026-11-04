@@ -628,13 +628,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             )?;
 
             // The module root's surface decides which nominals are public, so a nominal
-            // re-exported from another file is checked too.
-            if self.source_path_is_public_from_root_file(
-                &header.declaration_path,
-                &self.header_source_path(header),
-            ) {
+            // re-exported from another file is checked against every surface that exports it.
+            for public_root_file in self.public_export_roots_for_header(header) {
                 self.validate_public_generic_bounds(
                     header,
+                    &public_root_file,
                     owner_kind,
                     generic_parameters,
                     &resolved_bounds_by_local,

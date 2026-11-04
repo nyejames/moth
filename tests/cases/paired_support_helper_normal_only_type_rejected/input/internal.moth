@@ -1,0 +1,7 @@
+NormalOnly = |
+    value String,
+|
+
+show |data NormalOnly| -> String:
+    return "x"
+;

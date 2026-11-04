@@ -321,6 +321,20 @@ impl StableModuleOriginIdentity {
         self.role
     }
 
+    /// Rebind the same package and logical module path to one surface role.
+    ///
+    /// WHAT: preserves the stable package and module path while selecting the normal, support or
+    ///       role-neutral shared origin of the same structural directory.
+    /// WHY: one paired semantic compilation holds the active normal origin and needs the matching
+    ///      origin for declarations authored in the support root or a shared helper.
+    pub(crate) fn with_role(&self, role: ModuleRootRole) -> Self {
+        Self {
+            package: self.package.clone(),
+            logical_module_path: self.logical_module_path.clone(),
+            role,
+        }
+    }
+
     /// Whether two origins belong to the same rooted directory module.
     ///
     /// A shared helper origin and a root-qualified origin at the same package and logical module

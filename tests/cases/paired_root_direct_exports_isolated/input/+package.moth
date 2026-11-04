@@ -1,3 +1,11 @@
+private_label || -> String:
+    return "support"
+;
+
 export:
     value #= "support"
+
+    public_label || -> String:
+        return private_label()
+    ;
 ;

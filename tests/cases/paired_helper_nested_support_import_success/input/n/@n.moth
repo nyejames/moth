@@ -1,0 +1,6 @@
+@c run as run_c
+export:
+    run || -> String:
+        return run_c()
+    ;
+;

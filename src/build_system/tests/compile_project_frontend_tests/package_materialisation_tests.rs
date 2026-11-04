@@ -21,9 +21,9 @@ use crate::compiler_frontend::hir::reachability::{
 };
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::public_interface::{
-    PublicDeclarationSemantics, PublicFunctionCategory,
+    PublicDeclarationSemantics, PublicFunctionCategory, PublicSemanticInterface,
 };
-use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
+use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginDeclarationId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
@@ -3099,5 +3099,156 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
     assert!(
         !rendered.contains(project_text.trim_end()),
         "the package diagnostic must not render the colliding project snapshot: {rendered}"
+    );
+}
+
+/// Compile one integration paired-root fixture through the real builder frontend.
+fn compile_paired_root_fixture(case: &str) -> ProjectFrontendCompilation {
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = temp.path().to_path_buf();
+    fs::create_dir_all(dir.join("src")).expect("should create source root");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (name = \"docs\")\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    let input = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/cases")
+        .join(case)
+        .join("input");
+    for entry in fs::read_dir(&input).expect("should read paired fixture directory") {
+        let entry = entry.expect("fixture entry should be readable");
+        if entry.path().is_file() {
+            fs::copy(entry.path(), dir.join("src").join(entry.file_name()))
+                .expect("should copy paired fixture file");
+        }
+    }
+
+    let mut config = Config::new(dir);
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    successful_compilation_value(compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut warning_owner,
+    ))
+}
+
+#[test]
+fn paired_root_publishes_one_artifact_one_helper_body_and_two_interfaces() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let frontend = compile_paired_root_fixture("paired_root_shared_helper_success");
+    let artifacts = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        artifacts.len(),
+        1,
+        "the paired directory must publish one structural module artifact"
+    );
+    let artifact = &artifacts[0];
+    assert_eq!(
+        artifact.module.executable.hir.functions.len(),
+        2,
+        "one page entry plus one shared receiver body must be the only HIR functions"
+    );
+
+    let support = artifact
+        .support_interface
+        .as_ref()
+        .expect("the paired module must publish its support interface");
+    assert_eq!(
+        artifact.interface.module_origin.role(),
+        ModuleRootRole::Normal
+    );
+    assert_eq!(support.module_origin.role(), ModuleRootRole::Support);
+    assert!(
+        artifact
+            .interface
+            .module_origin
+            .is_same_structural_directory(&support.module_origin),
+        "both interfaces must belong to the same structural directory"
+    );
+
+    let shared_origins = |interface: &PublicSemanticInterface| {
+        interface
+            .declarations
+            .iter()
+            .filter(|declaration| {
+                declaration.origin.module_origin().role() == ModuleRootRole::Shared
+            })
+            .map(|declaration| declaration.origin.clone())
+            .collect::<Vec<_>>()
+    };
+    let normal_shared = shared_origins(&artifact.interface);
+    let support_shared = shared_origins(support);
+    assert_eq!(
+        normal_shared, support_shared,
+        "both interfaces must project the same shared helper identities"
+    );
+    assert_eq!(
+        normal_shared
+            .iter()
+            .map(|origin| origin.defining_name())
+            .collect::<Vec<_>>(),
+        ["Message", "value"],
+        "the shared helper declarations must not be duplicated per surface"
+    );
+}
+
+#[test]
+fn paired_root_private_declarations_keep_their_surface_origins() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let frontend = compile_paired_root_fixture("paired_root_direct_exports_isolated");
+    let artifacts = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .collect::<Vec<_>>();
+    assert_eq!(artifacts.len(), 1);
+    let artifact = &artifacts[0];
+    let support = artifact
+        .support_interface
+        .as_ref()
+        .expect("the paired module must publish its support interface");
+
+    for (interface, role) in [
+        (&artifact.interface, ModuleRootRole::Normal),
+        (support, ModuleRootRole::Support),
+    ] {
+        let declarations = interface
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.origin.defining_name() == "value")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            declarations.len(),
+            1,
+            "each surface owns one `value` declaration"
+        );
+        assert_eq!(
+            declarations[0].origin.module_origin().role(),
+            role,
+            "a root-private constant must stay scoped to its declaring surface"
+        );
+    }
+
+    let mut private_roles = artifact
+        .module
+        .executable
+        .hir
+        .function_ids_by_private_origin
+        .keys()
+        .filter(|identity| identity.defining_name() == "private_label")
+        .map(|identity| identity.module_origin().role())
+        .collect::<Vec<_>>();
+    private_roles.sort_by_key(|role| format!("{role:?}"));
+    assert_eq!(
+        private_roles,
+        [ModuleRootRole::Normal, ModuleRootRole::Support],
+        "same-named root-private functions must retain distinct surface identities"
     );
 }

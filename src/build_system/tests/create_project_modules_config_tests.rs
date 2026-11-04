@@ -653,7 +653,7 @@ fn hidden_section_output_inside_source_root_is_accepted_and_visible_output_is_re
     // A hidden output root inside the selected source root is allowed.
     write_config("generated/_out");
     let mut config = Config::new(root.clone());
-    let _ = successful_compilation_value(parse_project_config_for_test_with_html_keys(
+    successful_compilation_value(parse_project_config_for_test_with_html_keys(
         &mut config,
         &config_path,
         &style_directives,

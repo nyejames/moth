@@ -58,7 +58,8 @@ use crate::compiler_frontend::public_interface::{
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
-    OriginFunctionId, OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
+    ModuleRootRole, OriginFunctionId, OriginTraitId, OriginTypeCategory, OriginTypeId,
+    StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -83,6 +84,8 @@ pub(crate) struct ModuleMaterialisationCapture {
     /// Requester-owned declaring modules remain separate from the generated body's provider.
     retained_declaring_contexts: Vec<Arc<ModuleMaterialisationContext>>,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
+    /// The authored surface role for every source file in this module.
+    source_roles_by_path: FxHashMap<PathId, ModuleRootRole>,
     pub(crate) public_source_trait_origins:
         Arc<FxHashMap<PathId, crate::compiler_frontend::semantic_identity::OriginTraitId>>,
     pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
@@ -1886,8 +1889,14 @@ impl ModuleMaterialisationCapture {
             paths.render_portable(parent, &self.string_table, &mut scratch)
         };
 
+        let source_path = paths.try_parent(*path).unwrap_or(PathId::ROOT);
+        let role = self
+            .source_roles_by_path
+            .get(&source_path)
+            .copied()
+            .unwrap_or(module_origin.role());
         Ok(ModulePrivateExecutableIdentity::new(
-            module_origin.clone(),
+            module_origin.with_role(role),
             declaring_source,
             category,
             name,
@@ -1915,6 +1924,17 @@ impl ModuleMaterialisationCapture {
             inherited_stable_context: None,
             retained_declaring_contexts: Vec::new(),
             module_origin,
+            source_roles_by_path: lookups
+                .module_symbols
+                .file_roles_by_source
+                .iter()
+                .map(|(path, role)| {
+                    (
+                        *path,
+                        role.active_surface().unwrap_or(ModuleRootRole::Shared),
+                    )
+                })
+                .collect(),
             public_source_trait_origins,
             stage0_resolution_facts,
             frozen_identity_handle,
