@@ -205,3 +205,31 @@ fn paired_publication_preflight_failure_leaves_both_surfaces_unpublished() {
     );
     assert_eq!(store.materialisation_locations().count(), 0);
 }
+
+#[test]
+fn paired_diagnosis_marks_the_shared_slot_and_both_surfaces_unavailable() {
+    let mut store = ModuleArtifactStore::new(1);
+    store
+        .mark_diagnosed(ModuleId::from_index(0))
+        .expect("diagnosis should own the existing module slot");
+
+    assert_eq!(
+        store.slot(ModuleId::from_index(0)).unwrap(),
+        ProviderSlot::Diagnosed
+    );
+    assert_eq!(store.artifact_count(), 0);
+    assert!(
+        store
+            .interface_for_surface(ModuleId::from_index(0), ModuleRootRole::Normal)
+            .unwrap()
+            .is_none(),
+        "a diagnosed paired module must not expose a normal interface"
+    );
+    assert!(
+        store
+            .interface_for_surface(ModuleId::from_index(0), ModuleRootRole::Support)
+            .unwrap()
+            .is_none(),
+        "a diagnosed paired module must not expose a support interface"
+    );
+}
