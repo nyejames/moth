@@ -485,13 +485,13 @@ fn run_semantic_stages(
     // project-graph and public-alias-target traits are included; private and unowned
     // source-package traits are excluded. The type-surface projection consumes this
     // index to resolve source-trait generic bounds to stable trait origin identities.
-    let public_source_trait_origins = build_public_source_trait_origin_index(
+    let public_source_trait_origins = std::sync::Arc::new(build_public_source_trait_origin_index(
         &source_module_origins,
         &sorted.headers,
         &sorted.module_symbols,
         &compiler.string_table,
         &compiler.path_fork,
-    )?;
+    )?);
 
     // 3. Build the Abstract Syntax Tree (AST).
     // The build result carries the executable `Ast` plus the two closed side results
@@ -510,6 +510,7 @@ fn run_semantic_stages(
         &mut warnings,
         resolved_file_references,
         Some(active_module_origin.clone()),
+        std::sync::Arc::clone(&public_source_trait_origins),
         #[cfg(feature = "timers")]
         timing_context,
     )?;
@@ -954,6 +955,12 @@ fn build_ast_with_registered_types(
     warnings: &mut Vec<DiagnosticDraft>,
     resolved_file_references: ResolvedFileReferenceTable,
     module_origin: Option<StableModuleOriginIdentity>,
+    public_source_trait_origins: std::sync::Arc<
+        rustc_hash::FxHashMap<
+            crate::compiler_frontend::symbols::path_interner::PathId,
+            crate::compiler_frontend::semantic_identity::OriginTraitId,
+        >,
+    >,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
 ) -> Result<AstBuildResult, PreparedFailure> {
     match compiler.headers_to_ast(
@@ -965,6 +972,7 @@ fn build_ast_with_registered_types(
             capacity_estimate,
             resolved_file_references,
             module_origin,
+            public_source_trait_origins,
             build_config_values: Arc::clone(&context.build_config_values),
         },
         #[cfg(feature = "timers")]

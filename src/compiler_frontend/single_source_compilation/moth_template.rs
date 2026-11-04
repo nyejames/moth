@@ -731,6 +731,7 @@ fn fold_template_semantics(
                 ))),
                 module_resources: Rc::clone(&module_resources),
                 module_origin,
+                public_source_trait_origins: Arc::default(),
                 frozen_identity_handle,
             })
         });

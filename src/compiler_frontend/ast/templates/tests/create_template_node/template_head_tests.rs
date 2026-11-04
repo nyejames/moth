@@ -474,6 +474,7 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
         ))),
         module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
         module_origin: None,
+        public_source_trait_origins: Arc::default(),
         frozen_identity_handle: FrozenIdentityHandle::new(),
     }))
     .with_declaring_file_id(source_file);
@@ -571,6 +572,7 @@ fn template_head_extensionless_path_retains_exact_span() {
         ))),
         module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
         module_origin: None,
+        public_source_trait_origins: Arc::default(),
         frozen_identity_handle: FrozenIdentityHandle::new(),
     }))
     .with_declaring_file_id(source_file);

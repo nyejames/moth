@@ -969,6 +969,7 @@ pub(super) fn generated_file_value_resolution_services(
         stage0_resolution_facts: Some(stage0_resolution_facts),
         module_resources,
         module_origin,
+        public_source_trait_origins: Arc::default(),
         frozen_identity_handle,
     })
 }

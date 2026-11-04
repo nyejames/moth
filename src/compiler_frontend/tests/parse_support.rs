@@ -124,6 +124,7 @@ fn test_file_value_resolution_services(
         ))),
         module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
         module_origin: None,
+        public_source_trait_origins: Arc::default(),
         frozen_identity_handle: FrozenIdentityHandle::new(),
     })
 }

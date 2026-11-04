@@ -54,7 +54,9 @@ use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, OriginTraitId, StableModuleOriginIdentity,
+};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceDatabaseError, SourceId,
 };
@@ -63,6 +65,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
+use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
@@ -193,6 +196,7 @@ pub(crate) struct AstBuildRequest<'a> {
     pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
     pub(crate) resolved_file_references: ResolvedFileReferenceTable,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
+    pub(crate) public_source_trait_origins: Arc<FxHashMap<PathId, OriginTraitId>>,
     pub(crate) build_config_values:
         Arc<crate::compiler_frontend::build_config::ResolvedBuildConfigMap>,
 }
@@ -543,6 +547,7 @@ impl<'a> CompilerFrontend<'a> {
             capacity_estimate,
             resolved_file_references,
             module_origin,
+            public_source_trait_origins,
             build_config_values,
         } = request;
 
@@ -570,6 +575,7 @@ impl<'a> CompilerFrontend<'a> {
             ))),
             module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
             module_origin,
+            public_source_trait_origins,
             frozen_identity_handle,
         }));
         Ast::new(

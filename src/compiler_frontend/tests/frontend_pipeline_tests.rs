@@ -515,6 +515,7 @@ impl FrontendProject {
                     capacity_estimate: Default::default(),
                     resolved_file_references: ResolvedFileReferenceTable::default(),
                     module_origin: None,
+                    public_source_trait_origins: Arc::default(),
                     build_config_values: Arc::new(Default::default()),
                 },
                 #[cfg(feature = "timers")]

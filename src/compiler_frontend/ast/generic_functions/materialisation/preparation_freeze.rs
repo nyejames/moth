@@ -83,6 +83,8 @@ pub(crate) struct ModuleMaterialisationCapture {
     /// Requester-owned declaring modules remain separate from the generated body's provider.
     retained_declaring_contexts: Vec<Arc<ModuleMaterialisationContext>>,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
+    pub(crate) public_source_trait_origins:
+        Arc<FxHashMap<PathId, crate::compiler_frontend::semantic_identity::OriginTraitId>>,
     pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
     pub(crate) frozen_identity_handle: FrozenIdentityHandle,
     pub(crate) type_environment: TypeEnvironment,
@@ -152,6 +154,8 @@ pub(crate) struct ModuleMaterialisationEnvironmentInput<'a> {
     pub(crate) default_const_templates_by_path:
         FxHashMap<PathId, (PublicConstTemplate, Option<OwnedFoldedString>)>,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
+    pub(crate) public_source_trait_origins:
+        Arc<FxHashMap<PathId, crate::compiler_frontend::semantic_identity::OriginTraitId>>,
     pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
     pub(crate) frozen_identity_handle: FrozenIdentityHandle,
     pub(crate) string_table: &'a StringTable,
@@ -1771,23 +1775,30 @@ impl ModuleMaterialisationCapture {
                 })?;
                 Ok((
                     trait_id,
+                    *path,
                     self.string_table.resolve(defining_name).to_owned(),
                 ))
             })
             .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
-        for (trait_id, defining_name) in private_traits {
-            if self
-                .trait_environment
-                .canonical_identity_for_id(trait_id)
-                .is_none()
-            {
-                Rc::make_mut(&mut self.trait_environment).register_canonical_identity(
+        for (trait_id, trait_path, defining_name) in private_traits {
+            let identity = self
+                .public_source_trait_origins
+                .get(&trait_path)
+                .cloned()
+                .map(CanonicalTraitIdentity::Source)
+                .unwrap_or_else(|| {
                     CanonicalTraitIdentity::Source(OriginTraitId::new(
                         module_origin.clone(),
                         defining_name,
-                    )),
-                    trait_id,
-                )?;
+                    ))
+                });
+            if self
+                .trait_environment
+                .id_for_canonical_identity(&identity)
+                .is_none()
+            {
+                Rc::make_mut(&mut self.trait_environment)
+                    .register_canonical_identity(identity, trait_id)?;
             }
         }
 
@@ -1877,6 +1888,7 @@ impl ModuleMaterialisationCapture {
             public_trait_roots,
             default_const_templates_by_path,
             module_origin,
+            public_source_trait_origins,
             stage0_resolution_facts,
             frozen_identity_handle,
             string_table,
@@ -1889,6 +1901,7 @@ impl ModuleMaterialisationCapture {
             inherited_stable_context: None,
             retained_declaring_contexts: Vec::new(),
             module_origin,
+            public_source_trait_origins,
             stage0_resolution_facts,
             frozen_identity_handle,
             type_environment: type_environment.fork_for_generated(),

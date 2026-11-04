@@ -413,6 +413,14 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                         .file_value_resolution
                         .as_ref()
                         .and_then(|services| services.module_origin.clone()),
+                    public_source_trait_origins: self
+                        .context
+                        .file_value_resolution
+                        .as_ref()
+                        .map(|services| {
+                            std::sync::Arc::clone(&services.public_source_trait_origins)
+                        })
+                        .unwrap_or_default(),
                     stage0_resolution_facts: self
                         .context
                         .file_value_resolution
