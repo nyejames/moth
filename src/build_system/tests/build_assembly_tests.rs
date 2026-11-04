@@ -762,6 +762,58 @@ fn entry_union_keeps_entry_fragment_and_excludes_linked_module_fragment() {
 }
 
 #[test]
+fn package_owner_lookup_registers_the_structural_shared_origin() {
+    let package = StablePackageIdentity::project_local("shared-owner-map");
+    let record = module_record(
+        "/synthetic/shared-owner-map",
+        "/synthetic/shared-owner-map/+package.moth",
+        ModuleRootRole::Support,
+        "",
+        &package,
+    );
+    let shared_origin = record.shared_origin().clone();
+    let stable_origin = record.stable_origin().clone();
+    assert_ne!(
+        shared_origin, stable_origin,
+        "a support root and its shared helper origin must be distinct"
+    );
+
+    let graph = ProjectModuleGraph::from_test_records(vec![record]);
+    let module_id = ModuleId::from_index(0);
+    let project = boundary(
+        graph,
+        vec![artifact(
+            synthetic_module("+package.moth", Vec::new(), None, Vec::new()),
+            empty_interface(stable_origin.clone()),
+        )],
+    );
+
+    let owners = super::super::build_module_owner_by_origin(
+        &project,
+        &CompletedSourcePackageRegistry::new(),
+    )
+    .expect("owner lookup should build");
+    assert_eq!(
+        owners.get(&shared_origin),
+        Some(
+            &crate::build_system::create_project_modules::compiled_boundary::CompiledModuleRef::Project(
+                module_id
+            )
+        ),
+        "a shared helper origin must resolve to its structural module owner"
+    );
+    assert_eq!(
+        owners.get(&stable_origin),
+        Some(
+            &crate::build_system::create_project_modules::compiled_boundary::CompiledModuleRef::Project(
+                module_id
+            )
+        ),
+        "the support surface origin must resolve to the same structural module owner"
+    );
+}
+
+#[test]
 fn package_facade_rejects_project_context_reachable_private_helper() {
     let package = StablePackageIdentity::project_local("assembly-provenance-helper");
     let facade_origin = StableModuleOriginIdentity::from_portable_path(
