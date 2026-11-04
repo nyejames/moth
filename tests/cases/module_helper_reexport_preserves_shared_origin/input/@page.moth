@@ -1,0 +1,8 @@
+@impl value, Message
+
+export:
+    @impl value, Message
+;
+
+message = Message("receiver-helper")
+io.line([: [value] [message.label()]])

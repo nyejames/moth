@@ -208,7 +208,7 @@ pub(in crate::compiler_frontend) fn build_direct_export_seed(
         path_fork,
     )?;
     let public_nominal_type_origins = index_public_nominal_type_origins(
-        &active_origin,
+        source_module_origins,
         &export_bindings,
         sorted_headers,
         module_symbols,
@@ -405,7 +405,7 @@ fn resolve_active_module_origin(
 /// is defined in the same file as that type; this projection runs only on overall semantic success,
 /// so the rule already holds.
 fn index_public_nominal_type_origins(
-    module_origin: &StableModuleOriginIdentity,
+    source_module_origins: &SourceModuleOriginTable,
     export_bindings: &[ExportBinding],
     sorted_headers: &[Header],
     module_symbols: &ModuleSymbols,
@@ -434,7 +434,10 @@ fn index_public_nominal_type_origins(
             HeaderKind::Choice { .. } => OriginTypeCategory::Choice,
             _ => continue,
         };
-        let origin = OriginTypeId::new(module_origin.clone(), name.to_owned(), category);
+        let Some(header_origin) = source_module_origins.origin_for(header.tokens.source())? else {
+            continue;
+        };
+        let origin = OriginTypeId::new(header_origin.clone(), name.to_owned(), category);
         let is_exported_origin = export_bindings.iter().any(|binding| {
             matches!(binding.origin(), OriginDeclarationId::Type(exported) if exported == &origin)
         });
@@ -987,7 +990,10 @@ fn collect_one_reexport_binding<'a>(
     let Some(target_origin) = context.source_module_origins.origin_for(file_id)? else {
         return Ok(());
     };
-    if target_origin != context.module_origin {
+    // Helper declarations keep their role-neutral defining origin. Root-private declarations
+    // stay qualified to the active root, so a paired root cannot re-export the other surface's
+    // private declaration merely because both share package and logical path.
+    if !target_origin.is_same_structural_module(context.module_origin) {
         return Ok(());
     }
     let Some(name) = context
@@ -1005,7 +1011,7 @@ fn collect_one_reexport_binding<'a>(
     };
 
     // Determine the declaration category from the header kind and build the origin.
-    let origin = reexport_declaration_origin(header, context.module_origin, name)?;
+    let origin = reexport_declaration_origin(header, target_origin, name)?;
     let export_name = context.string_table.resolve(entry.export_name).to_owned();
 
     bindings.push(ReexportBinding {

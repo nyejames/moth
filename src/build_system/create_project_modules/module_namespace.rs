@@ -843,7 +843,11 @@ fn populate_project_cross_module_targets(
             continue;
         }
         if let Some(key) = support_package_key(identities, support_id) {
-            if namespace.entries.get(&key).is_some_and(|entry| {
+            // The consumer imports a paired normal surface through its normal module path, even
+            // when that path passes through unrooted intermediate directories. Suppress the
+            // support key only when the same structural module already has a normal entry in
+            // this namespace. Key spelling cannot decide this: the support key is a basename.
+            let normal_surface_already_visible = namespace.entries.values().any(|entry| {
                 matches!(
                     entry,
                     NamespaceEntry::CrossModule {
@@ -851,7 +855,8 @@ fn populate_project_cross_module_targets(
                         surface: ModuleRootRole::Normal,
                     } if *target_module_id == support_id
                 )
-            }) {
+            });
+            if normal_surface_already_visible {
                 continue;
             }
             namespace.insert(
@@ -904,7 +909,11 @@ fn populate_package_cross_module_targets(
             continue;
         }
         if let Some(key) = support_package_key(identities, support_id) {
-            if namespace.entries.get(&key).is_some_and(|entry| {
+            // The consumer imports a paired normal surface through its normal module path, even
+            // when that path passes through unrooted intermediate directories. Suppress the
+            // support key only when the same structural module already has a normal entry in
+            // this namespace. Key spelling cannot decide this: the support key is a basename.
+            let normal_surface_already_visible = namespace.entries.values().any(|entry| {
                 matches!(
                     entry,
                     NamespaceEntry::CrossModule {
@@ -912,7 +921,8 @@ fn populate_package_cross_module_targets(
                         surface: ModuleRootRole::Normal,
                     } if *target_module_id == support_id
                 )
-            }) {
+            });
+            if normal_surface_already_visible {
                 continue;
             }
             namespace.insert(

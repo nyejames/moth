@@ -10340,6 +10340,13 @@ contract = "language.dependencies.source_package_dotdot_rejected"
 role = "primary"
 
 [[case]]
+id = "source_package_facade_helper_reexport_success"
+path = "source_package_facade_helper_reexport_success"
+tags = ["integration", "dependencies", "visibility", "packages", "facade", "positive"]
+contract = "language.source_packages.helper_reexport_facade"
+role = "primary"
+
+[[case]]
 id = "source_package_facade"
 path = "source_package_facade"
 tags = ["integration", "source-packages", "facades", "dependencies"]
@@ -11633,6 +11640,13 @@ path = "direct_nested_support_root_dependency_rejected"
 tags = ["integration", "dependencies", "diagnostics", "special-files", "source-packages"]
 contract = "language.dependencies.direct_special_file_dependency_rejected"
 role = "boundary"
+
+[[case]]
+id = "module_helper_reexport_preserves_shared_origin"
+path = "module_helper_reexport_preserves_shared_origin"
+tags = ["integration", "dependencies", "visibility", "public-interface", "positive"]
+contract = "language.dependencies.same_module_helper_reexport"
+role = "primary"
 
 [[case]]
 id = "module_facade_unprefixed_type_export"

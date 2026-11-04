@@ -2832,6 +2832,22 @@ mod project_module_graph_tests {
     }
 
     #[test]
+    fn nested_support_without_a_structural_parent_is_not_a_project_package_surface() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        fs::create_dir_all(root.join("library")).expect("should create nested directory");
+        fs::write(root.join("library/+api.moth"), "").expect("should write nested support root");
+
+        let (index, _project_root, _entry_root) = discover_index(&root, ".");
+        let graph = ProjectModuleGraph::from_source_tree_index(&index);
+        assert_eq!(
+            graph.project_package_surface(),
+            None,
+            "a nested support root with no structural parent is not rooted at the selected directory"
+        );
+    }
+
+    #[test]
     fn support_visibility_is_visible_to_owner_and_normal_descendants_outside_subtree() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();

@@ -73,3 +73,30 @@ fn paired_root_surface_is_selected_by_consumer_position() {
         "a paired module must not import its own support surface"
     );
 }
+
+#[test]
+fn paired_support_is_suppressed_for_parent_even_through_an_unrooted_directory() {
+    let package = StablePackageIdentity::project_local("docs");
+    let records = vec![
+        record("/app", "", true, false, &package),
+        record("/app/group/engine", "group/engine", true, true, &package),
+        record("/app/ui", "ui", true, false, &package),
+    ];
+    let identities = ModuleIdentityTable::from_records(records);
+    let parent = identities
+        .module_id_for_directory(std::path::Path::new("/app"))
+        .expect("parent module should exist");
+
+    let mut parent_namespace = ModuleNamespace::new();
+    populate_package_cross_module_targets(&mut parent_namespace, &identities, parent);
+    assert_eq!(
+        cross_module_surface(&parent_namespace, "group/engine"),
+        Some(ModuleRootRole::Normal),
+        "the parent still imports the paired normal surface through the unrooted directory"
+    );
+    assert_eq!(
+        cross_module_surface(&parent_namespace, "engine"),
+        None,
+        "the support surface must not be added under a basename for the parent"
+    );
+}

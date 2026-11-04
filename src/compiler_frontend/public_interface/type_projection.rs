@@ -397,7 +397,10 @@ pub(super) fn register_generic_parameter_origins(
     let mut function_origin_by_name: FxHashMap<&str, &OriginFunctionId> = FxHashMap::default();
     for binding in export_bindings {
         if let OriginDeclarationId::Function(function_origin) = binding.origin() {
-            if function_origin.module_origin() != binding.exporting_module() {
+            if !function_origin
+                .module_origin()
+                .is_same_structural_module(binding.exporting_module())
+            {
                 continue;
             }
             function_origin_by_name.insert(function_origin.defining_name(), function_origin);

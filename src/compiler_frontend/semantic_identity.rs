@@ -320,6 +320,21 @@ impl StableModuleOriginIdentity {
     pub(crate) fn role(&self) -> ModuleRootRole {
         self.role
     }
+
+    /// Whether two origins belong to the same rooted directory module.
+    ///
+    /// A shared helper origin and a root-qualified origin at the same package and logical module
+    /// path belong to one structural module. Two different root surfaces do not: a normal and a
+    /// support origin at the same path remain isolated scopes.
+    pub(crate) fn is_same_structural_module(&self, other: &Self) -> bool {
+        if self == other {
+            return true;
+        }
+        if self.package != other.package || self.logical_module_path != other.logical_module_path {
+            return false;
+        }
+        self.role == ModuleRootRole::Shared || other.role == ModuleRootRole::Shared
+    }
 }
 
 /// Convert a base-relative logical path into a portable forward-slash spelling.

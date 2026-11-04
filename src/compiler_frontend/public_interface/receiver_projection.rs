@@ -121,7 +121,11 @@ pub(crate) fn build_callable_seed_table(
     let mut seen_origins = FxHashSet::default();
 
     for binding in export_bindings {
-        if binding.origin().module_origin() != module_origin {
+        if !binding
+            .origin()
+            .module_origin()
+            .is_same_structural_module(module_origin)
+        {
             continue;
         }
         if matches!(binding.origin(), OriginDeclarationId::Trait(_)) {

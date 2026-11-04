@@ -1326,42 +1326,42 @@ fn build_module_owner_by_origin(
     let mut module_owner_by_origin =
         FxHashMap::<StableModuleOriginIdentity, CompiledModuleRef>::default();
     for node in project.structure.nodes() {
-        if module_owner_by_origin
-            .insert(
-                node.stable_origin().clone(),
-                CompiledModuleRef::Project(node.module_id()),
-            )
-            .is_some()
-        {
-            return Err(InfrastructureFailure::internal(
-                CompilerStage::ProjectBuildAssembly,
-                format!(
-                    "Project package assembly found duplicate project module origin {:?}",
-                    node.stable_origin()
-                ),
-            ));
+        let module_ref = CompiledModuleRef::Project(node.module_id());
+        for origin in [node.stable_origin(), node.shared_origin()] {
+            if module_owner_by_origin
+                .insert(origin.clone(), module_ref)
+                .is_some_and(|existing| existing != module_ref)
+            {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "Project package assembly found duplicate project module origin {:?}",
+                        origin
+                    ),
+                ));
+            }
         }
     }
     for (package_index, package) in source_packages.iter().enumerate() {
         let package_id = PackageBoundaryId::from_index(package_index);
         for node in package.boundary.structure.nodes() {
-            if module_owner_by_origin
-                .insert(
-                    node.stable_origin().clone(),
-                    CompiledModuleRef::SourcePackage {
-                        package_id,
-                        module_id: node.module_id(),
-                    },
-                )
-                .is_some()
-            {
-                return Err(InfrastructureFailure::internal(
-                    CompilerStage::ProjectBuildAssembly,
-                    format!(
-                        "Project package assembly found duplicate module origin {:?}",
-                        node.stable_origin()
-                    ),
-                ));
+            let module_ref = CompiledModuleRef::SourcePackage {
+                package_id,
+                module_id: node.module_id(),
+            };
+            for origin in [node.stable_origin(), node.shared_origin()] {
+                if module_owner_by_origin
+                    .insert(origin.clone(), module_ref)
+                    .is_some_and(|existing| existing != module_ref)
+                {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "Project package assembly found duplicate module origin {:?}",
+                            origin
+                        ),
+                    ));
+                }
             }
         }
     }

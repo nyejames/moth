@@ -435,7 +435,11 @@ impl ProjectModuleGraph {
     pub(crate) fn project_package_surface(&self) -> Option<ModuleId> {
         self.nodes
             .iter()
-            .find(|node| node.nearest_parent.is_none() && node.support_origin.is_some())
+            .find(|node| {
+                node.nearest_parent.is_none()
+                    && node.support_origin.is_some()
+                    && node.stable_origin().logical_module_path().is_empty()
+            })
             .map(|node| node.module_id)
     }
 

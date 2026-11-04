@@ -1,0 +1,7 @@
+value #= "shared-helper"
+
+Message = | text String |
+
+label |this Message| -> String:
+    return this.text
+;
