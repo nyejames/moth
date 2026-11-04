@@ -404,11 +404,15 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             }
         };
         let materialisation_context = if retain_materialisation_context {
+            let mut materialisation_public_trait_roots = resolved_public_trait_roots.clone();
+            if let Some(support_trait_roots) = support_public_trait_roots.as_ref() {
+                materialisation_public_trait_roots.extend(support_trait_roots.iter().cloned());
+            }
             let context = ModuleMaterialisationPreparationBuilder::from_environment(
                 ModuleMaterialisationEnvironmentInput {
                     lookups: &owned_lookups,
                     type_environment: &type_environment,
-                    public_trait_roots: &resolved_public_trait_roots,
+                    public_trait_roots: &materialisation_public_trait_roots,
                     default_const_templates_by_path: default_const_templates,
                     module_origin: self
                         .context

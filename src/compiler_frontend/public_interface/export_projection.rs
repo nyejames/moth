@@ -718,7 +718,9 @@ fn collect_free_export_bindings(
     let mut seen_public_names: FxHashSet<String> = FxHashSet::default();
 
     for header in sorted_headers {
-        if !is_directly_defined_public_export(header) {
+        if !is_directly_defined_public_export(header)
+            || header.tokens.source() != active_root_file_id
+        {
             continue;
         }
 

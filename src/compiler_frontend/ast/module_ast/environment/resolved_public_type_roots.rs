@@ -27,6 +27,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterListId, TypeId};
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::semantic_identity::OriginTraitId;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::{CoreTraitKind, TraitEnvironment};
@@ -190,6 +191,8 @@ pub(crate) struct BuildResolvedPublicTypeRootsInput<'a> {
     /// Source declaration paths re-exported through the root's `export:` block from private files
     /// in the same module.
     pub reexport_target_paths: &'a FxHashSet<PathId>,
+    /// The selected root surface whose directly-authored public declarations belong to this table.
+    pub active_root_file_id: SourceId,
 }
 
 /// Build the resolved public type-root table from completed AST environment facts.
@@ -222,6 +225,7 @@ pub(crate) fn build_resolved_public_type_roots(
         type_environment,
         string_table,
         reexport_target_paths,
+        active_root_file_id,
     } = input;
 
     let mut roots = Vec::new();
@@ -231,7 +235,9 @@ pub(crate) fn build_resolved_public_type_roots(
 
     // Pass 1: collect declaration roots and the complete public nominal path set.
     for header in sorted_headers {
-        if !is_active_root_public_declaration(header) {
+        if !is_active_root_public_declaration(header)
+            || header.tokens.source() != active_root_file_id
+        {
             continue;
         }
 

@@ -67,9 +67,12 @@ use crate::compiler_frontend::public_interface::{
     build_direct_export_seed, build_public_source_nominal_origin_index,
     build_public_source_trait_origin_index,
 };
-use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootRole, OriginFunctionId, StableModuleOriginIdentity,
+};
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::validated_generic_template_metadata::validate_materialisation_context_templates;
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend};
 use crate::{borrow_log, timed_stage_attributed};
@@ -239,7 +242,7 @@ pub(crate) fn compile_module_for_boracle(
     let entry_file_path = entry_file_path.as_path();
     let PreparedModuleInput {
         active_root_file_id,
-        support_root_file_id: _,
+        support_root_file_id,
         candidate_source_ids,
         source_module_origins,
         prepared_header_syntax,
@@ -276,6 +279,7 @@ pub(crate) fn compile_module_for_boracle(
         preparation_warnings,
         SemanticStageInputs {
             prepared_header_syntax,
+            support_root_file_id,
             candidate_source_ids,
             source_module_origins,
             active_root_file_id,
@@ -758,9 +762,26 @@ fn run_semantic_stages(
     )?;
 
     let mut function_origin_seeds = Vec::new();
+    let mut function_seed_origins = FxHashMap::<PathId, OriginFunctionId>::default();
     let mut surface_drafts = Vec::with_capacity(surface_builds.len());
     for (role, mut build) in surface_builds.drain(..) {
-        function_origin_seeds.extend(std::mem::take(&mut build.function_origin_seeds));
+        for seed in std::mem::take(&mut build.function_origin_seeds) {
+            if let Some(existing) = function_seed_origins.get(&seed.path) {
+                if existing != &seed.origin {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "semantic module compilation: declaration path {:?} resolves to conflicting public function origins across module surfaces",
+                            seed.path
+                        ),
+                    )
+                    .into());
+                }
+                continue;
+            }
+            function_seed_origins.insert(seed.path, seed.origin.clone());
+            function_origin_seeds.push(seed);
+        }
         surface_drafts.push((role, build.draft));
     }
     let function_origin_lookup = HirFunctionOriginLookup::from_public_and_private_seeds(

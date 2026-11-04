@@ -777,11 +777,18 @@ fn populate_same_module_entries(
         };
         let relative_path = owned_identity.relative_source_path();
 
-        let file_name = Path::new(relative_path)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("");
-        if file_name.starts_with('@') || file_name.starts_with('+') {
+        let is_root_surface = record
+            .logical_identity()
+            .module_origin()
+            .is_some_and(|origin| {
+                matches!(
+                    origin.role(),
+                    ModuleRootRole::Normal
+                        | ModuleRootRole::Support
+                        | ModuleRootRole::SyntheticProjectContext
+                )
+            });
+        if is_root_surface {
             continue;
         }
 

@@ -18,6 +18,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -159,6 +160,7 @@ pub(crate) struct AstPublicInterfaceProjectionInput {
 pub(crate) fn build_resolved_public_trait_roots(
     sorted_headers: &[Header],
     reexport_target_paths: &FxHashSet<PathId>,
+    active_root_file_id: SourceId,
     trait_environment: &TraitEnvironment,
     string_table: &StringTable,
 ) -> Result<Vec<ResolvedPublicTraitRoot>, InfrastructureFailure> {
@@ -167,7 +169,9 @@ pub(crate) fn build_resolved_public_trait_roots(
     for header in sorted_headers {
         let is_reexported_trait = matches!(header.kind, HeaderKind::Trait { .. })
             && reexport_target_paths.contains(&header.declaration_path);
-        if !(is_active_root_public_trait_declaration(header) || is_reexported_trait) {
+        let is_direct_active_trait = is_active_root_public_trait_declaration(header)
+            && header.tokens.source() == active_root_file_id;
+        if !(is_direct_active_trait || is_reexported_trait) {
             continue;
         }
 

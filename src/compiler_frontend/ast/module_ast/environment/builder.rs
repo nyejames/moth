@@ -684,6 +684,27 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // block. They are not in the active root file, so the directly-defined pass excludes them.
         let reexport_target_paths =
             collect_reexport_target_paths(&self.context.entry_dir, &self.module_symbols);
+        let active_root_file_id = self
+            .module_symbols
+            .source_ids_by_source
+            .get(&self.context.entry_dir)
+            .copied()
+            .or_else(|| {
+                self.module_symbols
+                    .file_roles_by_source
+                    .iter()
+                    .find_map(|(source, role)| {
+                        role.is_active_module_root()
+                            .then(|| {
+                                self.module_symbols
+                                    .source_ids_by_source
+                                    .get(source)
+                                    .copied()
+                            })
+                            .flatten()
+                    })
+            })
+            .unwrap_or(crate::compiler_frontend::source::SourceId::COMPILATION_ROOT);
 
         let resolved_public_type_roots = prepare!(build_resolved_public_type_roots(
             BuildResolvedPublicTypeRootsInput {
@@ -699,6 +720,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 type_environment: &self.type_environment,
                 string_table,
                 reexport_target_paths: &reexport_target_paths,
+                active_root_file_id,
             }
         ))?;
 
@@ -707,6 +729,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let resolved_public_trait_roots = prepare!(build_resolved_public_trait_roots(
             sorted_headers,
             &reexport_target_paths,
+            active_root_file_id,
             &trait_environment,
             string_table,
         ))?;
@@ -729,6 +752,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             Some(support_root_source) if support_root_source != self.context.entry_dir => {
                 let support_reexport_target_paths =
                     collect_reexport_target_paths(&support_root_source, &self.module_symbols);
+                let support_root_file_id = self
+                    .module_symbols
+                    .source_ids_by_source
+                    .get(&support_root_source)
+                    .copied()
+                    .unwrap_or(crate::compiler_frontend::source::SourceId::COMPILATION_ROOT);
                 let support_type_roots = prepare!(build_resolved_public_type_roots(
                     BuildResolvedPublicTypeRootsInput {
                         sorted_headers,
@@ -745,11 +774,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         type_environment: &self.type_environment,
                         string_table,
                         reexport_target_paths: &support_reexport_target_paths,
+                        active_root_file_id: support_root_file_id,
                     }
                 ))?;
                 let support_trait_roots = prepare!(build_resolved_public_trait_roots(
                     sorted_headers,
                     &support_reexport_target_paths,
+                    support_root_file_id,
                     &trait_environment,
                     string_table,
                 ))?;

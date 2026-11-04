@@ -163,6 +163,7 @@ pub(crate) struct CheckOnlyModuleCompilationJob {
 pub(crate) struct CheckOnlyProviderBinding {
     pub(crate) dependency_shell_id: DependencyShellId,
     pub(crate) provider_module_id: ModuleId,
+    pub(crate) provider_surface: ModuleRootRole,
 }
 pub(crate) struct CheckOnlySourcePackageDependency {
     pub(crate) dependency_shell_id: DependencyShellId,
@@ -924,6 +925,7 @@ fn prepare_check_only_module(
                 }
                 ResolvedDependency::CrossModule {
                     provider_module_id,
+                    provider_surface,
                     consumer_module_id,
                     ..
                 } => {
@@ -935,6 +937,7 @@ fn prepare_check_only_module(
                     provider_bindings.push(CheckOnlyProviderBinding {
                         dependency_shell_id: provider.dependency_shell_id,
                         provider_module_id,
+                        provider_surface,
                     });
                 }
                 ResolvedDependency::SourcePackageSurface {

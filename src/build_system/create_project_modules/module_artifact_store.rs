@@ -241,6 +241,7 @@ impl ModuleArtifactStore {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn interface(
         &self,
         module_id: ModuleId,

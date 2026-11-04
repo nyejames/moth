@@ -11656,6 +11656,13 @@ contract = "language.project_structure.support_surface_import_visibility"
 role = "primary"
 
 [[case]]
+id = "paired_root_direct_exports_isolated"
+path = "paired_root_direct_exports_isolated"
+tags = ["integration", "modules", "visibility", "root-boundaries", "positive"]
+contract = "language.project_structure.paired_root_direct_exports"
+role = "primary"
+
+[[case]]
 id = "paired_root_shared_helper_success"
 path = "paired_root_shared_helper_success"
 tags = ["integration", "modules", "visibility", "root-boundaries", "positive"]

@@ -283,22 +283,32 @@ fn facade_project_globals_dependency(
         return Ok(None);
     }
 
-    let mut component_scratch = Vec::new();
     for (source_path, clauses) in &prepared
         .semantic
         .prepared_header_syntax
         .module_symbols
         .file_dependency_clauses_by_source
     {
-        let components = prepared
+        let Some(source_id) = prepared
             .semantic
-            .path_fork
-            .resolve_components(*source_path, &mut component_scratch);
-        let source_file_name = components
-            .last()
-            .map(|component| prepared.semantic.string_table.resolve(*component))
-            .unwrap_or_default();
-        if !source_file_name.starts_with('+') {
+            .prepared_header_syntax
+            .module_symbols
+            .source_ids_by_source
+            .get(source_path)
+        else {
+            continue;
+        };
+        let Some(source_origin) = prepared
+            .semantic
+            .source_module_origins
+            .origin_for(*source_id)?
+        else {
+            continue;
+        };
+        if !matches!(
+            source_origin.role(),
+            ModuleRootRole::Support | ModuleRootRole::SyntheticProjectContext
+        ) {
             continue;
         }
         for clause in clauses {
@@ -337,14 +347,22 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
     ) -> Result<SourceProviderDependencySet<'boundary>, InfrastructureFailure> {
         let check_only = check_only_provider_bindings.is_some()
             || check_only_source_package_dependencies.is_some();
-        let mut transient_provider_index: FxHashMap<DependencyShellId, ModuleId> =
-            FxHashMap::default();
+        let mut transient_provider_index: FxHashMap<
+            DependencyShellId,
+            (
+                ModuleId,
+                crate::compiler_frontend::semantic_identity::ModuleRootRole,
+            ),
+        > = FxHashMap::default();
         let mut transient_package_index: FxHashMap<DependencyShellId, &str> = FxHashMap::default();
 
         if let Some(bindings) = check_only_provider_bindings {
             for binding in bindings {
                 if transient_provider_index
-                    .insert(binding.dependency_shell_id, binding.provider_module_id)
+                    .insert(
+                        binding.dependency_shell_id,
+                        (binding.provider_module_id, binding.provider_surface),
+                    )
                     .is_some()
                 {
                     return Err(InfrastructureFailure::internal(
@@ -411,12 +429,12 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                     continue;
                 }
                 if check_only {
-                    if let Some(provider_module_id) =
+                    if let Some((provider_module_id, provider_surface)) =
                         transient_provider_index.get(&shell_id).copied()
                     {
                         let interface = self
                             .provider_store
-                            .interface(provider_module_id)?
+                            .interface_for_surface(provider_module_id, provider_surface)?
                             .ok_or_else(|| {
                                 InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                                     "Check-only ModuleId {} started semantic binding before provider ModuleId {} published a complete interface",

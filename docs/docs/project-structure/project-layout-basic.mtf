@@ -46,8 +46,10 @@ A `+*.moth` root creates a scoped support surface. For example,
 modules and their descendants may depend on it. Other support packages in the
 same scope and the package's private implementation subtree cannot. When a
 directory has both roots, helpers are shared while each root keeps a separate
-authoring scope and public interface. A project-root `+*.moth` is selected by
-project package assembly as the external package surface.
+authoring scope and public interface. A parent module selects a paired child's
+`@` surface; eligible sibling branches select its `+` surface. The parent never
+falls back to support exports. A project-root `+*.moth` is selected by project
+package assembly as the external package surface.
 
 ### Outputs are generated
 
