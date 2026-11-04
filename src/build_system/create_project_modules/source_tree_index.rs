@@ -200,6 +200,12 @@ struct DiscoveredSourceCandidate {
     classification: SourceClassification,
     supported: bool,
     logical_candidate_path: String,
+    /// The discovered module-root surface role, retained before canonicalization.
+    ///
+    /// A root file reached through a symlink has a visible `@`/`+` spelling but a differently
+    /// named canonical target. Role inference from the canonical filename loses the surface, so
+    /// classification consumes the role discovered from the visible entry instead.
+    root_role: Option<ModuleRootRole>,
 }
 
 /// Zero-based row handle for a source candidate in one [`SourceTreeIndex`].
@@ -473,8 +479,8 @@ impl SourceTreeIndex {
     /// provider-owned file whose extension is registered with the external provider registry but is
     /// not a compiler `SourceFileKind`. Unknown extensions never enter owned source sets. After
     /// deterministic `ModuleIdentityTable` construction, each recognized candidate is classified
-    /// under its nearest containing normal or support root into
-    /// central [`SourceRecord`] table. Recognized candidates with no enclosing
+    /// under its nearest containing normal or support root into the central [`SourceRecord`]
+    /// table. Recognized candidates with no enclosing
     /// module root remain explicit unrooted [`SourceRecord`]s rather than being silently
     /// discarded. Sorted rows are handed to the boundary's compiler-facing registration index.
     pub(super) fn discover(
@@ -732,6 +738,9 @@ impl SourceTreeIndex {
                         classification: SourceClassification::CompilerSemantic(kind),
                         supported: source_supported,
                         logical_candidate_path,
+                        root_role: is_module_root
+                            .then(|| module_root_role_for_file_name(file_name))
+                            .flatten(),
                     });
                 } else if let Some(extension) = provider_extension {
                     // Provider-owned files are never module roots. They enter the inventory as
@@ -745,6 +754,7 @@ impl SourceTreeIndex {
                         classification: SourceClassification::ProviderOwned(extension),
                         supported: true,
                         logical_candidate_path,
+                        root_role: None,
                     });
                 }
 
@@ -884,8 +894,7 @@ impl SourceTreeIndex {
                 // identity; re-canonicalizing would repeat the same syscall for the same answer.
                 let logical_module_path = logical_module_path_from(&directory, &entry_root)?;
 
-                stats.module_roots_found += usize::from(directory_root.normal_root_file.is_some())
-                    + usize::from(directory_root.support_root_file.is_some());
+                stats.module_roots_found += 1;
                 records.push(ModuleIdentityRecord::new(
                     directory,
                     directory_root.normal_root_file,
@@ -1425,7 +1434,8 @@ fn entry_root_relative_logical_path(
 /// root by walking parent directories through the identity table. A nested module root and all
 /// files beneath it transfer to the nested module because the nearest-module walk finds it
 /// first. Unrooted internal subdirectories stay owned by their nearest ancestor module. The
-/// Recognized candidates with/// no enclosing module root become explicit deterministic unrooted classified sources.
+/// Recognized candidates with no enclosing module root become explicit deterministic unrooted
+/// classified sources.
 /// WHY: one authoritative classification is the single input for source ownership. Each
 /// classified source carries its portable logical identity and explicit ownership.
 /// Source ordering uses the stable identity's explicit ordering.
@@ -1433,9 +1443,29 @@ fn classify_owned_sources(
     module_identities: &ModuleIdentityTable,
     recognized_candidates: Vec<DiscoveredSourceCandidate>,
 ) -> Result<Vec<ClassifiedSource>, InfrastructureFailure> {
+    // Two visible entries can resolve to one physical source (a root symlink and its target, or
+    // two aliases). Retain one record and prefer the candidate that carries a discovered root
+    // surface role, so a symlinked `@root` does not lose its surface to its plain target spelling.
+    let mut candidates =
+        Vec::<DiscoveredSourceCandidate>::with_capacity(recognized_candidates.len());
+    let mut position_by_canonical = FxHashMap::<PathBuf, usize>::default();
+    for candidate in recognized_candidates {
+        if let Some(position) = position_by_canonical
+            .get(&candidate.canonical_path)
+            .copied()
+        {
+            if candidates[position].root_role.is_none() && candidate.root_role.is_some() {
+                candidates[position] = candidate;
+            }
+            continue;
+        }
+        position_by_canonical.insert(candidate.canonical_path.clone(), candidates.len());
+        candidates.push(candidate);
+    }
+
     let mut classified = Vec::new();
 
-    for candidate in recognized_candidates {
+    for candidate in candidates {
         let Some(parent_directory) = candidate.canonical_path.parent() else {
             classified.push(unrooted_classified(candidate));
             continue;
@@ -1451,10 +1481,7 @@ fn classify_owned_sources(
         let relative_path =
             relative_source_path_from(&candidate.canonical_path, record.root_directory())?;
         let source_origin = candidate
-            .canonical_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .and_then(module_root_role_for_file_name)
+            .root_role
             .and_then(|role| record.surface_origin(role))
             .unwrap_or_else(|| record.shared_origin())
             .clone();

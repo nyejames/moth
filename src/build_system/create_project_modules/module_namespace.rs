@@ -811,63 +811,9 @@ fn populate_project_cross_module_targets(
     project_module_graph: &ProjectModuleGraph,
     module_id: ModuleId,
 ) {
-    let owning_path = identities
-        .record(module_id)
-        .stable_origin()
-        .logical_module_path()
-        .to_owned();
-
-    for child_id in identities.direct_child_modules(module_id) {
-        if identities.record(*child_id).normal_root_file().is_none() {
-            continue;
-        }
-
-        if let Some(key) = relative_module_key(&owning_path, identities, *child_id) {
-            namespace.insert(
-                key,
-                NamespaceEntry::CrossModule {
-                    target_module_id: *child_id,
-                    surface: ModuleRootRole::Normal,
-                },
-            );
-        }
-    }
-
-    for support_id in identities.module_ids() {
-        if support_id == module_id {
-            continue;
-        }
-        if identities.record(support_id).support_root_file().is_none()
-            || !project_module_graph.is_support_visible_to_consumer(support_id, module_id)
-        {
-            continue;
-        }
-        if let Some(key) = support_package_key(identities, support_id) {
-            // The consumer imports a paired normal surface through its normal module path, even
-            // when that path passes through unrooted intermediate directories. Suppress the
-            // support key only when the same structural module already has a normal entry in
-            // this namespace. Key spelling cannot decide this: the support key is a basename.
-            let normal_surface_already_visible = namespace.entries.values().any(|entry| {
-                matches!(
-                    entry,
-                    NamespaceEntry::CrossModule {
-                        target_module_id,
-                        surface: ModuleRootRole::Normal,
-                    } if *target_module_id == support_id
-                )
-            });
-            if normal_surface_already_visible {
-                continue;
-            }
-            namespace.insert(
-                key,
-                NamespaceEntry::CrossModule {
-                    target_module_id: support_id,
-                    surface: ModuleRootRole::Support,
-                },
-            );
-        }
-    }
+    populate_cross_module_targets(namespace, identities, module_id, |support_id| {
+        project_module_graph.is_support_visible_to_consumer(support_id, module_id)
+    });
 }
 
 /// Add cross-module target entries for one package module: direct child modules and visible
@@ -876,6 +822,18 @@ fn populate_package_cross_module_targets(
     namespace: &mut ModuleNamespace,
     identities: &ModuleIdentityTable,
     module_id: ModuleId,
+) {
+    populate_cross_module_targets(namespace, identities, module_id, |support_id| {
+        is_support_visible_in_identity_table(identities, support_id, module_id)
+    });
+}
+
+/// Shared child/support namespace population for project and package boundary identity tables.
+fn populate_cross_module_targets(
+    namespace: &mut ModuleNamespace,
+    identities: &ModuleIdentityTable,
+    module_id: ModuleId,
+    is_support_visible: impl Fn(ModuleId) -> bool,
 ) {
     let owning_path = identities
         .record(module_id)
@@ -904,7 +862,7 @@ fn populate_package_cross_module_targets(
             continue;
         }
         if identities.record(support_id).support_root_file().is_none()
-            || !is_support_visible_in_identity_table(identities, support_id, module_id)
+            || !is_support_visible(support_id)
         {
             continue;
         }
@@ -936,8 +894,6 @@ fn populate_package_cross_module_targets(
     }
 }
 
-/// Compute the extensionless module-relative dependency key for one target module, relative to the
-/// owning module's logical path.
 fn relative_module_key(
     owning_path: &str,
     identities: &ModuleIdentityTable,

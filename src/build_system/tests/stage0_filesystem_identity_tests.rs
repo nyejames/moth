@@ -928,6 +928,42 @@ mod module_identity_tests {
         (index, canonical_root, canonical_entry_root)
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn root_symlink_retains_the_visible_normal_surface_role() {
+        use std::os::unix::fs::symlink;
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(&src).expect("should create entry root");
+        let target = src.join("actual.moth");
+        fs::write(&target, "").expect("should write symlink target");
+        symlink(&target, src.join("@home.moth")).expect("should create root symlink");
+
+        let (index, _project_root, entry_root) = discover_index(&root, "src");
+        let module_id = index
+            .module_identities()
+            .module_id_for_directory(&entry_root)
+            .expect("the entry root should own a structural module");
+        let record = index.module_identities().record(module_id);
+        assert_eq!(record.public_surface_role(), ModuleRootRole::Normal);
+
+        let source = index
+            .source_index_for_canonical_path(&fs::canonicalize(&target).unwrap())
+            .expect("the root target should be indexed");
+        let origin = index
+            .source(source)
+            .logical_identity()
+            .module_origin()
+            .expect("the root target should have an owned origin");
+        assert_eq!(
+            origin.role(),
+            ModuleRootRole::Normal,
+            "root role must follow the visible root entry, not the canonical target filename"
+        );
+    }
+
     #[test]
     fn assigns_module_ids_in_canonical_logical_path_order() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");

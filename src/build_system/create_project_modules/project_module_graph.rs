@@ -478,6 +478,20 @@ impl ProjectModuleGraph {
         support_is_visible(self, support_id, consumer_id)
     }
 
+    /// Strict support visibility for one authored consumer surface.
+    ///
+    /// A paired structural module has both a normal and a support surface but one graph node.
+    /// The node's primary role cannot distinguish an import authored in the support root, so
+    /// callers pass the declaring source's role explicitly.
+    pub(crate) fn is_support_visible_to_consumer_role(
+        &self,
+        support_id: ModuleId,
+        consumer_id: ModuleId,
+        consumer_role: ModuleRootRole,
+    ) -> bool {
+        support_is_visible_for_role(self, support_id, consumer_id, consumer_role)
+    }
+
     /// Build a lookup from canonical source path to owning stable module origin from every
     /// module's owned source IDs.
     ///
@@ -897,6 +911,20 @@ fn support_is_visible(
     support_id: ModuleId,
     consumer_id: ModuleId,
 ) -> bool {
+    support_is_visible_for_role(
+        topology,
+        support_id,
+        consumer_id,
+        topology.role(consumer_id),
+    )
+}
+
+fn support_is_visible_for_role(
+    topology: &impl SupportVisibilityTopology,
+    support_id: ModuleId,
+    consumer_id: ModuleId,
+    consumer_role: ModuleRootRole,
+) -> bool {
     if !topology.has_support_surface(support_id) {
         return false;
     }
@@ -905,7 +933,7 @@ fn support_is_visible(
         return false;
     };
 
-    match topology.role(consumer_id) {
+    match consumer_role {
         ModuleRootRole::Normal => {
             consumer_id == owner
                 || (is_ancestor_of(topology, owner, consumer_id)

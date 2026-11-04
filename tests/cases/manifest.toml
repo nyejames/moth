@@ -11649,6 +11649,13 @@ contract = "language.project_structure.paired_root_atomic_publication"
 role = "primary"
 
 [[case]]
+id = "paired_root_support_lateral_import_rejected"
+path = "paired_root_support_lateral_import_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "negative"]
+contract = "language.project_structure.support_surface_import_visibility"
+role = "primary"
+
+[[case]]
 id = "paired_root_shared_helper_success"
 path = "paired_root_shared_helper_success"
 tags = ["integration", "modules", "visibility", "root-boundaries", "positive"]

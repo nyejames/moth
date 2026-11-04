@@ -15,6 +15,7 @@ use crate::builder_surface::SourceFileKind;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, DiagnosticDraft, InvalidConfigReason, PreparedFailure,
@@ -24,7 +25,7 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDepende
 use crate::compiler_frontend::headers::parse_file_headers::FileRole;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
+use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
 use crate::compiler_frontend::source::{
     SourceDatabase, SourceId as CompilerSourceId, SourceSpanBuilders,
 };
@@ -1468,6 +1469,33 @@ fn discover_modules_serial_provider_capable(
                         ..
                     } => {
                         add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+                        let consumer_role = source_tree_index
+                            .source(source_index)
+                            .logical_identity()
+                            .module_origin()
+                            .map(|origin| origin.role())
+                            .unwrap_or(ModuleRootRole::Normal);
+                        if provider_surface == ModuleRootRole::Support
+                            && consumer_role == ModuleRootRole::Support
+                            && !project_module_graph.is_support_visible_to_consumer_role(
+                                provider_module_id,
+                                seed.module_id,
+                                consumer_role,
+                            )
+                        {
+                            let path_table = Arc::new(syntax.path_fork_mut().shared_table());
+                            let table = syntax.string_table_mut().take_for_handoff();
+                            let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                                DiagnosticBag::from(imports::cross_module_import_not_exported(
+                                    provider.path,
+                                    Some(provider.span),
+                                )),
+                                table,
+                                None,
+                                || Some(path_table),
+                            )?;
+                            return Err(PreparedFailure::Diagnosed(batch));
+                        }
                         resolved_edges.push(ResolvedDependencyEdge {
                             provider_module_id,
                             provider_surface,
