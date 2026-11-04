@@ -30,7 +30,7 @@ use crate::compiler_frontend::instrumentation::MemoryLedgerSnapshot;
 use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedDeclarationIdentity, ModuleRootRole, StablePackageIdentity,
+    GeneratedDeclarationIdentity, StablePackageIdentity,
 };
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabaseRetentionMetrics};
@@ -613,16 +613,8 @@ impl CompiledSourcePackage {
                 ),
             ));
         }
-        if node.role() != ModuleRootRole::Normal {
-            return Err(InfrastructureFailure::internal(
-                CompilerStage::ProjectBuildAssembly,
-                format!(
-                    "Source package @{} root module has role {:?}; packages require a normal entry-root module",
-                    self.package_prefix(),
-                    node.role()
-                ),
-            ));
-        }
+        let public_surface_role = node.public_surface_role();
+        let public_surface_origin = node.public_surface_origin();
 
         match self.boundary.modules.slot(self.root_module_id)? {
             ProviderSlot::Successful(_) => {
@@ -637,14 +629,15 @@ impl CompiledSourcePackage {
                             root_index
                         ))
                     })?;
-                if &interface.module_origin != node.stable_origin() {
+                if &interface.module_origin != public_surface_origin {
                     return Err(InfrastructureFailure::internal(
                         CompilerStage::ProjectBuildAssembly,
                         format!(
-                            "Source package @{} root interface origin {:?} disagrees with its graph node origin {:?}",
+                            "Source package @{} root interface origin {:?} disagrees with its selected {:?} public-surface origin {:?}",
                             self.package_prefix(),
                             interface.module_origin,
-                            node.stable_origin()
+                            public_surface_role,
+                            public_surface_origin
                         ),
                     ));
                 }

@@ -20,6 +20,10 @@ const UNTERMINATED_RECORD_PAGE_SOURCE: &str = "stats #= (a = 1\n";
 /// Imports `greet` from the `@ui` package that only one test builder registers.
 const UI_IMPORT_PAGE_SOURCE: &str = "@ui greet\nvalue = greet()\n";
 
+/// Imports a shared helper constant and a shared nominal with a receiver method from `@ui`.
+const UI_SUPPORT_HELPER_IMPORT_PAGE_SOURCE: &str =
+    "@ui value, Message\nmessage = Message(\"hello\")\nio.line([: [value] [message.label()]])\n";
+
 /// A `Byte` value passed to a host function that takes `Byte`.
 const HOST_BYTE_PAGE_SOURCE: &str = "@platform takes_byte\noctet Byte = 42\ntakes_byte(octet)\n";
 
@@ -254,6 +258,20 @@ impl ProjectBuilder for ByteParameterBuilder {
     }
 }
 
+/// Writes a support-only `@ui` package root that re-exports shared helper declarations.
+fn write_ui_support_package(package_root: &Path) {
+    fs::write(
+        package_root.join("+package.moth"),
+        "export:\n    @impl value, Message\n;\n",
+    )
+    .expect("should write support package facade");
+    fs::write(
+        package_root.join("impl.moth"),
+        "value #= 7\n\nMessage = | text String |\n\nlabel |this Message| -> String:\n    return this.text\n;\n",
+    )
+    .expect("should write shared package helpers");
+}
+
 /// Writes a `@ui` package root whose only module exports `greet`.
 fn write_ui_package(package_root: &Path) {
     fs::write(
@@ -301,6 +319,25 @@ fn independent_definitions_do_not_share_source_packages() {
     assert_eq!(error.kind(), ErrorKind::Compilation);
     build_project(&ui_builder, BuildRequest::new(project_dir.path()))
         .expect("the first builder should still resolve @ui after the failing build");
+}
+
+#[test]
+fn builder_registered_support_only_source_package_publishes_its_support_interface() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(
+        project_dir.path(),
+        UI_SUPPORT_HELPER_IMPORT_PAGE_SOURCE,
+        false,
+    );
+    let ui_dir = tempfile::tempdir().expect("should create package directory");
+    write_ui_support_package(ui_dir.path());
+    let builder = UiPackageBuilder {
+        ui_root: ui_dir.path().to_path_buf(),
+    };
+
+    build_project(&builder, BuildRequest::new(project_dir.path())).expect(
+        "a builder-registered support-only package should publish its support interface and import",
+    );
 }
 
 #[test]

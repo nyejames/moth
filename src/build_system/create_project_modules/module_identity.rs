@@ -61,6 +61,24 @@ pub(crate) fn module_root_role_for_file_name(file_name: &str) -> Option<ModuleRo
     }
 }
 
+/// The public-surface role for a directory with the given root surfaces.
+///
+/// A support root is the external surface when present; otherwise the normal root is public.
+/// Callers must pass a directory that owns at least one root file. This is the single
+/// surface-selection rule shared by package-boundary discovery, prepared root projection and
+/// compiled package validation.
+pub(crate) fn public_surface_role(has_normal_root: bool, has_support_root: bool) -> ModuleRootRole {
+    debug_assert!(
+        has_normal_root || has_support_root,
+        "a structural module must own at least one root file"
+    );
+    if has_support_root {
+        ModuleRootRole::Support
+    } else {
+        ModuleRootRole::Normal
+    }
+}
+
 /// One structural module root directory with its durable identity and optional root surfaces.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ModuleIdentityRecord {
@@ -132,6 +150,21 @@ impl ModuleIdentityRecord {
 
     pub(crate) fn has_normal_root(&self) -> bool {
         self.normal_root_file.is_some()
+    }
+
+    pub(crate) fn has_support_root(&self) -> bool {
+        self.support_root_file.is_some()
+    }
+
+    /// The role of the package-facing public surface.
+    pub(crate) fn public_surface_role(&self) -> ModuleRootRole {
+        public_surface_role(self.has_normal_root(), self.has_support_root())
+    }
+
+    /// The canonical package-facing public-surface root file.
+    pub(crate) fn public_root_file(&self) -> &Path {
+        self.root_file_for_surface(self.public_surface_role())
+            .expect("the selected public surface must own a root file")
     }
 
     /// The primary root file for legacy single-surface consumers.

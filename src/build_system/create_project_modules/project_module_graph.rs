@@ -29,7 +29,7 @@
 
 #[cfg(test)]
 use super::module_identity::ModuleIdentityRecord;
-use super::module_identity::{ModuleId, ModuleIdentityTable};
+use super::module_identity::{ModuleId, ModuleIdentityTable, public_surface_role};
 use super::source_tree_index::SourceTreeIndex;
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -136,6 +136,20 @@ impl ProjectModuleGraphNode {
         &self.shared_origin == origin
             || self.normal_origin.as_ref() == Some(origin)
             || self.support_origin.as_ref() == Some(origin)
+    }
+
+    /// The role of the package-facing public surface.
+    pub(crate) fn public_surface_role(&self) -> ModuleRootRole {
+        public_surface_role(
+            self.normal_root_file.is_some(),
+            self.support_root_file.is_some(),
+        )
+    }
+
+    /// The stable origin of the package-facing public surface.
+    pub(crate) fn public_surface_origin(&self) -> &StableModuleOriginIdentity {
+        self.surface_origin(self.public_surface_role())
+            .expect("the selected public surface must own an origin")
     }
 
     /// The primary cross-build origin for legacy single-surface consumers.

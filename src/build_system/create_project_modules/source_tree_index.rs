@@ -1030,12 +1030,7 @@ impl SourceTreeIndex {
             .module_identities
             .module_id_for_directory(&self.entry_root)?;
         let record = self.module_identities.record(module_id);
-        Some(
-            record
-                .support_root_file()
-                .or_else(|| record.normal_root_file())
-                .expect("a structural module has at least one root file"),
-        )
+        Some(record.public_root_file())
     }
 
     #[cfg(test)]

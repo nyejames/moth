@@ -389,6 +389,7 @@ mod source_package_boundary_indexes_tests {
     use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
         InvalidConfigCode, InvalidConfigView,
     };
+    use crate::compiler_frontend::semantic_identity::ModuleRootRole;
     #[cfg(unix)]
     use crate::compiler_tests::test_fs::RestrictedDirectory;
     #[cfg(unix)]
@@ -486,6 +487,46 @@ mod source_package_boundary_indexes_tests {
             index.root_file_for_entry_root(),
             Some(canonical_root_file.as_path()),
             "package root module file should match the derived public surface"
+        );
+    }
+
+    #[test]
+    fn support_only_package_root_selects_the_support_public_surface() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let package_root = root.join("pkg");
+        fs::create_dir_all(&package_root).expect("should create package root");
+        fs::write(package_root.join("+home.moth"), "").expect("should write support module root");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        register_pkg(&mut source_packages, &package_root);
+
+        let mut string_table = StringTable::new();
+        let indexes = build_indexes(&source_packages, &mut string_table)
+            .expect("support-only package root should build a boundary index");
+        let (_, index) = indexes
+            .iter()
+            .next()
+            .expect("one package index should exist");
+
+        let canonical_root_file = fs::canonicalize(package_root.join("+home.moth"))
+            .expect("support module root file should canonicalize");
+        assert_eq!(
+            index.root_file_for_entry_root(),
+            Some(canonical_root_file.as_path()),
+            "a support root is the package's external public surface"
+        );
+
+        let module_id = index
+            .module_identities()
+            .module_id_for_directory(index.entry_root())
+            .expect("the package root directory should have a structural module");
+        let record = index.module_identities().record(module_id);
+        assert_eq!(record.public_surface_role(), ModuleRootRole::Support);
+        assert_eq!(record.public_root_file(), canonical_root_file);
+        assert!(
+            record.surface_origin(ModuleRootRole::Support).is_some(),
+            "the selected public surface must retain its stable support origin"
         );
     }
 
