@@ -1438,12 +1438,14 @@ fn discover_modules_serial_provider_capable(
                     }
                     ResolvedDependency::CrossModule {
                         provider_module_id,
+                        provider_surface,
                         consumer_module_id,
                         ..
                     } => {
                         add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
                         resolved_edges.push(ResolvedDependencyEdge {
                             provider_module_id,
+                            provider_surface,
                             consumer_module_id,
                             dependency_shell_id: provider.dependency_shell_id,
                         });

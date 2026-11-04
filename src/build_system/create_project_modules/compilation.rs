@@ -612,6 +612,18 @@ pub(crate) fn build_provider_binding_index(
 ) -> FxHashMap<(ModuleId, DependencyShellId), usize> {
     let mut index = FxHashMap::default();
     for (binding_index, binding) in provider_bindings.iter().enumerate() {
+        if !matches!(
+            binding.provider_surface,
+            crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal
+                | crate::compiler_frontend::semantic_identity::ModuleRootRole::Support
+        ) {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "ModuleId {} resolved a cross-module provider edge to a non-surface role {:?}",
+                binding.consumer_module_id.index(),
+                binding.provider_surface
+            );
+        }
         let shell_id = binding.dependency_shell_id;
         let key = (binding.consumer_module_id, shell_id);
         if index.insert(key, binding_index).is_some() {

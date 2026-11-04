@@ -57,8 +57,12 @@ enum NamespaceEntry {
     },
     /// An explicit provider-owned file in the same module, keyed by its path with extension.
     SameModuleProvider { source_index: SourceRecordIndex },
-    /// A child normal module or visible support package, resolved by boundary-local `ModuleId`.
-    CrossModule { target_module_id: ModuleId },
+    /// A child normal module or visible support package, resolved by boundary-local `ModuleId`
+    /// and the explicit surface selected for this consumer position.
+    CrossModule {
+        target_module_id: ModuleId,
+        surface: ModuleRootRole,
+    },
 }
 
 /// One boundary-aware namespace for one indexed module.
@@ -133,6 +137,7 @@ pub(crate) enum ResolvedDependency {
     /// A source file in another module in the active project or package boundary.
     CrossModule {
         provider_module_id: ModuleId,
+        provider_surface: ModuleRootRole,
         consumer_module_id: ModuleId,
         #[cfg(test)]
         root_file: PathBuf,
@@ -813,7 +818,7 @@ fn populate_project_cross_module_targets(
         .to_owned();
 
     for child_id in identities.direct_child_modules(module_id) {
-        if identities.record(*child_id).role() != ModuleRootRole::Normal {
+        if identities.record(*child_id).normal_root_file().is_none() {
             continue;
         }
 
@@ -822,6 +827,7 @@ fn populate_project_cross_module_targets(
                 key,
                 NamespaceEntry::CrossModule {
                     target_module_id: *child_id,
+                    surface: ModuleRootRole::Normal,
                 },
             );
         }
@@ -831,14 +837,28 @@ fn populate_project_cross_module_targets(
         if support_id == module_id {
             continue;
         }
-        if !project_module_graph.is_support_visible_to_consumer(support_id, module_id) {
+        if identities.record(support_id).support_root_file().is_none()
+            || !project_module_graph.is_support_visible_to_consumer(support_id, module_id)
+        {
             continue;
         }
         if let Some(key) = support_package_key(identities, support_id) {
+            if namespace.entries.get(&key).is_some_and(|entry| {
+                matches!(
+                    entry,
+                    NamespaceEntry::CrossModule {
+                        target_module_id,
+                        surface: ModuleRootRole::Normal,
+                    } if *target_module_id == support_id
+                )
+            }) {
+                continue;
+            }
             namespace.insert(
                 key,
                 NamespaceEntry::CrossModule {
                     target_module_id: support_id,
+                    surface: ModuleRootRole::Support,
                 },
             );
         }
@@ -859,7 +879,7 @@ fn populate_package_cross_module_targets(
         .to_owned();
 
     for child_id in identities.direct_child_modules(module_id) {
-        if identities.record(*child_id).role() != ModuleRootRole::Normal {
+        if identities.record(*child_id).normal_root_file().is_none() {
             continue;
         }
 
@@ -868,6 +888,7 @@ fn populate_package_cross_module_targets(
                 key,
                 NamespaceEntry::CrossModule {
                     target_module_id: *child_id,
+                    surface: ModuleRootRole::Normal,
                 },
             );
         }
@@ -877,14 +898,28 @@ fn populate_package_cross_module_targets(
         if support_id == module_id {
             continue;
         }
-        if !is_support_visible_in_identity_table(identities, support_id, module_id) {
+        if identities.record(support_id).support_root_file().is_none()
+            || !is_support_visible_in_identity_table(identities, support_id, module_id)
+        {
             continue;
         }
         if let Some(key) = support_package_key(identities, support_id) {
+            if namespace.entries.get(&key).is_some_and(|entry| {
+                matches!(
+                    entry,
+                    NamespaceEntry::CrossModule {
+                        target_module_id,
+                        surface: ModuleRootRole::Normal,
+                    } if *target_module_id == support_id
+                )
+            }) {
+                continue;
+            }
             namespace.insert(
                 key,
                 NamespaceEntry::CrossModule {
                     target_module_id: support_id,
+                    surface: ModuleRootRole::Support,
                 },
             );
         }
@@ -970,15 +1005,25 @@ fn resolve_entry(
                 consumer_module_id,
             })
         }
-        NamespaceEntry::CrossModule { target_module_id } => {
+        NamespaceEntry::CrossModule {
+            target_module_id,
+            surface,
+        } => {
             #[cfg(test)]
             let root_file = index
                 .module_identities()
                 .record(*target_module_id)
-                .root_file()
+                .root_file_for_surface(*surface)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "cross-module namespace selected missing {surface:?} surface for ModuleId {}",
+                        target_module_id.index()
+                    )
+                })
                 .to_path_buf();
             Ok(ResolvedDependency::CrossModule {
                 provider_module_id: *target_module_id,
+                provider_surface: *surface,
                 consumer_module_id,
                 #[cfg(test)]
                 root_file,

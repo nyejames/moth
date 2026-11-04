@@ -188,6 +188,7 @@ impl CollectReachableInputsError {
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedDependencyEdge {
     pub(super) provider_module_id: ModuleId,
+    pub(super) provider_surface: crate::compiler_frontend::semantic_identity::ModuleRootRole,
     pub(super) consumer_module_id: ModuleId,
     pub(super) dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId,
 }

@@ -68,6 +68,14 @@ trait SupportVisibilityTopology {
     fn role(&self, module_id: ModuleId) -> ModuleRootRole;
 
     fn nearest_parent(&self, module_id: ModuleId) -> Option<ModuleId>;
+
+    fn has_normal_surface(&self, module_id: ModuleId) -> bool {
+        self.role(module_id) == ModuleRootRole::Normal
+    }
+
+    fn has_support_surface(&self, module_id: ModuleId) -> bool {
+        self.role(module_id) == ModuleRootRole::Support
+    }
 }
 
 /// One canonical module node in the project module graph.
@@ -820,6 +828,14 @@ impl SupportVisibilityTopology for ProjectModuleGraph {
     fn nearest_parent(&self, module_id: ModuleId) -> Option<ModuleId> {
         self.nodes[module_id.index()].nearest_parent
     }
+
+    fn has_normal_surface(&self, module_id: ModuleId) -> bool {
+        self.nodes[module_id.index()].normal_origin.is_some()
+    }
+
+    fn has_support_surface(&self, module_id: ModuleId) -> bool {
+        self.nodes[module_id.index()].support_origin.is_some()
+    }
 }
 
 impl SupportVisibilityTopology for ModuleIdentityTable {
@@ -829,6 +845,14 @@ impl SupportVisibilityTopology for ModuleIdentityTable {
 
     fn nearest_parent(&self, module_id: ModuleId) -> Option<ModuleId> {
         self.nearest_ancestor_module(module_id)
+    }
+
+    fn has_normal_surface(&self, module_id: ModuleId) -> bool {
+        self.record(module_id).normal_root_file().is_some()
+    }
+
+    fn has_support_surface(&self, module_id: ModuleId) -> bool {
+        self.record(module_id).support_root_file().is_some()
     }
 }
 
@@ -849,7 +873,7 @@ fn support_is_visible(
     support_id: ModuleId,
     consumer_id: ModuleId,
 ) -> bool {
-    if topology.role(support_id) != ModuleRootRole::Support {
+    if !topology.has_support_surface(support_id) {
         return false;
     }
 
@@ -886,7 +910,7 @@ fn nearest_normal_ancestor(
     let mut current = topology.nearest_parent(module_id);
 
     while let Some(parent) = current {
-        if topology.role(parent) == ModuleRootRole::Normal {
+        if topology.has_normal_surface(parent) {
             return Some(parent);
         }
         current = topology.nearest_parent(parent);

@@ -146,6 +146,16 @@ impl ModuleIdentityRecord {
             .expect("a structural module has at least one root file")
     }
 
+    /// The canonical root file for one explicit surface.
+    #[allow(dead_code)]
+    pub(crate) fn root_file_for_surface(&self, role: ModuleRootRole) -> Option<&Path> {
+        match role {
+            ModuleRootRole::Normal => self.normal_root_file(),
+            ModuleRootRole::Support => self.support_root_file(),
+            ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => None,
+        }
+    }
+
     /// The primary surface role for legacy single-surface consumers.
     pub(crate) fn role(&self) -> ModuleRootRole {
         if self.has_normal_root() {

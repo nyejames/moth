@@ -674,11 +674,13 @@ fn provider_binding_index_rejects_duplicate_shell_edges() {
     let edges = vec![
         ResolvedDependencyEdge {
             provider_module_id: ModuleId::from_index(1),
+            provider_surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
             consumer_module_id: ModuleId::from_index(0),
             dependency_shell_id: shell,
         },
         ResolvedDependencyEdge {
             provider_module_id: ModuleId::from_index(2),
+            provider_surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
             consumer_module_id: ModuleId::from_index(0),
             dependency_shell_id: shell,
         },
@@ -699,6 +701,7 @@ fn source_package_dependency_index_rejects_cross_category_or_duplicate_shells() 
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let provider_edge = ResolvedDependencyEdge {
         provider_module_id: ModuleId::from_index(1),
+        provider_surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         consumer_module_id: ModuleId::from_index(0),
         dependency_shell_id: shell,
     };
