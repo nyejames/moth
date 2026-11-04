@@ -65,9 +65,12 @@ implementation subtree or from another support package in the same scope.
 No folder gains package meaning without a `+*.moth` root. Ordinary directories
 do not automatically become packages.
 
-The optional project-root `+*.moth` facade beside `config.moth` still uses the
-pre-Phase-3 special assembly role. Unified normal/support pairing for one
-rooted directory is accepted but pending implementation.
+A directory may contain both an `@*.moth` normal root and a `+*.moth` support
+root. They are two isolated surfaces of one structural module: helpers are
+shared, roots cannot import each other, and both interfaces publish only from
+one successful semantic transaction. A project-root `+*.moth` is the ordinary
+support surface selected by project package assembly; there is no separate
+facade node or special assembly namespace.
 
 For the full package contract see @../packages/#project-local-packages (Project-local packages).
 

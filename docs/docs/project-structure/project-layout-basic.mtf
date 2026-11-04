@@ -24,12 +24,13 @@ The queued directive form leaves version optional and has no `entry_root`:
 - Everything below the selected root is source unless it is excluded or is a generated hidden output.
 - `_dev/` and `_release/` are generated output. Do not edit them.
 
-### One root file per module directory
+### Up to two root files per module directory
 
-Each source directory can have one root file. An `@*.moth` root creates a normal
-module. The text after `@` stays cosmetic, so `@page.moth`, `@api.moth` and
-`@mod.moth` all create the same root role. A root becomes an HTML artefact only
-when it declares a root-only page:
+Each source directory can have one `@*.moth` normal root and one `+*.moth`
+support root. They form one structural module with shared helper files and two
+isolated interfaces. The text after `@` stays cosmetic, so `@page.moth`,
+`@api.moth` and `@mod.moth` all create the same root role. A normal root becomes
+an HTML artefact only when it declares a root-only page:
 
 [codeblock, $code("moth"):
     $page
@@ -40,11 +41,13 @@ accepted page syntax.
 
 ### Shared scoped packages
 
-A `+*.moth` root creates a scoped support package instead of a normal module.
-For example, `shared/+package.moth` creates `@shared`. Its owner module, normal
-sibling modules and their descendants may depend on it. Other support packages
-in the same scope and the package's private implementation subtree cannot. A
-directory cannot contain both `@*.moth` and `+*.moth` roots.
+A `+*.moth` root creates a scoped support surface. For example,
+`shared/+package.moth` creates `@shared`. Its owner module, normal sibling
+modules and their descendants may depend on it. Other support packages in the
+same scope and the package's private implementation subtree cannot. When a
+directory has both roots, helpers are shared while each root keeps a separate
+authoring scope and public interface. A project-root `+*.moth` is selected by
+project package assembly as the external package surface.
 
 ### Outputs are generated
 

@@ -1056,7 +1056,7 @@ A `+*.moth` root creates a named support package, such as `shared/+package.moth`
 Its `export:` facade lets normal sibling modules share code, while preserving private implementation boundaries.
 It is visible to its nearest normal owner and normal siblings/descendants in that scope.
 
-An optional project-root `+*.moth` beside `config.moth` exposes the project's **external** package API. Internal modules can't import this facade.
+An optional project-root `+*.moth` exposes the project's **external** package API as an ordinary support surface. Internal modules can't import it as a private back door.
 Neither exported signatures nor reachable exported implementations may depend on private `@project` values.
 
 For example, a project might contain:

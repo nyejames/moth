@@ -1,31 +1,22 @@
-**Current support versus accepted design.** Source-package and module
-foundations are partially implemented. The complete external facade and
-project-context contract remains partial. This page defines the accepted final
-contract. The facade is API-only: no generic directive can turn it into an
-application entry.
+**Current support versus accepted design.** Paired normal/support roots and
+source-package publication are implemented. The deferred `$project` directive
+form remains queued. The project package surface is API-only: no generic
+directive can turn it into an application entry.
 
 The project package facade exposes a project's public API to external
-consumers. It is compiled through the ordinary compiler pipeline with
-project-facade visibility supplied by Stage 0.
+consumers. A project-root `+*.moth` is an ordinary support root of that
+structural module, not a separate facade node.
 
-### The facade root
+### The package surface
 
-One optional project-root `+*.moth` file beside `config.moth` defines the
-external project package facade. The suffix after `+` is cosmetic.
+One optional `+*.moth` root at the selected project directory is the external
+project package surface. The suffix after `+` is cosmetic. Package assembly
+selects that support interface; it never falls back to the normal root.
 
-The facade may define and export its own legal API-only declarations: functions,
-structs, choices, type aliases, traits and compile-time constants.
-
-### Special assembly namespace
-
-Stage 0 gives the facade a special assembly namespace rooted at the selected
-project directory. Through that namespace it may reference the public
-interfaces of descendant modules below the selected directory, regardless of
-ordinary lexical module visibility.
-
-This physical facade role is the pre-Phase-3 model. The accepted direction
-replaces it with the normal/support pairing owned by each rooted directory. That
-unification is pending and is not implemented at this checkpoint.
+The support root may define and export its own legal API-only declarations:
+functions, structs, choices, type aliases, traits and compile-time constants.
+Helpers are shared with the normal root, but the two roots cannot import each
+other.
 
 ### Facade restrictions
 
@@ -48,10 +39,10 @@ facade/package design.
 
 ### Project package assembly
 
-The compiler produces an immutable facade module artefact and public interface.
-`ProjectPackageAssembly` is a separate link plan over:
+The compiler produces one immutable module artefact with normal and support
+interfaces. `ProjectPackageAssembly` is a separate link plan over:
 
-- the compiled facade artefact
+- the selected support interface
 - selected descendant public interfaces
 - reachable generated functions
 - package runtime requirements permitted by the target

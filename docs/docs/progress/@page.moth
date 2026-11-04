@@ -547,7 +547,7 @@ init_docs_sidebar()!
             [: Supported]
             [$md: Directory commands compile the selected directory as build and source root. Missing [$html:<code>config.moth</code>] applies validated builder defaults and a directory-derived name. Hidden [$html:<code>_</code>] source components are excluded with lexical and canonical symlink checks. Directory outputs default to [$html:<code>_dev</code>] and [$html:<code>_release</code>] and are hidden from source discovery. Scaffolds emit a root-level [$html:<code>@page.moth</code>] and a minimal explicit config.]
             [: Build system / CLI]
-            [: Paired normal/support roots and facade unification remain Phase 3 work. See @../project-structure (Project structure).]
+            [$md: Paired normal/support roots compile in one transaction with isolated authoring scopes and atomic interface publication. Source-package and project-package surfaces select the declared support interface. See @../project-structure (Project structure).]
         ]
 
         [data:

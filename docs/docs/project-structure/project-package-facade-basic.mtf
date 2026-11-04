@@ -1,28 +1,26 @@
-**Accepted API-only boundary.** The external project package facade remains
-partially implemented. It cannot become an application entry through generic
-directives.
+**Accepted API-only boundary.** The external project package surface is
+implemented. It cannot become an application entry through generic directives.
 
 A project can expose a public package API to other projects through an optional
-facade file at the project root.
+`+*.moth` root at the selected project directory.
 
-### What a facade does
+### What the package surface does
 
-A `+*.moth` file beside `config.moth` becomes the project package facade. It
-exports declarations that external consumers can bind. Without it, the project
-has no externally consumable package surface.
+A `+*.moth` root at the project root is the project package's support surface.
+It exports declarations that external consumers can bind. Without it, the
+project has no externally consumable package surface. When an `@*.moth` normal
+root is also present, both roots share helpers but keep isolated authoring
+scopes and interfaces.
 
-The facade rejects top-level runtime work and page fragments. It cannot declare
-root-only `$page` metadata, has no implicit entry and emits no route. Support
-roots follow the same API-only rule.
+The support surface rejects top-level runtime work and page fragments. It
+cannot declare root-only `$page` metadata, has no implicit entry and emits no
+route.
 
 ### How it reaches descendant modules
 
-The facade can reference public interfaces of modules below the selected
-project directory even though ordinary module visibility wouldn't allow it.
-Stage 0 gives the facade a special assembly namespace for this purpose.
-
-This is the pre-Phase-3 facade model. Unifying project-root `+` with normal
-support roots is accepted but pending.
+The support surface follows the ordinary support visibility rule. It does not
+receive a privileged namespace over descendant modules, and internal project
+modules cannot import it as a private back door.
 
 ### Privacy and inputs
 
