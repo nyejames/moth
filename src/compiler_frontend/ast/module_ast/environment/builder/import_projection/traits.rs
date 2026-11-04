@@ -444,7 +444,8 @@ fn imported_trait_path(
     let root_role = match origin.module_origin().role() {
         crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal => "normal",
         crate::compiler_frontend::semantic_identity::ModuleRootRole::Support => "support",
-        crate::compiler_frontend::semantic_identity::ModuleRootRole::ProjectPackageFacade => {
+        crate::compiler_frontend::semantic_identity::ModuleRootRole::Shared => "shared",
+        crate::compiler_frontend::semantic_identity::ModuleRootRole::SyntheticProjectContext => {
             "facade"
         }
     };

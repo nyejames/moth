@@ -123,9 +123,9 @@ pub fn parse_file_headers_with_table(
             .entry_file_role
             .unwrap_or(match options.active_root_role {
                 ModuleRootRole::Normal => FileRole::ActiveModuleRoot,
-                ModuleRootRole::Support | ModuleRootRole::ProjectPackageFacade => {
-                    FileRole::ActiveApiOnlyModuleRoot
-                }
+                ModuleRootRole::Support
+                | ModuleRootRole::Shared
+                | ModuleRootRole::SyntheticProjectContext => FileRole::ActiveApiOnlyModuleRoot,
             })
     } else if is_module_root_file_by_name {
         FileRole::ImportedModuleRoot

@@ -210,17 +210,19 @@ impl StablePackageIdentity {
     }
 }
 
-/// The structural role of one canonical module root.
+/// The structural role of one canonical module origin.
 ///
 /// `Normal` roots (`@*.moth`) are entry candidates. `Support` roots (`+*.moth`) are scoped package
-/// roots that are never entry candidates. `ProjectPackageFacade` is the optional project-root
-/// `+*.moth` beside `config.moth`; Stage 0 assigns it from location rather than filename alone and
-/// it never participates in entry-root containment or dependency-resolution lookup.
+/// roots that are never entry candidates. `Shared` is the role-neutral defining origin for helper
+/// files that are owned once by a structural directory module and may be reached by both root
+/// surfaces. `SyntheticProjectContext` is retained only for the synthetic `@project` context; it has
+/// no filesystem or graph meaning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ModuleRootRole {
     Normal,
     Support,
-    ProjectPackageFacade,
+    Shared,
+    SyntheticProjectContext,
 }
 
 impl ModuleRootRole {
@@ -251,21 +253,20 @@ impl StableModuleOriginIdentity {
     /// Construct the stable origin for the synthetic project-global context.
     ///
     /// Project globals have no source file or filesystem-backed module root. The reserved
-    /// `project-globals` logical marker keeps this synthetic origin distinct from the real
-    /// project-package facade, whose logical path is empty, while reusing the existing
-    /// project-local package and facade-role identity vocabulary.
+    /// `project-globals` logical marker keeps this synthetic origin distinct from every
+    /// filesystem root surface, whose logical path is empty at the selected root.
     pub(crate) fn project_context(package: StablePackageIdentity) -> Self {
         Self {
             package,
             logical_module_path: "project-globals".to_owned(),
-            role: ModuleRootRole::ProjectPackageFacade,
+            role: ModuleRootRole::SyntheticProjectContext,
         }
     }
 
     /// Build the cross-build identity from a base-relative logical module path.
     ///
     /// `relative_logical_path` is the `PathBuf` produced by stripping the canonical root
-    /// directory against its base (the entry root, or the project root for the facade). It is
+    /// directory against its base (the entry root). It is
     /// converted to a portable forward-slash spelling so the identity is self-contained and
     /// platform-independent.
     ///

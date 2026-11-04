@@ -1068,7 +1068,7 @@ struct FacadeRootPlan {
     roots_by_module: FxHashMap<CompiledModuleRef, FxHashSet<FunctionId>>,
 }
 type FacadeReachabilityByModule = FxHashMap<CompiledModuleRef, HirReachability>;
-type ProjectPackageFacadePlan = (
+type SyntheticProjectContextPlan = (
     CompiledModuleRef,
     FxHashSet<CompiledModuleRef>,
     FacadeReachabilityByModule,
@@ -1156,8 +1156,8 @@ fn plan_project_package_facade(
     source_packages: &CompletedSourcePackageRegistry,
     module_owner_by_origin: &FxHashMap<StableModuleOriginIdentity, CompiledModuleRef>,
     execution_owners: &ExecutionOwnerMaps,
-) -> Result<Option<ProjectPackageFacadePlan>, ProjectAssemblyError> {
-    let Some(facade_module_id) = project.structure.facade() else {
+) -> Result<Option<SyntheticProjectContextPlan>, ProjectAssemblyError> {
+    let Some(facade_module_id) = project.structure.project_package_surface() else {
         return Ok(None);
     };
     let facade_module_ref = CompiledModuleRef::Project(facade_module_id);

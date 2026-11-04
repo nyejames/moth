@@ -4,13 +4,13 @@
 //! [`SourceTreeIndex`]. Each canonical module becomes one node carrying its `ModuleId`,
 //! stable origin, root role, root directory/file, nearest structural parent, direct children
 //! and structural dependency edges. The graph classifies normal entry candidates and the
-//! optional project package facade, encodes strict scoped-support visibility as a query, and
+//! project package support surface, encodes strict scoped-support visibility as a query, and
 //! exposes deterministic dependency-edge insertion, an explicit construction-to-completion
 //! phase transition that freezes provider/consumer adjacency into sorted `Vec<ModuleId>` storage,
 //! and topological compile waves over those frozen provider-before-consumer edges. Source records
 //! and ownership remain in `SourceTreeIndex`.
 //! WHY: the compiler cannot schedule canonical modules until Stage 0 can distinguish normal
-//! modules, support packages and the optional facade, and until dependency order can be
+//! modules, support packages and their shared helper origins, and until dependency order can be
 //! derived without a second filesystem traversal or a parallel identity/topology table. This
 //! owner consumes the existing [`ModuleIdentityTable`] rather than recomputing it and resolves
 //! source data through the retained index, so identity, ancestry and source ownership stay
@@ -78,10 +78,12 @@ trait SupportVisibilityTopology {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ProjectModuleGraphNode {
     module_id: ModuleId,
-    stable_origin: StableModuleOriginIdentity,
-    role: ModuleRootRole,
+    shared_origin: StableModuleOriginIdentity,
+    normal_origin: Option<StableModuleOriginIdentity>,
+    support_origin: Option<StableModuleOriginIdentity>,
     root_directory: std::path::PathBuf,
-    root_file: std::path::PathBuf,
+    normal_root_file: Option<std::path::PathBuf>,
+    support_root_file: Option<std::path::PathBuf>,
     nearest_parent: Option<ModuleId>,
     direct_children: Vec<ModuleId>,
 }
@@ -96,15 +98,56 @@ impl ProjectModuleGraphNode {
     // by compile-wave scheduling and entry selection; the remaining identity, ancestry and
     // source-set accessors expose data the graph carries for later provider-edge and source-set
     // consumers and are exercised by focused graph-invariant tests.
-    /// The owned cross-build origin identity for this module.
+    /// The role-neutral origin shared by every helper file in this structural module.
+    #[allow(dead_code)]
+    pub(crate) fn shared_origin(&self) -> &StableModuleOriginIdentity {
+        &self.shared_origin
+    }
+
+    /// The role-qualified origin for one present root surface.
+    #[allow(dead_code)]
+    pub(crate) fn surface_origin(
+        &self,
+        role: ModuleRootRole,
+    ) -> Option<&StableModuleOriginIdentity> {
+        match role {
+            ModuleRootRole::Normal => self.normal_origin.as_ref(),
+            ModuleRootRole::Support => self.support_origin.as_ref(),
+            ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => None,
+        }
+    }
+
+    /// Whether this structural module owns any root with the given surface role.
+    #[allow(dead_code)]
+    pub(crate) fn has_surface(&self, role: ModuleRootRole) -> bool {
+        self.surface_origin(role).is_some()
+    }
+
+    /// Whether a source origin belongs to this structural module.
+    pub(crate) fn owns_origin(&self, origin: &StableModuleOriginIdentity) -> bool {
+        &self.shared_origin == origin
+            || self.normal_origin.as_ref() == Some(origin)
+            || self.support_origin.as_ref() == Some(origin)
+    }
+
+    /// The primary cross-build origin for legacy single-surface consumers.
     pub(crate) fn stable_origin(&self) -> &StableModuleOriginIdentity {
-        &self.stable_origin
+        self.normal_origin
+            .as_ref()
+            .or(self.support_origin.as_ref())
+            .unwrap_or(&self.shared_origin)
     }
 
     #[allow(dead_code)]
-    /// The structural root role (`Normal`, `Support` or `ProjectPackageFacade`).
+    /// The primary structural surface role for legacy consumers.
     pub(crate) fn role(&self) -> ModuleRootRole {
-        self.role
+        if self.normal_origin.is_some() {
+            ModuleRootRole::Normal
+        } else if self.support_origin.is_some() {
+            ModuleRootRole::Support
+        } else {
+            ModuleRootRole::Shared
+        }
     }
 
     #[allow(dead_code)]
@@ -113,13 +156,28 @@ impl ProjectModuleGraphNode {
         &self.root_directory
     }
 
-    /// The canonical root file (`@*.moth` or `+*.moth`) that roots this module.
+    /// The canonical normal root file, when this module has one.
+    #[allow(dead_code)]
+    pub(crate) fn normal_root_file(&self) -> Option<&Path> {
+        self.normal_root_file.as_deref()
+    }
+
+    /// The canonical support root file, when this module has one.
+    #[allow(dead_code)]
+    pub(crate) fn support_root_file(&self) -> Option<&Path> {
+        self.support_root_file.as_deref()
+    }
+
+    /// The canonical primary root file for legacy single-surface consumers.
     pub(crate) fn root_file(&self) -> &Path {
-        &self.root_file
+        self.normal_root_file
+            .as_deref()
+            .or(self.support_root_file.as_deref())
+            .expect("a structural graph node has at least one root file")
     }
 
     #[allow(dead_code)]
-    /// The nearest structural parent module, or `None` for the entry root and the facade.
+    /// The nearest structural parent module, or `None` for the entry root.
     pub(crate) fn nearest_parent(&self) -> Option<ModuleId> {
         self.nearest_parent
     }
@@ -155,15 +213,14 @@ enum ProjectModuleDependencies {
 ///
 /// Built directly from a [`SourceTreeIndex`] without filesystem IO or a second identity/topology
 /// table. Nodes are stored in deterministic `ModuleId` order. Normal modules are entry
-/// candidates; support roots are never entries; the optional project package facade is a node
-/// outside the normal ancestry tree. Edge insertion and compile-wave scheduling are separated by
+/// candidates; support roots are never entries; a project-root support surface is an ordinary
+/// structural module. Edge insertion and compile-wave scheduling are separated by
 /// one explicit [`ProjectModuleDependencies`] transition: edges are inserted while the graph is
 /// under construction, then [`ProjectModuleGraph::complete`] freezes adjacency into sorted
 /// `Vec<ModuleId>` storage before [`ProjectModuleGraph::compile_waves`] consumes it.
 pub(crate) struct ProjectModuleGraph {
     nodes: Vec<ProjectModuleGraphNode>,
     entry_modules: Vec<ModuleId>,
-    facade: Option<ModuleId>,
     dependencies: ProjectModuleDependencies,
 }
 
@@ -185,10 +242,12 @@ impl ProjectModuleGraph {
             .map(
                 |(index, (stable_origin, root_directory, root_file))| ProjectModuleGraphNode {
                     module_id: ModuleId::from_index(index),
-                    stable_origin,
-                    role: ModuleRootRole::Normal,
+                    shared_origin: stable_origin.clone(),
+                    normal_origin: Some(stable_origin),
+                    support_origin: None,
                     root_directory,
-                    root_file,
+                    normal_root_file: Some(root_file),
+                    support_root_file: None,
                     nearest_parent: None,
                     direct_children: Vec::new(),
                 },
@@ -199,7 +258,6 @@ impl ProjectModuleGraph {
         Self {
             nodes,
             entry_modules,
-            facade: None,
             dependencies: ProjectModuleDependencies::Frozen {
                 dependency_providers: vec![Vec::new(); node_count],
                 provider_consumers: vec![Vec::new(); node_count],
@@ -212,8 +270,8 @@ impl ProjectModuleGraph {
     /// Consumes the index's identity table rather than recomputing it. Source ownership remains
     /// in the retained index and is not copied into graph nodes.
     /// Each module becomes one node in deterministic `ModuleId` order. Normal modules are
-    /// classified as entry candidates; the optional project package facade is recorded as a
-    /// node outside the normal ancestry tree.
+    /// classified as entry candidates; project-root support surfaces remain ordinary structural
+    /// modules.
     pub(crate) fn from_source_tree_index(source_tree_index: &SourceTreeIndex) -> Self {
         let identities = source_tree_index.module_identities();
         let module_ids: Vec<ModuleId> = identities.module_ids().collect();
@@ -221,7 +279,6 @@ impl ProjectModuleGraph {
 
         let mut nodes = Vec::with_capacity(node_count);
         let mut entry_modules = Vec::new();
-        let mut facade = None;
 
         for module_id in &module_ids {
             let record = identities.record(*module_id);
@@ -230,18 +287,18 @@ impl ProjectModuleGraph {
 
             nodes.push(ProjectModuleGraphNode {
                 module_id: *module_id,
-                stable_origin: record.stable_origin().clone(),
-                role: record.role(),
+                shared_origin: record.shared_origin().clone(),
+                normal_origin: record.surface_origin(ModuleRootRole::Normal).cloned(),
+                support_origin: record.surface_origin(ModuleRootRole::Support).cloned(),
                 root_directory: record.root_directory().to_path_buf(),
-                root_file: record.root_file().to_path_buf(),
+                normal_root_file: record.normal_root_file().map(Path::to_path_buf),
+                support_root_file: record.support_root_file().map(Path::to_path_buf),
                 nearest_parent,
                 direct_children,
             });
 
-            match record.role() {
-                ModuleRootRole::Normal => entry_modules.push(*module_id),
-                ModuleRootRole::ProjectPackageFacade => facade = Some(*module_id),
-                ModuleRootRole::Support => {}
+            if record.normal_root_file().is_some() {
+                entry_modules.push(*module_id);
             }
         }
 
@@ -256,7 +313,6 @@ impl ProjectModuleGraph {
         Self {
             nodes,
             entry_modules,
-            facade,
             dependencies: ProjectModuleDependencies::UnderConstruction {
                 dependency_providers,
                 provider_consumers,
@@ -267,7 +323,7 @@ impl ProjectModuleGraph {
     /// Build a graph from explicit identities for assembly tests.
     ///
     /// WHAT: supplies deterministic graph nodes without requiring source discovery to create a
-    /// fixture. WHY: package assembly tests need to model a facade and selected descendants while
+    /// fixture. WHY: package assembly tests need to model a support surface and selected descendants while
     /// keeping their source artefacts synthetic and focused on liveness.
     #[cfg(test)]
     pub(crate) fn from_test_records(records: Vec<ModuleIdentityRecord>) -> Self {
@@ -276,31 +332,29 @@ impl ProjectModuleGraph {
         let node_count = module_ids.len();
         let mut nodes = Vec::with_capacity(node_count);
         let mut entry_modules = Vec::new();
-        let mut facade = None;
 
         for module_id in &module_ids {
             let record = identities.record(*module_id);
             nodes.push(ProjectModuleGraphNode {
                 module_id: *module_id,
-                stable_origin: record.stable_origin().clone(),
-                role: record.role(),
+                shared_origin: record.shared_origin().clone(),
+                normal_origin: record.surface_origin(ModuleRootRole::Normal).cloned(),
+                support_origin: record.surface_origin(ModuleRootRole::Support).cloned(),
                 root_directory: record.root_directory().to_path_buf(),
-                root_file: record.root_file().to_path_buf(),
+                normal_root_file: record.normal_root_file().map(Path::to_path_buf),
+                support_root_file: record.support_root_file().map(Path::to_path_buf),
                 nearest_parent: None,
                 direct_children: Vec::new(),
             });
 
-            match record.role() {
-                ModuleRootRole::Normal => entry_modules.push(*module_id),
-                ModuleRootRole::ProjectPackageFacade => facade = Some(*module_id),
-                ModuleRootRole::Support => {}
+            if record.normal_root_file().is_some() {
+                entry_modules.push(*module_id);
             }
         }
 
         Self {
             nodes,
             entry_modules,
-            facade,
             dependencies: ProjectModuleDependencies::Frozen {
                 dependency_providers: vec![Vec::new(); node_count],
                 provider_consumers: vec![Vec::new(); node_count],
@@ -334,7 +388,7 @@ impl ProjectModuleGraph {
 
     /// Normal entry-candidate modules in deterministic `ModuleId` order.
     ///
-    /// Support roots and the project package facade are never entry candidates.
+    /// Support roots are never entry candidates.
     pub(crate) fn entry_modules(&self) -> &[ModuleId] {
         &self.entry_modules
     }
@@ -365,10 +419,16 @@ impl ProjectModuleGraph {
         Ok(&dependency_providers[module_id.index()])
     }
 
-    #[allow(dead_code)]
-    /// The optional project package facade module, outside the normal ancestry tree.
-    pub(crate) fn facade(&self) -> Option<ModuleId> {
-        self.facade
+    /// The project-root support surface that assembles the external package facade.
+    ///
+    /// This is an ordinary structural module selected by its root location and surface, not a
+    /// separate filesystem/graph node. Returns `None` when the selected boundary has no
+    /// project-root support root.
+    pub(crate) fn project_package_surface(&self) -> Option<ModuleId> {
+        self.nodes
+            .iter()
+            .find(|node| node.nearest_parent.is_none() && node.support_origin.is_some())
+            .map(|node| node.module_id)
     }
 
     /// Strict scoped-support visibility query.
@@ -411,7 +471,6 @@ impl ProjectModuleGraph {
             FxHashMap::default();
 
         for node in &self.nodes {
-            let node_origin = node.stable_origin();
             for source_id in source_tree_index.owned_source_indices(node.module_id()) {
                 let record = source_tree_index.source(*source_id);
                 let Some(entry_origin) = record.logical_identity().module_origin() else {
@@ -421,12 +480,13 @@ impl ProjectModuleGraph {
                         source_id.index(),
                     )));
                 };
-                if entry_origin != node_origin {
+                if !node.owns_origin(entry_origin) {
                     return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
-                        "Project module graph owned source entry {} has a stable identity module origin ({:?}) that does not match its containing graph node origin ({:?})",
+                        "Project module graph owned source entry {} has a stable identity module origin ({:?}) that does not belong to its containing structural module (shared {:?}, retained surface origins {:?})",
                         record.canonical_path().display(),
                         entry_origin,
-                        node_origin,
+                        node.shared_origin(),
+                        [node.surface_origin(ModuleRootRole::Normal), node.surface_origin(ModuleRootRole::Support)],
                     )));
                 }
                 let canonical_path = record.canonical_path().to_path_buf();
@@ -560,7 +620,7 @@ impl ProjectModuleGraph {
     /// Wave 0 contains every module with no outstanding providers. Each later wave contains
     /// modules whose providers all completed in earlier waves. Within a wave, modules are
     /// ordered by `ModuleId` so independent ready nodes keep one deterministic position. The
-    /// optional project package facade is ordered by its real edges, never by a hard-coded fake
+    /// project package support surface is ordered by its real edges, never by a hard-coded fake
     /// dependency.
     ///
     /// Dependency cycles are authored import cycles across modules or packages. They block the
@@ -718,8 +778,8 @@ impl ProjectModuleGraph {
         let node = &self.nodes[module_id.index()];
         format!(
             "{:?} {:?} (ModuleId {})",
-            node.role,
-            node.stable_origin.logical_module_path(),
+            node.role(),
+            node.stable_origin().logical_module_path(),
             module_id.index()
         )
     }
@@ -754,7 +814,7 @@ fn module_on_dependency_cycle(
 
 impl SupportVisibilityTopology for ProjectModuleGraph {
     fn role(&self, module_id: ModuleId) -> ModuleRootRole {
-        self.nodes[module_id.index()].role
+        self.nodes[module_id.index()].role()
     }
 
     fn nearest_parent(&self, module_id: ModuleId) -> Option<ModuleId> {
@@ -815,7 +875,7 @@ fn support_is_visible(
                 && !is_ancestor_of(topology, support_id, consumer_id)
         }
 
-        ModuleRootRole::ProjectPackageFacade => false,
+        ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => false,
     }
 }
 

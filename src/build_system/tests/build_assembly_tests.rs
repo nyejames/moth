@@ -333,10 +333,17 @@ fn module_record(
     logical_module_path: &str,
     package: &StablePackageIdentity,
 ) -> ModuleIdentityRecord {
+    let (normal_root_file, support_root_file) = match role {
+        ModuleRootRole::Normal => (Some(PathBuf::from(root_file)), None),
+        ModuleRootRole::Support | ModuleRootRole::SyntheticProjectContext => {
+            (None, Some(PathBuf::from(root_file)))
+        }
+        ModuleRootRole::Shared => (None, None),
+    };
     ModuleIdentityRecord::new(
         PathBuf::from(root_directory),
-        PathBuf::from(root_file),
-        role,
+        normal_root_file,
+        support_root_file,
         PathBuf::from(logical_module_path),
         package,
     )
@@ -377,7 +384,7 @@ fn package_facade_rejects_project_context_declaration_provenance() {
     let facade_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
         "".to_owned(),
-        ModuleRootRole::ProjectPackageFacade,
+        ModuleRootRole::Support,
     );
     let declaration_origin = OriginConstantId::new(facade_origin.clone(), "config".to_owned());
     let declaration_resource = resource(&facade_origin, "assets/config.svg");
@@ -399,7 +406,7 @@ fn package_facade_rejects_project_context_declaration_provenance() {
     let graph = ProjectModuleGraph::from_test_records(vec![module_record(
         "/synthetic/provenance-declaration",
         "/synthetic/provenance-declaration/+package.moth",
-        ModuleRootRole::ProjectPackageFacade,
+        ModuleRootRole::Support,
         "",
         &package,
     )]);
@@ -760,7 +767,7 @@ fn package_facade_rejects_project_context_reachable_private_helper() {
     let facade_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
         "".to_owned(),
-        ModuleRootRole::ProjectPackageFacade,
+        ModuleRootRole::SyntheticProjectContext,
     );
     let child_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
@@ -826,7 +833,7 @@ fn package_facade_rejects_project_context_reachable_private_helper() {
         module_record(
             "/synthetic/provenance-helper",
             "/synthetic/provenance-helper/+package.moth",
-            ModuleRootRole::ProjectPackageFacade,
+            ModuleRootRole::SyntheticProjectContext,
             "",
             &package,
         ),
@@ -867,7 +874,7 @@ fn package_union_follows_facade_export_and_excludes_hidden_child_export() {
     let facade_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
         "".to_owned(),
-        ModuleRootRole::ProjectPackageFacade,
+        ModuleRootRole::SyntheticProjectContext,
     );
     let child_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
@@ -924,7 +931,7 @@ fn package_union_follows_facade_export_and_excludes_hidden_child_export() {
         module_record(
             "/synthetic/project",
             "/synthetic/project/+package.moth",
-            ModuleRootRole::ProjectPackageFacade,
+            ModuleRootRole::SyntheticProjectContext,
             "",
             &package,
         ),
@@ -996,7 +1003,7 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
     let facade_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
         "".to_owned(),
-        ModuleRootRole::ProjectPackageFacade,
+        ModuleRootRole::SyntheticProjectContext,
     );
     let child_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
@@ -1065,7 +1072,7 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
         module_record(
             "/synthetic/nominal",
             "/synthetic/nominal/+package.moth",
-            ModuleRootRole::ProjectPackageFacade,
+            ModuleRootRole::SyntheticProjectContext,
             "",
             &package,
         ),

@@ -564,7 +564,7 @@ fn api_only_root_roles_lower_without_implicit_start() {
     let mut path_fork = super::PathInternerFork::empty();
     for root_role in [
         ModuleRootRole::Support,
-        ModuleRootRole::ProjectPackageFacade,
+        ModuleRootRole::SyntheticProjectContext,
     ] {
         let mut string_table = StringTable::new();
         let declaration_path = super::symbol("exported_value", &mut path_fork, &mut string_table);

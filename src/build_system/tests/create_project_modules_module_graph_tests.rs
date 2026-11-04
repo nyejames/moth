@@ -490,8 +490,8 @@ fn discovered_module_origin_is_not_rederived_from_a_path_component() {
 fn build_source_origin_lookup_maps_each_owned_file_to_its_node_origin() {
     // Hidden invariant: the source-origin lookup is a direct projection of the central
     // `SourceTreeIndex` ownership through the graph's owned source IDs. Every owned source
-    // record's logical identity module origin must equal its containing graph node's stable
-    // origin, and no canonical path may appear twice.
+    // record's logical identity module origin must belong to its containing structural module,
+    // and no canonical path may appear twice.
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let (config, resolver, style_directives, _module_a_root, _module_b_root) =
@@ -513,10 +513,9 @@ fn build_source_origin_lookup_maps_each_owned_file_to_its_node_origin() {
             let lookup_origin = lookup
                 .get(record.canonical_path())
                 .expect("every owned source entry must be present in the lookup");
-            assert_eq!(
-                lookup_origin,
-                node.stable_origin(),
-                "an owned source entry's lookup origin must equal its containing node origin (path: {:?})",
+            assert!(
+                node.owns_origin(lookup_origin),
+                "an owned source entry's lookup origin must belong to its containing structural module (path: {:?})",
                 record.canonical_path().display(),
             );
         }

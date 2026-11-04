@@ -1521,11 +1521,17 @@ fn discover_modules_serial_provider_capable(
         );
         let has_deferred_check_only = !check_only_source_indices.is_empty();
         for check_only_source_index in check_only_source_indices {
+            let check_only_origin = source_tree_index
+                .source(check_only_source_index)
+                .logical_identity()
+                .module_origin()
+                .cloned()
+                .unwrap_or_else(|| stable_origin.clone());
             check_only_specs.push(CheckOnlyModuleSpec {
                 owner_module_id: seed.module_id,
                 source_index: check_only_source_index,
                 candidate_source_indices: candidate_source_indices.clone(),
-                stable_origin: stable_origin.clone(),
+                stable_origin: check_only_origin,
             });
         }
         if !has_deferred_check_only {

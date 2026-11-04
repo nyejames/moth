@@ -258,17 +258,49 @@ fn facade_project_globals_dependency(
                 "facade dependency validation found no owning origin for the active root",
             )
         })?;
-    if active_origin.role() != ModuleRootRole::ProjectPackageFacade {
+    let is_project_package_surface = matches!(
+        active_origin.role(),
+        ModuleRootRole::SyntheticProjectContext | ModuleRootRole::Support
+    ) && active_origin.logical_module_path().is_empty();
+    let has_project_package_support_surface =
+        prepared
+            .semantic
+            .candidate_source_ids
+            .iter()
+            .any(|source_id| {
+                prepared
+                    .semantic
+                    .source_module_origins
+                    .origin_for(*source_id)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|origin| {
+                        origin.role() == ModuleRootRole::Support
+                            && origin.logical_module_path().is_empty()
+                    })
+            });
+    if !is_project_package_surface && !has_project_package_support_surface {
         return Ok(None);
     }
 
-    for clauses in prepared
+    let mut component_scratch = Vec::new();
+    for (source_path, clauses) in &prepared
         .semantic
         .prepared_header_syntax
         .module_symbols
         .file_dependency_clauses_by_source
-        .values()
     {
+        let components = prepared
+            .semantic
+            .path_fork
+            .resolve_components(*source_path, &mut component_scratch);
+        let source_file_name = components
+            .last()
+            .map(|component| prepared.semantic.string_table.resolve(*component))
+            .unwrap_or_default();
+        if !source_file_name.starts_with('+') {
+            continue;
+        }
         for clause in clauses {
             if is_project_globals_dependency(
                 clause.dependency.path,

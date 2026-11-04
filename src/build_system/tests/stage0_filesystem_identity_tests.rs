@@ -164,26 +164,26 @@ mod non_utf8_filesystem_identity {
     }
 
     #[test]
-    fn facade_discovery_rejects_non_utf8_direct_child_of_project_root() {
+    fn non_utf8_direct_child_outside_entry_root_is_ignored() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let entry_root = root.join("src");
         fs::create_dir_all(&entry_root).expect("should create entry root");
         fs::write(entry_root.join("@page.moth"), "").expect("should write entry root");
 
-        // A non-UTF-8 named direct child of the project root must not be silently skipped while
-        // scanning for the optional project package facade.
+        // The selected directory is the traversal boundary. A non-UTF-8 sibling of it is outside
+        // that boundary and must not enter the inventory or force an error.
         let bad_name = OsString::from_vec(vec![0xC3, 0x28]);
         let bad_file = root.join(bad_name);
         fs::write(&bad_file, "x ~= 1\n").expect("should write non-UTF-8 named file");
 
-        let mut config = Config::new(root.clone());
+        let config = Config::new(root.clone());
         let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let mut string_table = StringTable::new();
 
-        let failure = super::source_tree_index::SourceTreeIndex::discover(
+        let index = super::source_tree_index::SourceTreeIndex::discover(
             canonical_entry_root,
             super::source_tree_index::SourceTreeProjectContext {
                 project_root: &canonical_root,
@@ -195,8 +195,8 @@ mod non_utf8_filesystem_identity {
             &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
-        .expect_err("non-UTF-8 project-root child should be rejected during facade discovery");
-        assert_file_infrastructure_error(failure);
+        .expect("a non-UTF-8 path outside the selected directory must be ignored");
+        assert_eq!(index.module_identities().module_ids().count(), 1);
     }
 
     #[test]
@@ -391,6 +391,7 @@ mod source_package_boundary_indexes_tests {
     };
     #[cfg(unix)]
     use crate::compiler_tests::test_fs::RestrictedDirectory;
+    #[cfg(unix)]
     use crate::projects::html_project::external_js::js_import_provider::JsExternalImportProvider;
     use std::path::Path;
     use std::sync::Arc;
@@ -511,7 +512,7 @@ mod source_package_boundary_indexes_tests {
     }
 
     #[test]
-    fn missing_normal_module_root_rejected_during_boundary_indexing() {
+    fn missing_module_root_rejected_during_boundary_indexing() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
@@ -527,7 +528,7 @@ mod source_package_boundary_indexes_tests {
     }
 
     #[test]
-    fn support_root_does_not_satisfy_package_normal_module_root_requirement() {
+    fn support_only_package_is_accepted_as_an_external_surface() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
@@ -538,13 +539,32 @@ mod source_package_boundary_indexes_tests {
         register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
-        let failure = build_indexes(&source_packages, &mut string_table)
-            .expect_err("a support root cannot replace the package normal module root");
-        assert_invalid_config_reason(failure, InvalidConfigCode::SourcePackageMissingRoot);
+        let indexes = build_indexes(&source_packages, &mut string_table)
+            .expect("a support-only package should build a boundary index");
+        let (_, index) = indexes.iter().next().expect("package index should exist");
+        let module_id = index
+            .module_identities()
+            .module_id_for_directory(
+                &fs::canonicalize(&package_root).expect("package root should canonicalize"),
+            )
+            .expect("support root should define one structural module");
+        let record = index.module_identities().record(module_id);
+        assert_eq!(record.normal_root_file(), None);
+        assert!(record.support_root_file().is_some());
+
+        let prepared = indexes.prepared_source_package_roots();
+        assert_eq!(
+            prepared.root_files().get("pkg"),
+            Some(
+                &fs::canonicalize(package_root.join("+support.moth"))
+                    .expect("support root should canonicalize")
+            ),
+            "a support root is the external package surface"
+        );
     }
 
     #[test]
-    fn support_root_beside_package_normal_module_root_uses_shared_root_collision_diagnostic() {
+    fn paired_package_surfaces_select_the_support_root_as_external_surface() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
@@ -556,9 +576,28 @@ mod source_package_boundary_indexes_tests {
         register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
-        let failure = build_indexes(&source_packages, &mut string_table)
-            .expect_err("one directory cannot contain hash and support roots");
-        assert_invalid_config_reason(failure, InvalidConfigCode::MultipleModuleRootFiles);
+        let indexes = build_indexes(&source_packages, &mut string_table)
+            .expect("a paired package should build a boundary index");
+        let (_, index) = indexes.iter().next().expect("package index should exist");
+        let module_id = index
+            .module_identities()
+            .module_id_for_directory(
+                &fs::canonicalize(&package_root).expect("package root should canonicalize"),
+            )
+            .expect("paired roots should define one structural module");
+        let record = index.module_identities().record(module_id);
+        assert!(record.normal_root_file().is_some());
+        assert!(record.support_root_file().is_some());
+
+        let prepared = indexes.prepared_source_package_roots();
+        assert_eq!(
+            prepared.root_files().get("pkg"),
+            Some(
+                &fs::canonicalize(package_root.join("+support.moth"))
+                    .expect("support root should canonicalize")
+            ),
+            "a support root beside a normal root is the external package surface"
+        );
     }
 
     #[test]
@@ -812,8 +851,6 @@ mod module_identity_tests {
     use crate::compiler_frontend::semantic_identity::{
         ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
     };
-    #[cfg(unix)]
-    use crate::compiler_tests::test_fs::RestrictedDirectory;
     use std::path::Path;
 
     fn discover_index(
@@ -1097,191 +1134,72 @@ mod module_identity_tests {
     }
 
     #[test]
-    fn discovers_project_package_facade_outside_entry_root_containment() {
-        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-        let root = _tmp_root.path().to_path_buf();
-        let src = root.join("src");
-        fs::create_dir_all(&src).expect("should create entry root");
-        fs::write(src.join("@page.moth"), "").expect("should write entry module");
-        fs::write(root.join("+package.moth"), "").expect("should write project facade");
-
-        let (index, project_root, _entry_root) = discover_index(&root, "src");
-        let table = index.module_identities();
-
-        let support_count = table
-            .module_ids()
-            .filter(|id| table.record(*id).role() == ModuleRootRole::Support)
-            .count();
-        assert_eq!(
-            support_count, 0,
-            "facade outside entry root must not be a support root"
-        );
-
-        let facade_count = table
-            .module_ids()
-            .filter(|id| table.record(*id).role() == ModuleRootRole::ProjectPackageFacade)
-            .count();
-        assert_eq!(facade_count, 1, "exactly one facade should be discovered");
-
-        let facade_dir = project_root;
-        let facade_id = table
-            .module_id_for_directory(&facade_dir)
-            .expect("facade should have a module id");
-        assert_eq!(
-            table.record(facade_id).role(),
-            ModuleRootRole::ProjectPackageFacade,
-        );
-
-        // The facade is outside the entry-root containment tree.
-        assert_eq!(
-            table.nearest_ancestor_module(facade_id),
-            None,
-            "facade must have no ancestor"
-        );
-        assert!(
-            table.direct_child_modules(facade_id).is_empty(),
-            "facade must have no children"
-        );
-
-        // The facade is not an entry module. Assert against the canonical facade and entry
-        // root-file paths via the project module graph (the production entry-classification
-        // owner) so the exclusion is genuinely protected, not just a filename-stem check.
-        let facade_root_file = fs::canonicalize(root.join("+package.moth"))
-            .expect("facade root file should canonicalize");
-        let entry_root_file =
-            fs::canonicalize(src.join("@page.moth")).expect("entry root file should canonicalize");
-        let graph = ProjectModuleGraph::from_source_tree_index(&index);
-        let entry_root_files: Vec<&std::path::Path> = graph
-            .entry_modules()
-            .iter()
-            .map(|module_id| graph.node(*module_id).root_file())
-            .collect();
-        assert!(
-            entry_root_files.contains(&entry_root_file.as_path()),
-            "entry module {entry_root_file:?} should be an entry module: {entry_root_files:?}"
-        );
-        assert!(
-            !entry_root_files.contains(&facade_root_file.as_path()),
-            "facade {facade_root_file:?} must not be an entry module: {entry_root_files:?}"
-        );
-
-        assert!(
-            index.stats().project_package_facade_found,
-            "facade discovery should be recorded in stats"
-        );
-    }
-
-    #[test]
-    fn missing_project_root_surfaces_file_error_not_missing_facade() {
-        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-        let root = _tmp_root.path().to_path_buf();
-        let entry_root = root.join("src");
-        fs::create_dir_all(&entry_root).expect("should create entry root");
-        fs::write(entry_root.join("@page.moth"), "").expect("should write entry root");
-
-        let config = Config::new(root.clone());
-        let canonical_entry_root =
-            fs::canonicalize(&entry_root).expect("entry root should canonicalize");
-        let missing_project_root = root.join("does_not_exist");
-        let mut string_table = StringTable::new();
-
-        let failure = super::source_tree_index::SourceTreeIndex::discover(
-            canonical_entry_root,
-            super::source_tree_index::SourceTreeProjectContext {
-                project_root: &missing_project_root,
-                validated_output_settings: None,
-            },
-            &config,
-            &SourcePackageRegistry::default(),
-            &crate::builder_surface::SourceFileKindRegistry::default(),
-            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
-            &mut string_table,
-        )
-        .expect_err("missing project root should surface a file error, not a missing facade");
-        assert_file_infrastructure_error(failure, "discovering package facade");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn unreadable_project_root_surfaces_file_error_not_missing_facade() {
-        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-        let root = _tmp_root.path().to_path_buf();
-        let entry_root = root.join("src");
-        fs::create_dir_all(&entry_root).expect("should create entry root");
-        fs::write(entry_root.join("@page.moth"), "").expect("should write entry root");
-
-        let config = Config::new(root.clone());
-        let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
-        let canonical_entry_root =
-            fs::canonicalize(&entry_root).expect("entry root should canonicalize");
-
-        // Drop read permission so facade discovery cannot read the project root directory.
-        // Execute permission is retained so the earlier canonicalization already succeeded.
-        let _restricted_root = RestrictedDirectory::deny_listing(&root);
-
-        let mut string_table = StringTable::new();
-        let failure = super::source_tree_index::SourceTreeIndex::discover(
-            canonical_entry_root,
-            super::source_tree_index::SourceTreeProjectContext {
-                project_root: &canonical_root,
-                validated_output_settings: None,
-            },
-            &config,
-            &SourcePackageRegistry::default(),
-            &crate::builder_surface::SourceFileKindRegistry::default(),
-            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
-            &mut string_table,
-        )
-        .expect_err("unreadable project root should surface a file error, not a missing facade");
-        assert_file_infrastructure_error(failure, "discovering package facade");
-    }
-
-    fn assert_file_infrastructure_error(failure: PreparedFailure, expected_text: &str) {
-        use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
-
-        let error = primary_infrastructure_error(failure);
-        assert_eq!(
-            error.kind,
-            InfrastructureFailureKind::Filesystem,
-            "project root read failure should be a File infrastructure error"
-        );
-        assert!(
-            error.message.contains(expected_text),
-            "error message should mention {expected_text:?}: {}",
-            error.message,
-        );
-    }
-
-    #[test]
-    fn rejects_mixed_normal_and_support_roots_in_one_directory() {
+    fn paired_normal_and_support_roots_share_one_structural_module() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@page.moth"), "").expect("should write normal root");
-        fs::write(src.join("+pkg.moth"), "").expect("should write support root");
+        fs::write(src.join("+package.moth"), "").expect("should write support root");
+        fs::write(src.join("helper.moth"), "").expect("should write shared helper");
 
-        let entry_root = root.join("src");
-        let config = Config::new(root.clone());
-        let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
-        let canonical_entry_root =
-            fs::canonicalize(&entry_root).expect("entry root should canonicalize");
-        let mut string_table = StringTable::new();
+        let (index, _project_root, entry_root) = discover_index(&root, "src");
+        let table = index.module_identities();
+        let module_id = table
+            .module_id_for_directory(&entry_root)
+            .expect("paired roots should share one structural module id");
 
-        let failure = super::source_tree_index::SourceTreeIndex::discover(
-            canonical_entry_root,
-            super::source_tree_index::SourceTreeProjectContext {
-                project_root: &canonical_root,
-                validated_output_settings: None,
-            },
-            &config,
-            &SourcePackageRegistry::default(),
-            &crate::builder_surface::SourceFileKindRegistry::default(),
-            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
-            &mut string_table,
-        )
-        .expect_err("mixed normal and support roots should be rejected");
-        assert_first_boundary_error_code(failure, "MOTH-CONFIG-0001");
+        assert_eq!(
+            table
+                .module_ids()
+                .filter(|id| table.record(*id).root_directory() == entry_root)
+                .count(),
+            1,
+            "one rooted directory must produce exactly one structural module"
+        );
+
+        let record = table.record(module_id);
+        assert_eq!(
+            record.normal_root_file(),
+            Some(entry_root.join("@page.moth").as_path())
+        );
+        assert_eq!(
+            record.support_root_file(),
+            Some(entry_root.join("+package.moth").as_path())
+        );
+        assert_eq!(record.shared_origin().role(), ModuleRootRole::Shared);
+        assert_eq!(
+            record
+                .surface_origin(ModuleRootRole::Normal)
+                .expect("normal surface should exist")
+                .role(),
+            ModuleRootRole::Normal
+        );
+        assert_eq!(
+            record
+                .surface_origin(ModuleRootRole::Support)
+                .expect("support surface should exist")
+                .role(),
+            ModuleRootRole::Support
+        );
+
+        let graph = ProjectModuleGraph::from_source_tree_index(&index);
+        assert_eq!(graph.node_count(), 1);
+        let node = graph.node(module_id);
+        assert_eq!(
+            node.normal_root_file(),
+            Some(entry_root.join("@page.moth").as_path())
+        );
+        assert_eq!(
+            node.support_root_file(),
+            Some(entry_root.join("+package.moth").as_path())
+        );
+        assert_eq!(graph.entry_modules(), &[module_id]);
+        assert_eq!(
+            index.owned_source_indices(module_id).len(),
+            3,
+            "the structural module owns both roots and its shared helper exactly once"
+        );
     }
 
     #[test]
@@ -1491,53 +1409,64 @@ mod module_identity_tests {
 
     #[test]
     fn changing_root_role_changes_stable_identity() {
-        // The facade shares the project root directory, whose logical path is empty just like the
-        // entry root's, so role is the differentiator.
+        // Both roots share one logical module path; the role-qualified surface origins must stay
+        // distinct, and each must be stable across absolute checkout roots.
         let _tmp_root_a = tempfile::tempdir().expect("should create temp dir");
         let root_a = _tmp_root_a.path().to_path_buf();
-        let _tmp1_root_b = tempfile::tempdir().expect("should create temp dir");
-        let root_b = _tmp1_root_b.path().to_path_buf();
+        let _tmp_root_b = tempfile::tempdir().expect("should create temp dir");
+        let root_b = _tmp_root_b.path().to_path_buf();
         for root in [&root_a, &root_b] {
             let src = root.join("src");
             fs::create_dir_all(&src).expect("should create entry root");
-            fs::write(src.join("@home.moth"), "").expect("should write entry root");
-            fs::write(root.join("+package.moth"), "").expect("should write facade");
+            fs::write(src.join("@home.moth"), "").expect("should write normal root");
+            fs::write(src.join("+package.moth"), "").expect("should write support root");
         }
 
-        let (table_a, project_a, entry_a) = discover_table_with_name(&root_a, "src", "my-project");
-        let (table_b, project_b, entry_b) = discover_table_with_name(&root_b, "src", "my-project");
+        let (table_a, _project_a, entry_a) = discover_table_with_name(&root_a, "src", "my-project");
+        let (table_b, _project_b, entry_b) = discover_table_with_name(&root_b, "src", "my-project");
+        let record_a = table_a.record(
+            table_a
+                .module_id_for_directory(&entry_a)
+                .expect("paired roots should have an id"),
+        );
+        let record_b = table_b.record(
+            table_b
+                .module_id_for_directory(&entry_b)
+                .expect("paired roots should have an id"),
+        );
 
-        let entry_origin = entry_module_origin(&table_a, &entry_a);
-        let facade_id = table_a
-            .module_id_for_directory(&project_a)
-            .expect("facade should have an id");
-        let facade_origin = table_a.record(facade_id).stable_origin();
+        let normal_origin = record_a
+            .surface_origin(ModuleRootRole::Normal)
+            .expect("normal root should have an origin");
+        let support_origin = record_a
+            .surface_origin(ModuleRootRole::Support)
+            .expect("support root should have an origin");
+        let shared_origin = record_a.shared_origin();
+
+        assert_eq!(normal_origin.logical_module_path(), "");
+        assert_eq!(support_origin.logical_module_path(), "");
+        assert_eq!(shared_origin.logical_module_path(), "");
+        assert_eq!(normal_origin.role(), ModuleRootRole::Normal);
+        assert_eq!(support_origin.role(), ModuleRootRole::Support);
+        assert_eq!(shared_origin.role(), ModuleRootRole::Shared);
+        assert_ne!(normal_origin, support_origin);
+        assert_ne!(shared_origin, normal_origin);
+        assert_ne!(shared_origin, support_origin);
 
         assert_eq!(
-            entry_origin.logical_module_path(),
-            facade_origin.logical_module_path(),
-            "both the entry root and the facade have the empty logical path"
+            record_a.surface_origin(ModuleRootRole::Normal),
+            record_b.surface_origin(ModuleRootRole::Normal),
+            "normal surface identity must be equal across distinct absolute checkout roots"
         );
-        assert_eq!(entry_origin.role(), ModuleRootRole::Normal);
-        assert_eq!(facade_origin.role(), ModuleRootRole::ProjectPackageFacade);
-        assert_ne!(
-            entry_origin, facade_origin,
-            "different root roles must yield different identities even with the same logical path"
-        );
-
-        // The facade identity is itself stable across checkout roots.
-        let facade_id_b = table_b
-            .module_id_for_directory(&project_b)
-            .expect("facade should have an id");
         assert_eq!(
-            facade_origin,
-            table_b.record(facade_id_b).stable_origin(),
-            "facade identity must be equal across distinct absolute checkout roots"
+            record_a.surface_origin(ModuleRootRole::Support),
+            record_b.surface_origin(ModuleRootRole::Support),
+            "support surface identity must be equal across distinct absolute checkout roots"
         );
-        assert_ne!(
-            facade_origin,
-            entry_module_origin(&table_b, &entry_b),
-            "facade and entry identities must differ in the second tree too"
+        assert_eq!(
+            record_a.shared_origin(),
+            record_b.shared_origin(),
+            "shared helper identity must be equal across distinct absolute checkout roots"
         );
     }
 
@@ -2002,37 +1931,55 @@ mod owned_source_inventory_tests {
     }
 
     #[test]
-    fn project_facade_owns_its_root_source() {
+    fn paired_module_owns_both_roots_and_shared_helpers_once() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
-        fs::write(src.join("@page.moth"), "").expect("should write entry root file");
-        fs::write(root.join("+package.moth"), "").expect("should write facade root file");
+        fs::write(src.join("@page.moth"), "").expect("should write normal root file");
+        fs::write(src.join("+package.moth"), "").expect("should write support root file");
+        fs::write(src.join("helper.moth"), "").expect("should write shared helper");
 
         let index =
             discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
         let table = index.module_identities();
-        let facade_id = table
+        let module_id = table
             .module_ids()
-            .find(|id| table.record(*id).role() == ModuleRootRole::ProjectPackageFacade)
-            .expect("project package facade should exist");
+            .next()
+            .expect("paired roots should define one structural module");
 
-        let facade_ids = index.owned_source_indices(facade_id);
         assert_eq!(
-            facade_ids.len(),
-            1,
-            "facade module owns exactly its root source file"
+            owned_relative_paths(&index, module_id),
+            vec!["@page.moth", "+package.moth", "helper.moth"],
+            "one structural module owns both roots and its shared helper exactly once"
         );
-        let facade_record = index.source(facade_ids[0]);
-        assert_eq!(
-            owned_relative_path(&index, facade_ids[0]),
-            "+package.moth",
-            "facade root file identity is module-relative to the facade root directory"
+
+        let root_origins = index
+            .owned_source_indices(module_id)
+            .iter()
+            .map(|source_id| {
+                let record = index.source(*source_id);
+                assert_eq!(
+                    record.classification(),
+                    &SourceClassification::CompilerSemantic(SourceFileKind::Moth)
+                );
+                let SourceLogicalIdentity::Owned(identity) = record.logical_identity() else {
+                    panic!("an owned source must carry an owned logical identity");
+                };
+                identity.module_origin().role()
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            root_origins.contains(&ModuleRootRole::Normal),
+            "the normal root source must carry the normal surface origin: {root_origins:?}"
         );
-        assert_eq!(
-            facade_record.classification(),
-            &SourceClassification::CompilerSemantic(SourceFileKind::Moth)
+        assert!(
+            root_origins.contains(&ModuleRootRole::Support),
+            "the support root source must carry the support surface origin: {root_origins:?}"
+        );
+        assert!(
+            root_origins.contains(&ModuleRootRole::Shared),
+            "the helper source must carry the role-neutral shared origin: {root_origins:?}"
         );
     }
 
@@ -2244,83 +2191,53 @@ mod owned_source_inventory_tests {
     }
 
     #[test]
-    fn facade_file_inside_entry_root_is_owned_exactly_once_by_facade() {
-        // Project root equals entry root, so the facade root file lies inside the traversal. It
-        // must appear exactly once, owned only by the facade module, and must not also appear in
-        // the entry-root module's owned source set.
+    fn paired_root_files_appear_exactly_once_in_the_central_source_table() {
         let _temp = tempfile::tempdir().expect("should create temp dir");
         let root = _temp.path().to_path_buf();
 
-        fs::write(root.join("@page.moth"), "").expect("should write entry root file");
-        fs::write(root.join("+package.moth"), "").expect("should write facade root file");
+        fs::write(root.join("@page.moth"), "").expect("should write normal root file");
+        fs::write(root.join("+package.moth"), "").expect("should write support root file");
 
         let index = discover_index_with_kinds(&root, ".", "my-project", &html_source_file_kinds());
         let table = index.module_identities();
-
-        let facade_id = table
+        let module_id = table
             .module_ids()
-            .find(|id| table.record(*id).role() == ModuleRootRole::ProjectPackageFacade)
-            .expect("project package facade should exist");
-        let entry_id = table
-            .module_ids()
-            .find(|id| {
-                table.record(*id).role() == ModuleRootRole::Normal
-                    && table
-                        .record(*id)
-                        .logical_module_path()
-                        .as_os_str()
-                        .is_empty()
-            })
-            .expect("entry root normal module should exist");
+            .next()
+            .expect("paired roots should define one structural module");
+        let record = table.record(module_id);
 
-        let facade_ids = index.owned_source_indices(facade_id);
-        assert_eq!(
-            facade_ids.len(),
-            1,
-            "facade module owns exactly its root source file"
-        );
-        assert_eq!(
-            owned_relative_path(&index, facade_ids[0]),
-            "+package.moth",
-            "facade root file identity is module-relative to the facade root directory"
-        );
-
-        let entry_paths = owned_relative_paths(&index, entry_id);
-        assert!(
-            !entry_paths.contains(&"+package.moth".to_owned()),
-            "the facade file must not appear in the entry-root normal module's owned set: \
-             {entry_paths:?}"
-        );
-        assert_eq!(
-            entry_paths,
-            vec!["@page.moth"],
-            "entry-root normal module owns only its own root file"
-        );
-
-        let facade_record_count = index
-            .sources()
-            .iter()
-            .filter(|record| match record.logical_identity() {
-                SourceLogicalIdentity::Owned(identity) => {
-                    identity.relative_source_path() == "+package.moth"
-                        && identity.module_origin() == table.record(facade_id).stable_origin()
-                }
-                SourceLogicalIdentity::Unrooted(_) => false,
-            })
-            .count();
-        assert_eq!(
-            facade_record_count, 1,
-            "the facade source must appear exactly once in the central source table"
-        );
+        for (relative_path, expected_origin) in [
+            ("@page.moth", record.surface_origin(ModuleRootRole::Normal)),
+            (
+                "+package.moth",
+                record.surface_origin(ModuleRootRole::Support),
+            ),
+        ] {
+            let matching = index
+                .sources()
+                .iter()
+                .filter(|source| match source.logical_identity() {
+                    SourceLogicalIdentity::Owned(identity) => {
+                        identity.relative_source_path() == relative_path
+                            && Some(identity.module_origin()) == expected_origin
+                    }
+                    SourceLogicalIdentity::Unrooted(_) => false,
+                })
+                .count();
+            assert_eq!(
+                matching, 1,
+                "{relative_path} must appear exactly once with its surface origin"
+            );
+        }
     }
 
     #[test]
-    fn compilation_root_table_keeps_normal_root_when_facade_shares_entry_root() {
+    fn compilation_root_table_selects_the_normal_root_for_a_paired_directory() {
         let _temp = tempfile::tempdir().expect("should create temp dir");
         let root = _temp.path().to_path_buf();
 
-        fs::write(root.join("@page.moth"), "").expect("should write entry root file");
-        fs::write(root.join("+package.moth"), "").expect("should write facade root file");
+        fs::write(root.join("@page.moth"), "").expect("should write normal root file");
+        fs::write(root.join("+package.moth"), "").expect("should write support root file");
 
         let index = discover_index_with_kinds(&root, ".", "my-project", &html_source_file_kinds());
         let table = index.module_identities();
@@ -2330,7 +2247,7 @@ mod owned_source_inventory_tests {
         assert_eq!(
             compilation_roots.root_file_for_directory(&canonical_root),
             Some(canonical_root.join("@page.moth").as_path()),
-            "the normal module remains authoritative for the shared project directory"
+            "the normal module remains the primary compilation root for the shared directory"
         );
     }
 
@@ -2836,7 +2753,7 @@ mod project_module_graph_tests {
     }
 
     #[test]
-    fn entry_modules_are_normal_only_and_facade_is_separate() {
+    fn entry_modules_are_normal_only_and_support_is_separate() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
@@ -2846,7 +2763,6 @@ mod project_module_graph_tests {
         fs::write(src.join("@site.moth"), "").expect("should write entry normal root");
         fs::write(src.join("pages/@pages.moth"), "").expect("should write child normal root");
         fs::write(src.join("components/+ui.moth"), "").expect("should write support root");
-        fs::write(root.join("+package.moth"), "").expect("should write project facade");
 
         let (index, _project_root, _entry_root) = discover_index(&root, "src");
         let graph = ProjectModuleGraph::from_source_tree_index(&index);
@@ -2872,21 +2788,9 @@ mod project_module_graph_tests {
             "support root must never be an entry candidate"
         );
 
-        let facade_id = graph
-            .facade()
-            .expect("project package facade should be classified");
-        assert_eq!(
-            graph.node(facade_id).role(),
-            ModuleRootRole::ProjectPackageFacade
-        );
         assert!(
-            !graph.entry_modules().contains(&facade_id),
-            "facade must never be an entry candidate"
-        );
-        assert_eq!(
-            graph.node(facade_id).nearest_parent(),
-            None,
-            "facade stays outside the normal ancestry tree"
+            graph.project_package_surface().is_none(),
+            "a nested support root is not a project package surface"
         );
     }
 
@@ -3078,27 +2982,26 @@ mod project_module_graph_tests {
     }
 
     #[test]
-    fn facade_is_ordered_by_real_edges_not_a_fake_dependency() {
+    fn support_surface_is_ordered_by_real_edges_not_a_fake_dependency() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("pages")).expect("should create pages");
+        fs::create_dir_all(src.join("components")).expect("should create components");
 
         fs::write(src.join("@site.moth"), "").expect("should write entry normal root");
         fs::write(src.join("pages/@pages.moth"), "").expect("should write child normal root");
-        fs::write(root.join("+package.moth"), "").expect("should write project facade");
+        fs::write(src.join("components/+ui.moth"), "").expect("should write support root");
 
         let (index, _project_root, _entry_root) = discover_index(&root, "src");
 
-        let facade_id = ProjectModuleGraph::from_source_tree_index(&index)
-            .facade()
-            .expect("project package facade should be classified");
+        let support_id = module_id_for(&index, ModuleRootRole::Support, "components");
         let pages_id = module_id_for(&index, ModuleRootRole::Normal, "pages");
         let site_id = module_id_for(&index, ModuleRootRole::Normal, "");
 
-        // Without edges the facade is independent and joins wave zero with the normal modules.
-        // The no-edge graph completes before scheduling so wave scheduling reads only frozen
-        // adjacency.
+        // Without edges the support module is independent and joins wave zero with the normal
+        // modules. The no-edge graph completes before scheduling so wave scheduling reads only
+        // frozen adjacency.
         let mut no_edge_graph = ProjectModuleGraph::from_source_tree_index(&index);
         no_edge_graph
             .complete()
@@ -3108,31 +3011,30 @@ mod project_module_graph_tests {
             .expect("completed no-edge graph waves cleanly");
         assert_eq!(waves.len(), 1, "no edges means one wave");
         assert!(
-            waves[0].contains(&facade_id),
-            "facade with no edges is independent and ready in wave zero"
+            waves[0].contains(&support_id),
+            "support module with no edges is independent and ready in wave zero"
         );
 
-        // Once a real edge targets the facade, it is ordered after its providers without any
-        // hard-coded fake dependency. Edges are inserted while the graph is under construction,
-        // then completion freezes the adjacency before scheduling reads it.
+        // Once real edges target the support module, it is ordered after its providers without
+        // any hard-coded fake dependency.
         let mut graph = ProjectModuleGraph::from_source_tree_index(&index);
         graph
-            .add_dependency_edge(pages_id, facade_id)
-            .expect("pages -> facade edge should insert");
+            .add_dependency_edge(pages_id, support_id)
+            .expect("pages -> support edge should insert");
         graph
-            .add_dependency_edge(site_id, facade_id)
-            .expect("site -> facade edge should insert");
+            .add_dependency_edge(site_id, support_id)
+            .expect("site -> support edge should insert");
         graph
             .complete()
             .expect("populated graph should complete before scheduling");
 
         let waves = graph
             .compile_waves()
-            .expect("facade-ordered graph waves cleanly");
-        let facade_wave = waves
+            .expect("support-ordered graph waves cleanly");
+        let support_wave = waves
             .iter()
-            .position(|wave| wave.contains(&facade_id))
-            .expect("facade should appear in a wave");
+            .position(|wave| wave.contains(&support_id))
+            .expect("support should appear in a wave");
         let pages_wave = waves
             .iter()
             .position(|wave| wave.contains(&pages_id))
@@ -3142,8 +3044,8 @@ mod project_module_graph_tests {
             .position(|wave| wave.contains(&site_id))
             .expect("site should appear in a wave");
         assert!(
-            facade_wave > pages_wave && facade_wave > site_wave,
-            "facade must compile after both providers that target it"
+            support_wave > pages_wave && support_wave > site_wave,
+            "support module must compile after both providers that target it"
         );
     }
 

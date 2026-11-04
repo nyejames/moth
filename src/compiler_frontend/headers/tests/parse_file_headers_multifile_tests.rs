@@ -540,7 +540,7 @@ fn entry_normal_module_root_file_is_assigned_active_module_root_role() {
 fn api_only_active_roots_export_declarations_without_synthesizing_start() {
     for root_role in [
         ModuleRootRole::Support,
-        ModuleRootRole::ProjectPackageFacade,
+        ModuleRootRole::SyntheticProjectContext,
     ] {
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
@@ -578,7 +578,7 @@ fn api_only_active_roots_export_declarations_without_synthesizing_start() {
 fn api_only_active_roots_reject_every_root_activity_form() {
     for root_role in [
         ModuleRootRole::Support,
-        ModuleRootRole::ProjectPackageFacade,
+        ModuleRootRole::SyntheticProjectContext,
     ] {
         for source in ["value = 1\n", "[3]\n", "#[3]\n"] {
             let mut string_table = StringTable::new();

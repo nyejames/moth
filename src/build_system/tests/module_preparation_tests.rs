@@ -835,7 +835,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
 fn api_only_root_roles_compile_public_interfaces_without_hir_start() {
     for root_role in [
         ModuleRootRole::Support,
-        ModuleRootRole::ProjectPackageFacade,
+        ModuleRootRole::SyntheticProjectContext,
     ] {
         compile_api_only_root_and_assert_boundary(root_role);
     }
