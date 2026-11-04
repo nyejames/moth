@@ -11,10 +11,7 @@ fn dummy_report() -> CreateProjectReport {
     CreateProjectReport {
         project_path: PathBuf::from("/path/to/site"),
         project_name: String::from("site"),
-        created: vec![
-            PathBuf::from("config.moth"),
-            PathBuf::from("src/@page.moth"),
-        ],
+        created: vec![PathBuf::from("config.moth"), PathBuf::from("@page.moth")],
         updated: Vec::new(),
         skipped: Vec::new(),
         replaced: Vec::new(),
@@ -35,10 +32,7 @@ fn summary_lists_each_file_action_section() {
     let report = CreateProjectReport {
         project_path: PathBuf::from("/path/to/site"),
         project_name: String::from("site"),
-        created: vec![
-            PathBuf::from("config.moth"),
-            PathBuf::from("src/@page.moth"),
-        ],
+        created: vec![PathBuf::from("config.moth"), PathBuf::from("@page.moth")],
         updated: vec![PathBuf::from(".gitignore")],
         replaced: vec![PathBuf::from("old-config.moth")],
         skipped: vec![PathBuf::from("README.md")],
@@ -47,7 +41,7 @@ fn summary_lists_each_file_action_section() {
 
     assert!(summary.contains("Created:"));
     assert!(summary.contains("  config.moth"));
-    assert!(summary.contains("  src/@page.moth"));
+    assert!(summary.contains("  @page.moth"));
     assert!(summary.contains("Updated:"));
     assert!(summary.contains("  .gitignore"));
     assert!(summary.contains("Replaced:"));

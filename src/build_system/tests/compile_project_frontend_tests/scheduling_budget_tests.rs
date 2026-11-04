@@ -30,7 +30,8 @@ const THREE_FAILING_BODIES: &str = "first || -> I32:\n    return missing_one\n;\
      third || -> I32:\n    return missing_three\n;\n";
 const ONE_FAILING_BODY: &str = "consumer || -> I32:\n    return only_second_module\n;\n";
 /// The project threshold every package cutoff fixture in this file reaches.
-const PROJECT_ERROR_LIMIT_TWO: &str = "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 2,\n)\nhtml #= ()\n";
+const PROJECT_ERROR_LIMIT_TWO: &str =
+    "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n";
 /// A module root whose body binds a resolved resource before failing, plus an independent body
 /// in an owned sibling file with the same shape.
 const RESOURCE_FAILING_MODULE_ROOT: &str = "@extra later\nexport:\n    probe || -> String:\n        logo = @assets/broken.svg\n        return missing_one\n    ;\n;\n";
@@ -302,6 +303,7 @@ fn finish_stopped_package_request(
 fn write_project(root: &Path, config_text: &str, files: &[(&str, &str)]) {
     fs::write(root.join("config.moth"), config_text).expect("config should be written");
     for (relative_path, contents) in files {
+        let relative_path = relative_path.strip_prefix("src/").unwrap_or(relative_path);
         let path = root.join(relative_path);
         fs::create_dir_all(path.parent().expect("each fixture path has a parent"))
             .expect("fixture directory should be created");
@@ -316,7 +318,7 @@ fn diagnostic_recovery_project_soft_cutoff() {
     let root = temp.path();
     write_project(
         root,
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 2,\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n",
         &[
             ("src/first/@first.moth", THREE_FAILING_BODIES),
             ("src/second/@second.moth", ONE_FAILING_BODY),
@@ -418,7 +420,7 @@ fn diagnostic_recovery_project_soft_cutoff_none_compiles_every_module() {
     let root = temp.path();
     write_project(
         root,
-        "project_error_limit #I32? = none\nproject #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = project_error_limit,\n)\nhtml #= ()\n",
+        "project_error_limit #I32? = none\nproject #= (\n    name = \"docs\",\n        max_errors_per_project = project_error_limit,\n)\nhtml #= ()\n",
         &[
             ("src/first/@first.moth", THREE_FAILING_BODIES),
             ("src/second/@second.moth", ONE_FAILING_BODY),
@@ -456,7 +458,7 @@ fn diagnostic_recovery_project_soft_cutoff_on_last_module_records_no_stop() {
     // meets the threshold exactly, so no further work was skipped.
     write_project(
         root,
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 3,\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n        max_errors_per_project = 3,\n)\nhtml #= ()\n",
         &[
             ("src/@page.moth", "#[:site]\n"),
             (
@@ -503,7 +505,7 @@ fn diagnostic_recovery_project_soft_cutoff_counts_shared_provider_once() {
     // flag: the provider diagnosis was charged once and the blocked dependant never charges.
     write_project(
         root,
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 2,\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n",
         &[
             ("src/@page.moth", "@shared broken\n#[:site]\n"),
             (
@@ -571,7 +573,7 @@ fn diagnostic_recovery_check_only_units_share_owner_allowance() {
     // first orphan retains both slots; the second orphan must not be admitted at all.
     write_project(
         root,
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 30,\n    max_errors_per_module = 2,\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n        max_errors_per_project = 30,\n    max_errors_per_module = 2,\n)\nhtml #= ()\n",
         &[
             (
                 "src/first/@first.moth",
@@ -627,7 +629,7 @@ fn diagnostic_recovery_check_only_allowance_subtracts_owner_errors() {
     // can be admitted: the first orphan fills the owner's remaining slot and the second is skipped.
     write_project(
         root,
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 30,\n    max_errors_per_module = 2,\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n        max_errors_per_project = 30,\n    max_errors_per_module = 2,\n)\nhtml #= ()\n",
         &[
             (
                 "src/first/@first.moth",
@@ -691,7 +693,7 @@ fn diagnostic_recovery_project_budget_spans_source_package_work() {
     // is command-scope state and never resets when package work hands over to project modules.
     write_project(
         root,
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 2,\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n",
         &[
             ("src/a/@page.moth", "owner_missing\n#[:site]\n"),
             ("src/b/@page.moth", "second_missing\n#[:site]\n"),
@@ -759,7 +761,7 @@ fn diagnostic_recovery_stopped_check_only_unit_treats_unvisited_provider_as_stop
     // panics or contributes a diagnostic of its own.
     write_project(
         root,
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 2,\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n",
         &[
             (
                 "src/first/@first.moth",
@@ -831,7 +833,7 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
     // from the failed bodies, and only the clean module may publish its resource association.
     write_project(
         root,
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
         &[
             ("src/@page.moth", "#[:site]\n"),
             ("src/broken/@broken.moth", RESOURCE_FAILING_MODULE_ROOT),
@@ -998,12 +1000,12 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
     // Repairing both bodies on the same root proves the repaired source compiles and now
     // publishes the association; each lane run builds fresh registries.
     fs::write(
-        root.join("src/broken/@broken.moth"),
+        root.join("broken/@broken.moth"),
         RESOURCE_REPAIRED_MODULE_ROOT,
     )
     .expect("the repaired root source should be written");
     fs::write(
-        root.join("src/broken/extra.moth"),
+        root.join("broken/extra.moth"),
         RESOURCE_REPAIRED_MODULE_EXTRA,
     )
     .expect("the repaired extra source should be written");
@@ -1270,7 +1272,7 @@ fn write_deferred_check_only_package_project(
     second_orphan: &str,
 ) {
     let config = format!(
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = {project_error_limit},\n)\nhtml #= ()\n"
+        "project #= (\n    name = \"docs\",\n        max_errors_per_project = {project_error_limit},\n)\nhtml #= ()\n"
     );
     write_project(
         root,

@@ -1,6 +1,4 @@
 project #= (
-    name = "test_project",
-)
+    name = "test_project")
 html #= (
-    dev_output = "/absolute/lib",
-)
+    dev_output = "/absolute/lib")

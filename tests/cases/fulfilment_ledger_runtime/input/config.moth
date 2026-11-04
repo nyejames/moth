@@ -1,5 +1,3 @@
 project #= (
-    name = "fulfilment_ledger_runtime",
-    entry_root = "src",
-)
+    name = "fulfilment_ledger_runtime")
 html #= ()

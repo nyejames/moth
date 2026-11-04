@@ -1,5 +1,3 @@
 project #= (
-    name = "implicit_failure_self_recursive_back_edge_keeps_overflow_origin",
-    entry_root = "src",
-)
+    name = "implicit_failure_self_recursive_back_edge_keeps_overflow_origin")
 html #= ()

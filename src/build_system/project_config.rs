@@ -43,6 +43,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::{BuilderSettings, Config, DEFAULT_MAX_ERRORS_PER_PROJECT};
 
+use moth_lexical::identifier::is_identifier;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -122,27 +123,41 @@ pub fn load_project_config(
     let config_path = config.config_file_path();
 
     if !config_path.exists() {
-        // A failed reload must not leave prior project-global/config provenance visible to the
-        // next frontend invocation, even when the missing file is fatal for a directory project.
-        config.project_config_loaded = false;
+        // A reload without a config source must not retain authored provenance, builder
+        // settings or spans from a previous load.
+        config.project_name.clear();
+        config.version = None;
+        config.author = None;
+        config.license = None;
         config.config_resolution_records.clear();
         config.project_field_config_dependencies.clear();
         config.extra_project_fields.clear();
+        config.setting_spans.clear();
+        config.output_roots = OutputRootSettings::default();
+        config.builder_settings = BuilderSettings::default();
         config.max_errors_per_module = Some(DEFAULT_MAX_ERRORS_PER_MODULE);
         config.max_errors_per_project = Some(DEFAULT_MAX_ERRORS_PER_PROJECT);
+
         if config.entry_dir.is_dir() {
-            let failure = {
+            let defaults_result = {
                 let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-                capture_root_diagnostics(
-                    vec![project_config::invalid_config_reason(
-                        Some(diagnostic_strings.intern("config.moth")),
-                        InvalidConfigReason::MissingConfigFile,
-                        None,
-                    )],
-                    diagnostic_strings.strings(),
+                validation::apply_defaults_without_config(
+                    config,
+                    &services.frontend_surface.config_schemas,
+                    &mut diagnostic_strings,
                 )
             };
-            return Err(ProjectConfigFailure::Prepared(failure));
+            if let Err(ConfigApplyError::Diagnostics(errors)) = defaults_result {
+                return Err(ProjectConfigFailure::Prepared(capture_root_diagnostics(
+                    errors,
+                    string_table,
+                )));
+            }
+            if let Err(ConfigApplyError::Compiler(error)) = defaults_result {
+                return Err(ProjectConfigFailure::Prepared(PreparedFailure::from(error)));
+            }
+            apply_directory_name_default(config, string_table)
+                .map_err(ProjectConfigFailure::Prepared)?;
         }
 
         return validate_directory_output_settings_if_needed(config, string_table)
@@ -156,13 +171,81 @@ pub fn load_project_config(
         .into());
     }
 
-    compile_project_config_file(
+    let outputs = compile_project_config_file(
         config,
         &config_path,
         services,
         project_source_builder,
         string_table,
-    )
+    )?;
+    if config.entry_dir.is_dir() {
+        apply_directory_name_default(config, string_table)
+            .map_err(ProjectConfigFailure::Prepared)?;
+    }
+    Ok(outputs)
+}
+
+/// Apply the selected directory name as the default project identity.
+///
+/// WHAT: when no explicit `project.name` was folded, use the exact final component of the selected
+/// directory without rewriting its spelling. An invalid identifier is a user diagnostic rather
+/// than a silently sanitised name.
+/// WHY: directory compilation is valid without `config.moth`, while stable project identity still
+/// needs one canonical name. Scaffolding writes an explicit valid name so this fallback is mostly
+/// invisible.
+fn apply_directory_name_default(
+    config: &mut Config,
+    string_table: &mut StringTable,
+) -> Result<(), PreparedFailure> {
+    if !config.project_name.is_empty() {
+        return Ok(());
+    }
+
+    // The selected directory may be spelled `.` or relatively; canonicalize only to read its
+    // final component. The name never derives from an absolute path spelling.
+    let selected_directory =
+        std::fs::canonicalize(&config.entry_dir).unwrap_or_else(|_| config.entry_dir.clone());
+    let directory_name = selected_directory
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty());
+
+    let Some(directory_name) = directory_name else {
+        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+        return Err(capture_root_diagnostics(
+            vec![project_config::invalid_config_reason(
+                Some(diagnostic_strings.intern("name")),
+                InvalidConfigReason::InvalidProjectSettingValue {
+                    value: diagnostic_strings.intern("<selected directory>"),
+                    expected: diagnostic_strings.intern(
+                        "set project.name in config.moth to a valid Moth project identifier",
+                    ),
+                },
+                None,
+            )],
+            diagnostic_strings.strings(),
+        ));
+    };
+
+    if !is_identifier(directory_name) {
+        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+        return Err(capture_root_diagnostics(
+            vec![project_config::invalid_config_reason(
+                Some(diagnostic_strings.intern("name")),
+                InvalidConfigReason::InvalidProjectSettingValue {
+                    value: diagnostic_strings.intern(directory_name),
+                    expected: diagnostic_strings.intern(
+                        "set project.name in config.moth to a valid Moth project identifier",
+                    ),
+                },
+                None,
+            )],
+            diagnostic_strings.strings(),
+        ));
+    }
+
+    config.project_name = directory_name.to_owned();
+    Ok(())
 }
 
 // -------------------------
@@ -181,7 +264,10 @@ pub(crate) fn compile_project_config_file(
     project_source_builder: &mut Option<SourceDatabaseBuilder>,
     string_table: &mut StringTable,
 ) -> Result<Option<ValidatedDirectoryOutputSettings>, ProjectConfigFailure> {
-    config.project_config_loaded = false;
+    config.project_name.clear();
+    config.version = None;
+    config.author = None;
+    config.license = None;
     config.config_resolution_records.clear();
     config.project_field_config_dependencies.clear();
     config.extra_project_fields.clear();
@@ -367,7 +453,6 @@ pub(crate) fn compile_project_config_file(
     // receiving fields and the private input-contract records.
     config.config_resolution_records = compiled_config.resolution_records;
     config.project_field_config_dependencies = compiled_config.project_field_dependencies;
-    config.project_config_loaded = true;
     Ok(validated_output_settings)
 }
 

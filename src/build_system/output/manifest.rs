@@ -151,14 +151,20 @@ pub(crate) struct ManifestCleanupReport {
 pub(crate) fn prepare_output_cleanup(
     output_root: &Path,
     project_root: Option<&Path>,
-    entry_root: Option<&Path>,
+    directory_output: bool,
     owner: &OutputOwner,
     setting_span: Option<SourceSpan>,
     cleanup_policy: &CleanupPolicy,
     diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
 ) -> Result<PreparedOutputCleanup, PreparedFailure> {
-    let manifest_read_result = if let Some(project_root) = project_root {
-        validate_output_root_is_safe(output_root, project_root, entry_root)?;
+    if let Some(project_root) = project_root {
+        if directory_output {
+            validate_directory_output_root_safety(output_root, project_root)?;
+        } else {
+            validate_single_file_output_root_safety(output_root, project_root)?;
+        }
+    }
+    let manifest_read_result = if project_root.is_some() {
         let manifest_read_result = read_build_manifest(output_root, &owner.builder, cleanup_policy);
         let existing_owner = match &manifest_read_result {
             ManifestReadResult::Valid(manifest) => Some((
@@ -291,7 +297,7 @@ pub(crate) fn validate_relative_output_path(
             InvalidOutputFolderReason::CurrentDirectory
             | InvalidOutputFolderReason::InvalidPathComponent
             | InvalidOutputFolderReason::RootOrPrefix
-            | InvalidOutputFolderReason::InsideOrEqualToEntryRoot
+            | InvalidOutputFolderReason::VisibleDirectoryOutputPath
             | InvalidOutputFolderReason::ResolvesOutsideProjectRoot => {
                 "Output path must only contain normal portable path components."
             }
@@ -304,26 +310,12 @@ pub(crate) fn validate_relative_output_path(
     })
 }
 
-/// Reject output roots that are dangerous system paths or suspiciously far from the project.
-///
-/// WHY: stale artifact cleanup deletes files, so the output root must be validated before any
-/// removal to prevent accidental deletion on system-critical or unrelated paths.
-pub(crate) fn validate_output_root_is_safe(
+/// Reject dangerous canonical output targets shared by every output lane.
+fn reject_dangerous_output_root(
     output_root: &Path,
-    project_root: &Path,
-    entry_root: Option<&Path>,
+    canonical_root: &Path,
 ) -> Result<(), InfrastructureFailure> {
-    // WHAT: Canonicalize the output root, falling back to the nearest existing ancestor.
-    // WHY: Symlinks or relative segments could disguise a dangerous target path.
-    let canonical_root = canonicalize_output_path(output_root).map_err(|_| {
-        file_error_with_rejection_reason(
-            output_root,
-            "Build output root contains a dangling symlink component and cannot be used safely.",
-            super::writer::OutputRejectionReason::OutputRootDanglingSymlink,
-        )
-    })?;
-
-    if is_dangerous_system_path(&canonical_root) {
+    if is_dangerous_system_path(canonical_root) {
         return Err(file_error_with_rejection_reason(
             output_root,
             format!(
@@ -334,39 +326,69 @@ pub(crate) fn validate_output_root_is_safe(
             super::writer::OutputRejectionReason::OutputRootDangerousSystemPath,
         ));
     }
+    Ok(())
+}
 
-    // Directory-project output roots use the same canonical containment classification as config
-    // bootstrap. Single-file output retains the older adjacent-project boundary below because
-    // its output root is chosen by the command rather than config.
-    if let Some(entry_root) = entry_root {
-        if let Err(reason) = super::policy::validate_directory_output_root_containment(
+/// Validate one directory-project output root before any manifest read, write or cleanup.
+///
+/// WHY: stale artifact cleanup deletes files, so the output root must be inside the project and
+/// hidden before any removal. Config validation applies the same rule earlier; this check keeps
+/// the write boundary safe when a plan is constructed programmatically.
+pub(crate) fn validate_directory_output_root_safety(
+    output_root: &Path,
+    project_root: &Path,
+) -> Result<(), InfrastructureFailure> {
+    let canonical_root = canonicalize_output_path(output_root).map_err(|_| {
+        file_error_with_rejection_reason(
             output_root,
-            project_root,
-            Some(entry_root),
-        ) {
-            let message = match reason {
-                InvalidOutputFolderReason::InsideOrEqualToEntryRoot => format!(
-                    "Directory build output root '{}' must not resolve inside the source entry root '{}'.",
-                    output_root.display(),
-                    entry_root.display()
-                ),
-                InvalidOutputFolderReason::ResolvesOutsideProjectRoot => format!(
-                    "Directory build output root '{}' must resolve strictly inside the project directory '{}'.",
-                    output_root.display(),
-                    project_root.display()
-                ),
-                _ => "Directory build output root failed canonical containment validation."
-                    .to_owned(),
-            };
-            return Err(file_error_with_rejection_reason(
-                output_root,
-                message,
-                super::writer::OutputRejectionReason::OutputRootNotInsideProject,
-            ));
-        }
+            "Build output root contains a dangling symlink component and cannot be used safely.",
+            super::writer::OutputRejectionReason::OutputRootDanglingSymlink,
+        )
+    })?;
+    reject_dangerous_output_root(output_root, &canonical_root)?;
 
-        return Ok(());
+    if let Err(reason) =
+        super::policy::validate_directory_output_root_containment(output_root, project_root)
+    {
+        let message = match reason {
+            InvalidOutputFolderReason::VisibleDirectoryOutputPath => format!(
+                "Directory build output root '{}' must stay hidden from source discovery by a directory component starting with '_'.",
+                output_root.display()
+            ),
+            _ => format!(
+                "Directory build output root '{}' must resolve strictly inside the project directory '{}'.",
+                output_root.display(),
+                project_root.display()
+            ),
+        };
+        return Err(file_error_with_rejection_reason(
+            output_root,
+            message,
+            super::writer::OutputRejectionReason::OutputRootNotInsideProject,
+        ));
     }
+
+    Ok(())
+}
+
+/// Validate one single-file output root before any manifest read, write or cleanup.
+///
+/// Single-file output is not directory-project source, so it retains the adjacent-project
+/// boundary chosen by the command rather than the hidden-subtree rule.
+pub(crate) fn validate_single_file_output_root_safety(
+    output_root: &Path,
+    project_root: &Path,
+) -> Result<(), InfrastructureFailure> {
+    // WHAT: Canonicalize the output root, falling back to the nearest existing ancestor.
+    // WHY: Symlinks or relative segments could disguise a dangerous target path.
+    let canonical_root = canonicalize_output_path(output_root).map_err(|_| {
+        file_error_with_rejection_reason(
+            output_root,
+            "Build output root contains a dangling symlink component and cannot be used safely.",
+            super::writer::OutputRejectionReason::OutputRootDanglingSymlink,
+        )
+    })?;
+    reject_dangerous_output_root(output_root, &canonical_root)?;
 
     // WHAT: Verify a single-file output root is near the project directory.
     // WHY: An output root in a completely unrelated location is likely a misconfiguration.

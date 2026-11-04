@@ -40,14 +40,13 @@ fn test_project_builder() -> BuilderSelection {
 }
 
 fn write_directory_project(root: &Path, page_source: &str) {
-    let source_root = root.join("src");
-    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::create_dir_all(root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
     )
     .expect("should write project config");
-    fs::write(source_root.join("@page.moth"), page_source).expect("should write page source");
+    fs::write(root.join("@page.moth"), page_source).expect("should write page source");
 }
 
 fn build_result_with_warnings(
@@ -145,8 +144,8 @@ fn build_command_writes_the_validated_directory_output_plan() {
         completion.status,
         crate::projects::ProjectCommandStatus::Success
     );
-    assert!(temp.path().join("preview/index.html").is_file());
-    assert!(!temp.path().join("dev/index.html").exists());
+    assert!(temp.path().join("_preview/index.html").is_file());
+    assert!(!temp.path().join("_dev/index.html").exists());
 }
 
 #[test]
@@ -159,7 +158,7 @@ fn budget_stopped_build_writes_no_output_and_reports_the_cutoff() {
     fs::create_dir_all(src.join("second")).expect("should create second module directory");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 1,\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
+        "project #= (\n    name = \"docs\",\n        max_errors_per_project = 1,\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
     )
     .expect("should write project config");
     fs::write(

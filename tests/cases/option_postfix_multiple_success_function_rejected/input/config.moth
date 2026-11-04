@@ -1,5 +1,3 @@
 project #= (
-    name = "option_postfix_multiple_success_function_rejected",
-    entry_root = "src",
-)
+    name = "option_postfix_multiple_success_function_rejected")
 html #= ()

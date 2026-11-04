@@ -560,10 +560,9 @@ fn project_metadata_fingerprint_tracks_name_type_and_value_structure() {
 
 #[test]
 fn effective_project_fields_exclude_internal_unschematized_defaults() {
-    let mut config = Config::new(PathBuf::from("/project"));
+    let _temp = tempfile::tempdir().expect("should create project dir");
+    let mut config = Config::new(_temp.path().to_path_buf());
     config.project_name = "docs".to_owned();
-    config.entry_root = PathBuf::from("src");
-    config.project_config_loaded = true;
     // Diagnostic limits are compiler controls, so non-default values must not become project
     // metadata, fixed contract facts or `@project` members.
     config.max_errors_per_module = NonZeroU32::new(9);
@@ -583,13 +582,7 @@ fn effective_project_fields_exclude_internal_unschematized_defaults() {
         .map(|field| field.name.as_str())
         .collect::<Vec<_>>();
 
-    assert_eq!(names, vec!["name", "entry_root", "DisplayName"]);
-    let fixed_names = super::config_boundary::fixed_project_contract_facts(&fields)
-        .into_iter()
-        .map(|fact| fact.name().as_str().to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(fixed_names, vec!["name", "entry_root"]);
-
+    assert_eq!(names, vec!["name", "version", "DisplayName"]);
     let globals = super::config_boundary::build_project_globals_interface(&config, &fields)
         .expect("the project-global provider should build")
         .expect("a loaded config should publish project globals");
@@ -605,10 +598,6 @@ fn effective_project_fields_exclude_internal_unschematized_defaults() {
             "{limit_name} must stay out of the effective project fields"
         );
         assert!(
-            !fixed_names.iter().any(|name| name.as_str() == limit_name),
-            "{limit_name} must stay out of the fixed contract facts"
-        );
-        assert!(
             !public_names.contains(&limit_name),
             "{limit_name} must stay out of @project"
         );
@@ -617,10 +606,9 @@ fn effective_project_fields_exclude_internal_unschematized_defaults() {
 
 #[test]
 fn effective_project_fields_classify_fixed_and_metadata_kinds() {
-    let mut config = Config::new(PathBuf::from("/project"));
+    let _temp = tempfile::tempdir().expect("should create project dir");
+    let mut config = Config::new(_temp.path().to_path_buf());
     config.project_name = "docs".to_owned();
-    config.entry_root = PathBuf::from("src");
-    config.project_config_loaded = true;
     config.extra_project_fields.push(ProjectMetadataField {
         name: "complex".to_owned(),
         type_identity: CanonicalTypeIdentity::AnonymousConstRecord,
@@ -637,7 +625,7 @@ fn effective_project_fields_classify_fixed_and_metadata_kinds() {
             .iter()
             .map(|field| field.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["name", "entry_root", "complex"]
+        vec!["name", "version", "complex"]
     );
     assert!(matches!(
         &fields[0].kind,
@@ -650,8 +638,8 @@ fn effective_project_fields_classify_fixed_and_metadata_kinds() {
     assert!(matches!(
         &fields[1].kind,
         super::config_boundary::EffectiveProjectFieldKind::FixedPrimitive {
-            value_type: BuildInputType::Primitive(PrimitiveBuildInputType::String),
-            required: true,
+            value_type: BuildInputType::Optional(PrimitiveBuildInputType::String),
+            required: false,
             ..
         }
     ));
@@ -660,20 +648,14 @@ fn effective_project_fields_classify_fixed_and_metadata_kinds() {
         super::config_boundary::EffectiveProjectFieldKind::Metadata
     ));
 
-    let fixed_names = super::config_boundary::fixed_project_contract_facts(&fields)
-        .into_iter()
-        .map(|fact| fact.name().as_str().to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(fixed_names, vec!["name", "entry_root"]);
     assert!(super::config_boundary::input_contract_facts(&fields).is_empty());
 }
 
 #[test]
 fn effective_project_fields_keep_private_input_and_receiving_field_distinct() {
-    let mut config = Config::new(PathBuf::from("/project"));
+    let _temp = tempfile::tempdir().expect("should create project dir");
+    let mut config = Config::new(_temp.path().to_path_buf());
     config.project_name = "docs".to_owned();
-    config.entry_root = PathBuf::from("src");
-    config.project_config_loaded = true;
 
     let mut string_table = StringTable::new();
     let input_name = BuildInputName::new("release_version").expect("valid input name");
@@ -716,7 +698,7 @@ fn effective_project_fields_keep_private_input_and_receiving_field_distinct() {
             .iter()
             .map(|field| field.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["version", "name", "entry_root", "release_version"]
+        vec!["version", "name", "release_version"]
     );
     assert!(matches!(
         &fields[0].kind,
@@ -724,15 +706,10 @@ fn effective_project_fields_keep_private_input_and_receiving_field_distinct() {
             if input_names == &vec![input_name.clone()]
     ));
     assert!(matches!(
-        &fields[3].kind,
+        &fields[2].kind,
         super::config_boundary::EffectiveProjectFieldKind::InputContract { .. }
     ));
 
-    let fixed_names = super::config_boundary::fixed_project_contract_facts(&fields)
-        .into_iter()
-        .map(|fact| fact.name().as_str().to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(fixed_names, vec!["name", "entry_root"]);
     let direct_names = super::config_boundary::input_contract_facts(&fields)
         .into_iter()
         .map(|fact| fact.name().as_str().to_owned())
@@ -1861,8 +1838,8 @@ fn generated_sidecar_warning_frontend(
     std::fs::create_dir_all(&source_root).expect("project source root should be created");
     std::fs::create_dir_all(&package_root).expect("source-package root should be created");
     std::fs::write(
-        project_root.join("config.moth"),
-        "project #= (name = \"docs\", entry_root = \"src\")\nhtml #= ()\n",
+        source_root.join("config.moth"),
+        "project #= (name = \"docs\")\nhtml #= ()\n",
     )
     .expect("project config should be written");
     std::fs::write(source_root.join("@page.moth"), "value = 1\n")
@@ -1882,9 +1859,8 @@ io.line(result)
     )
     .expect("source-package module should be written");
 
-    let mut config = Config::new(project_root.clone());
+    let mut config = Config::new(source_root.clone());
     config.project_name = "docs".to_owned();
-    config.entry_root = PathBuf::from("src");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut builder_surface = BuilderSurface::with_mandatory_core();
     builder_surface

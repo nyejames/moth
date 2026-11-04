@@ -85,14 +85,12 @@ impl ProjectBuilder for PackageFacadeBuilder {
 /// Writes a one-page project whose page holds `page_source` and, when requested, its
 /// `+package.moth` facade beside `config.moth`.
 fn write_project(project_root: &Path, page_source: &str, with_facade: bool) {
-    let src = project_root.join("src");
-    fs::create_dir_all(&src).expect("should create src");
     fs::write(
         project_root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\n",
+        "project #= (\n    name = \"docs\",\n)\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), page_source).expect("should write page");
+    fs::write(project_root.join("@page.moth"), page_source).expect("should write page");
     if with_facade {
         fs::write(
             project_root.join("+package.moth"),

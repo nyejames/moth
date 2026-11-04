@@ -1,5 +1,3 @@
 project #= (
-    name = "wiring_generic_choice_route_input_mismatch_rejected",
-    entry_root = "src",
-)
+    name = "wiring_generic_choice_route_input_mismatch_rejected")
 html #= ()

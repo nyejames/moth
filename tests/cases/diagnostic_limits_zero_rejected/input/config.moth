@@ -1,6 +1,4 @@
 project #= (
     name = "test_project",
-    entry_root = "src",
-    max_errors_per_module = 0,
-)
+    max_errors_per_module = 0)
 html #= ()

@@ -1,5 +1,3 @@
 project #= (
-    name = "uint_map_key_release",
-    entry_root = "src",
-)
+    name = "uint_map_key_release")
 html #= ()

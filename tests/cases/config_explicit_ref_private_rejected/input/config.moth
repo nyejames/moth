@@ -1,8 +1,6 @@
 helper = "src"
 
 project #= (
-    name = "test_project",
-)
+    name = "test_project")
 html #= (
-    dev_output = helper,
-)
+    dev_output = helper)

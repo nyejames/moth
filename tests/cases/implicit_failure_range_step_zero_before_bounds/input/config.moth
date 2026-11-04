@@ -1,5 +1,3 @@
 project #= (
-    name = "implicit_failure_range_step_zero_before_bounds",
-    entry_root = "src",
-)
+    name = "implicit_failure_range_step_zero_before_bounds")
 html #= ()

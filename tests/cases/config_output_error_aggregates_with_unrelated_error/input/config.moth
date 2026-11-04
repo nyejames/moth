@@ -1,5 +1,5 @@
 project #= (
-    entry_root = "src",
+    name = "",
 )
 html #= (
     dev_output = "../dev",

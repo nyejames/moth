@@ -1163,12 +1163,13 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
 }
 
 #[test]
-fn directory_project_rejects_missing_entry_root() {
+fn directory_project_rejects_retired_entry_root() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let dir = _temp.path().to_path_buf();
 
-    // Config declares an entry_root that does not exist.
+    // The selected directory is the source root; an authored entry_root must be rejected
+    // with a migration diagnostic instead of selecting a second root.
     fs::write(
         dir.join("config.moth"),
         "project #= (\n    name = \"docs\",\n    entry_root = \"nonexistent\",\n)\n",
@@ -1179,7 +1180,6 @@ fn directory_project_rejects_missing_entry_root() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut string_table = StringTable::new();
 
-    // Parse config so entry_root is applied to Config.
     let config_path = dir.join("config.moth");
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
@@ -1200,35 +1200,13 @@ fn directory_project_rejects_missing_entry_root() {
         &mut source_files,
         &mut string_table,
     );
-    assert!(parse_result.is_ok(), "config parse should succeed");
-    let mut source_builder = source_files
-        .take()
-        .expect("config should retain its source builder");
-    source_builder
-        .assemble_finalized_tables()
-        .expect("config source span table should assemble");
-    source_builder
-        .finish()
-        .expect("config source builder should satisfy lifecycle invariants");
-    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
-
-    let result = compile_project_frontend(
-        &mut config,
-        BuildProfile::Dev,
-        None,
-        &style_directives,
-        &mut BuilderSurface::with_mandatory_core(),
-        &mut warning_owner,
-    );
-    let reports = diagnosed_reports(&result);
     assert!(
-        reports
-            .iter_severity(DiagnosticSeverity::Error)
-            .any(|(_, view)| {
-                view.descriptor().code == "MOTH-CONFIG-0001"
-                    && view.reason_key() == Some("invalid_config.configured_entry_root_missing")
-            }),
-        "expected ConfiguredEntryRootMissing for a nonexistent entry root"
+        matches!(
+            parse_result,
+            Err(crate::build_system::project_config::ProjectConfigFailure::Prepared(_))
+                | Err(crate::build_system::project_config::ProjectConfigFailure::Diagnosed(_))
+        ),
+        "an authored entry_root must be rejected"
     );
 }
 
@@ -1323,8 +1301,7 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources() {
     )
     .expect("should write second JS provider");
 
-    let mut config = Config::new(dir.clone());
-    config.entry_root = PathBuf::from("src");
+    let mut config = Config::new(src.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut warning_owner = fresh_warning_owner();
     let mut frontend_surface = builder_surface_with_html_js_provider();
@@ -1445,8 +1422,7 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources_when_
     )
     .expect("should write a-b JS provider");
 
-    let mut config = Config::new(dir.clone());
-    config.entry_root = PathBuf::from("src");
+    let mut config = Config::new(src.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut warning_owner = fresh_warning_owner();
     let mut frontend_surface = builder_surface_with_html_js_provider();

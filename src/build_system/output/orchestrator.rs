@@ -76,7 +76,7 @@ fn write_project_outputs_inner(
     let cleanup_state = prepare_output_cleanup(
         output_root,
         options.output_plan.project_root(),
-        options.output_plan.entry_root(),
+        matches!(options.output_plan, OutputPlan::Directory(_)),
         output_owner,
         options.output_plan.setting_span(),
         &project.cleanup_policy,

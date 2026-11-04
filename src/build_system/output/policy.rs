@@ -6,7 +6,9 @@
 //! diagnostics, build orchestration, and manifest persistence agree on the same result.
 
 use crate::build_system::build_profile::BuildProfile;
-use crate::build_system::output::output_path::{canonicalize_output_path, normalize_relative_path};
+use crate::build_system::output::output_path::{
+    canonicalize_output_path, normalize_directory_output_relative_path,
+};
 use crate::compiler_frontend::compiler_messages::InvalidOutputFolderReason;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::utilities::basic::normalize_path;
@@ -148,12 +150,7 @@ pub struct ValidatedDirectoryOutputSettings {
 
 impl ValidatedDirectoryOutputSettings {
     /// Select the output root and ownership facts for one command profile.
-    pub(crate) fn select(
-        &self,
-        project_root: PathBuf,
-        entry_root: PathBuf,
-        owner: OutputOwner,
-    ) -> ValidatedOutputPlan {
+    pub(crate) fn select(&self, project_root: PathBuf, owner: OutputOwner) -> ValidatedOutputPlan {
         let folder = match owner.profile {
             BuildProfile::Dev => &self.dev,
             BuildProfile::Release => &self.release,
@@ -162,7 +159,6 @@ impl ValidatedDirectoryOutputSettings {
         ValidatedOutputPlan {
             output_root: folder.resolved_path.clone(),
             project_root,
-            entry_root,
             owner,
             setting_span: folder.span,
         }
@@ -173,7 +169,6 @@ impl ValidatedDirectoryOutputSettings {
 pub struct ValidatedOutputPlan {
     pub output_root: PathBuf,
     pub project_root: PathBuf,
-    pub entry_root: PathBuf,
     pub owner: OutputOwner,
     /// Crate-private for the same reason as [`ValidatedOutputFolder::span`].
     pub(crate) setting_span: Option<SourceSpan>,
@@ -209,13 +204,6 @@ impl OutputPlan {
         }
     }
 
-    pub(crate) fn entry_root(&self) -> Option<&Path> {
-        match self {
-            Self::Directory(plan) => Some(&plan.entry_root),
-            Self::SingleFile(_) => None,
-        }
-    }
-
     pub(crate) fn owner(&self) -> &OutputOwner {
         match self {
             Self::Directory(plan) => &plan.owner,
@@ -237,30 +225,24 @@ impl OutputPlan {
 
 /// Classify one directory output setting against the project boundary.
 ///
-/// WHAT: validates that `relative` is a non-empty, relative, normal portable path that resolves to
-/// a folder strictly inside the project root but outside the source entry root.
+/// WHAT: normalizes the portable relative spelling so the emitted root is hidden from source
+/// discovery, then resolves it strictly inside the project root.
 /// WHY: directory output roots must be safe and distinct before any output writing or cleanup
 /// runs. This pure classifier is shared by config diagnostics and plan construction.
 ///
 /// Rejects empty paths, absolute and rooted paths, platform-prefix paths, parent-directory and
-/// authored `.` segments anywhere in the path, and a resolved path equal to or inside an
-/// explicitly configured non-root `entry_root`.
-///
-/// `resolved_entry_root` is `None` for the empty or `.` entry-root spelling, which resolves to the
-/// project root. In that case the output is validated against the project root only.
+/// authored `.` segments anywhere in the path, and multi-component paths without an
+/// underscore-prefixed directory component. Output inside the selected source root is expected:
+/// the hidden component keeps it out of discovery.
 pub(crate) fn classify_output_folder(
     relative: &Path,
     project_root: &Path,
-    resolved_entry_root: Option<&Path>,
 ) -> Result<ValidatedOutputFolder, InvalidOutputFolderReason> {
-    let relative_path = normalize_relative_path(relative)?;
-
+    let spelling = relative
+        .to_str()
+        .ok_or(InvalidOutputFolderReason::NonUtf8)?;
+    let relative_path = normalize_directory_output_relative_path(spelling)?;
     let resolved_path = project_root.join(&relative_path);
-    if let Some(entry_root) = resolved_entry_root
-        && (resolved_path == entry_root || resolved_path.starts_with(entry_root))
-    {
-        return Err(InvalidOutputFolderReason::InsideOrEqualToEntryRoot);
-    }
 
     Ok(ValidatedOutputFolder {
         relative_path,
@@ -272,19 +254,14 @@ pub(crate) fn classify_output_folder(
 /// Validate the filesystem target of a lexically valid directory output folder.
 ///
 /// WHAT: follows existing symlink components conservatively and checks the resolved output root
-/// against the project and strict source-entry boundaries.
+/// against the project boundary.
 /// WHY: lexical config validation cannot see a symlink that redirects an apparently project-local
 /// folder. Bootstrap, `check`, the dev server and the writer must reject that target consistently.
 pub(crate) fn validate_output_folder_containment(
     folder: &ValidatedOutputFolder,
     project_root: &Path,
-    resolved_entry_root: Option<&Path>,
 ) -> Result<(), InvalidOutputFolderReason> {
-    validate_directory_output_root_containment(
-        &folder.resolved_path,
-        project_root,
-        resolved_entry_root,
-    )
+    validate_directory_output_root_containment(&folder.resolved_path, project_root)
 }
 
 /// Resolve a validated directory output root for physical-identity comparisons.
@@ -308,7 +285,6 @@ pub(crate) fn canonical_output_root_for_identity(
 pub(crate) fn validate_directory_output_root_containment(
     output_root: &Path,
     project_root: &Path,
-    resolved_entry_root: Option<&Path>,
 ) -> Result<(), InvalidOutputFolderReason> {
     let canonical_output_root = canonical_output_root_for_identity(output_root)?;
     let canonical_project_root = canonicalize_output_path(project_root)
@@ -321,19 +297,25 @@ pub(crate) fn validate_directory_output_root_containment(
         return Err(InvalidOutputFolderReason::ResolvesOutsideProjectRoot);
     }
 
-    if let Some(entry_root) = resolved_entry_root {
-        let canonical_entry_root = canonicalize_output_path(entry_root)
-            .map(|canonical| normalize_path(&canonical))
-            .map_err(|_| InvalidOutputFolderReason::ResolvesOutsideProjectRoot)?;
-        if canonical_entry_root != canonical_project_root
-            && (canonical_output_root == canonical_entry_root
-                || canonical_output_root.starts_with(&canonical_entry_root))
-        {
-            return Err(InvalidOutputFolderReason::InsideOrEqualToEntryRoot);
-        }
+    // A canonical target must stay hidden even when a visible symlink spelling pointed at it.
+    let relative = canonical_output_root
+        .strip_prefix(&canonical_project_root)
+        .map_err(|_| InvalidOutputFolderReason::ResolvesOutsideProjectRoot)?;
+    if !output_path_components_are_hidden(relative) {
+        return Err(InvalidOutputFolderReason::VisibleDirectoryOutputPath);
     }
 
     Ok(())
+}
+
+/// Whether a project-relative canonical output path contains an `_`-prefixed directory component.
+fn output_path_components_are_hidden(relative: &Path) -> bool {
+    relative.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(|component| component.starts_with('_'))
+    })
 }
 
 fn collect_managed_extensions<I, S>(managed_extensions: I) -> BTreeSet<String>

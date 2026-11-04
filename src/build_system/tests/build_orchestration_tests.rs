@@ -419,7 +419,7 @@ fn build_project_late_backend_infrastructure_discards_frontend_warnings() {
     fs::create_dir_all(&src).expect("should create project source root");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"late_failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"late_failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write project config");
     fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
@@ -499,7 +499,7 @@ fn project_compilation_selects_only_modules_with_root_activity_as_entries() {
     fs::create_dir_all(src.join("api")).expect("should create module directories");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "value = 1\n").expect("should write active root");
@@ -538,7 +538,7 @@ fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
     fs::create_dir_all(src.join("broken")).expect("should create module directories");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "value = 1\n").expect("should write valid root");
@@ -582,7 +582,7 @@ fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
     fs::create_dir_all(cutoff_src.join("second")).expect("should create second module directory");
     fs::write(
         cutoff_root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 1,\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n        max_errors_per_project = 1,\n)\nhtml #= ()\n",
     )
     .expect("should write cutoff config");
     fs::write(
@@ -1480,14 +1480,13 @@ fn validated_output_settings_select_default_profile_roots() {
     }
     .expect("default output folders should validate");
 
-    assert_eq!(settings.dev.resolved_path, root.join("dev"));
-    assert_eq!(settings.release.resolved_path, root.join("release"));
+    assert_eq!(settings.dev.resolved_path, root.join("_dev"));
+    assert_eq!(settings.release.resolved_path, root.join("_release"));
 
     // The validated settings are selected by the build profile without re-resolving paths.
     assert_eq!(
         settings
             .select(
-                root.clone(),
                 root.clone(),
                 OutputOwner {
                     builder: BuilderIdentity::html(),
@@ -1495,12 +1494,12 @@ fn validated_output_settings_select_default_profile_roots() {
                 }
             )
             .output_root,
-        root.join("dev")
+        root.join("_dev")
     );
 }
 
 #[test]
-fn validated_output_settings_preserve_configured_profile_roots() {
+fn validated_output_settings_normalize_configured_profile_roots() {
     let root = unused_temp_path("output_overrides");
     let mut config = Config::new(root.clone());
     config.output_roots.dev_output = Some("preview".to_owned());
@@ -1515,8 +1514,8 @@ fn validated_output_settings_preserve_configured_profile_roots() {
     }
     .expect("configured output folders should validate");
 
-    assert_eq!(settings.dev.resolved_path, root.join("preview"));
-    assert_eq!(settings.release.resolved_path, root.join("public"));
+    assert_eq!(settings.dev.resolved_path, root.join("_preview"));
+    assert_eq!(settings.release.resolved_path, root.join("_public"));
 }
 
 #[test]
@@ -1524,24 +1523,21 @@ fn directory_frontend_skips_separator_normalized_output_roots() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    let normalized_dev_root = root.join("generated/site");
+    let normalized_dev_root = root.join("generated/_site");
     fs::create_dir_all(&normalized_dev_root).expect("should create normalized output root");
     fs::write(
         root.join("config.moth"),
         r#"project #= (
     name = "docs",
-    entry_root = "src",
 )
 html #= (
-    dev_output = "generated\\site",
-    release_output = "generated\\release",
+    dev_output = "generated\\_site",
+    release_output = "generated\\_release",
 )
 "#,
     )
     .expect("should write config");
-    let src = root.join("src");
-    fs::create_dir_all(&src).expect("should create src");
-    fs::write(src.join("@page.moth"), "value = 1\n").expect("should write entry module");
+    fs::write(root.join("@page.moth"), "value = 1\n").expect("should write entry module");
     fs::write(
         normalized_dev_root.join("@stale.moth"),
         "value = missing_stale_value\n",
@@ -1569,7 +1565,7 @@ fn directory_frontend_skips_symlink_ancestor_output_aliases() {
 
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    let physical_output_root = root.join("generated/site");
+    let physical_output_root = root.join("generated/_site");
     fs::create_dir_all(&physical_output_root).expect("should create physical output root");
     symlink(root.join("generated"), root.join("preview"))
         .expect("should create output-root symlink alias");
@@ -1577,18 +1573,15 @@ fn directory_frontend_skips_symlink_ancestor_output_aliases() {
         root.join("config.moth"),
         r#"project #= (
     name = "docs",
-    entry_root = "src",
 )
 html #= (
-    dev_output = "generated\\site",
-    release_output = "generated\\release",
+    dev_output = "generated\\_site",
+    release_output = "generated\\_release",
 )
 "#,
     )
     .expect("should write config");
-    let src = root.join("src");
-    fs::create_dir_all(&src).expect("should create src");
-    fs::write(src.join("@page.moth"), "value = 1\n").expect("should write entry module");
+    fs::write(root.join("@page.moth"), "value = 1\n").expect("should write entry module");
     fs::write(
         physical_output_root.join("@stale.moth"),
         "value = missing_stale_value\n",
@@ -1616,7 +1609,7 @@ fn directory_frontend_skips_symlink_aliases_to_output_descendants() {
 
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    let physical_output_root = root.join("generated/site");
+    let physical_output_root = root.join("generated/_site");
     let physical_output_descendant = physical_output_root.join("nested");
     fs::create_dir_all(&physical_output_descendant)
         .expect("should create physical output descendant");
@@ -1626,18 +1619,15 @@ fn directory_frontend_skips_symlink_aliases_to_output_descendants() {
         root.join("config.moth"),
         r#"project #= (
     name = "docs",
-    entry_root = "src",
 )
 html #= (
-    dev_output = "generated\\site",
-    release_output = "generated\\release",
+    dev_output = "generated\\_site",
+    release_output = "generated\\_release",
 )
 "#,
     )
     .expect("should write config");
-    let src = root.join("src");
-    fs::create_dir_all(&src).expect("should create src");
-    fs::write(src.join("@page.moth"), "value = 1\n").expect("should write entry module");
+    fs::write(root.join("@page.moth"), "value = 1\n").expect("should write entry module");
     fs::write(
         physical_output_descendant.join("@stale.moth"),
         "value = missing_stale_value\n",
@@ -1665,15 +1655,12 @@ fn validated_output_settings_reject_canonical_root_aliases() {
 
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    let entry_root = root.join("src");
     let shared_root = root.join("shared-output");
-    fs::create_dir_all(&entry_root).expect("should create entry root");
     fs::create_dir_all(&shared_root).expect("should create shared output root");
-    symlink(&shared_root, root.join("dev-alias")).expect("should create dev output alias");
-    symlink(&shared_root, root.join("release-alias")).expect("should create release output alias");
+    symlink(&shared_root, root.join("_dev-alias")).expect("should create dev output alias");
+    symlink(&shared_root, root.join("_release-alias")).expect("should create release output alias");
 
     let mut config = Config::new(root.clone());
-    config.entry_root = PathBuf::from("src");
     config.output_roots.dev_output = Some("dev-alias".to_owned());
     config.output_roots.release_output = Some("release-alias".to_owned());
     let mut string_table = StringTable::new();
@@ -1748,7 +1735,7 @@ fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
 
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("about").join("@page.moth"), "#[:<h1>About</h1>]\n")
@@ -1776,7 +1763,7 @@ fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic()
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    page_url_style = \"slashy\",\n)\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    page_url_style = \"slashy\",\n)\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
@@ -2377,7 +2364,6 @@ fn directory_output_root_symlink_escape_causes_zero_files_written() {
             output_plan: OutputPlan::Directory(ValidatedOutputPlan {
                 output_root: output_root.clone(),
                 project_root: root.clone(),
-                entry_root: entry_root.clone(),
                 owner,
                 setting_span: None,
             }),
@@ -2444,7 +2430,7 @@ fn empty_directory_output_setting_is_rejected() {
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"\",\n)\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"\",\n)\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
@@ -2471,7 +2457,7 @@ fn absolute_output_setting_is_rejected() {
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"/absolute/path\",\n)\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"/absolute/path\",\n)\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
@@ -2490,20 +2476,45 @@ fn absolute_output_setting_is_rejected() {
 }
 
 #[test]
-fn output_folder_inside_entry_root_is_rejected() {
+fn hidden_output_inside_source_root_is_accepted_and_visible_output_is_rejected() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    let src = root.join("src");
-    fs::create_dir_all(&src).expect("should create source folder");
-    fs::write(
-        root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"src\",\n)\n",
-    )
-    .expect("should write config");
-    fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(root.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
+    let write_config = |dev_output: &str| {
+        fs::write(
+            root.join("config.moth"),
+            format!(
+                "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"{dev_output}\",\n)\n"
+            ),
+        )
+        .expect("should write config");
+    };
+
+    write_config("generated/_site");
     let builder = HtmlProjectBuilder::new();
+    let build = successful_compilation_value(
+        build_project(
+            &builder,
+            root.to_str().expect("root path should be valid UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+            &mut discovery_stops,
+        )
+        .unwrap_or_else(|never| match never {}),
+    );
+    assert_eq!(
+        build
+            .directory_output_plan
+            .as_ref()
+            .expect("directory build should carry an output plan")
+            .output_root,
+        root.join("generated/_site"),
+        "a hidden output root inside the selected source root is allowed"
+    );
+
+    write_config("generated/site");
     let result = build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),
@@ -2512,7 +2523,6 @@ fn output_folder_inside_entry_root_is_rejected() {
         &mut discovery_stops,
     )
     .unwrap_or_else(|never| match never {});
-
     assert_has_config_error(&result);
 }
 
@@ -2525,7 +2535,7 @@ fn identical_dev_and_release_folders_are_rejected() {
     fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"output\",\n    release_output = \"output\",\n)\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"output\",\n    release_output = \"output\",\n)\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
@@ -2544,18 +2554,16 @@ fn identical_dev_and_release_folders_are_rejected() {
 }
 
 #[test]
-fn valid_distinct_output_folders_resolve_unchanged() {
+fn valid_distinct_output_folders_resolve_to_hidden_roots() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    let src = root.join("src");
-    fs::create_dir_all(&src).expect("should create source folder");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(root.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = HtmlProjectBuilder::new();
     let build_result = successful_compilation_value(
@@ -2575,7 +2583,7 @@ fn valid_distinct_output_folders_resolve_unchanged() {
             .as_ref()
             .expect("directory build should carry an output plan")
             .output_root,
-        root.join("dev")
+        root.join("_dev")
     );
 }
 
@@ -2585,15 +2593,14 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    let source_root = root.join("src");
-    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::create_dir_all(&root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
     )
     .expect("should write config");
     fs::write(
-        source_root.join("@page.moth"),
+        root.join("@page.moth"),
         "value ~= \"hello\"\n\
          result ~= \"unset\"\n\
          \n\
@@ -2665,7 +2672,6 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
             output_plan: OutputPlan::Directory(ValidatedOutputPlan {
                 output_root: second_plan.output_root.clone(),
                 project_root: second_plan.project_root.clone(),
-                entry_root: second_plan.entry_root.clone(),
                 owner: OutputOwner {
                     builder: BuilderIdentity::test(),
                     profile: BuildProfile::Dev,
@@ -2729,15 +2735,12 @@ fn first_dev_and_release_builds_create_independent_owned_manifests() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    let source_root = root.join("src");
-    fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
     )
     .expect("should write config");
-    fs::write(source_root.join("@page.moth"), "#[:<h1>Home</h1>]\n")
-        .expect("should write home page");
+    fs::write(root.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = HtmlProjectBuilder::new();
     let dev_build = successful_compilation_value(
@@ -2763,10 +2766,10 @@ fn first_dev_and_release_builds_create_independent_owned_manifests() {
     )
     .expect("first dev build should write its manifest");
 
-    let dev_manifest = fs::read_to_string(root.join("dev/.moth_manifest"))
+    let dev_manifest = fs::read_to_string(root.join("_dev/.moth_manifest"))
         .expect("dev manifest should exist after the first build");
     assert!(dev_manifest.contains("# profile: dev"));
-    assert_path_missing(&root.join("release/.moth_manifest"));
+    assert_path_missing(&root.join("_release/.moth_manifest"));
 
     let release_build = successful_compilation_value(
         build_project(
@@ -2791,7 +2794,7 @@ fn first_dev_and_release_builds_create_independent_owned_manifests() {
     )
     .expect("first release build should write its manifest");
 
-    let release_manifest = fs::read_to_string(root.join("release/.moth_manifest"))
+    let release_manifest = fs::read_to_string(root.join("_release/.moth_manifest"))
         .expect("release manifest should exist after the first build");
     assert!(release_manifest.contains("# profile: release"));
 }

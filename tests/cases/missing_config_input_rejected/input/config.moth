@@ -1,5 +1,3 @@
 project #= (
-    name = "missing_config_input_rejected",
-    entry_root = "src",
-)
+    name = "missing_config_input_rejected")
 html #= ()

@@ -78,8 +78,8 @@ fn initial_runtime_paths_watch_the_project_without_bootstrapping() {
 
     let resolved = resolve_dev_runtime_paths(&root);
 
-    assert_eq!(resolved.output_dir, root.join("dev"));
-    assert_eq!(resolved.watch_scope.output_dir, root.join("dev"));
+    assert_eq!(resolved.output_dir, root.join("_dev"));
+    assert_eq!(resolved.watch_scope.output_dir, root.join("_dev"));
     assert!(
         resolved.watch_scope.watches_path(&root.join("config.moth")),
         "initial watch scope must include config changes after a failed first build"

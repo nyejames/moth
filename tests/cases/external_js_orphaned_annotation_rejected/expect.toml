@@ -9,7 +9,7 @@ message_contains = ["is not followed by a supported declaration"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-IMPORT-0022"
 reason = "invalid_external_module.orphaned_annotation"
-path = "input/src/broken.js"
+path = "input/broken.js"
 line = 2
 column = 4
 count = 1

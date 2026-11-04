@@ -11,13 +11,11 @@ use crate::scaffold::{
 };
 use moth::projects::settings::CONFIG_FILE_NAME;
 
-const PAGE_FILE: &str = "src/@page.moth";
+const PAGE_FILE: &str = "@page.moth";
 const GITIGNORE_FILE: &str = ".gitignore";
 
 /// Relative paths of all scaffold-owned files.
 const SCAFFOLD_OWNED_FILES: &[&str] = &[CONFIG_FILE_NAME, PAGE_FILE];
-
-pub const SCAFFOLD_DIRECTORIES: &[&str] = &["src", "dev", "release"];
 
 /// Run preflight checks before writing anything.
 ///
@@ -111,19 +109,6 @@ pub(crate) fn write_scaffold(
 
     let mut created: Vec<PathBuf> = Vec::new();
     let mut replaced: Vec<PathBuf> = Vec::new();
-
-    for dir in SCAFFOLD_DIRECTORIES {
-        let dir_path = project_dir.join(dir);
-        if !dir_path.exists() {
-            fs::create_dir_all(&dir_path).map_err(|e| {
-                format!(
-                    "Project creation failed while creating directory {}: {e}.",
-                    dir_path.display()
-                )
-            })?;
-            created.push(PathBuf::from(dir));
-        }
-    }
 
     // Helper to write a scaffold-owned file and track its disposition.
     let mut write_scaffold_file = |relative: &str, content: &str| -> Result<(), String> {
@@ -222,7 +207,7 @@ fn handle_gitignore(
         )
     })?;
 
-    if existing_contains_dev_block(&existing) {
+    if existing_contains_moth_output_block(&existing) {
         return Ok(GitignoreResult {
             created: None,
             updated: None,
@@ -261,15 +246,20 @@ fn handle_gitignore(
     })
 }
 
-/// Check whether an existing `.gitignore` already contains the Moth `/dev` rule.
+/// Check whether an existing `.gitignore` already contains the Moth output rules.
 ///
-/// Recognizes a trimmed line equal to `/dev` or `/dev/` so that a trailing
-/// slash does not cause a duplicate append. Uses exact line equality after
-/// trimming, not substring matching, so near matches such as `/device`,
-/// `prefix/dev`, `/dev/**` and commented rules are not treated as present.
-pub(super) fn existing_contains_dev_block(content: &str) -> bool {
-    content.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed == "/dev" || trimmed == "/dev/"
-    })
+/// Both `/_dev` and `/_release` must be present. Each rule is recognized as a
+/// trimmed line equal to itself optionally followed by a trailing slash, so a
+/// trailing slash does not cause a duplicate append. Uses exact line equality
+/// after trimming, not substring matching, so near matches such as `/_device`,
+/// `prefix/_dev`, `/_dev/**` and commented rules are not treated as present.
+pub(super) fn existing_contains_moth_output_block(content: &str) -> bool {
+    let contains_rule = |rule: &str| {
+        let with_slash = format!("{rule}/");
+        content.lines().any(|line| {
+            let trimmed = line.trim();
+            trimmed == rule || trimmed == with_slash
+        })
+    };
+    contains_rule("/_dev") && contains_rule("/_release")
 }

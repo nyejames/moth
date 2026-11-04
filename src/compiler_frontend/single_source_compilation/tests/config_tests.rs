@@ -996,11 +996,10 @@ fn declaration_config_bootstrap_rejects_fixed_project_dependence_through_nested_
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let result = compile_project_source(
-        "source_root #Config of String = \"src\"\n\
-         helper #= (root = source_root,)\n\
+        "fixed_name #Config of String = \"docs\"\n\
+         helper #= (root = fixed_name,)\n\
          project #= (\n\
-             name = \"docs\",\n\
-             entry_root = helper.root,\n\
+             name = helper.root,\n\
          )\n",
         &inputs,
         &globals,
@@ -1318,19 +1317,18 @@ fn declaration_config_rejects_fixed_fields() {
     );
 }
 #[test]
-fn declaration_config_rejects_fixed_entry_root_field() {
+fn declaration_config_rejects_fixed_name_field() {
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let Err(messages) = compile_project_source(
-        "entry_root #Config of String = \"src\"\n\
+        "fixed_name #Config of String = \"docs\"\n\
          project #= (\n\
-             name = \"docs\",\n\
-             entry_root = entry_root,\n\
+             name = fixed_name,\n\
          )\n",
         &inputs,
         &globals,
     ) else {
-        panic!("project entry_root must remain fixed-only");
+        panic!("the project name must remain fixed-only");
     };
 
     let boundary = config_failure_boundary(messages);
@@ -1340,7 +1338,7 @@ fn declaration_config_rejects_fixed_entry_root_field() {
             view.descriptor().code == "MOTH-CONFIG-0001"
                 && view.reason_key() == Some("invalid_config.config_qualifier_fixed_field")
         })
-        .expect("entry_root should produce a typed fixed-field diagnostic");
+        .expect("the project name should produce a typed fixed-field diagnostic");
     let facts = diagnostic
         .family_view::<InvalidConfigView>()
         .expect("fixed-field config diagnostic should retain its typed reason");
@@ -1353,7 +1351,7 @@ fn declaration_config_rejects_fixed_entry_root_field() {
         DiagnosticRenderContext::for_report(report)
             .string_table
             .resolve(key),
-        "entry_root"
+        "name"
     );
     assert!(
         matches!(

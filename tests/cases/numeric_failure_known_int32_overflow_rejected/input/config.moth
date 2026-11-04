@@ -1,5 +1,3 @@
 project #= (
-    name = "numeric_failure_known_int32_overflow_rejected",
-    entry_root = "src",
-)
+    name = "numeric_failure_known_int32_overflow_rejected")
 html #= ()

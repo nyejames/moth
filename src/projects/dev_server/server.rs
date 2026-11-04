@@ -177,7 +177,14 @@ pub(crate) fn resolve_dev_runtime_paths(entry_target: &Path) -> DevRuntimePaths 
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."))
     };
-    let output_dir = project_root.join("dev");
+    // The first successful build replaces this fallback with the validated output plan. A
+    // directory project defaults to the hidden `_dev` root; synthetic single-file output keeps
+    // the command-chosen adjacent `dev` directory.
+    let output_dir = if entry_target.is_dir() {
+        project_root.join("_dev")
+    } else {
+        project_root.join("dev")
+    };
     DevRuntimePaths {
         watch_scope: watch::WatchScope::derive(entry_target, None, &output_dir),
         output_dir,

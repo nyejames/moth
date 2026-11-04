@@ -97,7 +97,7 @@ fn same_module_dependency_creates_no_project_graph_edge() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     // The single entry module depends on a sibling file inside its own module root.
@@ -179,7 +179,7 @@ fn independent_no_edge_entries_are_grouped_in_one_ready_wave() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     // Two independent entry modules with no cross-module dependencies.
@@ -260,7 +260,7 @@ fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     // The consumer depends on its direct child twice, so the duplicate observation must be
@@ -552,7 +552,7 @@ fn canonical_module_job_excludes_cross_module_donor_sources() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -611,7 +611,7 @@ fn indexed_namespace_rejects_direct_entry_root_dependency() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@@page symbol\n#[:page]\n")
@@ -644,7 +644,7 @@ fn indexed_namespace_rejects_direct_nested_child_root_dependency() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@child/@home symbol\n#[:page]\n")

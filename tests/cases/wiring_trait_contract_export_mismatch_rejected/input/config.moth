@@ -1,5 +1,3 @@
 project #= (
-    name = "wiring_trait_contract_export_mismatch_rejected",
-    entry_root = "src",
-)
+    name = "wiring_trait_contract_export_mismatch_rejected")
 html #= ()

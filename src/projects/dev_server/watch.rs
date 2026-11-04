@@ -5,7 +5,6 @@
 //! WHY: rebuild coordination should react to concrete source changes without re-scanning broad
 //! unrelated trees on every loop iteration.
 
-use crate::build_system::create_project_modules::resolve_project_entry_root;
 use crate::projects::settings::{CONFIG_FILE_NAME, Config};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use saying::say;
@@ -42,7 +41,7 @@ impl WatchScope {
             };
             let project_root = canonical_if_exists(&config.entry_dir);
             scope.watch_exact_file_or_parent(&project_root.join(CONFIG_FILE_NAME));
-            scope.watch_directory_or_parent(&resolve_project_entry_root(config));
+            scope.watch_directory_or_parent(&config.entry_dir);
             return scope;
         }
 
@@ -137,11 +136,76 @@ impl WatchTarget {
         }
 
         if self.recursive {
-            return path.starts_with(&self.watch_path);
+            return path.starts_with(&self.watch_path)
+                && !path_enters_hidden_directory(path, &self.watch_path);
         }
 
         path == self.watch_path || path.parent() == Some(self.watch_path.as_path())
     }
+}
+
+/// Whether a watched path enters an excluded `_` directory below its watch root.
+///
+/// A terminal file name is never a directory component, so `_helper.moth` and `_intro.mtf` stay
+/// watchable. Deleted paths have no metadata, so an extensionless spelling is treated as a
+/// directory for the final component.
+///
+/// Canonical ancestry is checked in addition to the lexical spelling so a visible symlink alias
+/// cannot reintroduce hidden physical content after a filesystem change.
+fn path_enters_hidden_directory(path: &Path, watch_root: &Path) -> bool {
+    // Removal events have no metadata. Ignoring the terminal component in that case can cause an
+    // extra rebuild for a removed hidden directory, but it never admits excluded content and keeps
+    // underscore-prefixed files watchable.
+    let include_final = path.is_dir();
+    let lexical_hidden = path
+        .strip_prefix(watch_root)
+        .ok()
+        .is_some_and(|relative| relative_path_has_hidden_component(relative, include_final));
+    if lexical_hidden {
+        return true;
+    }
+
+    path.canonicalize().ok().is_some_and(|canonical| {
+        canonical
+            .strip_prefix(watch_root)
+            .ok()
+            .is_some_and(|relative| relative_path_has_hidden_component(relative, include_final))
+    })
+}
+
+fn path_enters_hidden_directory_for_metadata(
+    path: &Path,
+    watch_root: &Path,
+    is_directory: bool,
+) -> bool {
+    let lexical_hidden = path
+        .strip_prefix(watch_root)
+        .ok()
+        .is_some_and(|relative| relative_path_has_hidden_component(relative, is_directory));
+    if lexical_hidden {
+        return true;
+    }
+    path.canonicalize().ok().is_some_and(|canonical| {
+        canonical
+            .strip_prefix(watch_root)
+            .ok()
+            .is_some_and(|relative| relative_path_has_hidden_component(relative, is_directory))
+    })
+}
+
+fn relative_path_has_hidden_component(relative: &Path, include_final: bool) -> bool {
+    let components = relative.components().collect::<Vec<_>>();
+    let check_len = if include_final {
+        components.len()
+    } else {
+        components.len().saturating_sub(1)
+    };
+    components[..check_len].iter().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(|name| name.starts_with('_'))
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -471,12 +535,14 @@ fn collect_directory_fingerprints(
         for entry_result in entries {
             let entry = entry_result?;
             let path = entry.path();
+            let metadata = entry.metadata()?;
 
-            if should_ignore_path(&path, output_dir) {
+            if should_ignore_path(&path, output_dir)
+                || path_enters_hidden_directory_for_metadata(&path, root, metadata.is_dir())
+            {
                 continue;
             }
 
-            let metadata = entry.metadata()?;
             if metadata.is_dir() {
                 if recursive {
                     stack.push(path);

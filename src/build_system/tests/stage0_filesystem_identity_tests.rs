@@ -108,7 +108,6 @@ mod non_utf8_filesystem_identity {
         fs::write(&bad_file, "x ~= 1\n").expect("should write non-UTF-8 named file");
 
         let mut config = Config::new(root.clone());
-        config.entry_root = PathBuf::from("src");
         let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
@@ -143,7 +142,6 @@ mod non_utf8_filesystem_identity {
         fs::create_dir_all(&bad_folder).expect("should create non-UTF-8 named folder");
 
         let mut config = Config::new(root.clone());
-        config.entry_root = PathBuf::from("src");
         let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
@@ -180,7 +178,6 @@ mod non_utf8_filesystem_identity {
         fs::write(&bad_file, "x ~= 1\n").expect("should write non-UTF-8 named file");
 
         let mut config = Config::new(root.clone());
-        config.entry_root = PathBuf::from("src");
         let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
@@ -248,7 +245,6 @@ mod non_utf8_filesystem_identity {
         fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
 
         let mut config = Config::new(root.clone());
-        config.entry_root = PathBuf::from("src");
 
         let mut string_table = StringTable::new();
         let resolver = super::project_roots::build_project_path_resolver(
@@ -818,7 +814,7 @@ mod module_identity_tests {
     };
     #[cfg(unix)]
     use crate::compiler_tests::test_fs::RestrictedDirectory;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     fn discover_index(
         root: &std::path::Path,
@@ -831,8 +827,7 @@ mod module_identity_tests {
         let entry_root = root.join(entry_root_relative);
         fs::create_dir_all(&entry_root).expect("should create entry root");
 
-        let mut config = Config::new(root.to_path_buf());
-        config.entry_root = PathBuf::from(entry_root_relative);
+        let config = Config::new(root.to_path_buf());
         let canonical_root = fs::canonicalize(root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
@@ -1184,8 +1179,7 @@ mod module_identity_tests {
         fs::create_dir_all(&entry_root).expect("should create entry root");
         fs::write(entry_root.join("@page.moth"), "").expect("should write entry root");
 
-        let mut config = Config::new(root.clone());
-        config.entry_root = PathBuf::from("src");
+        let config = Config::new(root.clone());
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
         let missing_project_root = root.join("does_not_exist");
@@ -1216,8 +1210,7 @@ mod module_identity_tests {
         fs::create_dir_all(&entry_root).expect("should create entry root");
         fs::write(entry_root.join("@page.moth"), "").expect("should write entry root");
 
-        let mut config = Config::new(root.clone());
-        config.entry_root = PathBuf::from("src");
+        let config = Config::new(root.clone());
         let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
@@ -1269,8 +1262,7 @@ mod module_identity_tests {
         fs::write(src.join("+pkg.moth"), "").expect("should write support root");
 
         let entry_root = root.join("src");
-        let mut config = Config::new(root.clone());
-        config.entry_root = PathBuf::from("src");
+        let config = Config::new(root.clone());
         let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
@@ -1302,8 +1294,7 @@ mod module_identity_tests {
         fs::write(src.join("pkg/+two.moth"), "").expect("should write second support root");
 
         let entry_root = root.join("src");
-        let mut config = Config::new(root.clone());
-        config.entry_root = PathBuf::from("src");
+        let config = Config::new(root.clone());
         let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");
@@ -1343,7 +1334,6 @@ mod module_identity_tests {
         fs::create_dir_all(&entry_root).expect("should create entry root");
 
         let mut config = Config::new(root.to_path_buf());
-        config.entry_root = PathBuf::from(entry_root_relative);
         config.project_name = String::from(project_name);
 
         let canonical_root = fs::canonicalize(root).expect("project root should canonicalize");
@@ -1714,7 +1704,6 @@ mod owned_source_inventory_tests {
         fs::create_dir_all(&entry_root).expect("should create entry root");
 
         let mut config = Config::new(root.to_path_buf());
-        config.entry_root = PathBuf::from(entry_root_relative);
         config.project_name = String::from(project_name);
 
         let canonical_root = fs::canonicalize(root).expect("project root should canonicalize");
@@ -2581,7 +2570,6 @@ mod owned_source_inventory_tests {
     ) -> SourceTreeIndex {
         let entry_root = root.join(entry_root_relative);
         let mut config = Config::new(root.to_path_buf());
-        config.entry_root = PathBuf::from(entry_root_relative);
         config.project_name = String::from(project_name);
 
         let canonical_root = fs::canonicalize(root).expect("project root should canonicalize");
@@ -2740,7 +2728,6 @@ mod project_module_graph_tests {
     use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
     use crate::compiler_frontend::semantic_identity::ModuleRootRole;
     use crate::compiler_frontend::symbols::string_interning::StringTable;
-    use std::path::PathBuf;
 
     use super::module_identity::ModuleId;
     use super::project_module_graph::{DependencyEdgeOutcome, ProjectModuleGraph};
@@ -2755,8 +2742,7 @@ mod project_module_graph_tests {
         let entry_root = root.join(entry_root_relative);
         fs::create_dir_all(&entry_root).expect("should create entry root");
 
-        let mut config = Config::new(root.to_path_buf());
-        config.entry_root = PathBuf::from(entry_root_relative);
+        let config = Config::new(root.to_path_buf());
         let canonical_root = fs::canonicalize(root).expect("project root should canonicalize");
         let canonical_entry_root =
             fs::canonicalize(&entry_root).expect("entry root should canonicalize");

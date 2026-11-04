@@ -529,11 +529,14 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
     ) -> Result<Project, BackendInvocationFailure<Self::Error>> {
         project_compilation
             .modules()
-            .find(|module| module.metadata.entry_point.ends_with("src/@page.moth"))
+            .find(|module| {
+                module.metadata.entry_point.ends_with("@page.moth")
+                    && !module.metadata.entry_point.ends_with("docs/@page.moth")
+            })
             .expect("directory build should discover homepage module");
         project_compilation
             .modules()
-            .find(|module| module.metadata.entry_point.ends_with("src/docs/@page.moth"))
+            .find(|module| module.metadata.entry_point.ends_with("docs/@page.moth"))
             .expect("directory build should discover docs module");
 
         let (error, warning) = {

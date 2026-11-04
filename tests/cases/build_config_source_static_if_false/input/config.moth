@@ -1,5 +1,3 @@
 project #= (
-    name = "static_config_false",
-    entry_root = "src",
-)
+    name = "static_config_false")
 html #= ()

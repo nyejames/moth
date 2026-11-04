@@ -42,6 +42,8 @@ unit_code! {
         EscapesModuleBoundary = 7,
         EscapesSymlink = 8,
         EscapesProjectRoot = 9,
+        HiddenPath = 10,
+        ReservedConfigFile = 11,
     }
 }
 
@@ -58,6 +60,8 @@ impl InvalidCompileTimePathCode {
             InvalidCompileTimePathReason::EscapesModuleBoundary => Self::EscapesModuleBoundary,
             InvalidCompileTimePathReason::EscapesSymlink => Self::EscapesSymlink,
             InvalidCompileTimePathReason::EscapesProjectRoot => Self::EscapesProjectRoot,
+            InvalidCompileTimePathReason::HiddenPath => Self::HiddenPath,
+            InvalidCompileTimePathReason::ReservedConfigFile => Self::ReservedConfigFile,
         }
     }
 
@@ -92,6 +96,8 @@ impl InvalidCompileTimePathCode {
             Self::EscapesModuleBoundary => InvalidCompileTimePathReason::EscapesModuleBoundary,
             Self::EscapesSymlink => InvalidCompileTimePathReason::EscapesSymlink,
             Self::EscapesProjectRoot => InvalidCompileTimePathReason::EscapesProjectRoot,
+            Self::HiddenPath => InvalidCompileTimePathReason::HiddenPath,
+            Self::ReservedConfigFile => InvalidCompileTimePathReason::ReservedConfigFile,
         })
     }
 }
@@ -400,8 +406,6 @@ diagnostic_family! {
 unit_code! {
     pub(crate) enum InvalidConfigCode {
         MissingKey = 1,
-        MissingConfigFile = 2,
-        MissingProjectRecord = 3,
         MissingActiveBuilderSection = 4,
         DuplicateKey = 5,
         FunctionUnsupported = 6,
@@ -450,7 +454,6 @@ unit_code! {
         DuplicateHtmlOutputPath = 49,
         ResourceOutputPathCollision = 50,
         ResourceOutputPathReserved = 51,
-        ConfiguredEntryRootMissing = 52,
         EntryRootPackagePrefixCollision = 53,
         SourcePackageMissingRoot = 54,
         SourcePackageMultipleRoots = 55,
@@ -470,8 +473,6 @@ unit_code! {
         InvalidOutputFolderCurrentDirectory = 69,
         InvalidOutputFolderInvalidPathComponentWithoutFolder = 70,
         InvalidOutputFolderInvalidPathComponentWithFolder = 71,
-        InvalidOutputFolderInsideOrEqualToEntryRootWithoutFolder = 72,
-        InvalidOutputFolderInsideOrEqualToEntryRootWithFolder = 73,
         InvalidOutputFolderResolvesOutsideProjectRootWithoutFolder = 74,
         InvalidOutputFolderResolvesOutsideProjectRootWithFolder = 75,
         OutputFoldersNotDistinct = 76,
@@ -483,8 +484,10 @@ unit_code! {
         InvalidArtefactOutputPathParentDirectorySegment = 82,
         InvalidArtefactOutputPathCurrentDirectory = 83,
         InvalidArtefactOutputPathInvalidPathComponent = 84,
-        InvalidArtefactOutputPathInsideOrEqualToEntryRoot = 85,
         InvalidArtefactOutputPathResolvesOutsideProjectRoot = 86,
+        InvalidOutputFolderVisiblePathWithoutFolder = 87,
+        InvalidOutputFolderVisiblePathWithFolder = 88,
+        InvalidArtefactOutputPathVisiblePath = 89,
     }
 }
 
@@ -493,8 +496,6 @@ impl InvalidConfigCode {
     pub(crate) fn of(reason: &InvalidConfigReason) -> Self {
         match reason {
             InvalidConfigReason::MissingKey => Self::MissingKey,
-            InvalidConfigReason::MissingConfigFile => Self::MissingConfigFile,
-            InvalidConfigReason::MissingProjectRecord => Self::MissingProjectRecord,
             InvalidConfigReason::MissingActiveBuilderSection { .. } => {
                 Self::MissingActiveBuilderSection
             }
@@ -549,9 +550,6 @@ impl InvalidConfigCode {
             }
             InvalidConfigReason::ResourceOutputPathReserved { .. } => {
                 Self::ResourceOutputPathReserved
-            }
-            InvalidConfigReason::ConfiguredEntryRootMissing { .. } => {
-                Self::ConfiguredEntryRootMissing
             }
             InvalidConfigReason::EntryRootPackagePrefixCollision { .. } => {
                 Self::EntryRootPackagePrefixCollision
@@ -612,11 +610,11 @@ impl InvalidConfigCode {
             InvalidOutputFolderReason::InvalidPathComponent => {
                 Self::InvalidOutputFolderInvalidPathComponentWithoutFolder
             }
-            InvalidOutputFolderReason::InsideOrEqualToEntryRoot if has_folder => {
-                Self::InvalidOutputFolderInsideOrEqualToEntryRootWithFolder
+            InvalidOutputFolderReason::VisibleDirectoryOutputPath if has_folder => {
+                Self::InvalidOutputFolderVisiblePathWithFolder
             }
-            InvalidOutputFolderReason::InsideOrEqualToEntryRoot => {
-                Self::InvalidOutputFolderInsideOrEqualToEntryRootWithoutFolder
+            InvalidOutputFolderReason::VisibleDirectoryOutputPath => {
+                Self::InvalidOutputFolderVisiblePathWithoutFolder
             }
             InvalidOutputFolderReason::ResolvesOutsideProjectRoot if has_folder => {
                 Self::InvalidOutputFolderResolvesOutsideProjectRootWithFolder
@@ -642,8 +640,8 @@ impl InvalidConfigCode {
             InvalidOutputFolderReason::InvalidPathComponent => {
                 Self::InvalidArtefactOutputPathInvalidPathComponent
             }
-            InvalidOutputFolderReason::InsideOrEqualToEntryRoot => {
-                Self::InvalidArtefactOutputPathInsideOrEqualToEntryRoot
+            InvalidOutputFolderReason::VisibleDirectoryOutputPath => {
+                Self::InvalidArtefactOutputPathVisiblePath
             }
             InvalidOutputFolderReason::ResolvesOutsideProjectRoot => {
                 Self::InvalidArtefactOutputPathResolvesOutsideProjectRoot
@@ -679,11 +677,11 @@ impl InvalidConfigCode {
             Self::InvalidOutputFolderInvalidPathComponentWithFolder => {
                 (InvalidOutputFolderReason::InvalidPathComponent, true)
             }
-            Self::InvalidOutputFolderInsideOrEqualToEntryRootWithoutFolder => {
-                (InvalidOutputFolderReason::InsideOrEqualToEntryRoot, false)
+            Self::InvalidOutputFolderVisiblePathWithoutFolder => {
+                (InvalidOutputFolderReason::VisibleDirectoryOutputPath, false)
             }
-            Self::InvalidOutputFolderInsideOrEqualToEntryRootWithFolder => {
-                (InvalidOutputFolderReason::InsideOrEqualToEntryRoot, true)
+            Self::InvalidOutputFolderVisiblePathWithFolder => {
+                (InvalidOutputFolderReason::VisibleDirectoryOutputPath, true)
             }
             Self::InvalidOutputFolderResolvesOutsideProjectRootWithoutFolder => {
                 (InvalidOutputFolderReason::ResolvesOutsideProjectRoot, false)
@@ -710,8 +708,8 @@ impl InvalidConfigCode {
             Self::InvalidArtefactOutputPathInvalidPathComponent => {
                 InvalidOutputFolderReason::InvalidPathComponent
             }
-            Self::InvalidArtefactOutputPathInsideOrEqualToEntryRoot => {
-                InvalidOutputFolderReason::InsideOrEqualToEntryRoot
+            Self::InvalidArtefactOutputPathVisiblePath => {
+                InvalidOutputFolderReason::VisibleDirectoryOutputPath
             }
             Self::InvalidArtefactOutputPathResolvesOutsideProjectRoot => {
                 InvalidOutputFolderReason::ResolvesOutsideProjectRoot
@@ -844,8 +842,8 @@ impl InvalidConfigCode {
                 | Self::InvalidOutputFolderCurrentDirectory
                 | Self::InvalidOutputFolderInvalidPathComponentWithoutFolder
                 | Self::InvalidOutputFolderInvalidPathComponentWithFolder
-                | Self::InvalidOutputFolderInsideOrEqualToEntryRootWithoutFolder
-                | Self::InvalidOutputFolderInsideOrEqualToEntryRootWithFolder
+                | Self::InvalidOutputFolderVisiblePathWithoutFolder
+                | Self::InvalidOutputFolderVisiblePathWithFolder
                 | Self::InvalidOutputFolderResolvesOutsideProjectRootWithoutFolder
                 | Self::InvalidOutputFolderResolvesOutsideProjectRootWithFolder
         )
@@ -946,7 +944,6 @@ fn invalid_config_string_ids(
             strings.extend([*value, *expected]);
         }
         InvalidConfigReason::MissingHtmlHomepage { entry_root }
-        | InvalidConfigReason::ConfiguredEntryRootMissing { entry_root }
         | InvalidConfigReason::NoRootModuleEntries { entry_root } => strings.push(*entry_root),
         InvalidConfigReason::DuplicateHtmlOutputPath {
             output_path,
@@ -1110,8 +1107,8 @@ pub(crate) fn decode_invalid_config(
         | InvalidConfigCode::InvalidOutputFolderCurrentDirectory
         | InvalidConfigCode::InvalidOutputFolderInvalidPathComponentWithoutFolder
         | InvalidConfigCode::InvalidOutputFolderInvalidPathComponentWithFolder
-        | InvalidConfigCode::InvalidOutputFolderInsideOrEqualToEntryRootWithoutFolder
-        | InvalidConfigCode::InvalidOutputFolderInsideOrEqualToEntryRootWithFolder
+        | InvalidConfigCode::InvalidOutputFolderVisiblePathWithoutFolder
+        | InvalidConfigCode::InvalidOutputFolderVisiblePathWithFolder
         | InvalidConfigCode::InvalidOutputFolderResolvesOutsideProjectRootWithoutFolder
         | InvalidConfigCode::InvalidOutputFolderResolvesOutsideProjectRootWithFolder) => {
             let (reason, has_folder) = folder_code.output_folder_shape()?;
@@ -1125,8 +1122,6 @@ pub(crate) fn decode_invalid_config(
             }
         }
         InvalidConfigCode::MissingKey => InvalidConfigReason::MissingKey,
-        InvalidConfigCode::MissingConfigFile => InvalidConfigReason::MissingConfigFile,
-        InvalidConfigCode::MissingProjectRecord => InvalidConfigReason::MissingProjectRecord,
         InvalidConfigCode::MissingActiveBuilderSection => {
             InvalidConfigReason::MissingActiveBuilderSection {
                 section: strings.take()?,
@@ -1251,17 +1246,12 @@ pub(crate) fn decode_invalid_config(
         | InvalidConfigCode::InvalidArtefactOutputPathParentDirectorySegment
         | InvalidConfigCode::InvalidArtefactOutputPathCurrentDirectory
         | InvalidConfigCode::InvalidArtefactOutputPathInvalidPathComponent
-        | InvalidConfigCode::InvalidArtefactOutputPathInsideOrEqualToEntryRoot
+        | InvalidConfigCode::InvalidArtefactOutputPathVisiblePath
         | InvalidConfigCode::InvalidArtefactOutputPathResolvesOutsideProjectRoot) => {
             InvalidConfigReason::InvalidArtefactOutputPath {
                 output_path: strings.take()?,
                 artefact_kind: strings.take()?,
                 reason: artefact_code.artefact_output_path_shape()?,
-            }
-        }
-        InvalidConfigCode::ConfiguredEntryRootMissing => {
-            InvalidConfigReason::ConfiguredEntryRootMissing {
-                entry_root: strings.take()?,
             }
         }
         InvalidConfigCode::EntryRootPackagePrefixCollision => {

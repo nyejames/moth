@@ -9,4 +9,4 @@ diagnostic_codes = ["MOTH-CONFIG-0001"]
 code = "MOTH-CONFIG-0001"
 reason = "invalid_config.invalid_project_setting_value"
 path = "input/config.moth"
-line = 4
+line = 3

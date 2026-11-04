@@ -68,14 +68,46 @@ fn detects_modified_file_fingerprints() {
 }
 
 #[test]
-fn directory_scope_ignores_legacy_package_folders() {
+fn hidden_directories_are_unwatched_but_underscore_files_stay_watched() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp
+        .path()
+        .canonicalize()
+        .expect("temp root should canonicalize");
+    fs::create_dir_all(root.join("_private")).expect("should create hidden directory");
+    fs::write(root.join("_private/hidden.moth"), "").expect("should write hidden source");
+    fs::write(root.join("_helper.moth"), "").expect("should write underscore helper");
+
+    let scope = WatchScope::derive(&root, None, &root.join("_dev"));
+    assert!(
+        scope.watches_path(&root.join("_helper.moth")),
+        "an underscore-prefixed file in a visible directory remains watched"
+    );
+    assert!(
+        !scope.watches_path(&root.join("_private/hidden.moth")),
+        "a hidden directory stays excluded from notifications"
+    );
+
+    let fingerprints = collect_fingerprints(&scope).expect("scanner should complete");
+    assert!(
+        fingerprints.contains_key(&root.join("_helper.moth")),
+        "polling must fingerprint underscore-prefixed files"
+    );
+    assert!(
+        !fingerprints.contains_key(&root.join("_private/hidden.moth")),
+        "polling must not fingerprint hidden directories"
+    );
+}
+
+#[test]
+fn directory_scope_watches_selected_root_except_outputs() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
-    let output_dir = root.join("dev");
+    let output_dir = root.join("_dev");
     fs::create_dir_all(root.join("src")).expect("should create src dir");
     fs::create_dir_all(root.join("assets/vendor")).expect("should create assets dir");
     fs::write(root.join("src/helper.js"), "export function draw() {}")
-        .expect("should write entry-root js file");
+        .expect("should write source js file");
     fs::write(
         root.join("assets/vendor/lib.js"),
         "export function lib() {}",
@@ -83,18 +115,17 @@ fn directory_scope_ignores_legacy_package_folders() {
     .expect("should write nested package-folder js file");
     let canonical_root = root.canonicalize().expect("root should canonicalize");
 
-    let mut config = Config::new(root.clone());
-    config.entry_root = PathBuf::from("src");
+    let config = Config::new(root.clone());
 
     let scope = WatchScope::derive(&root, Some(&config), &output_dir);
 
     assert!(scope.watches_path(&canonical_root.join(CONFIG_FILE_NAME)));
     assert!(scope.watches_path(&canonical_root.join("src/main.moth")));
     assert!(scope.watches_path(&canonical_root.join("src/helper.js")));
-    assert!(!scope.watches_path(&canonical_root.join("assets/logo.png")));
-    assert!(!scope.watches_path(&canonical_root.join("assets/vendor/lib.js")));
-    assert!(!scope.watches_path(&canonical_root.join("target/debug/app")));
-    assert!(!scope.watches_path(&canonical_root.join("dev/bundle.js")));
+    assert!(scope.watches_path(&canonical_root.join("assets/logo.png")));
+    assert!(scope.watches_path(&canonical_root.join("assets/vendor/lib.js")));
+    assert!(scope.watches_path(&canonical_root.join("target/debug/app")));
+    assert!(!scope.watches_path(&canonical_root.join("_dev/bundle.js")));
 }
 
 #[test]

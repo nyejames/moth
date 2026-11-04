@@ -1,5 +1,3 @@
 project #= (
-    name = "wiring_route_forwarded_generic_input_runtime",
-    entry_root = "src",
-)
+    name = "wiring_route_forwarded_generic_input_runtime")
 html #= ()

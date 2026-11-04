@@ -1213,7 +1213,6 @@ pub(super) fn compile_source_package_inventories(
                         BuildConfigInputSet::new(),
                         config_globals.clone(),
                         Vec::new(),
-                        Vec::new(),
                         None,
                     ),
                     graph,
@@ -1321,7 +1320,6 @@ pub(super) fn compile_source_package_inventories(
                     canonical_source_facts,
                     BuildConfigInputSet::new(),
                     config_globals.clone(),
-                    Vec::new(),
                     Vec::new(),
                     None,
                 ),
@@ -1568,6 +1566,7 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
                 &mut external_imports,
                 directory_dependency_resolution,
                 &mut resource_inputs,
+                mode.requires_normal_entry(),
                 mode.includes_check_only(),
                 &mut selected_source_texts,
                 string_table,
@@ -1721,8 +1720,6 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
 
         let effective_project_fields =
             config_boundary::effective_project_fields(config, string_table)?;
-        let fixed_project_facts =
-            config_boundary::fixed_project_contract_facts(&effective_project_fields);
         let direct_project_facts = config_boundary::input_contract_facts(&effective_project_fields);
         let project_fallback = config.setting_span("project");
         let project_source_files = Arc::clone(project_sources.sources());
@@ -1756,7 +1753,7 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
         );
         let project_build_config_values = config_boundary::resolve_boundary_build_config(
             &project_source_facts,
-            &fixed_project_facts,
+            &[],
             &direct_project_facts,
             &canonical_project_inputs,
             &config_globals,
@@ -1829,7 +1826,6 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
                 project_source_facts,
                 build_config_inputs.clone(),
                 config_globals.clone(),
-                fixed_project_facts.clone(),
                 direct_project_facts.clone(),
                 project_globals.as_ref(),
             ),

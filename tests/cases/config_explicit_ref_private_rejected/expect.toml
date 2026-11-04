@@ -9,4 +9,4 @@ diagnostic_codes = ['MOTH-RULE-0053']
 code = "MOTH-RULE-0053"
 reason = "compile_time_evaluation_error.non_constant_reference_in_constant"
 path = "input/config.moth"
-line = 7
+line = 6

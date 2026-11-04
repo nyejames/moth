@@ -1,5 +1,3 @@
 project #= (
-    name = "implicit_failure_direct_private_multi_success",
-    entry_root = "src",
-)
+    name = "implicit_failure_direct_private_multi_success")
 html #= ()

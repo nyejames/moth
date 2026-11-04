@@ -41,7 +41,8 @@ second || -> I32:
 ";
 
 /// Directory-project config retaining one module error before discovery stops.
-const MODULE_LIMIT_CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_module = 1,\n)\nhtml #= ()\n";
+const MODULE_LIMIT_CONFIG_SOURCE: &str =
+    "project #= (\n    name = \"docs\",\n    max_errors_per_module = 1,\n)\nhtml #= ()\n";
 
 fn run_moth(arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_moth"))
@@ -75,26 +76,22 @@ fn write_source(root: &std::path::Path, name: &str, source: &str) -> std::path::
 }
 
 fn write_directory_html_project(root: &Path, page_source: &str) {
-    let src = root.join("src");
-    fs::create_dir_all(&src).expect("src should be created");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("config should be written");
-    fs::write(src.join("@page.moth"), page_source).expect("page source should be written");
+    fs::write(root.join("@page.moth"), page_source).expect("page source should be written");
 }
 
 fn write_directory_html_config_input_project(root: &Path) {
-    let src = root.join("src");
-    fs::create_dir_all(&src).expect("src should be created");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
     )
     .expect("config should be written");
     fs::write(
-        src.join("@page.moth"),
+        root.join("@page.moth"),
         "enabled #Config of Bool\nresult ~= 0\nif enabled:\n    ~result = 1\n;\n",
     )
     .expect("page source should be written");
@@ -169,7 +166,7 @@ fn build_command_executes_with_typed_config_input() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(root.path().join("preview/index.html").is_file());
+    assert!(root.path().join("_preview/index.html").is_file());
 }
 
 #[test]
@@ -189,17 +186,15 @@ fn check_command_executes_with_typed_config_input() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(!root.path().join("preview").exists());
+    assert!(!root.path().join("_preview").exists());
 }
 
 #[test]
 fn check_orders_the_module_stop_before_the_terse_summary_and_omits_it_when_complete() {
     let root = tempdir().expect("temporary directory should be created");
-    let src = root.path().join("src");
-    fs::create_dir_all(&src).expect("src should be created");
     fs::write(root.path().join("config.moth"), MODULE_LIMIT_CONFIG_SOURCE)
         .expect("limited config should be written");
-    fs::write(src.join("@page.moth"), TWO_FAILING_BODIES_SOURCE)
+    fs::write(root.path().join("@page.moth"), TWO_FAILING_BODIES_SOURCE)
         .expect("page source should be written");
     let stop_line =
         "Diagnostic discovery stopped early (module error limit): later code was not checked.";
@@ -308,7 +303,7 @@ fn invalid_syntax_project_build_exits_with_failure() {
 fn output_root_write_failure_exits_with_failure_without_benchmark_status() {
     let root = tempdir().expect("temporary directory should be created");
     write_directory_html_project(root.path(), "#[:<h1>Hello</h1>]\nentry = \".\"\n");
-    fs::write(root.path().join("dev"), b"occupied output root")
+    fs::write(root.path().join("_dev"), b"occupied output root")
         .expect("output-root collision file should be written");
 
     let output = run_moth_with_bench_status(

@@ -111,14 +111,13 @@ fn indexed_discovery_keeps_authored_kind_when_canonical_extension_disagrees() {
     symlink(&payload, source_root.join("page.mtf"))
         .expect("should symlink a template name onto the payload");
 
-    let config = Config::new(root.clone());
+    let config = Config::new(source_root.clone());
     let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
     source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
     let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
-    let entry_root =
-        fs::canonicalize(resolve_project_entry_root(&config)).expect("entry root should resolve");
+    let entry_root = project_root.clone();
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
@@ -173,13 +172,11 @@ fn stage0_source_ids_keep_module_origin_order_when_flat_portable_path_disagrees(
     fs::write(source_root.join("a-b/@b.moth"), "value #= 1\n")
         .expect("should write module a-b root");
 
-    let mut config = Config::new(root.clone());
-    config.entry_root = PathBuf::from("src");
+    let config = Config::new(source_root.clone());
     let resolver = configured_resolver(&config);
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
-    let entry_root =
-        fs::canonicalize(resolve_project_entry_root(&config)).expect("entry root should resolve");
+    let entry_root = project_root.clone();
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {

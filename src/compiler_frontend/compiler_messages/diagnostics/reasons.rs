@@ -355,8 +355,6 @@ impl UnsupportedBackendFeatureReason {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidConfigReason {
     MissingKey,
-    MissingConfigFile,
-    MissingProjectRecord,
     MissingActiveBuilderSection {
         section: StringId,
     },
@@ -463,9 +461,6 @@ pub enum InvalidConfigReason {
         artefact_kind: StringId,
         reason: InvalidOutputFolderReason,
     },
-    ConfiguredEntryRootMissing {
-        entry_root: StringId,
-    },
     EntryRootPackagePrefixCollision {
         prefix: StringId,
         entry_folder: StringId,
@@ -523,7 +518,8 @@ pub enum InvalidOutputFolderReason {
     ParentDirectorySegment,
     CurrentDirectory,
     InvalidPathComponent,
-    InsideOrEqualToEntryRoot,
+    /// A multi-component directory output path has no `_`-prefixed directory component.
+    VisibleDirectoryOutputPath,
     ResolvesOutsideProjectRoot,
 }
 
@@ -758,6 +754,10 @@ pub enum InvalidCompileTimePathReason {
     EscapesModuleBoundary,
     EscapesSymlink,
     EscapesProjectRoot,
+    /// The target lies inside a `_`-prefixed directory excluded from source discovery.
+    HiddenPath,
+    /// The target is the reserved `config.moth` source, which is not a module helper.
+    ReservedConfigFile,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

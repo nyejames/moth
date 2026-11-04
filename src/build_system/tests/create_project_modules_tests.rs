@@ -14,7 +14,6 @@ use crate::build_system::build::BackendBuilder;
 use crate::build_system::create_project_modules::module_namespace::{
     DirectoryDependencyResolution, ModuleNamespaceSet, ResolvedDependency,
 };
-use crate::build_system::create_project_modules::resolve_project_entry_root;
 use crate::build_system::create_project_modules::source_package_discovery::build_source_package_boundary_indexes;
 use crate::build_system::create_project_modules::source_tree_index::SourceTreeIndex;
 use crate::build_system::project_config::{
@@ -149,8 +148,7 @@ fn configured_resolver_with_source_file_kinds(
     // WHAT: rebuilds the same canonical resolver the real project build uses.
     // WHY: module-discovery tests should exercise the exact path rules used in production.
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
-    let entry_root =
-        fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
+    let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let mut index_string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
@@ -665,8 +663,7 @@ fn discover_modules_for_test_with_resource_inputs(
 )> {
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
-    let entry_root =
-        fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
+    let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let source_tree_index = match super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
@@ -735,6 +732,7 @@ fn discover_modules_for_test_with_resource_inputs(
                 &path_fork,
             ),
             &mut resource_inputs,
+            true,
             false,
             &mut selected_source_texts,
             &mut string_table,
@@ -797,8 +795,7 @@ fn discover_modules_for_test_with_providers(
 ) -> CompilationResult<ModuleCompilationSchedule> {
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
-    let entry_root =
-        fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
+    let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let source_tree_index = match super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
@@ -865,6 +862,7 @@ fn discover_modules_for_test_with_providers(
                 &path_fork,
             ),
             &mut resource_inputs,
+            true,
             false,
             &mut selected_source_texts,
             &mut string_table,
@@ -923,8 +921,7 @@ fn with_namespace_resolution(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
-    let entry_root =
-        fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
+    let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let external_import_providers =
         crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default();
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
@@ -1253,8 +1250,7 @@ fn discover_modules_and_graph_for_test(
 ) {
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
-    let entry_root =
-        fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
+    let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
@@ -1320,6 +1316,7 @@ fn discover_modules_and_graph_for_test(
                 &path_fork,
             ),
             &mut resource_inputs,
+            true,
             false,
             &mut selected_source_texts,
             &mut string_table,
@@ -1636,7 +1633,7 @@ fn write_cross_module_project(
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(module_a.join("@pageA.moth"), "@module_b\n#[:pageA]\n").expect("should write pageA");
@@ -1765,7 +1762,7 @@ fn direct_selection_resolves_cross_module_child_facade() {
     fs::create_dir_all(src.join("child")).expect("should create child module dir");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@child greet\n#[:entry]\n").expect("should write entry");
@@ -1828,7 +1825,7 @@ fn direct_selection_resolves_source_package_facade() {
     fs::create_dir_all(&package_root).expect("should create helper package dir");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@helper add\n#[:entry]\n").expect("should write entry");

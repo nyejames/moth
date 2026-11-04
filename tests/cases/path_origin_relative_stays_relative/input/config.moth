@@ -1,6 +1,4 @@
 project #= (
-    name = "test_project",
-)
+    name = "test_project")
 html #= (
-    origin = "/mysite",
-)
+    origin = "/mysite")

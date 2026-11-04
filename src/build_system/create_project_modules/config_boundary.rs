@@ -228,17 +228,19 @@ pub(super) enum EffectiveProjectFieldKind {
 
 /// Build one deterministic snapshot of the project fields visible at this build boundary.
 ///
-/// Omitted optional metadata has no field unless a schema/default or authored record made it
-/// effective. `entry_root` is always present for a loaded config because its schema default is
-/// applied by project-config validation. Declaration-owned input records remain private.
+/// `name` is always present after optional-config defaults apply; optional `version` is always
+/// published as an optional field so absence stays representable. Omitted optional metadata has
+/// no field unless a schema/default or authored record made it effective. Declaration-owned input
+/// Build one deterministic snapshot of the project fields visible at this build boundary.
+///
+/// `name` is always present after optional-config defaults apply; optional `version` is always
+/// published as an optional field so absence stays representable. Omitted optional metadata has
+/// no field unless a schema/default or authored record made it effective. Declaration-owned input
+/// records remain private.
 pub(super) fn effective_project_fields(
     config: &Config,
     string_table: &StringTable,
 ) -> Result<Vec<EffectiveProjectField>, InfrastructureFailure> {
-    if !config.project_config_loaded {
-        return Ok(Vec::new());
-    }
-
     let mut fields = Vec::new();
     let mut seen_names = FxHashSet::default();
     for dependency in &config.project_field_config_dependencies {
@@ -280,39 +282,18 @@ pub(super) fn effective_project_fields(
         )?,
     )?;
 
-    let entry_root = config.entry_root.to_str().ok_or_else(|| {
-        InfrastructureFailure::filesystem(
-            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
-            &config.entry_root,
-            "configured entry root is not valid UTF-8",
-        )
-    })?;
+    let optional_string_type = BuildInputType::Optional(PrimitiveBuildInputType::String);
     add_fixed(
         &mut fields,
         &mut seen_names,
         effective_fixed_project_field(
-            "entry_root",
-            name_type,
-            true,
-            Some(PrimitiveBuildValue::String(entry_root.to_owned())),
-            config.setting_span("entry_root"),
+            "version",
+            optional_string_type,
+            false,
+            config.version.clone().map(PrimitiveBuildValue::String),
+            config.setting_span("version"),
         )?,
     )?;
-
-    let optional_string_type = BuildInputType::Optional(PrimitiveBuildInputType::String);
-    if config.version.is_some() || config.setting_spans.contains_key("version") {
-        add_fixed(
-            &mut fields,
-            &mut seen_names,
-            effective_fixed_project_field(
-                "version",
-                optional_string_type,
-                false,
-                config.version.clone().map(PrimitiveBuildValue::String),
-                config.setting_span("version"),
-            )?,
-        )?;
-    }
     if config.author.is_some() || config.setting_spans.contains_key("author") {
         add_fixed(
             &mut fields,
@@ -462,31 +443,6 @@ fn effective_project_field_from_metadata(field: &ProjectMetadataField) -> Effect
         kind,
     }
 }
-pub(super) fn fixed_project_contract_facts(
-    fields: &[EffectiveProjectField],
-) -> Vec<BuildConfigContractFact> {
-    fields
-        .iter()
-        .filter_map(|field| {
-            let EffectiveProjectFieldKind::FixedPrimitive {
-                value_type,
-                value,
-                required,
-            } = &field.kind
-            else {
-                return None;
-            };
-            let name = BuildInputName::new(&field.name).ok()?;
-            Some(BuildConfigContractFact::new(
-                name,
-                *value_type,
-                *required,
-                value.clone(),
-                field.span,
-            ))
-        })
-        .collect()
-}
 
 /// Convert declaration-owned input contracts into barrier facts.
 pub(super) fn input_contract_facts(
@@ -542,7 +498,7 @@ pub(super) fn build_project_globals_interface(
     config: &Config,
     fields: &[EffectiveProjectField],
 ) -> Result<Option<ProjectGlobalsInterface>, InfrastructureFailure> {
-    if !config.project_config_loaded {
+    if !config.entry_dir.is_dir() {
         return Ok(None);
     }
 

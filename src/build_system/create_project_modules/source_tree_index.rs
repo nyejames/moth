@@ -35,7 +35,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::source::{SourceKind, SourceRegistrationIndex};
 use crate::compiler_frontend::source_packages::root_file::{
-    file_name_is_legacy_hash_root_file, file_name_is_module_root_file,
+    file_name_is_config_file, file_name_is_legacy_hash_root_file, file_name_is_module_root_file,
     file_name_is_normal_module_root_file, file_name_is_support_root_file,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -52,16 +52,12 @@ use super::project_structure_diagnostics::{
     non_utf8_filesystem_name_error, path_id, project_structure_diagnostic,
 };
 
-const FIXED_SKIPPED_DIRECTORY_NAMES: &[&str] = &[
-    ".git",
-    "target",
-    "node_modules",
-    "release",
-    "dev",
-    "dist",
-    "build",
-    ".cache",
-];
+/// Directory names that are never source regardless of configuration.
+///
+/// Visible `dev`, `release`, `dist` and `build` directories are deliberately absent: they may
+/// contain legitimate source. Generated output is hidden from discovery by its leading `_`
+/// component instead.
+const FIXED_SKIPPED_DIRECTORY_NAMES: &[&str] = &[".git", "target", "node_modules", ".cache"];
 
 /// Counts work performed by the Stage 0 source-tree traversal.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -126,12 +122,12 @@ impl SourceTreeSkipPolicy {
     }
 
     fn should_skip(&self, directory: &Path) -> bool {
-        let fixed_name = directory
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| FIXED_SKIPPED_DIRECTORY_NAMES.contains(&name));
+        let file_name = directory.file_name().and_then(|name| name.to_str());
+        let fixed_or_hidden = file_name.is_some_and(|name| {
+            FIXED_SKIPPED_DIRECTORY_NAMES.contains(&name) || directory_name_is_hidden(name)
+        });
 
-        if fixed_name
+        if fixed_or_hidden
             || self
                 .configured_directories
                 .binary_search(&directory.to_path_buf())
@@ -152,6 +148,31 @@ impl SourceTreeSkipPolicy {
                 })
             })
     }
+}
+
+/// Whether a directory name is hidden from source discovery by the `_` prefix.
+///
+/// Only directory components are hidden. A file such as `_helper.moth` in a visible directory
+/// remains eligible source.
+fn directory_name_is_hidden(name: &str) -> bool {
+    name.starts_with('_')
+}
+
+/// Whether a canonical directory path contains a hidden component below the selected root.
+///
+/// The selected root itself is exempt: `moth check website/_prototype/` compiles that root, while
+/// any `_` descendant stays excluded. Canonical ancestry means a visible symlink alias cannot
+/// reveal a hidden physical subtree.
+pub(crate) fn path_has_hidden_component_below(path: &Path, selected_root: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(selected_root) else {
+        return false;
+    };
+    relative.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(directory_name_is_hidden)
+    })
 }
 
 /// One canonical root file discovered inside a traversed directory, with its structural role.
@@ -564,7 +585,9 @@ impl SourceTreeIndex {
             // boundary.
             let directory = fs::canonicalize(&directory)
                 .map_err(|error| Self::directory_read_error(&directory, error))?;
-            if !directory.starts_with(&entry_root) || !visited_directories.insert(directory.clone())
+            if !directory.starts_with(&entry_root)
+                || !visited_directories.insert(directory.clone())
+                || path_has_hidden_component_below(&directory, &entry_root)
             {
                 continue;
             }
@@ -620,6 +643,13 @@ impl SourceTreeIndex {
                             non_utf8_filesystem_name_error(&path, "source tree file name")
                         })?;
 
+                // `config.moth` is a reserved configuration source, not a module helper. Only the
+                // selected root's config participates in bootstrap; a nested config is inert to
+                // the enclosing build and must not enter module ownership or dependency names.
+                if file_name_is_config_file(file_name) {
+                    continue;
+                }
+
                 if let SourceTreeBoundaryKind::Project { .. } = kind
                     && directory == entry_root
                     && (source_stem_from_file_name(file_name)
@@ -638,10 +668,6 @@ impl SourceTreeIndex {
                             None,
                         ),
                     ));
-                }
-
-                if let Some(stem) = source_stem_from_file_name(file_name) {
-                    source_files_by_stem.insert(stem.to_owned(), file_name.to_owned());
                 }
 
                 // Legacy `#*.moth` root-like filenames are invalid; roots use the `@` prefix.
@@ -693,6 +719,21 @@ impl SourceTreeIndex {
                         InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &path, format!("Failed to canonicalize source path: {error}"))
                     })?
                 };
+
+                // A file symlink can point outside the selected boundary or into an excluded `_`
+                // subtree even when its visible spelling looks eligible. Directory ancestry
+                // decides exclusion; an underscore-prefixed file name remains valid source.
+                let canonical_parent = canonical_path.parent();
+                if !canonical_path.starts_with(&entry_root)
+                    || canonical_parent
+                        .is_some_and(|parent| path_has_hidden_component_below(parent, &entry_root))
+                {
+                    continue;
+                }
+
+                if let Some(stem) = source_stem_from_file_name(file_name) {
+                    source_files_by_stem.insert(stem.to_owned(), file_name.to_owned());
+                }
 
                 if let Some(kind) = source_kind
                     // When the project root equals the entry root, the facade root file is
@@ -1200,6 +1241,18 @@ fn discover_project_package_facade(
             let canonical = fs::canonicalize(&path).map_err(|error| {
                 InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &path, format!("Failed to canonicalize project package facade path: {error}"))
             })?;
+            // A visible facade symlink must not activate a hidden physical subtree or escape the
+            // selected project directory.
+            let canonical_project_root = fs::canonicalize(project_root).map_err(|error| {
+                InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, project_root, format!("Failed to canonicalize project root for facade discovery: {error}"))
+            })?;
+            if !canonical.starts_with(&canonical_project_root)
+                || canonical.parent().is_some_and(|parent| {
+                    path_has_hidden_component_below(parent, &canonical_project_root)
+                })
+            {
+                continue;
+            }
             support_roots.push(canonical);
         }
     }

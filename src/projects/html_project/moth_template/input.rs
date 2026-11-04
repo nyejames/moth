@@ -301,8 +301,16 @@ fn collect_moth_template_paths_in_directory(
 
     for entry in entries {
         let path = entry.path();
-        if path.is_dir() && recursive {
-            collect_moth_template_paths_in_directory(&path, recursive, paths)?;
+        if path.is_dir() {
+            // `_` directories are excluded from the project source tree, so recursive template
+            // collection must not reintroduce their files.
+            if recursive
+                && !crate::build_system::create_project_modules::path_has_hidden_component_below(
+                    &path, directory,
+                )
+            {
+                collect_moth_template_paths_in_directory(&path, recursive, paths)?;
+            }
         } else if path.is_file() && has_moth_template_extension(&path) {
             paths.push(canonicalize_path(&path)?);
         }

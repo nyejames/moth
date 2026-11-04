@@ -118,10 +118,6 @@ fn project_policy_snapshot_preserves_known_policies_and_unknown_fallback() {
         ProjectFieldConfigPolicy::FixedOnly
     );
     assert_eq!(
-        policies.policy_for("entry_root"),
-        ProjectFieldConfigPolicy::FixedOnly
-    );
-    assert_eq!(
         policies.policy_for("version"),
         ProjectFieldConfigPolicy::Configurable
     );

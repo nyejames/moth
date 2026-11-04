@@ -1,5 +1,3 @@
 project #= (
-    name = "implicit_failure_concrete_private_hop_first_origin_rejected",
-    entry_root = "src",
-)
+    name = "implicit_failure_concrete_private_hop_first_origin_rejected")
 html #= ()

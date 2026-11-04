@@ -1,6 +1,7 @@
 //! Scaffold templates for `moth new html`.
 //!
-//! WHAT: Owns the generated content for `config.moth`, `src/@page.moth`, and `.gitignore`.
+//! WHAT: Owns the generated content for `config.moth`, the root-level `@page.moth`, and
+//!       `.gitignore`.
 //! WHY: Centralises template strings so they are not scattered through write logic.
 
 /// Escape a string for use in a Moth config string literal.
@@ -11,27 +12,21 @@ fn escape_moth_string_literal(value: &str) -> String {
 }
 
 /// Generate the content for `config.moth`.
+///
+/// The scaffold always writes an explicit valid project name so the created directory has a
+/// stable identity even though directory compilation does not require a config file.
 pub fn config_template(project_name: &str) -> String {
     let escaped = escape_moth_string_literal(project_name);
     format!(
-        r#"version #Config of String = "0.1.0"
-project #= (
+        r#"project #= (
     name = "{escaped}",
-    entry_root = "src",
-    version = version,
-    author = "",
-    license = "MIT",
 )
-html #= (
-    page_url_style = "trailing_slash",
-    redirect_index_html = true,
-    html_lang = "en",
-)
+html #= ()
 "#
     )
 }
 
-/// Return the exact starter content for `src/@page.moth`.
+/// Return the exact starter content for the root-level `@page.moth`.
 pub fn page_template() -> &'static str {
     r#"page_title #= "Welcome"
 page_head #= [$html:
@@ -57,10 +52,10 @@ page_head #= [$html:
 
 /// Return the default `.gitignore` content for a new HTML project.
 pub fn gitignore_template() -> &'static str {
-    "# Moth development output\n/dev\n\n# OS/editor noise\n.DS_Store\n.vscode/\n.idea/\n"
+    "# Moth generated output\n/_dev\n/_release\n\n# OS/editor noise\n.DS_Store\n.vscode/\n.idea/\n"
 }
 
 /// Return the block appended to an existing `.gitignore` when it is missing.
 pub fn gitignore_append_block() -> &'static str {
-    "\n# Moth\n/dev\n"
+    "\n# Moth generated output\n/_dev\n/_release\n"
 }

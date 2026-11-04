@@ -116,8 +116,6 @@ define_stable_reason_keys! {
 
     InvalidConfigCode => {
         &InvalidConfigCode::MissingKey => "invalid_config.missing_key",
-        &InvalidConfigCode::MissingConfigFile => "invalid_config.missing_config_file",
-        &InvalidConfigCode::MissingProjectRecord => "invalid_config.missing_project_record",
         &InvalidConfigCode::MissingActiveBuilderSection => "invalid_config.missing_active_builder_section",
         &InvalidConfigCode::DuplicateKey => "invalid_config.duplicate_key",
         &InvalidConfigCode::FunctionUnsupported => "invalid_config.function_unsupported",
@@ -166,7 +164,6 @@ define_stable_reason_keys! {
         &InvalidConfigCode::DuplicateHtmlOutputPath => "invalid_config.duplicate_html_output_path",
         &InvalidConfigCode::ResourceOutputPathCollision => "invalid_config.resource_output_path_collision",
         &InvalidConfigCode::ResourceOutputPathReserved => "invalid_config.resource_output_path_reserved",
-        &InvalidConfigCode::ConfiguredEntryRootMissing => "invalid_config.configured_entry_root_missing",
         &InvalidConfigCode::EntryRootPackagePrefixCollision => "invalid_config.entry_root_package_prefix_collision",
         &InvalidConfigCode::SourcePackageMissingRoot => "invalid_config.source_package_missing_root",
         &InvalidConfigCode::SourcePackageMultipleRoots => "invalid_config.source_package_multiple_roots",
@@ -186,8 +183,8 @@ define_stable_reason_keys! {
         &InvalidConfigCode::InvalidOutputFolderCurrentDirectory => "invalid_config.invalid_output_folder.current_directory",
         &InvalidConfigCode::InvalidOutputFolderInvalidPathComponentWithoutFolder
         | &InvalidConfigCode::InvalidOutputFolderInvalidPathComponentWithFolder => "invalid_config.invalid_output_folder.invalid_path_component",
-        &InvalidConfigCode::InvalidOutputFolderInsideOrEqualToEntryRootWithoutFolder
-        | &InvalidConfigCode::InvalidOutputFolderInsideOrEqualToEntryRootWithFolder => "invalid_config.invalid_output_folder.inside_or_equal_to_entry_root",
+        &InvalidConfigCode::InvalidOutputFolderVisiblePathWithoutFolder
+        | &InvalidConfigCode::InvalidOutputFolderVisiblePathWithFolder => "invalid_config.invalid_output_folder.visible_path",
         &InvalidConfigCode::InvalidOutputFolderResolvesOutsideProjectRootWithoutFolder
         | &InvalidConfigCode::InvalidOutputFolderResolvesOutsideProjectRootWithFolder => "invalid_config.invalid_output_folder.resolves_outside_project_root",
         &InvalidConfigCode::OutputFoldersNotDistinct => "invalid_config.output_folders_not_distinct",
@@ -199,7 +196,7 @@ define_stable_reason_keys! {
         &InvalidConfigCode::InvalidArtefactOutputPathParentDirectorySegment => "invalid_config.invalid_artefact_output_path.parent_directory_segment",
         &InvalidConfigCode::InvalidArtefactOutputPathCurrentDirectory => "invalid_config.invalid_artefact_output_path.current_directory",
         &InvalidConfigCode::InvalidArtefactOutputPathInvalidPathComponent => "invalid_config.invalid_artefact_output_path.invalid_path_component",
-        &InvalidConfigCode::InvalidArtefactOutputPathInsideOrEqualToEntryRoot => "invalid_config.invalid_artefact_output_path.inside_or_equal_to_entry_root",
+        &InvalidConfigCode::InvalidArtefactOutputPathVisiblePath => "invalid_config.invalid_artefact_output_path.visible_path",
         &InvalidConfigCode::InvalidArtefactOutputPathResolvesOutsideProjectRoot => "invalid_config.invalid_artefact_output_path.resolves_outside_project_root",
     },
 
@@ -356,6 +353,8 @@ define_stable_reason_keys! {
         &InvalidCompileTimePathCode::EscapesModuleBoundary => "invalid_compile_time_path.escapes_module_boundary",
         &InvalidCompileTimePathCode::EscapesSymlink => "invalid_compile_time_path.escapes_symlink",
         &InvalidCompileTimePathCode::EscapesProjectRoot => "invalid_compile_time_path.escapes_project_root",
+        &InvalidCompileTimePathCode::HiddenPath => "invalid_compile_time_path.hidden_path",
+        &InvalidCompileTimePathCode::ReservedConfigFile => "invalid_compile_time_path.reserved_config_file",
     },
 
     InvalidTypeAnnotationReason => {

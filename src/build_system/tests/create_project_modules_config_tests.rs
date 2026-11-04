@@ -55,7 +55,7 @@ fn parses_config_constant_declarations() {
 
     fs::write(
         &config_path,
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    version = \"1.2.3\",\n    template_const_loop_iteration_limit = 10001,\n)\nhtml #= (\n    page_url_style = \"trailing_slash\",\n    redirect_index_html = true,\n)\n",
+        "project #= (\n    name = \"docs\",\n    version = \"1.2.3\",\n    template_const_loop_iteration_limit = 10001,\n)\nhtml #= (\n    page_url_style = \"trailing_slash\",\n    redirect_index_html = true,\n)\n",
     )
     .expect("should write config");
 
@@ -64,7 +64,6 @@ fn parses_config_constant_declarations() {
     parse_project_config_for_test_with_html_keys(&mut config, &config_path, &style_directives)
         .expect("config should parse");
 
-    assert_eq!(config.entry_root, PathBuf::from("src"));
     assert_eq!(config.project_name, "docs");
     assert_eq!(config.version, Some("1.2.3".to_owned()));
     assert_eq!(
@@ -77,12 +76,12 @@ fn parses_config_constant_declarations() {
     );
     assert_eq!(
         config.output_roots.dev_output.as_deref(),
-        Some("dev"),
+        Some("_dev"),
         "the html section's schema defaults should own the output roots"
     );
     assert_eq!(
         config.output_roots.release_output.as_deref(),
-        Some("release")
+        Some("_release")
     );
     assert_eq!(config.template_const_loop_iteration_limit, 10001);
 }
@@ -108,14 +107,14 @@ fn diagnostic_limits_reload_resets_state() {
     };
 
     write_config(
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_module = 7,\n    max_errors_per_project = 11,\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n        max_errors_per_module = 7,\n    max_errors_per_project = 11,\n)\nhtml #= ()\n",
     );
     load_config(&mut config);
     assert_eq!(config.max_errors_per_module, NonZeroU32::new(7));
     assert_eq!(config.max_errors_per_project, NonZeroU32::new(11));
 
     // Omitting both settings restores their defaults instead of keeping the reloaded values.
-    write_config("project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n");
+    write_config("project #= (\n    name = \"docs\",\n)\nhtml #= ()\n");
     load_config(&mut config);
     assert_eq!(config.max_errors_per_module, NonZeroU32::new(5));
     assert_eq!(config.max_errors_per_project, NonZeroU32::new(30));
@@ -123,14 +122,14 @@ fn diagnostic_limits_reload_resets_state() {
     // An explicit absence disables one count and leaves the other setting alone. The current
     // grouped record has no field type context, so `none` arrives through a typed `I32?` constant.
     write_config(
-        "module_error_limit #I32? = none\nproject #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_module = module_error_limit,\n)\nhtml #= ()\n",
+        "module_error_limit #I32? = none\nproject #= (\n    name = \"docs\",\n        max_errors_per_module = module_error_limit,\n)\nhtml #= ()\n",
     );
     load_config(&mut config);
     assert_eq!(config.max_errors_per_module, None);
     assert_eq!(config.max_errors_per_project, NonZeroU32::new(30));
 
     write_config(
-        "project_error_limit #I32? = none\nproject #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = project_error_limit,\n)\nhtml #= ()\n",
+        "project_error_limit #I32? = none\nproject #= (\n    name = \"docs\",\n        max_errors_per_project = project_error_limit,\n)\nhtml #= ()\n",
     );
     load_config(&mut config);
     assert_eq!(config.max_errors_per_module, NonZeroU32::new(5));
@@ -138,7 +137,7 @@ fn diagnostic_limits_reload_resets_state() {
 
     // A rejected reload installs neither limit, even though its other value is acceptable.
     write_config(
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_module = 0,\n    max_errors_per_project = 9,\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n        max_errors_per_module = 0,\n    max_errors_per_project = 9,\n)\nhtml #= ()\n",
     );
     let result =
         parse_project_config_for_test_with_html_keys(&mut config, &config_path, &style_directives);
@@ -156,7 +155,7 @@ fn diagnostic_limits_reload_resets_state() {
     assert_eq!(config.max_errors_per_project, NonZeroU32::new(30));
 
     // The next valid reload starts from the defaults again.
-    write_config("project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n");
+    write_config("project #= (\n    name = \"docs\",\n)\nhtml #= ()\n");
     load_config(&mut config);
     assert_eq!(config.max_errors_per_module, NonZeroU32::new(5));
     assert_eq!(config.max_errors_per_project, NonZeroU32::new(30));
@@ -167,12 +166,12 @@ fn config_span_tables_finalize_for_success_and_diagnosed_results() {
     let cases = [
         (
             "successful",
-            "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+            "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
             false,
         ),
         (
             "diagnosed",
-            "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    release_output = \"src/out\",\n)\n",
+            "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    release_output = \"src/out\",\n)\n",
             true,
         ),
     ];
@@ -180,7 +179,6 @@ fn config_span_tables_finalize_for_success_and_diagnosed_results() {
     for (label, config_source, diagnosed) in cases {
         let _temp = tempfile::tempdir().expect("should create temporary project");
         let root = _temp.path().to_path_buf();
-        fs::create_dir(root.join("src")).expect("should create the source directory");
         let config_path = root.join(settings::CONFIG_FILE_NAME);
         let long_output_folder = format!("src/{}", "x".repeat(1100));
         let source = if diagnosed {
@@ -222,7 +220,7 @@ fn config_span_tables_finalize_for_success_and_diagnosed_results() {
             let failure = assert_project_config_identity(
                 failure,
                 "MOTH-CONFIG-0001",
-                Some("invalid_config.invalid_output_folder.inside_or_equal_to_entry_root"),
+                Some("invalid_config.invalid_output_folder.visible_path"),
             );
             assert_primary_span_text(&failure, &config_path, &format!("\"{long_output_folder}\""));
             None
@@ -291,22 +289,19 @@ fn loads_canonical_config_file_from_project_root() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::create_dir_all(root.join("src/alpha")).expect("should create first module directory");
-    fs::create_dir_all(root.join("src/beta")).expect("should create second module directory");
+    fs::create_dir_all(root.join("alpha")).expect("should create first module directory");
+    fs::create_dir_all(root.join("beta")).expect("should create second module directory");
     fs::write(
-        root.join("src/alpha/@alpha.moth"),
+        root.join("alpha/@alpha.moth"),
         "@drawing.js as drawing\nvalue = 1\n",
     )
     .expect("should write first module root");
-    fs::write(
-        root.join("src/alpha/drawing.js"),
-        "export function draw() {}\n",
-    )
-    .expect("should write first module provider");
-    fs::write(root.join("src/beta/@beta.moth"), "").expect("should write second module root");
+    fs::write(root.join("alpha/drawing.js"), "export function draw() {}\n")
+        .expect("should write first module provider");
+    fs::write(root.join("beta/@beta.moth"), "").expect("should write second module root");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -336,7 +331,6 @@ fn loads_canonical_config_file_from_project_root() {
     .unwrap_or_else(|_| panic!("canonical config should load"));
 
     assert_eq!(config.config_file_path(), root.join("config.moth"));
-    assert_eq!(config.entry_root, PathBuf::from("src"));
 
     let mut project_source_files = None;
     let mut warning_owner =
@@ -401,11 +395,11 @@ fn loads_canonical_config_file_from_project_root() {
     let canonical_config = fs::canonicalize(root.join(settings::CONFIG_FILE_NAME))
         .expect("config should canonicalize");
     let canonical_alpha =
-        fs::canonicalize(root.join("src/alpha/@alpha.moth")).expect("alpha should canonicalize");
+        fs::canonicalize(root.join("alpha/@alpha.moth")).expect("alpha should canonicalize");
     let canonical_beta =
-        fs::canonicalize(root.join("src/beta/@beta.moth")).expect("beta should canonicalize");
+        fs::canonicalize(root.join("beta/@beta.moth")).expect("beta should canonicalize");
     let canonical_alpha_provider =
-        fs::canonicalize(root.join("src/alpha/drawing.js")).expect("provider should canonicalize");
+        fs::canonicalize(root.join("alpha/drawing.js")).expect("provider should canonicalize");
     assert_eq!(
         project_source_files
             .get_by_canonical_path(&canonical_config)
@@ -447,7 +441,7 @@ fn applies_grouped_project_record_to_config_fields() {
 
     fs::write(
         &config_path,
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    version = \"1.2.3\",\n    custom_channel = \"alpha\",\n)\n",
+        "project #= (\n    name = \"docs\",\n    version = \"1.2.3\",\n    custom_channel = \"alpha\",\n)\n",
     )
     .expect("should write config");
 
@@ -457,7 +451,6 @@ fn applies_grouped_project_record_to_config_fields() {
         .expect("a grouped project record should parse and apply");
 
     assert_eq!(config.project_name, "docs");
-    assert_eq!(config.entry_root, PathBuf::from("src"));
     assert_eq!(config.version, Some("1.2.3".to_owned()));
 }
 
@@ -485,12 +478,10 @@ fn grouped_project_record_accepts_declare_first_helper_records() {
 }
 
 #[test]
-fn directory_projects_require_config_moth() {
+fn directory_projects_default_a_missing_config() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-
-    let src = root.join("src");
-    fs::create_dir_all(&src).expect("should create a directory project entry root");
+    let root = _temp.path().join("docs");
+    fs::create_dir_all(&root).expect("should create a directory project root");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -505,22 +496,58 @@ fn directory_projects_require_config_moth() {
     let _path_fork = PathInternerFork::empty();
     let mut source_builder = Some(SourceDatabaseBuilder::new(SourceDatabase::empty()));
 
-    let failure = project_config_failure_result(
-        load_project_config(
-            &mut config,
-            &services,
-            &mut source_builder,
-            &mut string_table,
-        )
-        .expect_err("a directory project without config.moth must fail"),
-        source_builder.take(),
-        &string_table,
+    let outputs = load_project_config(
+        &mut config,
+        &services,
+        &mut source_builder,
+        &mut string_table,
+    )
+    .unwrap_or_else(|_| panic!("a directory project without config.moth uses generated defaults"))
+    .expect("directory output defaults should validate");
+    assert_eq!(config.project_name, "docs");
+    assert_eq!(config.version, None, "no implicit version may be invented");
+    assert_eq!(outputs.dev.resolved_path, root.join("_dev"));
+    assert_eq!(outputs.release.resolved_path, root.join("_release"));
+}
+
+#[test]
+fn directory_project_with_invalid_name_requires_explicit_project_name() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().join("my-site");
+    fs::create_dir_all(&root).expect("should create a directory project root");
+
+    let mut config = Config::new(root);
+    let style_directives = test_style_directives();
+    let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
+    let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let services = ProjectConfigParseServices {
+        style_directives: &style_directives,
+        frontend_surface: &frontend_surface,
+        build_config_inputs: &build_config_inputs,
+    };
+    let mut string_table = StringTable::new();
+    let mut source_builder = Some(SourceDatabaseBuilder::new(SourceDatabase::empty()));
+
+    let failure = load_project_config(
+        &mut config,
+        &services,
+        &mut source_builder,
+        &mut string_table,
+    )
+    .expect_err("a hyphenated directory name is not a valid project identifier");
+    let failure = match failure {
+        crate::build_system::project_config::ProjectConfigFailure::Prepared(failure) => failure,
+        _ => panic!("expected a prepared config diagnostic"),
+    };
+    let crate::compiler_frontend::compiler_messages::PreparedFailure::Diagnosed(batch) = failure
+    else {
+        panic!("an invalid directory name is a user diagnostic");
+    };
+    assert_eq!(
+        config.project_name, "",
+        "the directory name is never rewritten"
     );
-    let _ = assert_project_config_identity(
-        failure,
-        "MOTH-CONFIG-0001",
-        Some("invalid_config.missing_config_file"),
-    );
+    let _ = batch;
 }
 
 #[test]
@@ -569,48 +596,46 @@ fn rejects_direct_canonical_config_dependency_paths() {
 }
 
 #[test]
-fn rejects_unknown_config_key() {
+fn hidden_section_output_inside_source_root_is_accepted_and_visible_output_is_rejected() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
     let config_path = root.join(settings::CONFIG_FILE_NAME);
-
-    fs::write(&config_path, "custom_key #= \"custom_value\"\n").expect("should write config");
-
-    let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
-    let failure = parse_project_config_for_test(&mut config, &config_path, &style_directives);
-    let _ = assert_project_config_identity(
-        failure,
-        "MOTH-CONFIG-0001",
-        Some("invalid_config.missing_project_record"),
-    );
-}
 
-#[test]
-fn rejects_section_output_inside_or_equal_to_entry_root() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
+    let write_config = |release_output: &str| {
+        fs::write(
+            &config_path,
+            format!(
+                "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    release_output = \"{release_output}\",\n)\n"
+            ),
+        )
+        .expect("should write config");
+    };
 
-    let config_path = root.join(settings::CONFIG_FILE_NAME);
-
-    // `entry_root` covers `src`, so an html `release_output` of `src/out` is inside the
-    // entry root. The builder surface is required because the section is the only html
-    // authoring path.
-    fs::write(
+    // A hidden output root inside the selected source root is allowed.
+    write_config("generated/_out");
+    let mut config = Config::new(root.clone());
+    let _ = successful_compilation_value(parse_project_config_for_test_with_html_keys(
+        &mut config,
         &config_path,
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    release_output = \"src/out\",\n)\n",
-    )
-    .expect("should write config");
+        &style_directives,
+    ));
+    assert_eq!(
+        config.output_roots.release_output.as_deref(),
+        Some("generated/_out")
+    );
 
+    // A visible output root inside the same source root would mix generated files into
+    // discovery, so it remains an authored config error.
+    write_config("generated/out");
     let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
     let failure =
         parse_project_config_for_test_with_html_keys(&mut config, &config_path, &style_directives);
     let boundary = assert_project_config_identity(
         failure,
         "MOTH-CONFIG-0001",
-        Some("invalid_config.invalid_output_folder.inside_or_equal_to_entry_root"),
+        Some("invalid_config.invalid_output_folder.visible_path"),
     );
     assert!(
         diagnosed_reports(&boundary)
@@ -661,7 +686,7 @@ fn parses_config_explicit_hash_binding_mode() {
 
     fs::write(
         &config_path,
-        "version #String = \"1.0\"\nproject #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    version = version,\n)\n",
+        "version #String = \"1.0\"\nproject #= (\n    name = \"docs\",\n    version = version,\n)\n",
     )
     .expect("should write config");
 
@@ -670,7 +695,6 @@ fn parses_config_explicit_hash_binding_mode() {
     parse_project_config_for_test(&mut config, &config_path, &style_directives)
         .expect("config should parse");
 
-    assert_eq!(config.entry_root, PathBuf::from("src"));
     assert_eq!(config.project_name, "docs");
     assert_eq!(config.version, Some("1.0".to_owned()));
 }
@@ -704,11 +728,11 @@ fn rejects_config_named_support_type_declarations() {
     let cases = [
         (
             "struct",
-            "SupportType = |\n   value String,\n|\nproject #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+            "SupportType = |\n   value String,\n|\nproject #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
         ),
         (
             "choice",
-            "Mode ::\n    Ready,\n;\nproject #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+            "Mode ::\n    Ready,\n;\nproject #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
         ),
         (
             "alias",
@@ -838,11 +862,9 @@ fn project_local_package_folder_does_not_register_source_metadata() {
     let root = _temp.path().to_path_buf();
     let package_root = root.join("packages/widgets");
     fs::create_dir_all(&package_root).expect("should create project-local package");
-    fs::create_dir_all(root.join("src")).expect("should create entry root");
-    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("@page.moth"), "x ~= 1\n").expect("should write entry");
 
-    let mut config = Config::new(root.clone());
-    config.entry_root = PathBuf::from("src");
+    let config = Config::new(root.clone());
 
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -861,16 +883,16 @@ fn project_local_package_folder_does_not_register_source_metadata() {
 }
 
 #[test]
-fn ordinary_package_folder_does_not_collide_with_entry_root() {
+fn ordinary_package_folder_does_not_collide_with_source_packages() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
-    fs::create_dir_all(root.join("src/helper")).expect("should create src/helper");
+    fs::create_dir_all(root.join("helper")).expect("should create helper");
     fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
-    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("lib/helper/@mod.moth"), "foo #= 1\n").expect("should write root");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -905,7 +927,7 @@ fn accepts_config_const_record_field_projection() {
 
     fs::write(
         &config_path,
-        "Defaults #= (\n    entry_root = \"src\",\n)\n\nproject #= (\n    name = \"docs\",\n    entry_root = Defaults.entry_root,\n)\n",
+        "Defaults #= (\n    version = \"1.2.3\",\n)\n\nproject #= (\n    name = \"docs\",\n    version = Defaults.version,\n)\n",
     )
     .expect("should write config");
 
@@ -915,9 +937,9 @@ fn accepts_config_const_record_field_projection() {
         .expect("config with const-record field projection should succeed");
 
     assert_eq!(
-        config.entry_root,
-        PathBuf::from("src"),
-        "entry_root should resolve through const-record field projection"
+        config.version,
+        Some("1.2.3".to_owned()),
+        "version should resolve through const-record field projection"
     );
 }
 
@@ -925,14 +947,12 @@ fn accepts_config_const_record_field_projection() {
 fn malformed_dependency_path_keeps_precise_location_during_module_discovery() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    let src = root.join("src");
-    fs::create_dir_all(&src).expect("should create src dir");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@core//math sin\n#[:ok]\n")
+    fs::write(root.join("@page.moth"), "@core//math sin\n#[:ok]\n")
         .expect("should write malformed entry");
 
     let mut config = Config::new(root.clone());
@@ -1119,7 +1139,7 @@ fn accepts_config_scalar_private_helper() {
 
     fs::write(
         &config_path,
-        "helper #= \"src\"\nproject #= (\n    name = \"docs\",\n    entry_root = helper,\n)\n",
+        "helper #= \"1.2.3\"\nproject #= (\n    name = \"docs\",\n    version = helper,\n)\n",
     )
     .expect("should write config");
 
@@ -1128,7 +1148,7 @@ fn accepts_config_scalar_private_helper() {
     parse_project_config_for_test(&mut config, &config_path, &style_directives)
         .expect("scalar helpers should fold into the project record");
 
-    assert_eq!(config.entry_root, PathBuf::from("src"));
+    assert_eq!(config.version, Some("1.2.3".to_owned()));
 }
 
 #[test]
@@ -1195,7 +1215,7 @@ fn rejects_core_string_key_with_bool_value() {
 
     fs::write(
         &config_path,
-        "project #= (\n    name = \"docs\",\n    entry_root = true,\n)\n",
+        "project #= (\n    name = \"docs\",\n    version = true,\n)\n",
     )
     .expect("should write config");
 
@@ -1207,7 +1227,10 @@ fn rejects_core_string_key_with_bool_value() {
         "MOTH-CONFIG-0001",
         Some("invalid_config.invalid_config_value_shape"),
     );
-    assert_eq!(first_project_config_string(&boundary, 0), "a string value");
+    assert_eq!(
+        first_project_config_string(&boundary, 0),
+        "a string value or none"
+    );
 }
 
 #[test]
@@ -1244,7 +1267,7 @@ fn accepts_config_local_reference_after_shape_enforcement() {
 
     fs::write(
         &config_path,
-        "version #= \"0.2.0\"\nproject #= (\n    name = \"docs\",\n    entry_root = version,\n)\n",
+        "version #= \"0.2.0\"\nproject #= (\n    name = \"docs\",\n    version = version,\n)\n",
     )
     .expect("should write config");
 
@@ -1254,9 +1277,9 @@ fn accepts_config_local_reference_after_shape_enforcement() {
         .expect("config with local const reference should succeed");
 
     assert_eq!(
-        config.entry_root,
-        PathBuf::from("0.2.0"),
-        "entry_root should be set through const reference"
+        config.version,
+        Some("0.2.0".to_owned()),
+        "version should be set through const reference"
     );
 }
 
@@ -1337,7 +1360,7 @@ fn authored_config_resolver_uses_canonical_parent_for_noncanonical_spelling() {
     let config_path = root.join("config.moth");
     fs::write(
         &config_path,
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -1348,7 +1371,7 @@ fn authored_config_resolver_uses_canonical_parent_for_noncanonical_spelling() {
     parse_project_config_for_test(&mut config, &non_canonical_config_path, &style_directives)
         .expect("non-canonical authored spelling should resolve and apply config");
 
-    assert_eq!(config.entry_root, PathBuf::from("src"));
+    assert_eq!(config.project_name, "docs");
 }
 
 #[test]
@@ -1450,7 +1473,7 @@ fn entry_root_requires_at_least_one_root_entry_file() {
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 

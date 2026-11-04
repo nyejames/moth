@@ -35,12 +35,6 @@ pub(crate) fn invalid_config_message(
 
     match reason {
         InvalidConfigReason::MissingKey => "Config constant is missing a key name.".to_owned(),
-        InvalidConfigReason::MissingConfigFile => {
-            "Directory projects require a `config.moth` file at the project root.".to_owned()
-        }
-        InvalidConfigReason::MissingProjectRecord => {
-            "`config.moth` requires exactly one grouped `project` record.".to_owned()
-        }
         InvalidConfigReason::MissingActiveBuilderSection { section } => {
             format!(
                 "`config.moth` requires the active builder section '{}', even when it is empty.",
@@ -205,7 +199,7 @@ pub(crate) fn invalid_config_message(
             string_table.resolve(*expected)
         ),
         InvalidConfigReason::MissingHtmlHomepage { entry_root } => format!(
-            "HTML project builds require an artifact-producing module root at the configured entry root '{}'.",
+            "HTML project builds require an artifact-producing normal module root in the selected project directory '{}'.",
             string_table.resolve(*entry_root),
         ),
         InvalidConfigReason::DuplicateHtmlOutputPath {
@@ -247,10 +241,6 @@ pub(crate) fn invalid_config_message(
             string_table.resolve(*output_path),
             *reason,
         ),
-        InvalidConfigReason::ConfiguredEntryRootMissing { entry_root } => format!(
-            "Configured entry root '{}' does not exist.",
-            string_table.resolve(*entry_root),
-        ),
         InvalidConfigReason::EntryRootPackagePrefixCollision {
             prefix,
             entry_folder,
@@ -282,7 +272,7 @@ pub(crate) fn invalid_config_message(
             )
         }
         InvalidConfigReason::NoRootModuleEntries { entry_root } => format!(
-            "No root module entries were found under '{}'. Expected at least one '@*.moth' file under the configured entry root.",
+            "No root module entries were found under '{}'. Expected at least one '@*.moth' file in the selected project directory.",
             string_table.resolve(*entry_root),
         ),
         InvalidConfigReason::MultipleModuleRootFiles {
@@ -436,10 +426,10 @@ fn invalid_output_folder_message(
                 "'{key_label}' '{name}' contains a Windows-incompatible or otherwise invalid path component."
             )
         }
-        InvalidOutputFolderReason::InsideOrEqualToEntryRoot => {
+        InvalidOutputFolderReason::VisibleDirectoryOutputPath => {
             let name = folder_name.unwrap_or_else(|| "<empty>".to_owned());
             format!(
-                "'{key_label}' '{name}' must be outside the source entry root. Configure a distinct output folder."
+                "'{key_label}' '{name}' must stay hidden from source discovery. Use a single name such as '_dev' or include a directory component starting with '_'."
             )
         }
         InvalidOutputFolderReason::ResolvesOutsideProjectRoot => {
@@ -478,8 +468,8 @@ fn invalid_artefact_output_path_message(
         InvalidOutputFolderReason::InvalidPathComponent => format!(
             "{artefact_kind} output path '{output_path}' contains a Windows-incompatible or otherwise invalid path component."
         ),
-        InvalidOutputFolderReason::InsideOrEqualToEntryRoot => format!(
-            "{artefact_kind} output path '{output_path}' must be outside the source entry root."
+        InvalidOutputFolderReason::VisibleDirectoryOutputPath => format!(
+            "{artefact_kind} output path '{output_path}' must include a directory component starting with '_'."
         ),
         InvalidOutputFolderReason::ResolvesOutsideProjectRoot => format!(
             "{artefact_kind} output path '{output_path}' must resolve strictly inside the project root and may not escape through a symlink."
@@ -572,6 +562,12 @@ pub(crate) fn invalid_compile_time_path_message(
         ),
         InvalidCompileTimePathReason::EscapesProjectRoot => format!(
             "Compile-time path '{path_text}' escapes the project root. Use a path inside the project root or move the target into the project."
+        ),
+        InvalidCompileTimePathReason::HiddenPath => format!(
+            "Compile-time path '{path_text}' enters a directory whose name starts with '_'. Such directories are excluded from the project's source tree, so they cannot be imported or used as resources."
+        ),
+        InvalidCompileTimePathReason::ReservedConfigFile => format!(
+            "Compile-time path '{path_text}' names 'config.moth'. That file is a build-owned configuration source, not a module helper, so it cannot be imported or used as a resource."
         ),
     }
 }

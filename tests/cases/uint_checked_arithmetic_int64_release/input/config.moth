@@ -1,5 +1,3 @@
 project #= (
-    name = "uint_checked_arithmetic_int64_release",
-    entry_root = "src",
-)
+    name = "uint_checked_arithmetic_int64_release")
 html #= ()

@@ -88,7 +88,7 @@ fn registered_source_database_retains_exact_text_for_multiple_compiled_sources()
     fs::create_dir_all(dir.join("src/about")).expect("should create nested module");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"snapshot\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"snapshot\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     let root_source = "title String = \"home\"\n";
@@ -147,7 +147,7 @@ fn selected_preload_invalid_utf8_is_a_source_diagnostic() {
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"selected_failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"selected_failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     let selected_path = dir.join("src/@page.moth");
@@ -193,7 +193,7 @@ fn unselected_preload_read_failure_stays_inert() {
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"unselected_failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"unselected_failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("src/@page.moth"), "title String = \"home\"\n")
@@ -261,7 +261,7 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
     fs::create_dir_all(dir.join("src")).expect("should create entry root");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("src/@page.moth"), "value = 1\n").expect("should write project entry");
@@ -908,9 +908,7 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
     fs::create_dir_all(dir_b.join("src")).expect("should create source root");
     fs::write(
         dir_b.join("config.moth"),
-        format!(
-            "project #= (\n    name = \"{project_b_name}\",\n    entry_root = \"src\",\n)\nhtml #= ()\n"
-        ),
+        format!("project #= (\n    name = \"{project_b_name}\",\n)\nhtml #= ()\n"),
     )
     .expect("should write config");
     fs::write(dir_b.join("src/@page.moth"), [b'o', b'k', 0xff, b'\n'])
@@ -920,9 +918,7 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
     fs::create_dir_all(dir_unrelated.join("src")).expect("should create unrelated source root");
     fs::write(
         dir_unrelated.join("config.moth"),
-        format!(
-            "project #= (\n    name = \"{unrelated_project_name}\",\n    entry_root = \"src\",\n)\nhtml #= ()\n"
-        ),
+        format!("project #= (\n    name = \"{unrelated_project_name}\",\n)\nhtml #= ()\n"),
     )
     .expect("should write unrelated config");
     fs::write(
@@ -1096,7 +1092,7 @@ fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
     fs::create_dir_all(dir.join("src/components")).expect("should create dependency module root");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     // The entry is HTML-selected by its authored root fragment and imports the public value.

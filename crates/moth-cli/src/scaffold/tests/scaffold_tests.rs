@@ -7,8 +7,8 @@
 //! protects the no-write and force command boundaries.
 
 use crate::scaffold::files::{
-    SCAFFOLD_DIRECTORIES, existing_contains_dev_block, find_scaffold_conflicts,
-    run_preflight_checks, write_scaffold,
+    existing_contains_moth_output_block, find_scaffold_conflicts, run_preflight_checks,
+    write_scaffold,
 };
 use crate::scaffold::prompt_tests::ScriptedPrompt;
 use crate::scaffold::start_page_scaffolding;
@@ -43,21 +43,18 @@ fn find_scaffold_conflicts_reports_exact_owned_set_and_excludes_directories_and_
     let project_dir = temp.path().to_path_buf();
 
     // Scaffold-owned files are the exact conflict set, in declared order.
-    for file in ["config.moth", "src/@page.moth"] {
-        if let Some(parent) = project_dir.join(file).parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
+    for file in ["config.moth", "@page.moth"] {
         fs::write(project_dir.join(file), b"old").unwrap();
     }
     assert_eq!(
         find_scaffold_conflicts(&project_dir),
-        vec!["config.moth", "src/@page.moth",]
+        vec!["config.moth", "@page.moth",]
     );
 
-    // Scaffold-owned directories and a user .gitignore are never conflicts.
+    // Generated output directories and a user .gitignore are never conflicts.
     let clean = tempfile::tempdir().unwrap();
     let clean_dir = clean.path().to_path_buf();
-    for dir in SCAFFOLD_DIRECTORIES {
+    for dir in ["_dev", "_release"] {
         fs::create_dir_all(clean_dir.join(dir)).unwrap();
     }
     fs::write(clean_dir.join(".gitignore"), b"old").unwrap();
@@ -188,16 +185,14 @@ fn creates_full_default_scaffold_and_reports_every_path() {
 
     // Every scaffold-owned path exists on disk.
     assert!(project_dir.join("config.moth").exists());
-    assert!(project_dir.join("src/@page.moth").exists());
-    assert!(!project_dir.join("lib").exists());
-    assert!(!project_dir.join("dev/.moth_manifest").exists());
-    assert!(!project_dir.join("release/.moth_manifest").exists());
-    assert!(project_dir.join(".gitignore").exists());
+    assert!(project_dir.join("@page.moth").exists());
+    assert!(!project_dir.join("src").exists());
+    assert!(!project_dir.join("_dev").exists());
+    assert!(!project_dir.join("_release").exists());
 
     assert!(report.created.contains(&PathBuf::from("config.moth")));
-    assert!(report.created.contains(&PathBuf::from("src")));
-    assert!(report.created.contains(&PathBuf::from("src/@page.moth")));
-    assert!(!report.created.contains(&PathBuf::from("lib")));
+    assert!(report.created.contains(&PathBuf::from("@page.moth")));
+    assert!(!report.created.contains(&PathBuf::from("src")));
     assert!(report.created.contains(&PathBuf::from(".gitignore")));
     assert!(report.replaced.is_empty());
     assert!(report.updated.is_empty());
@@ -212,12 +207,13 @@ fn generated_files_exactly_match_templates() {
 
     write_scaffold(&target, false, &mut prompt).unwrap();
 
+    let config = fs::read_to_string(project_dir.join("config.moth")).unwrap();
+    assert!(config.contains("name = \"Test Site\""));
+    assert!(!config.contains("version"));
+    assert!(!config.contains("entry_root"));
+    assert_eq!(config, start_page_scaffolding::config_template("Test Site"));
     assert_eq!(
-        fs::read_to_string(project_dir.join("config.moth")).unwrap(),
-        start_page_scaffolding::config_template("Test Site")
-    );
-    assert_eq!(
-        fs::read_to_string(project_dir.join("src/@page.moth")).unwrap(),
+        fs::read_to_string(project_dir.join("@page.moth")).unwrap(),
         start_page_scaffolding::page_template()
     );
 }
@@ -251,8 +247,8 @@ fn gitignore_is_created_when_absent_and_confirmed_or_skipped_when_declined() {
 }
 
 #[test]
-fn gitignore_appends_when_present_without_dev_block_or_skips_when_declined() {
-    // Existing .gitignore without a /dev block: confirmation appends the block.
+fn gitignore_appends_when_present_without_moth_output_block_or_skips_when_declined() {
+    // Existing .gitignore without the Moth output rules: confirmation appends the block.
     let temp = tempfile::tempdir().unwrap();
     let project_dir = temp.path().join("project");
     fs::create_dir(&project_dir).unwrap();
@@ -263,11 +259,12 @@ fn gitignore_appends_when_present_without_dev_block_or_skips_when_declined() {
     let report = write_scaffold(&target, false, &mut prompt).unwrap();
     let content = fs::read_to_string(project_dir.join(".gitignore")).unwrap();
     assert!(content.contains("node_modules/"));
-    assert!(content.contains("# Moth"));
-    assert!(content.contains("/dev"));
+    assert!(content.contains("# Moth generated output"));
+    assert!(content.lines().any(|line| line.trim() == "/_dev"));
+    assert!(content.lines().any(|line| line.trim() == "/_release"));
     assert!(report.updated.contains(&PathBuf::from(".gitignore")));
 
-    // Existing .gitignore without a /dev block: decline leaves it unchanged.
+    // Existing .gitignore without the Moth output rules: decline leaves it unchanged.
     let temp = tempfile::tempdir().unwrap();
     let project_dir = temp.path().join("project");
     fs::create_dir(&project_dir).unwrap();
@@ -284,9 +281,32 @@ fn gitignore_appends_when_present_without_dev_block_or_skips_when_declined() {
 }
 
 #[test]
-fn gitignore_is_skipped_when_dev_block_already_present() {
-    // Both exact /dev and trailing-slash /dev/ forms are recognised as present.
-    for existing in ["/dev\n", "/dev/\n"] {
+fn gitignore_is_updated_when_only_the_old_dev_rule_is_present() {
+    // The old `/dev` rule does not satisfy the pair of current output rules.
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().join("project");
+    fs::create_dir(&project_dir).unwrap();
+    fs::write(project_dir.join(".gitignore"), "/dev\n").unwrap();
+    let target = named_target(project_dir.clone(), "Test Site", true);
+    let mut prompt = ScriptedPrompt::new(vec![String::from("y")]);
+
+    let report = write_scaffold(&target, false, &mut prompt).unwrap();
+    let content = fs::read_to_string(project_dir.join(".gitignore")).unwrap();
+    assert!(content.lines().any(|line| line.trim() == "/dev"));
+    assert!(content.lines().any(|line| line.trim() == "/_dev"));
+    assert!(content.lines().any(|line| line.trim() == "/_release"));
+    assert!(report.updated.contains(&PathBuf::from(".gitignore")));
+}
+
+#[test]
+fn gitignore_is_skipped_when_moth_output_block_already_present() {
+    // Both rules must be present; exact, trailing-slash, and whitespace-padded forms count.
+    for existing in [
+        "/_dev\n/_release\n",
+        "/_dev/\n/_release/\n",
+        "  /_dev  \n  /_release  \n",
+        "noise\n/_dev\nmore\n/_release\n",
+    ] {
         let temp = tempfile::tempdir().unwrap();
         let project_dir = temp.path().join("project");
         fs::create_dir(&project_dir).unwrap();
@@ -322,14 +342,13 @@ fn force_replaces_scaffold_owned_files_only() {
     let temp = tempfile::tempdir().unwrap();
     let project_dir = temp.path().join("project");
     fs::create_dir(&project_dir).unwrap();
-    fs::create_dir(project_dir.join("src")).unwrap();
-    fs::create_dir(project_dir.join("dev")).unwrap();
-    fs::create_dir(project_dir.join("release")).unwrap();
+    fs::create_dir(project_dir.join("_dev")).unwrap();
+    fs::create_dir(project_dir.join("_release")).unwrap();
     fs::write(project_dir.join("config.moth"), b"old config").unwrap();
-    fs::write(project_dir.join("src/@page.moth"), b"old page").unwrap();
-    fs::write(project_dir.join("dev/user-output.js"), b"old dev output").unwrap();
+    fs::write(project_dir.join("@page.moth"), b"old page").unwrap();
+    fs::write(project_dir.join("_dev/user-output.js"), b"old dev output").unwrap();
     fs::write(
-        project_dir.join("release/user-output.js"),
+        project_dir.join("_release/user-output.js"),
         b"old release output",
     )
     .unwrap();
@@ -341,13 +360,13 @@ fn force_replaces_scaffold_owned_files_only() {
     let report = write_scaffold(&target, true, &mut prompt).unwrap();
 
     assert!(report.replaced.contains(&PathBuf::from("config.moth")));
-    assert!(report.replaced.contains(&PathBuf::from("src/@page.moth")));
+    assert!(report.replaced.contains(&PathBuf::from("@page.moth")));
     assert_eq!(
-        fs::read(project_dir.join("dev/user-output.js")).unwrap(),
+        fs::read(project_dir.join("_dev/user-output.js")).unwrap(),
         b"old dev output"
     );
     assert_eq!(
-        fs::read(project_dir.join("release/user-output.js")).unwrap(),
+        fs::read(project_dir.join("_release/user-output.js")).unwrap(),
         b"old release output"
     );
 
@@ -387,21 +406,31 @@ fn write_failure_returns_precise_error() {
 }
 
 #[test]
-fn existing_contains_dev_block_recognizes_exact_rules_and_rejects_near_matches() {
-    // Exact /dev and /dev/ lines, with surrounding whitespace or noise, are present.
-    for present in ["/dev\n", "/dev/\n", "  /dev  \n", "noise\n/dev\nmore\n"] {
-        assert!(existing_contains_dev_block(present), "{present:?}");
+fn existing_contains_moth_output_block_recognizes_exact_rules_and_rejects_near_matches() {
+    // Both rules, with trailing slashes, surrounding whitespace, or noise, are present.
+    for present in [
+        "/_dev\n/_release\n",
+        "/_dev/\n/_release/\n",
+        "  /_dev  \n  /_release  \n",
+        "noise\n/_dev\nmore\n/_release\n",
+    ] {
+        assert!(existing_contains_moth_output_block(present), "{present:?}");
     }
 
-    // Near matches that must not be treated as the Moth /dev rule.
+    // Missing one rule, the old /dev rule, and near matches must not count as present.
     for absent in [
-        "/device\n",
-        "prefix/dev\n",
-        "/dev/**\n",
-        "# /dev\n",
-        "/dev/foo\n",
-        "dev\n",
+        "/_dev\n",
+        "/_release\n",
+        "/dev\n",
+        "/dev\n/_release\n",
+        "/_dev\n/dev\n",
+        "/_device\n/_release\n",
+        "prefix/_dev\n/_release\n",
+        "/_dev/**\n/_release\n",
+        "# /_dev\n/_release\n",
+        "/_dev/foo\n/_release\n",
+        "_dev\n/_release\n",
     ] {
-        assert!(!existing_contains_dev_block(absent), "{absent:?}");
+        assert!(!existing_contains_moth_output_block(absent), "{absent:?}");
     }
 }

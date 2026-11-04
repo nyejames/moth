@@ -1,5 +1,3 @@
 project #= (
-    name = "numeric_range_proof_does_not_widen_validity_rejected",
-    entry_root = "src",
-)
+    name = "numeric_range_proof_does_not_widen_validity_rejected")
 html #= ()

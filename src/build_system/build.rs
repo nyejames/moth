@@ -19,7 +19,7 @@ use crate::build_system::create_project_modules::compiled_boundary::{
 };
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::build_system::create_project_modules::{
-    FrontendCompilationMode, compile_project_frontend_with_inputs, resolve_project_entry_root,
+    FrontendCompilationMode, compile_project_frontend_with_inputs,
 };
 use crate::build_system::output::{
     BuilderIdentity, CleanupPolicy, OutputOwner, ValidatedDirectoryOutputSettings,
@@ -1935,11 +1935,7 @@ pub(crate) fn build_project<E>(
             .into()));
         };
 
-        Some(validated_output_settings.select(
-            config.entry_dir.clone(),
-            resolve_project_entry_root(&config),
-            output_owner.clone(),
-        ))
+        Some(validated_output_settings.select(config.entry_dir.clone(), output_owner.clone()))
     } else {
         None
     };

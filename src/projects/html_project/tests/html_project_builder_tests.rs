@@ -747,7 +747,7 @@ fn emits_const_fragment_and_calls_start() {
 }
 
 #[test]
-fn directory_build_maps_routes_relative_to_entry_root() {
+fn directory_build_maps_routes_relative_to_selected_directory() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/about")).expect("should create about dir");
@@ -756,8 +756,7 @@ fn directory_build_maps_routes_relative_to_entry_root() {
     let entry_root = fs::canonicalize(root.join("src")).expect("entry root should resolve");
 
     let builder = HtmlProjectBuilder::new();
-    let mut config = Config::new(root.clone());
-    config.entry_root = PathBuf::from("src");
+    let config = Config::new(entry_root.clone());
 
     let project = expect_successful_build(build_with_test_modules(
         &builder,
@@ -791,8 +790,7 @@ fn directory_build_rejects_reserved_output_path_component() {
     let entry_root = fs::canonicalize(root.join("src")).expect("entry root should resolve");
 
     let builder = HtmlProjectBuilder::new();
-    let mut config = Config::new(root.clone());
-    config.entry_root = PathBuf::from("src");
+    let config = Config::new(entry_root.clone());
 
     let result = build_with_test_modules(
         &builder,
@@ -1077,15 +1075,14 @@ fn non_js_runtime_asset_is_ignored() {
 }
 
 #[test]
-fn directory_build_supports_custom_entry_root_names() {
+fn directory_build_supports_custom_selected_directory_names() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("pages/docs")).expect("should create pages dir");
     let entry_root = fs::canonicalize(root.join("pages")).expect("entry root should resolve");
 
     let builder = HtmlProjectBuilder::new();
-    let mut config = Config::new(root.clone());
-    config.entry_root = PathBuf::from("pages");
+    let config = Config::new(entry_root.clone());
 
     let project = expect_successful_build(build_with_test_modules(
         &builder,
@@ -1104,15 +1101,14 @@ fn directory_build_supports_custom_entry_root_names() {
 }
 
 #[test]
-fn directory_build_requires_homepage_at_entry_root() {
+fn directory_build_requires_homepage_at_selected_root() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/about")).expect("should create about dir");
     let entry_root = fs::canonicalize(root.join("src")).expect("entry root should resolve");
 
     let builder = HtmlProjectBuilder::new();
-    let mut config = Config::new(root.clone());
-    config.entry_root = PathBuf::from("src");
+    let config = Config::new(entry_root.clone());
 
     let result = build_with_test_modules(
         &builder,
@@ -1143,8 +1139,7 @@ fn directory_build_skips_api_only_sibling_from_all_artifact_planning() {
     let entry_root = fs::canonicalize(root.join("src")).expect("entry root should resolve");
 
     let builder = HtmlProjectBuilder::new();
-    let mut config = Config::new(root.clone());
-    config.entry_root = PathBuf::from("src");
+    let config = Config::new(entry_root.clone());
     let mut string_table = StringTable::new();
 
     let homepage = create_test_module(entry_root.join("@home.moth"), &mut string_table);
@@ -1252,8 +1247,7 @@ fn wasm_directory_build_preserves_nested_routes() {
     let entry_root = fs::canonicalize(root.join("src")).expect("entry root should resolve");
 
     let builder = HtmlProjectBuilder::new();
-    let mut config = Config::new(root.clone());
-    config.entry_root = PathBuf::from("src");
+    let config = Config::new(entry_root.clone());
 
     let project = expect_successful_build(build_with_test_modules(
         &builder,
@@ -1314,8 +1308,8 @@ fn html_builder_registers_closed_html_section_schema() {
         .project_section("html")
         .expect("HTML builder registers an html section");
     assert!(
-        html_section.required,
-        "the HTML builder section is required"
+        !html_section.required,
+        "builder sections are optional and apply schema defaults"
     );
     let html = &html_section.schema;
     let html_root = html.node(html.root());
@@ -1346,13 +1340,13 @@ fn html_builder_registers_closed_html_section_schema() {
     assert_eq!(
         dev_output.default,
         Some(PublicFoldedValue::String(OwnedFoldedString::Text(
-            "dev".to_owned()
+            "_dev".to_owned()
         )))
     );
     assert_eq!(
         release_output.default,
         Some(PublicFoldedValue::String(OwnedFoldedString::Text(
-            "release".to_owned()
+            "_release".to_owned()
         )))
     );
 

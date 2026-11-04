@@ -55,7 +55,7 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
         fs::create_dir_all(&package_root).expect("should create source package root");
         fs::write(
             project_root.join("config.moth"),
-            "project #= (name = \"docs\", entry_root = \"src\")\nhtml #= ()\n",
+            "project #= (name = \"docs\")\nhtml #= ()\n",
         )
         .expect("should write project config");
         fs::write(package_root.join("@mod.moth"), &package_source)
@@ -68,12 +68,11 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
         } else {
             fs::write(source_root.join("@page.moth"), consumer_source)
                 .expect("should write directory entry page");
-            project_root.clone()
+            source_root.clone()
         };
 
         let mut config = Config::new(entry);
         config.project_name = "docs".to_owned();
-        config.entry_root = PathBuf::from("src");
         let style_directives = StyleDirectiveRegistry::built_ins();
         let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
         let mut frontend_surface = BuilderSurface::with_mandatory_core();
@@ -142,7 +141,7 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     fs::create_dir_all(&src).expect("should create project entry root");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -165,8 +164,7 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
         ))
         .expect("project input should be unique");
 
-    let mut config = Config::new(dir.clone());
-    config.entry_root = PathBuf::from("src");
+    let mut config = Config::new(src.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
@@ -331,7 +329,7 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
     fs::create_dir_all(&src).expect("should create entry root");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@broken run\nvalue = run()\n")
@@ -347,9 +345,8 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
     )
     .expect("should write successful warning package");
 
-    for entry in [dir.clone(), src.join("@page.moth")] {
+    for entry in [src.clone(), src.join("@page.moth")] {
         let mut config = Config::new(entry);
-        config.entry_root = PathBuf::from("src");
         let style_directives = StyleDirectiveRegistry::built_ins();
         let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
         let _path_fork = PathInternerFork::empty();
@@ -793,7 +790,7 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
         fs::create_dir_all(dir.join("src")).expect("should create source root");
         fs::write(
             dir.join("config.moth"),
-            "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+            "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
         )
         .expect("should write config");
         let page = match support {
@@ -883,7 +880,7 @@ fn compile_single_page_project(page: &str) -> CompilationResult<ProjectFrontendC
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("src/@page.moth"), page).expect("should write page");
@@ -975,7 +972,7 @@ fn pruned_catch_handler_publishes_no_materialisation_request_or_sidecar() {
     // cannot prove that the dead handler never requested a concrete generic instance.
     let page = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/tests/cases/cast_wasm_unreachable_cast_ignored/input/src/@page.moth"
+        "/tests/cases/cast_wasm_unreachable_cast_ignored/input/@page.moth"
     ));
     let frontend = super::super::create_project_modules_tests::successful_compilation_value(
         compile_single_page_project(page),
@@ -1006,7 +1003,7 @@ fn static_if_duplicate_identity_request_publishes_one_canonical_sidecar() {
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     // Static-if prunes the inactive `identity(1)` request before deduplication, so the two
@@ -1119,7 +1116,7 @@ fn inactive_static_if_retained_method_on_concrete_field_publishes_no_request() {
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     // The inactive `peek` call completes after its static-if range closed. Only the active
@@ -1209,7 +1206,7 @@ fn valid_identity_request_before_failed_concrete_body_publishes_nothing() {
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     // `outer<U64>` passes a U64 into `inner`'s String parameter only in its concrete body, so the
@@ -1287,7 +1284,7 @@ fn generated_materialisation_preserves_exact_request_span_in_recursive_diagnosti
 
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1370,7 +1367,7 @@ fn imported_generic_materialisation_preserves_donor_identity_with_colliding_sour
         dir.join("config.moth"),
         "project #= (
     name = \"docs\",
-    entry_root = \"src\",
+    ,
 )
 html #= ()\n",
     )
@@ -1382,8 +1379,7 @@ html #= ()\n",
     fs::write(&package_path, &package_source).expect("should write package source");
     fs::write(&project_path, &project_source).expect("should write project source");
 
-    let mut config = Config::new(dir.clone());
-    config.entry_root = PathBuf::from("src");
+    let mut config = Config::new(dir.join("src"));
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
@@ -1535,7 +1531,7 @@ fn imported_nested_generic_materialisation_preserves_call_site_identity_with_col
 
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1555,8 +1551,7 @@ export:
     fs::write(&project_path, "@pkg outer\nvalue I32 = outer(1)\n")
         .expect("should write project source");
 
-    let mut config = Config::new(dir.clone());
-    config.entry_root = PathBuf::from("src");
+    let mut config = Config::new(dir.join("src"));
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
@@ -1814,11 +1809,11 @@ fn requester_public_receiver_evidence_preserves_independent_declaration_bounds()
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let temporary_directory = tempfile::tempdir().expect("should create temporary project");
     let root = temporary_directory.path();
-    let source_root = root.join("src");
+    let source_root = root.to_path_buf();
     fs::create_dir_all(source_root.join("provider")).expect("should create generic provider");
     fs::write(
         root.join("config.moth"),
-        "project #= (name = \"docs\", entry_root = \"src\")\nhtml #= ()\n",
+        "project #= (name = \"docs\")\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1875,8 +1870,7 @@ result = combine(Box(Label("payload")))
     )
     .expect("should write requester-owned public generic evidence");
 
-    let mut config = Config::new(root.to_path_buf());
-    config.entry_root = PathBuf::from("src");
+    let mut config = Config::new(source_root.clone());
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let frontend = super::super::create_project_modules_tests::successful_compilation_value(
         compile_project_frontend(
@@ -2258,8 +2252,9 @@ fn implicit_failure_generated_private_helper_facts_survive_materialisation_and_c
     fs::create_dir_all(&src).expect("should create project entry root");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"implicit-failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
-    ).expect("should write config");
+        "project #= (\n    name = \"implicit-failure\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
     fs::write(
         src.join("@page.moth"),
         "multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\
@@ -2344,7 +2339,7 @@ fn implicit_failure_later_generated_request_reuses_converged_private_helper_summ
     fs::create_dir_all(&helper).expect("should create declaring module");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"implicit-failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"implicit-failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -2369,8 +2364,7 @@ export:
     )
     .expect("should write later generated requester");
 
-    let mut config = Config::new(dir);
-    config.entry_root = PathBuf::from("src");
+    let mut config = Config::new(dir.join("src"));
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
@@ -2485,8 +2479,7 @@ export:
 fn compile_later_request_rejection(
     project_dir: &std::path::Path,
 ) -> CompilationResult<ProjectFrontendCompilation> {
-    let mut config = Config::new(project_dir.to_path_buf());
-    config.entry_root = PathBuf::from("src");
+    let mut config = Config::new(project_dir.join("src"));
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let mut frontend_surface = BuilderSurface::with_mandatory_core();
@@ -2561,7 +2554,7 @@ fn assert_later_request_rejected(declaring_source: &str, requester_source: &str,
     fs::create_dir_all(src.join("helper")).expect("should create declaring module");
     fs::write(
         temp_dir.path().join("config.moth"),
-        "project #= (\n    name = \"implicit-failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"implicit-failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("helper").join("@mod.moth"), declaring_source)
@@ -2641,7 +2634,7 @@ fn implicit_failure_private_helper_infallible_to_fallible_changes_exported_calle
     fs::create_dir_all(src.join("helper")).expect("should create declaring module");
     fs::write(
         temp_dir.path().join("config.moth"),
-        "project #= (\n    name = \"implicit-failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"implicit-failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     // The export block is byte-identical in both versions: only the private helper
@@ -2770,7 +2763,7 @@ fn exported_private_chain_witness_rendering_is_stable_across_repeated_compilatio
     fs::create_dir_all(&src).expect("should create entry root");
     fs::write(
         temp_dir.path().join("config.moth"),
-        "project #= (\n    name = \"implicit-failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"implicit-failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     const CHAIN_TAIL: &str = "multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\
@@ -2859,7 +2852,7 @@ fn source_package_warning_staged_by_frontend_outcome() {
     fs::create_dir_all(&src).expect("should create entry root");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
@@ -2869,8 +2862,7 @@ fn source_package_warning_staged_by_frontend_outcome() {
     )
     .expect("should write warning package root");
 
-    let mut config = Config::new(dir.clone());
-    config.entry_root = PathBuf::from("src");
+    let mut config = Config::new(dir.join("src"));
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();
@@ -2982,13 +2974,13 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
     let project_root = temporary_directory.path().to_path_buf();
-    let project_source_root = project_root.join("src");
+    let project_source_root = project_root.clone();
     let package_root = project_root.join("packages/pkg");
     fs::create_dir_all(&project_source_root).expect("should create project source root");
     fs::create_dir_all(&package_root).expect("should create source package root");
     fs::write(
         project_root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -3059,13 +3051,13 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
     let project_root = temporary_directory.path().to_path_buf();
-    let project_source_root = project_root.join("src");
+    let project_source_root = project_root.clone();
     let package_root = project_root.join("packages/pkg");
     fs::create_dir_all(&project_source_root).expect("should create project source root");
     fs::create_dir_all(&package_root).expect("should create source package root");
     fs::write(
         project_root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -3075,8 +3067,7 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
         .expect("should write project module");
     fs::write(package_root.join("@mod.moth"), package_text).expect("should write package module");
 
-    let mut config = Config::new(project_root.clone());
-    config.entry_root = PathBuf::from("src");
+    let mut config = Config::new(project_source_root.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
     let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
     let _path_fork = PathInternerFork::empty();

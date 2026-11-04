@@ -128,7 +128,6 @@ pub(super) struct BoundaryCompilationContext<'a> {
     /// the authoritative `build_config_values` map directly.
     build_config_inputs: BuildConfigInputSet,
     builder_globals: BuilderConfigGlobalSet,
-    fixed_project_facts: Vec<BuildConfigContractFact>,
     direct_project_facts: Vec<BuildConfigContractFact>,
     implicit_template_package_ids: Vec<PackageBoundaryId>,
 }
@@ -151,7 +150,6 @@ impl<'a> BoundaryCompilationContext<'a> {
         canonical_source_facts: Vec<BuildConfigContractFact>,
         build_config_inputs: BuildConfigInputSet,
         builder_globals: BuilderConfigGlobalSet,
-        fixed_project_facts: Vec<BuildConfigContractFact>,
         direct_project_facts: Vec<BuildConfigContractFact>,
         project_globals: Option<&'a ProjectGlobalsInterface>,
     ) -> Self {
@@ -176,7 +174,6 @@ impl<'a> BoundaryCompilationContext<'a> {
             canonical_source_facts,
             build_config_inputs,
             builder_globals,
-            fixed_project_facts,
             direct_project_facts,
             project_globals,
             implicit_template_package_ids,
@@ -196,7 +193,7 @@ impl<'a> BoundaryCompilationContext<'a> {
         BuildConfigResolutionIndex::from_validated(
             self.build_config_values.as_ref(),
             &self.canonical_source_facts,
-            &self.fixed_project_facts,
+            &[],
             &self.direct_project_facts,
         )
     }
