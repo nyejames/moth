@@ -387,14 +387,29 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             return true;
         }
 
-        if let Some(module_root) = self
+        let export_root_file = if self
             .module_symbols
-            .file_module_membership
-            .get(public_root_file)
+            .module_root_public_exports
+            .contains_key(public_root_file)
+        {
+            Some(*public_root_file)
+        } else {
+            self.module_symbols
+                .file_module_membership
+                .get(public_root_file)
+                .and_then(|module_root| {
+                    self.module_symbols
+                        .module_root_boundaries
+                        .iter()
+                        .find(|boundary| &boundary.module_root == module_root)
+                        .map(|boundary| boundary.root_file)
+                })
+        };
+        if let Some(export_root_file) = export_root_file
             && let Some(entries) = self
                 .module_symbols
                 .module_root_public_exports
-                .get(module_root)
+                .get(&export_root_file)
             && entries
                 .iter()
                 .any(|entry| entry.target.is_source_path(path))

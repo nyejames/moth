@@ -205,6 +205,7 @@ pub(super) fn publish_compiled_module(
         string_table: _,
         path_fork: _,
         public_interface,
+        support_public_interface,
     } = compiled;
     if !path_remap.is_identity() {
         module.remap_path_ids(&path_remap);
@@ -271,6 +272,7 @@ pub(super) fn publish_compiled_module(
         artifact: CompiledModuleArtifact {
             module,
             interface: public_interface,
+            support_interface: support_public_interface,
         },
         generated_delta,
         resource_source_associations,

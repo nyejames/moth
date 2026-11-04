@@ -117,6 +117,7 @@ pub(crate) fn compile_module(
 
     let PreparedModuleInput {
         active_root_file_id,
+        support_root_file_id,
         candidate_source_ids,
         source_module_origins,
         prepared_header_syntax,
@@ -158,6 +159,7 @@ pub(crate) fn compile_module(
         known_generated,
         preparation_warnings,
         SemanticStageInputs {
+            support_root_file_id,
             candidate_source_ids,
             prepared_header_syntax,
             source_module_origins,
@@ -182,6 +184,7 @@ pub(crate) fn compile_module(
                 module,
                 warnings,
                 public_interface,
+                support_public_interface,
                 generated_delta,
                 resource_source_associations,
             } = *output;
@@ -195,6 +198,7 @@ pub(crate) fn compile_module(
                     string_table,
                     path_fork,
                     public_interface,
+                    support_public_interface,
                 }),
                 warnings,
                 sidecar_warnings,
@@ -235,6 +239,7 @@ pub(crate) fn compile_module_for_boracle(
     let entry_file_path = entry_file_path.as_path();
     let PreparedModuleInput {
         active_root_file_id,
+        support_root_file_id: _,
         candidate_source_ids,
         source_module_origins,
         prepared_header_syntax,
@@ -305,6 +310,7 @@ pub(crate) fn compile_module_for_boracle(
 ///      classification, instead of a parameter list that hides which value came from where.
 struct SemanticStageInputs<'a> {
     prepared_header_syntax: PreparedHeaderSyntax,
+    support_root_file_id: Option<crate::compiler_frontend::source::SourceId>,
     candidate_source_ids: Vec<SourceId>,
     source_module_origins: Arc<SourceModuleOriginTable>,
     active_root_file_id: SourceId,
@@ -334,6 +340,7 @@ struct CompleteSemanticStage {
     module: Module,
     warnings: DiagnosticBag,
     public_interface: PublicSemanticInterface,
+    support_public_interface: Option<PublicSemanticInterface>,
     generated_delta: GeneratedFunctionDelta,
     resource_source_associations: Vec<ResourceSourceAssociation>,
 }
@@ -359,6 +366,7 @@ fn run_semantic_stages(
     let _ = request;
     let SemanticStageInputs {
         prepared_header_syntax,
+        support_root_file_id,
         candidate_source_ids,
         source_module_origins,
         active_root_file_id,
@@ -458,6 +466,34 @@ fn run_semantic_stages(
         &compiler.string_table,
         &compiler.path_fork,
     )?;
+    let support_surface_seed = match support_root_file_id {
+        Some(support_root_file_id) => {
+            let support_origin = source_module_origins
+                .origin_for(support_root_file_id)?
+                .cloned()
+                .ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "semantic module compilation: paired support root file id {} has no module origin",
+                            support_root_file_id.index()
+                        ),
+                    )
+                })?;
+            let seed = build_direct_export_seed(
+                &source_module_origins,
+                support_root_file_id,
+                &sorted.headers,
+                &sorted.module_symbols,
+                context.source_provider_dependencies,
+                compiler.external_package_registry.as_ref(),
+                &compiler.string_table,
+                &compiler.path_fork,
+            )?;
+            Some((support_origin, seed))
+        }
+        None => None,
+    };
 
     // Build the transient expanded public source-nominal origin index before `sorted`
     // moves into AST construction. Each origin is derived from the header's retained
@@ -520,6 +556,7 @@ fn run_semantic_stages(
     let AstBuildResult {
         ast: mut module_ast,
         public_interface_projection_input,
+        support_public_interface_projection_input,
         module_resources,
         materialisation_context: materialisation_context_builder,
         deferred_generic_requests,
@@ -556,56 +593,93 @@ fn run_semantic_stages(
     // after borrow validation, and provider closure assembles the completed public surface.
     // Export-diagnostic and synthetic-interface provenance are already retained in the draft.
     let module_resource_table = module_resources.borrow();
-    let public_interface_build_result = timed_stage_attributed!(
-        crate::timing::TimingMetric::FrontendPublicInterfaceProject,
-        timing_context,
-        PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
-            export_seed,
-            public_interface_projection_input,
-            public_source_nominal_type_origins: &public_source_nominal_type_origins,
-            public_source_trait_origins: &public_source_trait_origins,
-            type_environment: &module_ast.type_environment,
-            external_registry: compiler.external_package_registry.as_ref(),
-            string_table: &compiler.string_table,
-            path_fork: &compiler.path_fork,
-            generic_function_templates: materialisation_context_builder
-                .context()
-                .generic_function_templates(),
-            const_values: &module_ast.const_values,
-            module_resources: Some(&module_resource_table),
-        })
-        .build(),
-    );
-    let public_interface_build = match public_interface_build_result {
-        Ok(result) => result,
-        Err(PublicInterfaceDraftBuildFailure::Infrastructure(error)) => {
-            return Err(error.into());
+    let support_surface_role = support_surface_seed
+        .as_ref()
+        .map(|(support_origin, _)| support_origin.role());
+    let mut surface_specs = vec![(
+        active_module_origin.role(),
+        export_seed,
+        public_interface_projection_input,
+    )];
+    if let Some((support_origin, support_seed)) = support_surface_seed {
+        let support_projection =
+            support_public_interface_projection_input.ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    "semantic module compilation: paired support root has no support public-interface projection input",
+                )
+            })?;
+        surface_specs.push((support_origin.role(), support_seed, support_projection));
+    }
+
+    let mut surface_builds = Vec::with_capacity(surface_specs.len());
+    for (surface_role, seed, projection_input) in surface_specs {
+        let build_result = timed_stage_attributed!(
+            crate::timing::TimingMetric::FrontendPublicInterfaceProject,
+            timing_context,
+            PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
+                export_seed: seed,
+                public_interface_projection_input: projection_input,
+                public_source_nominal_type_origins: &public_source_nominal_type_origins,
+                public_source_trait_origins: &public_source_trait_origins,
+                type_environment: &module_ast.type_environment,
+                external_registry: compiler.external_package_registry.as_ref(),
+                string_table: &compiler.string_table,
+                path_fork: &compiler.path_fork,
+                generic_function_templates: materialisation_context_builder
+                    .context()
+                    .generic_function_templates(),
+                const_values: &module_ast.const_values,
+                module_resources: Some(&module_resource_table),
+            })
+            .build(),
+        );
+        let build = match build_result {
+            Ok(result) => result,
+            Err(PublicInterfaceDraftBuildFailure::Infrastructure(error)) => {
+                return Err(error.into());
+            }
+            Err(PublicInterfaceDraftBuildFailure::Diagnostic(diagnostic)) => {
+                let mut diagnostic_drafts = std::mem::take(&mut warnings);
+                diagnostic_drafts.push(diagnostic);
+                let batch = match PreparedDiagnosticBatch::capture_with_required_paths(
+                    DiagnosticBag::from_diagnostics(diagnostic_drafts),
+                    compiler.string_table.take_for_handoff(),
+                    Some(&module_ast.type_environment),
+                    || Some(Arc::new(compiler.path_fork.shared_table())),
+                ) {
+                    Ok(batch) => batch,
+                    Err(error) => return Err(PreparedFailure::from(error)),
+                };
+                return Err(PreparedFailure::Diagnosed(batch));
+            }
+        };
+        surface_builds.push((surface_role, build));
+    }
+    let public_origins_by_path = {
+        let mut origins = FxHashMap::default();
+        for (_, build) in &surface_builds {
+            for seed in &build.callable_seeds {
+                if let Some(existing) = origins.insert(seed.path, seed.origin.clone())
+                    && existing != seed.origin
+                {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "semantic module compilation: callable path {:?} resolves to conflicting public origins across module surfaces",
+                            seed.path
+                        ),
+                    )
+                    .into());
+                }
+            }
         }
-        Err(PublicInterfaceDraftBuildFailure::Diagnostic(diagnostic)) => {
-            let mut diagnostic_drafts = std::mem::take(&mut warnings);
-            diagnostic_drafts.push(diagnostic);
-            let batch = match PreparedDiagnosticBatch::capture_with_required_paths(
-                DiagnosticBag::from_diagnostics(diagnostic_drafts),
-                compiler.string_table.take_for_handoff(),
-                Some(&module_ast.type_environment),
-                || Some(Arc::new(compiler.path_fork.shared_table())),
-            ) {
-                Ok(batch) => batch,
-                Err(error) => return Err(PreparedFailure::from(error)),
-            };
-            return Err(PreparedFailure::Diagnosed(batch));
-        }
+        origins
     };
-    let public_interface_draft = public_interface_build.draft;
 
     // Release the shared-table borrow before HIR: lowering re-interns handoff origins with
     // `borrow_mut` against the same module resource table.
     drop(module_resource_table);
-    let public_origins_by_path = public_interface_build
-        .callable_seeds
-        .iter()
-        .map(|seed| (seed.path, seed.origin.clone()))
-        .collect::<FxHashMap<_, _>>();
     let private_function_origin_seeds = materialisation_context_builder
         .install_concrete_executable_contracts(
             &module_ast.const_values,
@@ -655,24 +729,42 @@ fn run_semantic_stages(
     //     Private and non-generic templates remain intentional exclusions.
     //     This runs after generic body validation and before HIR so the templates never
     //     re-enter donor AST state.
-    validate_materialisation_context_templates(
-        &public_interface_draft,
-        &public_interface_build.callable_seeds,
-        materialisation_context_builder.generic_function_templates_mut(),
-    )?;
+    for (_, build) in &surface_builds {
+        validate_materialisation_context_templates(
+            &build.draft,
+            &build.callable_seeds,
+            materialisation_context_builder.generic_function_templates_mut(),
+        )?;
+    }
     materialisation_context_builder.finalize_generic_template_identity_index()?;
     // Detach syntax, defaults and module constants while AST value owners are still live.
     // Same-module generated requests and publication consume this single stable capture.
+    let primary_draft = &surface_builds
+        .first()
+        .ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                "semantic module compilation: no public surface was projected",
+            )
+        })?
+        .1
+        .draft;
     let mut materialisation_context_builder = materialisation_context_builder.detach(
         &module_ast.const_values,
-        &public_interface_draft.declarations,
-        &public_interface_draft.reusable_evidence,
+        &primary_draft.declarations,
+        &primary_draft.reusable_evidence,
         &module_resources.borrow(),
         &compiler.path_fork,
     )?;
 
+    let mut function_origin_seeds = Vec::new();
+    let mut surface_drafts = Vec::with_capacity(surface_builds.len());
+    for (role, mut build) in surface_builds.drain(..) {
+        function_origin_seeds.extend(std::mem::take(&mut build.function_origin_seeds));
+        surface_drafts.push((role, build.draft));
+    }
     let function_origin_lookup = HirFunctionOriginLookup::from_public_and_private_seeds(
-        public_interface_build.function_origin_seeds,
+        function_origin_seeds,
         private_function_origin_seeds,
     )?;
 
@@ -795,21 +887,37 @@ fn run_semantic_stages(
     // generated summaries belong to the sidecar delta this transaction completes later,
     // distinct from these direct concrete summaries. Private functions and the entry retain local
     // summaries but never enter declaration records.
-    let public_interface = timed_stage_attributed!(
-        crate::timing::TimingMetric::FrontendPublicInterfaceFinalise,
-        timing_context,
-        {
-            let local_public_interface = public_interface_draft
-                .finalize_after_borrow_validation(&borrow_analysis.analysis, &hir_module)?;
-            PublicSemanticInterface::close_from_local(
-                local_public_interface,
-                context.source_provider_dependencies,
-                compiler.external_package_registry.as_ref(),
-            )
-        }
-    )?;
+    let mut public_interfaces = Vec::with_capacity(surface_drafts.len());
+    let all_public_function_origins = public_origins_by_path
+        .values()
+        .cloned()
+        .collect::<rustc_hash::FxHashSet<_>>();
+    for (role, draft) in surface_drafts {
+        let interface = timed_stage_attributed!(
+            crate::timing::TimingMetric::FrontendPublicInterfaceFinalise,
+            timing_context,
+            {
+                let local_public_interface = draft
+                    .finalize_after_borrow_validation_with_allowed_origins(
+                        &borrow_analysis.analysis,
+                        &hir_module,
+                        &all_public_function_origins,
+                    )?;
+                PublicSemanticInterface::close_from_local(
+                    local_public_interface,
+                    context.source_provider_dependencies,
+                    compiler.external_package_registry.as_ref(),
+                )
+            }
+        )?;
+        public_interfaces.push((role, interface));
+    }
+    let public_interface_refs = public_interfaces
+        .iter()
+        .map(|(_, interface)| interface)
+        .collect::<Vec<_>>();
     let materialisation_context = materialisation_context_builder
-        .freeze(&public_interface)?
+        .freeze(&public_interface_refs)?
         .map(Arc::new);
     let resource_table = Rc::try_unwrap(module_resources)
         .map(|cell| cell.into_inner())
@@ -879,7 +987,22 @@ fn run_semantic_stages(
                 ),
             },
             warnings: warning_bag,
-            public_interface,
+            public_interface: public_interfaces
+                .iter()
+                .find(|(role, _)| *role == active_module_origin.role())
+                .map(|(_, interface)| interface.clone())
+                .or_else(|| {
+                    public_interfaces
+                        .first()
+                        .map(|(_, interface)| interface.clone())
+                })
+                .expect("a module surface interface must exist"),
+            support_public_interface: support_surface_role.and_then(|support_role| {
+                public_interfaces
+                    .iter()
+                    .find(|(role, _)| *role == support_role)
+                    .map(|(_, interface)| interface.clone())
+            }),
             generated_delta,
             resource_source_associations,
         }),

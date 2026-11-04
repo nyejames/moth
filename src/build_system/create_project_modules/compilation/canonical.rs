@@ -465,7 +465,10 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                     let binding = &self.provider_bindings[*binding_index];
                     let interface = self
                         .provider_store
-                        .interface(binding.provider_module_id)?
+                        .interface_for_surface(
+                            binding.provider_module_id,
+                            binding.provider_surface,
+                        )?
                         .ok_or_else(|| {
                             InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                                 "ModuleId {} started semantic binding before provider ModuleId {} published a complete interface",

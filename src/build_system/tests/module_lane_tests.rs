@@ -558,6 +558,7 @@ fn test_graph_boundary(
                 CompiledModuleArtifact {
                     module,
                     interface: empty_test_interface_for_origin(origins[index].clone()),
+                    support_interface: None,
                 },
             )
             .expect("test store should publish each module");
@@ -603,6 +604,7 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("high/@mod.moth"), true),
                 interface: empty_test_interface("high".to_owned()),
+                support_interface: None,
             },
         )
         .expect("higher-ID provider should publish first");
@@ -612,6 +614,7 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("low/@mod.moth"), true),
                 interface: empty_test_interface("low".to_owned()),
+                support_interface: None,
             },
         )
         .expect("lower-ID consumer should publish second");
@@ -670,6 +673,7 @@ fn duplicate_declaration_inside_one_materialisation_context_raises_compiler_bug(
             CompiledModuleArtifact {
                 module,
                 interface: empty_test_interface("dup".to_owned()),
+                support_interface: None,
             },
         )
     }))
@@ -716,6 +720,7 @@ fn materialisation_lookup_resolves_the_exact_template_row() {
             CompiledModuleArtifact {
                 module,
                 interface: empty_test_interface("rows".to_owned()),
+                support_interface: None,
             },
         )
         .expect("row context should publish");
@@ -1598,6 +1603,7 @@ fn frontend_boundary_rejects_unfinished_module_slots() {
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@first.moth"), true),
                 interface: empty_test_interface("first".to_owned()),
+                support_interface: None,
             },
         )
         .expect("first module should publish");
@@ -1662,6 +1668,7 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@success.moth"), true),
                 interface: empty_test_interface("success".to_owned()),
+                support_interface: None,
             },
         )
         .expect("success module should publish");
@@ -1867,6 +1874,7 @@ fn boundary_validation_rejects_blocked_lane_mismatch_in_both_directions() {
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@single.moth"), false),
                 interface: empty_test_interface("single".to_owned()),
+                support_interface: None,
             },
         )
         .expect("slot should publish");
@@ -2103,6 +2111,7 @@ fn materialisation_rows_iterate_in_deterministic_publication_order() {
             CompiledModuleArtifact {
                 module: second_module,
                 interface: empty_test_interface("second".to_owned()),
+                support_interface: None,
             },
         )
         .expect("higher module id publishes first");
@@ -2119,6 +2128,7 @@ fn materialisation_rows_iterate_in_deterministic_publication_order() {
             CompiledModuleArtifact {
                 module: first_module,
                 interface: empty_test_interface("first".to_owned()),
+                support_interface: None,
             },
         )
         .expect("lower module id publishes second");
@@ -2337,6 +2347,7 @@ fn boundary_with_unvisited_slot(
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@success.moth"), true),
                 interface: empty_test_interface("success".to_owned()),
+                support_interface: None,
             },
         )
         .expect("the retained success should publish");

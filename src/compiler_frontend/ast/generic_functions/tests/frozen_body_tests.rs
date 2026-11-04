@@ -1703,7 +1703,7 @@ fn detachment_releases_recursive_lookup_owners_before_ast_lowering() {
         concrete_call_summaries: Vec::new(),
     };
     let frozen = prepared
-        .freeze(&public_interface)
+        .freeze(&[&public_interface])
         .expect("detached inputs should freeze without their lookup owners")
         .expect("draw retains a frozen provider");
 
@@ -2123,7 +2123,7 @@ fn resource_default_materialisation_fixture(
         .expect("generic resource default should detach");
     let preparation = prepared.context().clone();
     let context = prepared
-        .freeze(&public_interface)
+        .freeze(&[&public_interface])
         .expect("generic resource default should freeze")
         .expect("the retained generic should produce a materialisation context");
     let identity = GeneratedFunctionIdentity::new(
@@ -2375,7 +2375,7 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
         .expect("generic resource body should detach");
     let preparation = prepared.context().clone();
     let context = prepared
-        .freeze(&public_interface)
+        .freeze(&[&public_interface])
         .expect("generic resource body should freeze")
         .expect("the retained generic should produce a materialisation context");
     let identity = GeneratedFunctionIdentity::new(
@@ -4011,6 +4011,7 @@ fn parse_closure_files(files: &[(&str, &str)]) -> (AstBuildResult, PathInternerF
     );
     let options = HeaderParseOptions {
         entry_file_id: sources.get_by_canonical_path(entry).map(|source| source.id),
+        support_root_file_id: None,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };

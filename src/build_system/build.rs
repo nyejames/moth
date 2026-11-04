@@ -63,8 +63,8 @@ use crate::compiler_frontend::public_interface::{
     PublicDeclarationSemantics, PublicFunctionCategory, PublicSemanticInterface,
 };
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginDeclarationId,
-    OriginFunctionId, StableModuleOriginIdentity, StablePackageIdentity,
+    GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, ModuleRootRole,
+    OriginDeclarationId, OriginFunctionId, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceClass;
 
@@ -869,10 +869,13 @@ fn boundary_interface_at<'a>(
     project: &'a CompiledGraphBoundary,
     source_packages: &'a CompletedSourcePackageRegistry,
     module_ref: CompiledModuleRef,
+    surface: ModuleRootRole,
 ) -> Result<&'a PublicSemanticInterface, InfrastructureFailure> {
     match module_ref {
-        CompiledModuleRef::Project(module_id) => {
-            project.modules.interface(module_id)?.ok_or_else(|| {
+        CompiledModuleRef::Project(module_id) => project
+            .modules
+            .interface_for_surface(module_id, surface)?
+            .ok_or_else(|| {
                 InfrastructureFailure::internal(
                     CompilerStage::ProjectBuildAssembly,
                     format!(
@@ -880,8 +883,7 @@ fn boundary_interface_at<'a>(
                         module_id.index()
                     ),
                 )
-            })
-        }
+            }),
         CompiledModuleRef::SourcePackage {
             package_id,
             module_id,
@@ -889,7 +891,7 @@ fn boundary_interface_at<'a>(
             .package(package_id)?
             .boundary
             .modules
-            .interface(module_id)?
+            .interface_for_surface(module_id, surface)?
             .ok_or_else(|| {
                 InfrastructureFailure::internal(
                     CompilerStage::ProjectBuildAssembly,
@@ -962,7 +964,7 @@ fn assemble_project_package(
     module_owner_by_origin: &FxHashMap<StableModuleOriginIdentity, CompiledModuleRef>,
     execution_owners: &ExecutionOwnerMaps,
 ) -> Result<Option<PackageAssembly>, ProjectAssemblyError> {
-    let Some((facade_module_ref, selected_base_modules, reachability_by_module)) =
+    let Some((facade_module_ref, facade_surface, selected_base_modules, reachability_by_module)) =
         plan_project_package_facade(
             project,
             source_packages,
@@ -972,7 +974,8 @@ fn assemble_project_package(
     else {
         return Ok(None);
     };
-    let facade_interface = boundary_interface_at(project, source_packages, facade_module_ref)?;
+    let facade_interface =
+        boundary_interface_at(project, source_packages, facade_module_ref, facade_surface)?;
 
     let facade_module = boundary_module_at(project, source_packages, facade_module_ref)?;
     let facade_reachability = reachability_by_module
@@ -1070,6 +1073,7 @@ struct FacadeRootPlan {
 type FacadeReachabilityByModule = FxHashMap<CompiledModuleRef, HirReachability>;
 type SyntheticProjectContextPlan = (
     CompiledModuleRef,
+    ModuleRootRole,
     FxHashSet<CompiledModuleRef>,
     FacadeReachabilityByModule,
 );
@@ -1157,11 +1161,14 @@ fn plan_project_package_facade(
     module_owner_by_origin: &FxHashMap<StableModuleOriginIdentity, CompiledModuleRef>,
     execution_owners: &ExecutionOwnerMaps,
 ) -> Result<Option<SyntheticProjectContextPlan>, ProjectAssemblyError> {
-    let Some(facade_module_id) = project.structure.project_package_surface() else {
+    let Some((facade_module_id, facade_surface)) =
+        project.structure.project_package_surface_with_role()
+    else {
         return Ok(None);
     };
     let facade_module_ref = CompiledModuleRef::Project(facade_module_id);
-    let facade_interface = boundary_interface_at(project, source_packages, facade_module_ref)?;
+    let facade_interface =
+        boundary_interface_at(project, source_packages, facade_module_ref, facade_surface)?;
     validate_facade_declaration_provenance(facade_interface)?;
     let FacadeRootPlan {
         selected_base_modules,
@@ -1183,6 +1190,7 @@ fn plan_project_package_facade(
 
     Ok(Some((
         facade_module_ref,
+        facade_surface,
         selected_base_modules,
         reachability_by_module,
     )))
@@ -1327,7 +1335,15 @@ fn build_module_owner_by_origin(
         FxHashMap::<StableModuleOriginIdentity, CompiledModuleRef>::default();
     for node in project.structure.nodes() {
         let module_ref = CompiledModuleRef::Project(node.module_id());
-        for origin in [node.stable_origin(), node.shared_origin()] {
+        for origin in [
+            Some(node.stable_origin()),
+            Some(node.shared_origin()),
+            node.surface_origin(ModuleRootRole::Normal),
+            node.surface_origin(ModuleRootRole::Support),
+        ]
+        .into_iter()
+        .flatten()
+        {
             if module_owner_by_origin
                 .insert(origin.clone(), module_ref)
                 .is_some_and(|existing| existing != module_ref)
@@ -1349,7 +1365,15 @@ fn build_module_owner_by_origin(
                 package_id,
                 module_id: node.module_id(),
             };
-            for origin in [node.stable_origin(), node.shared_origin()] {
+            for origin in [
+                Some(node.stable_origin()),
+                Some(node.shared_origin()),
+                node.surface_origin(ModuleRootRole::Normal),
+                node.surface_origin(ModuleRootRole::Support),
+            ]
+            .into_iter()
+            .flatten()
+            {
                 if module_owner_by_origin
                     .insert(origin.clone(), module_ref)
                     .is_some_and(|existing| existing != module_ref)

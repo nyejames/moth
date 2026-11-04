@@ -446,7 +446,13 @@ impl ProjectModuleGraph {
     /// This is an ordinary structural module selected by its root location and surface, not a
     /// separate filesystem/graph node. Returns `None` when the selected boundary has no
     /// project-root support root.
+    #[cfg(test)]
     pub(crate) fn project_package_surface(&self) -> Option<ModuleId> {
+        self.project_package_surface_with_role().map(|(id, _)| id)
+    }
+
+    /// The project package module and the surface its external consumers must observe.
+    pub(crate) fn project_package_surface_with_role(&self) -> Option<(ModuleId, ModuleRootRole)> {
         self.nodes
             .iter()
             .find(|node| {
@@ -454,7 +460,7 @@ impl ProjectModuleGraph {
                     && node.support_origin.is_some()
                     && node.stable_origin().logical_module_path().is_empty()
             })
-            .map(|node| node.module_id)
+            .map(|node| (node.module_id, node.public_surface_role()))
     }
 
     /// Strict scoped-support visibility query.

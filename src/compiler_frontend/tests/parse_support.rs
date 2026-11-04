@@ -195,6 +195,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_recovery_policy(
 
     let options = HeaderParseOptions {
         entry_file_id: None,
+        support_root_file_id: None,
         entry_file_role: None,
         active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     };

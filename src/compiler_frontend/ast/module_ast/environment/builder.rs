@@ -111,7 +111,11 @@ fn collect_reexport_target_paths(
     else {
         return paths;
     };
-    for entries in module_symbols.module_root_public_exports.values() {
+    for entries in module_symbols
+        .module_root_public_exports
+        .get(active_root_source)
+        .into_iter()
+    {
         for entry in entries {
             let Some(path) = entry.target.source_path() else {
                 continue;
@@ -137,6 +141,9 @@ fn collect_reexport_target_paths(
 struct ResolvedPublicSurfaceOutputs {
     type_roots: ResolvedPublicTypeRootTable,
     trait_roots: Vec<ResolvedPublicTraitRoot>,
+    /// The paired support surface when the primary root is normal.
+    support_type_roots: Option<ResolvedPublicTypeRootTable>,
+    support_trait_roots: Option<Vec<ResolvedPublicTraitRoot>>,
 }
 
 /// Dense Stage 3 declaration lanes consumed by ordered AST environment passes.
@@ -704,6 +711,53 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             string_table,
         ))?;
 
+        // A paired module has a second active API-only root. Project its re-export targets and
+        // public roots independently from the normal surface so neither root can leak the other's
+        // private declarations into its interface.
+        let support_root_source =
+            self.module_symbols
+                .file_roles_by_source
+                .iter()
+                .find_map(|(source, role)| {
+                    (role.active_surface()
+                        == Some(
+                            crate::compiler_frontend::semantic_identity::ModuleRootRole::Support,
+                        ))
+                    .then_some(*source)
+                });
+        let (support_type_roots, support_trait_roots) = match support_root_source {
+            Some(support_root_source) if support_root_source != self.context.entry_dir => {
+                let support_reexport_target_paths =
+                    collect_reexport_target_paths(&support_root_source, &self.module_symbols);
+                let support_type_roots = prepare!(build_resolved_public_type_roots(
+                    BuildResolvedPublicTypeRootsInput {
+                        sorted_headers,
+                        resolved_struct_fields_by_path: &self.resolved_struct_fields_by_path,
+                        resolved_function_signatures_by_path: &self
+                            .resolved_function_signatures_by_path,
+                        nominal_type_ids_by_path: &self.nominal_type_ids_by_path,
+                        resolved_type_aliases_by_path: &self.resolved_type_aliases_by_path,
+                        declaration_table: self.declaration_table.as_ref(),
+                        generic_function_templates_by_path: &self
+                            .generic_function_templates_by_path,
+                        receiver_methods: receiver_methods.as_ref(),
+                        trait_environment: &trait_environment,
+                        type_environment: &self.type_environment,
+                        string_table,
+                        reexport_target_paths: &support_reexport_target_paths,
+                    }
+                ))?;
+                let support_trait_roots = prepare!(build_resolved_public_trait_roots(
+                    sorted_headers,
+                    &support_reexport_target_paths,
+                    &trait_environment,
+                    string_table,
+                ))?;
+                (Some(support_type_roots), Some(support_trait_roots))
+            }
+            _ => (None, None),
+        };
+
         self.finish_environment(
             receiver_methods,
             trait_environment,
@@ -711,6 +765,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             ResolvedPublicSurfaceOutputs {
                 type_roots: resolved_public_type_roots,
                 trait_roots: resolved_public_trait_roots,
+                support_type_roots,
+                support_trait_roots,
             },
             string_table,
         )
@@ -798,6 +854,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             }),
             resolved_public_type_roots: resolved_public_surface_outputs.type_roots,
             resolved_public_trait_roots: resolved_public_surface_outputs.trait_roots,
+            support_public_type_roots: resolved_public_surface_outputs.support_type_roots,
+            support_public_trait_roots: resolved_public_surface_outputs.support_trait_roots,
 
             type_environment: self.type_environment,
         })

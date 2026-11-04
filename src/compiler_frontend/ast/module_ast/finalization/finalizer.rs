@@ -372,6 +372,8 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             type_environment,
             resolved_public_type_roots,
             resolved_public_trait_roots,
+            support_public_type_roots,
+            support_public_trait_roots,
         } = self.environment;
 
         // Emission is complete, so the environment lookups `Rc` is the sole strong reference.
@@ -502,12 +504,28 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             .freeze(&mut emitted.ast)
             .map_err(|error| PreparedFailure::Infrastructure(error.into()))?;
 
+        let support_trait_environment = support_public_type_roots
+            .as_ref()
+            .map(|_| Rc::clone(&owned_lookups.trait_environment));
+        let support_trait_evidence_environment = support_public_type_roots
+            .as_ref()
+            .map(|_| Rc::clone(&owned_lookups.trait_evidence_environment));
         let public_interface_projection_input = AstPublicInterfaceProjectionInput {
             root_table: resolved_public_type_roots,
             trait_roots: resolved_public_trait_roots,
             trait_environment: Some(owned_lookups.trait_environment),
             trait_evidence_environment: Some(owned_lookups.trait_evidence_environment),
         };
+        let support_public_interface_projection_input =
+            match (support_public_type_roots, support_public_trait_roots) {
+                (Some(root_table), Some(trait_roots)) => Some(AstPublicInterfaceProjectionInput {
+                    root_table,
+                    trait_roots,
+                    trait_environment: support_trait_environment,
+                    trait_evidence_environment: support_trait_evidence_environment,
+                }),
+                _ => None,
+            };
         let module_resources = file_value_resolution
             .as_ref()
             .map(|services| Rc::clone(&services.module_resources));
@@ -530,6 +548,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             },
             module_resources,
             public_interface_projection_input,
+            support_public_interface_projection_input,
             materialisation_context,
             deferred_generic_requests: committed_generic_requests.executable,
             assertion_validation_generic_requests: committed_generic_requests.assertion_validation,

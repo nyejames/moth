@@ -58,9 +58,11 @@ fn nested_module_root_same_module_dependency_bypasses_public_surface() {
         dependency_prefix: intern_path(&["helper"], &mut string_table, &mut path_fork),
         module_root: helper_root,
         root_file: helper_mod_file,
+        surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     }];
 
-    let module_root_public_exports = empty_exports_for_roots(std::slice::from_ref(&helper_root));
+    let module_root_public_exports =
+        empty_exports_for_roots(std::slice::from_ref(&helper_mod_file));
 
     let mut input = PublicExportResolutionInput {
         consumer_file: &consumer_file,
@@ -105,6 +107,7 @@ fn cross_module_child_dependency_resolves_through_public_surface() {
         dependency_prefix: intern_path(&["child"], &mut string_table, &mut path_fork),
         module_root: child_root,
         root_file: child_mod_file,
+        surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     }];
 
     let greet_name = string_table.intern("greet");
@@ -116,7 +119,7 @@ fn cross_module_child_dependency_resolves_through_public_surface() {
     });
 
     let mut module_root_public_exports = FxHashMap::default();
-    module_root_public_exports.insert(child_root, child_exports);
+    module_root_public_exports.insert(child_mod_file, child_exports);
 
     let mut input = PublicExportResolutionInput {
         consumer_file: &page_file,
@@ -158,9 +161,10 @@ fn cross_module_child_dependency_missing_symbol_is_not_exported() {
         dependency_prefix: intern_path(&["child"], &mut string_table, &mut path_fork),
         module_root: child_root,
         root_file: child_mod_file,
+        surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     }];
 
-    let module_root_public_exports = empty_exports_for_roots(&[child_root]);
+    let module_root_public_exports = empty_exports_for_roots(&[child_mod_file]);
 
     let mut input = PublicExportResolutionInput {
         consumer_file: &page_file,
@@ -209,6 +213,7 @@ fn cross_module_provider_selection_preserves_shell_name_and_diagnostic_path() {
         dependency_prefix: intern_path(&["child"], &mut string_table, &mut path_fork),
         module_root: child_root,
         root_file: child_mod_file,
+        surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     }];
 
     let mut child_exports = FxHashSet::default();
@@ -221,7 +226,7 @@ fn cross_module_provider_selection_preserves_shell_name_and_diagnostic_path() {
         },
     });
     let mut module_root_public_exports = FxHashMap::default();
-    module_root_public_exports.insert(child_root, child_exports);
+    module_root_public_exports.insert(child_mod_file, child_exports);
 
     let header_path = intern_path(&["child", "public_name"], &mut string_table, &mut path_fork);
     let mut input = PublicExportResolutionInput {
@@ -273,9 +278,10 @@ fn source_package_nested_module_root_same_module_dependency_bypasses_public_surf
         dependency_prefix: intern_path(&["lib", "utils"], &mut string_table, &mut path_fork),
         module_root: utils_root,
         root_file: utils_mod_file,
+        surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     }];
 
-    let module_root_public_exports = empty_exports_for_roots(&[utils_root]);
+    let module_root_public_exports = empty_exports_for_roots(&[utils_mod_file]);
 
     let mut input = PublicExportResolutionInput {
         consumer_file: &utils_mod_file,
@@ -319,9 +325,10 @@ fn consumer_without_module_membership_uses_empty_prefix() {
         dependency_prefix: intern_path(&["child"], &mut string_table, &mut path_fork),
         module_root: child_root,
         root_file: child_mod_file,
+        surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     }];
 
-    let module_root_public_exports = empty_exports_for_roots(&[child_root]);
+    let module_root_public_exports = empty_exports_for_roots(&[child_mod_file]);
 
     let mut input = PublicExportResolutionInput {
         consumer_file: &unknown_consumer,

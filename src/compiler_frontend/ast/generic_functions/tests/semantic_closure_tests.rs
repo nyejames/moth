@@ -115,7 +115,7 @@ fn unprojectable_retained_alias_target_fails_at_the_alias_declaration() {
         )
         .expect("a completed alias target must detach");
     detached
-        .freeze(&control.public_interface)
+        .freeze(&[&control.public_interface])
         .expect("the detached alias target must freeze")
         .expect("the retained generic should produce a materialisation context");
 

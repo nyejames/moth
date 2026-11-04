@@ -1213,6 +1213,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
             input_files,
             &mut span_view,
             &entry_file_path,
+            None,
             local_string_table,
             source_files.fork_path_interner(),
             source_byte_count,
@@ -1226,6 +1227,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
             input_files,
             &mut span_view,
             &entry_file_path,
+            None,
             local_string_table,
             source_files.fork_path_interner(),
             source_byte_count,
@@ -1703,6 +1705,7 @@ pub(super) fn compiled_package(prefix: &str) -> CompiledSourcePackage {
                     reusable_evidence: Vec::new(),
                     concrete_call_summaries: Vec::new(),
                 },
+                support_interface: None,
             },
         )
         .expect("test package root should publish");

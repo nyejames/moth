@@ -621,7 +621,7 @@ impl CompiledSourcePackage {
                 let interface = self
                     .boundary
                     .modules
-                    .interface(self.root_module_id)?
+                    .interface_for_surface(self.root_module_id, public_surface_role)?
                     .ok_or_else(|| {
                         InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                             "Source package @{} root ModuleId {} holds a successful slot without a published interface",
@@ -670,9 +670,24 @@ impl CompiledSourcePackage {
 
     /// The completed facade interface for this package boundary.
     pub(crate) fn root_interface(&self) -> Result<&PublicSemanticInterface, InfrastructureFailure> {
+        let node = self
+            .boundary
+            .structure
+            .nodes()
+            .get(self.root_module_id.index())
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "Source package @{} root ModuleId {} is out of range",
+                        self.package_prefix(),
+                        self.root_module_id.index()
+                    ),
+                )
+            })?;
         self.boundary
             .modules
-            .interface(self.root_module_id)?
+            .interface_for_surface(self.root_module_id, node.public_surface_role())?
             .ok_or_else(|| {
                 InfrastructureFailure::internal(
                     CompilerStage::ProjectBuildAssembly,

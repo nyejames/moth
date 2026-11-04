@@ -308,40 +308,54 @@ impl ModuleMaterialisationPreparedBuilder {
 
     pub(crate) fn freeze(
         mut self,
-        public_interface: &PublicSemanticInterface,
+        public_interfaces: &[&PublicSemanticInterface],
     ) -> Result<Option<ModuleMaterialisationContext>, InfrastructureFailure> {
         // Public convergence replaces owned facts only. AST/default projection ended at detach.
         let context = Arc::make_mut(&mut self.context.stable_context);
         let mut declarations = std::mem::take(&mut context.declaration_closure).into_vec();
-        for declaration in &public_interface.declarations {
-            if let Some(existing) = declarations
-                .iter_mut()
-                .find(|existing| existing.origin == declaration.origin)
-            {
-                *existing = declaration.clone();
-            } else {
-                declarations.push(declaration.clone());
+        for public_interface in public_interfaces {
+            for declaration in &public_interface.declarations {
+                if let Some(existing) = declarations
+                    .iter_mut()
+                    .find(|existing| existing.origin == declaration.origin)
+                {
+                    *existing = declaration.clone();
+                } else {
+                    declarations.push(declaration.clone());
+                }
             }
         }
         declarations.sort_by(|left, right| left.origin.cmp(&right.origin));
         context.declaration_closure = declarations.into_boxed_slice();
         let mut evidence_records = std::mem::take(&mut context.evidence).into_vec();
-        for evidence in &public_interface.reusable_evidence {
-            if let Some(existing) = evidence_records
-                .iter_mut()
-                .find(|existing| existing.identity == evidence.identity)
-            {
-                *existing = evidence.clone();
-            } else {
-                evidence_records.push(evidence.clone());
+        for public_interface in public_interfaces {
+            for evidence in &public_interface.reusable_evidence {
+                if let Some(existing) = evidence_records
+                    .iter_mut()
+                    .find(|existing| existing.identity == evidence.identity)
+                {
+                    *existing = evidence.clone();
+                } else {
+                    evidence_records.push(evidence.clone());
+                }
             }
         }
         evidence_records.sort_by(|left, right| left.identity.cmp(&right.identity));
         context.evidence = evidence_records.into_boxed_slice();
+        let mut published_summaries = Vec::new();
+        for public_interface in public_interfaces {
+            for summary in &public_interface.concrete_call_summaries {
+                if !published_summaries
+                    .iter()
+                    .any(|published: &crate::compiler_frontend::public_interface::ConcreteCallSummaryRecord| published.origin == summary.origin)
+                {
+                    published_summaries.push(summary.clone());
+                }
+            }
+        }
         let mut imported_summaries = FxHashMap::default();
         for record in &context.concrete_call_summaries {
-            if !public_interface
-                .concrete_call_summaries
+            if !published_summaries
                 .iter()
                 .any(|published| published.origin == record.origin)
             {
@@ -350,7 +364,7 @@ impl ModuleMaterialisationPreparedBuilder {
         }
         context.concrete_call_summaries = retained_concrete_call_summaries(
             &imported_summaries,
-            &public_interface.concrete_call_summaries,
+            &published_summaries,
             &context.declaration_closure,
             &context.evidence,
         )?;

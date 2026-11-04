@@ -252,6 +252,12 @@ pub struct TopLevelConstFragment {
 #[derive(Clone, Copy)]
 pub struct HeaderParseOptions {
     pub entry_file_id: Option<SourceId>,
+    /// The paired support root for a structural module whose normal root is the active entry.
+    ///
+    /// A paired module prepares both roots in one source set. The normal root uses
+    /// `active_root_role`; this identity marks the support root as its own API-only surface rather
+    /// than an imported module root.
+    pub support_root_file_id: Option<SourceId>,
     /// An explicit role for the active entry file, when the caller is compiling a transient
     /// selection rather than a graph-owned module root.
     ///
@@ -270,6 +276,7 @@ impl Default for HeaderParseOptions {
     fn default() -> Self {
         Self {
             entry_file_id: None,
+            support_root_file_id: None,
             entry_file_role: None,
             active_root_role: ModuleRootRole::Normal,
         }
@@ -1468,6 +1475,15 @@ impl FileRole {
 
     pub(crate) fn is_export_capable(self) -> bool {
         self.is_module_root()
+    }
+
+    /// The active public surface this file role declares, when it is an active root.
+    pub(crate) fn active_surface(self) -> Option<ModuleRootRole> {
+        match self {
+            Self::ActiveModuleRoot => Some(ModuleRootRole::Normal),
+            Self::ActiveApiOnlyModuleRoot => Some(ModuleRootRole::Support),
+            Self::ImportedModuleRoot | Self::Normal => None,
+        }
     }
 }
 

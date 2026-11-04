@@ -14,7 +14,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::module_compilation::CompiledModuleArtifact;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedDeclarationIdentity, StableModuleOriginIdentity,
+    GeneratedDeclarationIdentity, ModuleRootRole, StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::FrozenStringTable;
@@ -104,6 +104,20 @@ impl ModuleArtifactStore {
                 "ModuleId {} artefact interface origin {:?} disagrees with graph node origin {:?}",
                 module_id.index(),
                 artifact.interface.module_origin,
+                expected_origin
+            );
+        }
+        if let Some(support_interface) = &artifact.support_interface
+            && (support_interface.module_origin.role() != ModuleRootRole::Support
+                || !support_interface
+                    .module_origin
+                    .is_same_structural_directory(expected_origin))
+        {
+            crate::compiler_bug!(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                "ModuleId {} support interface origin {:?} does not belong to the structural module of {:?}",
+                module_id.index(),
+                support_interface.module_origin,
                 expected_origin
             );
         }
@@ -234,6 +248,34 @@ impl ModuleArtifactStore {
         Ok(self
             .artifact(module_id)?
             .map(|artifact| &artifact.interface))
+    }
+
+    /// Resolve the published interface for one explicit module surface.
+    ///
+    /// A paired module publishes its normal interface in the primary lane and its support
+    /// interface beside it. A support-only module publishes its support interface as the primary
+    /// lane. Callers must select the surface their dependency edge names; there is no fallback.
+    pub(crate) fn interface_for_surface(
+        &self,
+        module_id: ModuleId,
+        surface: ModuleRootRole,
+    ) -> Result<Option<&PublicSemanticInterface>, InfrastructureFailure> {
+        let Some(artifact) = self.artifact(module_id)? else {
+            return Ok(None);
+        };
+        match surface {
+            ModuleRootRole::Normal => Ok((artifact.interface.module_origin.role()
+                == ModuleRootRole::Normal)
+                .then_some(&artifact.interface)),
+            ModuleRootRole::Support => Ok(artifact.support_interface.as_ref().or_else(|| {
+                matches!(
+                    artifact.interface.module_origin.role(),
+                    ModuleRootRole::Support | ModuleRootRole::SyntheticProjectContext
+                )
+                .then_some(&artifact.interface)
+            })),
+            ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => Ok(None),
+        }
     }
     /// Install one boundary-owned path table into every successful base artefact.
     ///

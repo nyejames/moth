@@ -445,6 +445,7 @@ impl FrontendProject {
 
         let options = HeaderParseOptions {
             entry_file_id,
+            support_root_file_id: None,
             entry_file_role: None,
             active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         };

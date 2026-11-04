@@ -314,6 +314,8 @@ pub(super) struct ModuleSyntaxDiscovery<'a, 'texts> {
     /// Source text selected during this walk but not retained in the boundary database yet.
     selected_source_texts: &'texts mut SelectedSourceTextMap,
     entry_file_path: PathBuf,
+    /// The paired support root prepared into the same source set, when present.
+    support_root_file_path: Option<PathBuf>,
     /// Explicit file role for transient entry selections; canonical module roots derive this from
     /// `active_root_role`.
     entry_file_role: Option<FileRole>,
@@ -368,6 +370,7 @@ impl ModulePreparationContext<'_> {
         stable_origin: StableModuleOriginIdentity,
         registered_sources: RegisteredModuleSources,
         entry_file_path: &Path,
+        support_root_file_path: Option<&Path>,
         entry_file_role: Option<FileRole>,
         string_table: StringTable,
         path_fork: PathInternerFork,
@@ -383,6 +386,7 @@ impl ModulePreparationContext<'_> {
             context: self,
             selected_source_texts,
             entry_file_path: entry_file_path.to_path_buf(),
+            support_root_file_path: support_root_file_path.map(Path::to_path_buf),
             entry_file_role,
             active_root_role: stable_origin.role(),
             expected_active_origin: stable_origin,
@@ -427,6 +431,7 @@ impl ModulePreparationContext<'_> {
         module: Vec<PreparedSourceInput>,
         source_spans: &mut SourceSpanBuilders<'_>,
         entry_file_path: &Path,
+        support_root_file_path: Option<&Path>,
         mut string_table: StringTable,
         mut path_fork: PathInternerFork,
         source_byte_count: usize,
@@ -470,6 +475,7 @@ impl ModulePreparationContext<'_> {
                     module,
                     source_spans,
                     entry_file_path,
+                    support_root_file_path,
                     active_root_role,
                     source_byte_count,
                 )
@@ -495,6 +501,18 @@ impl ModulePreparationContext<'_> {
             &stable_origin,
             entry_file_path,
         )?;
+        let support_root_file_id = support_root_file_path
+            .map(|path| {
+                source_id_for_canonical_path(self.source_files, path).ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "module preparation: the paired support root path {path:?} is not in the source file table"
+                        ),
+                    )
+                })
+            })
+            .transpose()?;
 
         // Retain the deterministic preparation context so semantic compilation can continue
         // against the same string table, path fork and boundary source identities.
@@ -502,6 +520,7 @@ impl ModulePreparationContext<'_> {
             PreparedModule {
                 semantic: PreparedModuleInput {
                     active_root_file_id,
+                    support_root_file_id,
                     candidate_source_ids,
                     source_module_origins,
                     prepared_header_syntax,
@@ -611,6 +630,7 @@ impl ModulePreparationContext<'_> {
         module: Vec<PreparedSourceInput>,
         source_spans: &mut SourceSpanBuilders<'_>,
         entry_file_path: &Path,
+        support_root_file_path: Option<&Path>,
         active_root_role: ModuleRootRole,
         source_byte_count: usize,
     ) -> Result<(PreparedHeaderSyntax, Vec<DiagnosticDraft>), PreparedFailure> {
@@ -619,8 +639,11 @@ impl ModulePreparationContext<'_> {
         Self::validate_path_fork_base(path_fork, self.source_files)?;
         let entry_file_id = source_id_for_canonical_path(self.source_files, entry_file_path);
 
+        let support_root_file_id = support_root_file_path
+            .and_then(|path| source_id_for_canonical_path(self.source_files, path));
         let options = HeaderParseOptions {
             entry_file_id,
+            support_root_file_id,
             entry_file_role: None,
             active_root_role,
         };
@@ -1169,8 +1192,13 @@ impl ModuleSyntaxDiscovery<'_, '_> {
             source_is_moth_template(self.context.source_files, source_id);
         let entry_file_id =
             source_id_for_canonical_path(self.context.source_files, &self.entry_file_path);
+        let support_root_file_id = self
+            .support_root_file_path
+            .as_deref()
+            .and_then(|path| source_id_for_canonical_path(self.context.source_files, path));
         let options = HeaderParseOptions {
             entry_file_id,
+            support_root_file_id,
             entry_file_role: self.entry_file_role,
             active_root_role: self.active_root_role,
         };
@@ -1325,12 +1353,17 @@ impl ModuleSyntaxDiscovery<'_, '_> {
             &self.expected_active_origin,
             &self.entry_file_path,
         )?;
+        let support_root_file_id = self
+            .support_root_file_path
+            .as_deref()
+            .and_then(|path| source_id_for_canonical_path(self.context.source_files, path));
 
         let warnings = self.warnings;
         Ok((
             PreparedModule {
                 semantic: PreparedModuleInput {
                     active_root_file_id,
+                    support_root_file_id,
                     candidate_source_ids: self.candidate_source_ids,
                     source_module_origins: self.source_module_origins,
                     prepared_header_syntax,

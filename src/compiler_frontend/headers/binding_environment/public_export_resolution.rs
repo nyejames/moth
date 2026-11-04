@@ -247,9 +247,7 @@ fn lookup_module_root_public_export(
                 .path_fork
                 .resolve_components(effective_path, &mut effective_components_buf);
             let public_suffix = &effective_components[prefix_len..];
-            let exports = input
-                .module_root_public_exports
-                .get(&boundary.module_root)?;
+            let exports = input.module_root_public_exports.get(&boundary.root_file)?;
 
             if prefix_len == 0 {
                 // The entry root has no module prefix. Source declarations retain their
@@ -445,7 +443,10 @@ pub(crate) fn check_module_boundary(
         return Ok(());
     }
 
-    if input.module_root_public_exports.contains_key(target_root) {
+    if input
+        .module_root_public_exports
+        .contains_key(input.target_file)
+    {
         return Err(diagnostics::cross_module_dependency_not_exported(
             input.symbol_path,
             input.span,

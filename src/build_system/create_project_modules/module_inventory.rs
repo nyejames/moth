@@ -72,6 +72,8 @@ use super::source_tree_index::{
 struct ModuleEntrySeed {
     module_id: ModuleId,
     entry_path: PathBuf,
+    /// The paired support root when the entry path is the normal root of a two-root module.
+    support_root_path: Option<PathBuf>,
 }
 
 /// Discovery-internal inventory carrying the graph-assigned `ModuleId` through serial discovery so
@@ -585,6 +587,9 @@ fn module_seeds_in_module_id_order(
         .map(|node| ModuleEntrySeed {
             module_id: node.module_id(),
             entry_path: node.root_file().to_path_buf(),
+            support_root_path: node
+                .normal_root_file()
+                .and_then(|_| node.support_root_file().map(Path::to_path_buf)),
         })
         .collect()
 }
@@ -782,6 +787,7 @@ fn prepare_check_only_module(
             source_module_origins,
         },
         &entry_file_path,
+        None,
         Some(FileRole::Normal),
         local_string_table,
         path_fork,
@@ -1312,6 +1318,7 @@ fn discover_modules_serial_provider_capable(
                 source_module_origins: Arc::clone(&source_module_origins),
             },
             &seed.entry_path,
+            seed.support_root_path.as_deref(),
             None,
             local_string_table,
             path_fork,
@@ -1320,9 +1327,27 @@ fn discover_modules_serial_provider_capable(
             timing_context,
         )?;
 
+        let support_entry_source_index = seed
+            .support_root_path
+            .as_deref()
+            .map(|path| {
+                source_tree_index
+                    .source_index_for_canonical_path(path)
+                    .ok_or_else(|| {
+                        graph_inventory_mismatch_error(format!(
+                            "ModuleId {} paired support root is absent from the source index",
+                            seed.module_id.index()
+                        ))
+                    })
+            })
+            .transpose()?;
         let mut queued = BTreeSet::new();
         let mut queue = VecDeque::from([entry_source_index]);
         queued.insert(entry_source_index);
+        if let Some(support_source_index) = support_entry_source_index {
+            queue.push_back(support_source_index);
+            queued.insert(support_source_index);
+        }
         let mut file_reference_resolver =
             FileReferenceResolver::new(source_tree_index, resource_inputs);
         while let Some(source_index) = queue.pop_front() {

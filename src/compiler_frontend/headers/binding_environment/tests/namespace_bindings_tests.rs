@@ -1300,6 +1300,7 @@ fn module_root_namespace_uses_prepared_root_file_identity() {
             dependency_prefix: intern_path(&["helper"], &mut string_table, &mut path_fork),
             module_root,
             root_file,
+            surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         });
 
     let registry = ExternalPackageRegistry::new();
@@ -1685,6 +1686,7 @@ fn nested_module_root_depends_on_child_facade_resolves_child_root() {
             dependency_prefix: intern_path(&["helper"], &mut string_table, &mut path_fork),
             module_root: helper_root,
             root_file: helper_mod_file,
+            surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         });
     module_symbols
         .module_root_boundaries
@@ -1692,6 +1694,7 @@ fn nested_module_root_depends_on_child_facade_resolves_child_root() {
             dependency_prefix: intern_path(&["helper", "child"], &mut string_table, &mut path_fork),
             module_root: grandchild_root,
             root_file: grandchild_mod_file,
+            surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         });
 
     let registry = ExternalPackageRegistry::new();

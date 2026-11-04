@@ -303,7 +303,11 @@ fn empty_interface(module_origin: StableModuleOriginIdentity) -> PublicSemanticI
 }
 
 fn artifact(module: Module, interface: PublicSemanticInterface) -> CompiledModuleArtifact {
-    CompiledModuleArtifact { module, interface }
+    CompiledModuleArtifact {
+        module,
+        interface,
+        support_interface: None,
+    }
 }
 
 fn boundary(

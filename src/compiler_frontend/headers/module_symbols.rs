@@ -32,6 +32,7 @@ use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderKind, RetainedDependencyClause,
@@ -115,6 +116,7 @@ pub(crate) struct ModuleRootBoundary {
     pub(crate) dependency_prefix: PathId,
     pub(crate) module_root: PathId,
     pub(crate) root_file: PathId,
+    pub(crate) surface: ModuleRootRole,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

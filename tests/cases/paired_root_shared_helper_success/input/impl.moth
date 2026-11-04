@@ -1,0 +1,7 @@
+value #= "shared"
+
+Message = | text String |
+
+label |this Message| -> String:
+    return this.text
+;

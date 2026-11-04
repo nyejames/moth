@@ -1427,11 +1427,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         &self,
         root_file: &PathId,
     ) -> Option<&FxHashSet<PublicExportEntry>> {
-        let module_root = self.module_symbols.file_module_membership.get(root_file)?;
-
         self.module_symbols
             .module_root_public_exports
-            .get(module_root)
+            .get(root_file)
     }
 
     fn resolve_and_register_selection_bindings(

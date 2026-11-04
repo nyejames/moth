@@ -11642,6 +11642,20 @@ contract = "language.dependencies.direct_special_file_dependency_rejected"
 role = "boundary"
 
 [[case]]
+id = "paired_root_support_diagnostic_rejects_normal"
+path = "paired_root_support_diagnostic_rejects_normal"
+tags = ["integration", "modules", "visibility", "root-boundaries", "negative", "publication"]
+contract = "language.project_structure.paired_root_atomic_publication"
+role = "primary"
+
+[[case]]
+id = "paired_root_shared_helper_success"
+path = "paired_root_shared_helper_success"
+tags = ["integration", "modules", "visibility", "root-boundaries", "positive"]
+contract = "language.project_structure.paired_root_shared_helper"
+role = "primary"
+
+[[case]]
 id = "module_helper_reexport_preserves_shared_origin"
 path = "module_helper_reexport_preserves_shared_origin"
 tags = ["integration", "dependencies", "visibility", "public-interface", "positive"]

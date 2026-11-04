@@ -184,6 +184,7 @@ fn invalid_artifact() -> CompiledModuleArtifact {
             reusable_evidence: Vec::new(),
             concrete_call_summaries: Vec::new(),
         },
+        support_interface: None,
     }
 }
 
@@ -761,6 +762,7 @@ fn semantic_result_with_local_path_in_domain(
         string_table,
         path_fork,
         public_interface: artifact.interface,
+        support_public_interface: None,
     }
 }
 
@@ -1042,6 +1044,7 @@ fn check_only_success_result_with_warnings() -> (
             string_table: module_string_table,
             path_fork: module_path_fork,
             public_interface: artifact.interface,
+            support_public_interface: None,
         },
         module_warnings,
         vec![sidecar_warnings],

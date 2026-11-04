@@ -93,6 +93,7 @@ fn artifact_with_context(context: ModuleMaterialisationContext) -> CompiledModul
             reusable_evidence: Vec::new(),
             concrete_call_summaries: Vec::new(),
         },
+        support_interface: None,
     }
 }
 

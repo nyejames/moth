@@ -373,6 +373,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
             .source_files
             .get_by_canonical_path(&canonical_a)
             .map(|i| i.id),
+        support_root_file_id: None,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -687,6 +688,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         input_files,
         &mut span_owners,
         &canonical_entry,
+        None,
         local_table,
         source_files_view.fork_path_interner(),
         source_byte_count,
@@ -698,6 +700,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         input_files,
         &mut span_owners,
         &canonical_entry,
+        None,
         local_table,
         source_files_view.fork_path_interner(),
         source_byte_count,
@@ -914,6 +917,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         input_files,
         &mut span_owners,
         &canonical_entry,
+        None,
         local_table,
         source_files_view.fork_path_interner(),
         source_byte_count,
@@ -925,6 +929,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         input_files,
         &mut span_owners,
         &canonical_entry,
+        None,
         local_table,
         source_files_view.fork_path_interner(),
         source_byte_count,
@@ -1102,6 +1107,7 @@ third || -> I32:
         input_files,
         &mut span_owners,
         &canonical_entry,
+        None,
         local_table,
         source_files_view.fork_path_interner(),
         source_byte_count,
@@ -1113,6 +1119,7 @@ third || -> I32:
         input_files,
         &mut span_owners,
         &canonical_entry,
+        None,
         local_table,
         source_files_view.fork_path_interner(),
         source_byte_count,
@@ -1433,6 +1440,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
             input_files,
             &mut span_owners.split().1,
             &canonical_a,
+            None,
             ModuleRootRole::Normal,
             source_byte_count,
         )
@@ -1670,6 +1678,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
             input_files,
             &mut span_owners.split().1,
             &entry_file_path,
+            None,
             ModuleRootRole::Normal,
             source_byte_count,
         )
@@ -1718,6 +1727,7 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
             .source_files
             .get_by_canonical_path(&fixture.entry_file_path)
             .map(|identity| identity.id),
+        support_root_file_id: None,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -1865,6 +1875,7 @@ fn prepared_file_error_allowance(
             .source_files
             .get_by_canonical_path(&fixture.entry_file_path)
             .map(|identity| identity.id),
+        support_root_file_id: None,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -2149,6 +2160,7 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
             input_files,
             &mut fixture.span_builders.split().1,
             &fixture.entry_file_path,
+            None,
             ModuleRootRole::Normal,
             source_byte_count,
         )
@@ -2226,6 +2238,7 @@ fn every_preparation_strategy_stamps_the_registered_source_identity() {
                 .source_files
                 .get_by_canonical_path(&fixture.entry_file_path)
                 .map(|record| record.id),
+            support_root_file_id: None,
             entry_file_role: None,
             active_root_role: ModuleRootRole::Normal,
         };
@@ -2319,6 +2332,7 @@ fn indexed_file_preparation_returns_warnings_for_publication() {
             },
             &fixture.entry_file_path,
             None,
+            None,
             std::mem::take(&mut fixture.frontend.string_table),
             std::mem::replace(&mut fixture.frontend.path_fork, PathInternerFork::empty()),
             &mut selected_source_texts,
@@ -2380,6 +2394,7 @@ fn chunked_file_preparation_preserves_warning_source_order() {
             input_files,
             &mut fixture.span_builders.split().1,
             &fixture.entry_file_path,
+            None,
             ModuleRootRole::Normal,
             source_byte_count,
         )
@@ -2576,6 +2591,7 @@ fn merge_rejects_chunk_forked_from_a_foreign_path_base() {
             .source_files
             .get_by_canonical_path(&fixture.entry_file_path)
             .map(|identity| identity.id),
+        support_root_file_id: None,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -2899,6 +2915,7 @@ fn serial_chunk_local_preparation_counts_each_selected_source_once() {
             input_files,
             &mut fixture.span_builders.split().1,
             &fixture.entry_file_path,
+            None,
             ModuleRootRole::Normal,
             source_byte_count,
         )
@@ -2951,6 +2968,7 @@ fn chunked_file_preparation_skips_identity_payload_remap() {
             input_files,
             &mut fixture.span_builders.split().1,
             &fixture.entry_file_path,
+            None,
             ModuleRootRole::Normal,
             source_byte_count,
         )

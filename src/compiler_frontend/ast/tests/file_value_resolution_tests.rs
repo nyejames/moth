@@ -385,6 +385,7 @@ fn compile_fixture(
     let style_directives = StyleDirectiveRegistry::built_ins();
     let options = HeaderParseOptions {
         entry_file_id: Some(file_id_for("@page.moth")),
+        support_root_file_id: None,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };

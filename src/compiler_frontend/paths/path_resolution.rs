@@ -13,6 +13,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::paths::compile_time_paths::CompileTimePathBase;
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 
 use crate::compiler_frontend::paths::dependency_resolution::{
     DependencyPathBase, DependencyPathResolutionError, validate_dependency_boundary,
@@ -167,6 +168,16 @@ impl ProjectPathResolver {
     pub(crate) fn module_root_file_for_directory(&self, directory: &Path) -> Option<PathBuf> {
         self.module_roots
             .root_file_for_directory(directory)
+            .map(|path| path.to_path_buf())
+    }
+
+    pub(crate) fn module_root_file_for_directory_surface(
+        &self,
+        directory: &Path,
+        surface: ModuleRootRole,
+    ) -> Option<PathBuf> {
+        self.module_roots
+            .root_file_for_directory_surface(directory, surface)
             .map(|path| path.to_path_buf())
     }
 

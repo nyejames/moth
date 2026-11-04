@@ -40,10 +40,30 @@ impl PublicInterfaceDraft {
     /// join point, so private functions and the entry remain ordinary local summaries and
     /// never become consumer-visible public records. This consumes the pre-HIR draft and returns
     /// the completed [`LocalPublicInterface`]; the draft cannot be finalized twice.
+    #[cfg(test)]
     pub(crate) fn finalize_after_borrow_validation(
         self,
         borrow_analysis: &BorrowAnalysis,
         hir_module: &HirModule,
+    ) -> Result<LocalPublicInterface, InfrastructureFailure> {
+        self.finalize_after_borrow_validation_with_allowed_origins(
+            borrow_analysis,
+            hir_module,
+            &rustc_hash::FxHashSet::default(),
+        )
+    }
+
+    /// Finalize while tolerating public origins published only by a sibling surface.
+    ///
+    /// A paired structural module shares one HIR owner across two interfaces. A helper callable
+    /// exported by only one surface therefore appears in the shared HIR origin map but is not a
+    /// declaration of the other surface. Callers pass the union of all surface callable origins;
+    /// an origin outside that union is still a real invariant failure.
+    pub(crate) fn finalize_after_borrow_validation_with_allowed_origins(
+        self,
+        borrow_analysis: &BorrowAnalysis,
+        hir_module: &HirModule,
+        allowed_origins: &rustc_hash::FxHashSet<OriginFunctionId>,
     ) -> Result<LocalPublicInterface, InfrastructureFailure> {
         // Transient construction-time indexes: validate uniqueness and join summaries by origin.
         // They are dropped before the `LocalPublicInterface` boundary, which stores only the
@@ -128,7 +148,7 @@ impl PublicInterfaceDraft {
         }
 
         for origin in hir_module.function_ids_by_origin.keys() {
-            if !expected_origins.contains(origin) {
+            if !expected_origins.contains(origin) && !allowed_origins.contains(origin) {
                 return Err(InfrastructureFailure::internal(
                     CompilerStage::AstConstruction,
                     format!(

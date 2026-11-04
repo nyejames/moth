@@ -215,7 +215,7 @@ pub(crate) fn build_callable_seed_table(
                 })?;
 
             let method_origin = OriginFunctionId::new_receiver(
-                module_origin.clone(),
+                receiver_origin.module_origin().clone(),
                 method_name.to_owned(),
                 receiver_origin.clone(),
             );

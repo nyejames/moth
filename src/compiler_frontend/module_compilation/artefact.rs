@@ -77,6 +77,8 @@ impl Module {
 pub(crate) struct CompiledModuleArtifact {
     pub(crate) module: Module,
     pub(crate) interface: PublicSemanticInterface,
+    /// The paired support surface published by the same successful module transaction.
+    pub(crate) support_interface: Option<PublicSemanticInterface>,
 }
 
 /// Module-local executable semantic state: validated HIR, paired type environment and borrow
