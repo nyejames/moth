@@ -1183,3 +1183,7 @@ fn find_module_bypass_prefix<'a>(
     }
     None
 }
+
+#[cfg(test)]
+#[path = "tests/module_namespace_tests.rs"]
+mod tests;

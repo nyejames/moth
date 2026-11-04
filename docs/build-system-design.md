@@ -227,11 +227,11 @@ Structural `$feature` selection must use bootstrap-available facts and act befor
 
 Stage 0 builds one canonical source index per project/package boundary from the selected directory. A directory project's source root is the selected directory itself; there is no configurable entry directory beneath it. A nested module can be compiled independently by selecting its directory as a new root. Single-file compilation is a separate synthetic-module mode.
 
-The index inventories normal/support roots, an optional project facade, nearest ownership, supported source-kind candidates, provider-owned files, logical source/namespace identities, path collisions and deterministic order. It does not scan arbitrary `.moth` files as page entries. Root-purpose selection consumes retained facts.
+The index inventories optional normal and support root surfaces per rooted directory, nearest ownership, supported source-kind candidates, provider-owned files, logical source/namespace identities, path collisions and deterministic order. It does not scan arbitrary `.moth` files as page entries. Root-purpose selection consumes retained facts.
 
 A directory component below the selected build root whose final filename starts with `_` is excluded from the entire compilation: normal and support roots, helpers, `.mtf`, resources, check-only inventory, providers, dependency resolution, incremental watches and other discovered inputs. The explicitly selected root is exempt for that root component only. Check both lexical components and canonical ancestry so a visible symlink alias cannot reveal a hidden physical subtree. Retain independently justified non-source skips such as `.git`, `target`, `node_modules` and `.cache`; do not skip visible `dev`, `release`, `dist` or `build` by name.
 
-Project-local packages are structural support roots or the project facade, not a configurable `package_folders` list or implicit `/lib` scan.
+Project-local packages are structural support roots, not a configurable `package_folders` list or implicit `/lib` scan. A support surface at the selected build root is the project package surface when package assembly selects one.
 
 ### Owned source set
 
@@ -292,9 +292,11 @@ A **module** is a directory-scoped compilation/visibility unit rooted by `@*.mot
 
 ### Module roots and dormant work
 
-A directory has at most one root. `@*.moth` defines a normal module. A `+*.moth` inside the source tree defines an API-only scoped support module. One optional project-root `+*.moth` beside config defines the external package facade. Root filename suffixes are cosmetic. `config.moth` is not a root.
+A rooted directory is one structural module with one `ModuleId` and shared owned helper sources. It may contain one `@*.moth` normal root, one `+*.moth` support root, or both. Duplicate roots of the same surface are rejected. A support-only directory is valid and API-only. Root filename suffixes are cosmetic. `config.moth` is not a root.
 
-Normal modules may own dormant runtime work/fragments. `$page` selects HTML entry purpose without changing module identity or making helpers independent entries. Compiler root-role rules define API-only restrictions and implicit entry. Stage 0 ensures selected normal roots complete local semantic validation before activation, including unpurposed-work diagnostics.
+The normal and support roots have separate role-qualified semantic origins, public interfaces and dependency edges. Helper files keep one role-neutral origin and belong to the one structural module. Neither root may import the other, including through direct root paths, alias paths, package lookup or re-export. Any diagnostic invalidates both surfaces before either is published.
+
+Normal roots may own dormant runtime work/fragments. `$page` selects HTML entry purpose without changing module identity or making helpers independent entries. Compiler root-role rules define API-only restrictions and implicit entry. Stage 0 ensures selected normal roots complete local semantic validation before activation, including unpurposed-work diagnostics.
 
 ### Module-root-relative dependency clauses
 
@@ -309,17 +311,17 @@ src/
 
 `@accounts Account` in `renderer.moth` resolves to `src/accounts.moth`.
 
-Parent components and `@./...` are invalid. Paths may traverse unrooted directories within the same module. A child normal-module or support-package boundary ends traversal and exposes only its facade. `@child/internal` cannot bypass it. Scoped support packages are addressed by package name. Providers use an explicit owner without file-relative fallback.
+Parent components and `@./...` are invalid. Paths may traverse unrooted directories within the same module. A child normal-module or support-package boundary ends traversal and exposes only its selected surface. `@child/internal` cannot bypass it. Scoped support packages are addressed by package name. Providers use an explicit owner without file-relative fallback.
 
 One clause resolves one provider/module/package surface. Direct selections are flat binding names within it and create no independent provider edges. Interface binding consumes this Stage 0 namespace without probing ordered fallback candidates.
 
 Normal modules may depend on owned ordinary files/directories, direct child normal modules, visible support packages, registered Core/Builder/dependency packages and explicitly permitted provider files.
 
-They cannot depend on parents, ancestors, normal siblings, grandchildren directly, sibling descendants, unrelated branches or private files of another module. A child facade re-exports deeper declarations needed by its parent. Normal-module topology does not rule out every authored cycle, so the graph validator reports any remaining cycle as a circular-dependency diagnostic.
+They cannot depend on parents, ancestors, normal siblings, grandchildren directly, sibling descendants, unrelated branches or private files of another module. A child public surface re-exports deeper declarations needed by its parent. Normal-module topology does not rule out every authored cycle, so the graph validator reports any remaining cycle as a circular-dependency diagnostic.
 
 ### Scoped support packages
 
-A support root exposes a package named by its containing directory:
+A support surface exposes a package named by its containing directory. A paired directory exposes its normal surface to the parent and its support surface to visible sibling scopes under the consumer-position rule:
 
 ```text
 site/
@@ -339,15 +341,17 @@ For support package `S` whose nearest ancestor normal module is `P`, `S` is visi
 
 The support facade may depend on owned files, any descendant module in its private subtree, strictly outer-scope support packages and registered packages. It cannot depend on its parent, normal sibling consumers or same-scope support siblings.
 
+For a paired directory, the parent imports the normal surface, while a normal sibling branch and its eligible descendants import the support surface. The paired normal surface cannot import its own support surface. Selection happens when Stage 0 builds the namespace entry and carries an explicit surface on the dependency edge; resolution never falls back from one surface to the other.
+
 The same name may occur in disjoint scopes. Overlapping visible scopes are rejected with both locations. Direct normal-sibling dependencies remain outside the accepted topology rather than becoming an implicit fallback.
 
-### Project package facade
+### Project package surface
 
-The optional project-root facade currently compiles as an ordinary API-only module with a pre-Phase-3 Stage 0 assembly namespace rooted at the selected project directory. It may define its own declarations and reference descendant public interfaces below that directory regardless of ordinary lexical module visibility. The accepted direction replaces this physical facade role with the normal/support pairing owned by each rooted directory; that unification is pending and must not be treated as landed.
+A `+*.moth` at the selected build root is an ordinary support surface over that structural module. Package assembly may select it as the external project package surface, whether or not the same directory has a `@` root or `config.moth`. It is not a separate graph node or root-file kind.
 
-The facade never bypasses public boundaries, is invisible to internal modules, cannot import `@project` and cannot expose prohibited project-dependent facts. Provider edges ensure its dependencies compile first. It has no root runtime activation or route.
+The project package surface never bypasses public boundaries, is invisible to internal modules, cannot import `@project` and cannot expose prohibited project-dependent facts. Provider edges ensure its dependencies compile first. It has no root runtime activation or route.
 
-`ProjectPackageAssembly` is a separate link plan over the compiled facade, selected descendant interfaces, reachable generated functions and permitted runtime requirements. It never recompiles or mutates the facade. A project may be both application and package. Without this facade it has no external Moth package surface. Its package identity uses `$project`'s `name`.
+`ProjectPackageAssembly` is a separate link plan over the selected project package surface, selected descendant interfaces, reachable generated functions and permitted runtime requirements. It never recompiles or mutates the facade. A project may be both application and package. Without this facade it has no external Moth package surface. Its package identity uses `$project`'s `name`.
 
 ### Namespace and collision policy
 
@@ -497,9 +501,9 @@ A linkable `ProjectCompilation` contains the canonical structure, project global
 
 ### `build`
 
-Build compiles the union required by selected artefact entries, any project package facade, transitive source providers, required Core/Builder/dependency packages and generated work. After successful compilation it performs link/target/memory validation, lowering and owned output emission.
+Build compiles the union required by selected artefact entries, any selected project package surface, transitive source providers, required Core/Builder/dependency packages and generated work. After successful compilation it performs link/target/memory validation, lowering and owned output emission.
 
-HTML application build requires at least one `$page` below the selected project directory, not necessarily a homepage. Synthetic single-file HTML output requires `$page` on that root. A package facade is not an implicit page.
+HTML application build requires at least one `$page` below the selected project directory, not necessarily a homepage. Synthetic single-file HTML output requires `$page` on that root. A package surface is not an implicit page.
 
 ### `dev`
 
@@ -511,7 +515,7 @@ Each compilation request uniquely owns its mutable worker state. A long-lived ho
 
 ### `check`
 
-Check compiles every discovered project module below the selected project directory, check-only orphan units, the project facade and required packages/generated work. A valid zero-page tree or declaration-only synthetic root is allowed. Unpurposed root runtime/output still fails.
+Check compiles every discovered project module below the selected project directory, check-only orphan units, the selected project package surface and required packages/generated work. A valid zero-page tree or declaration-only synthetic root is allowed. Unpurposed root runtime/output still fails.
 
 Actual linkable roots receive the same selected-target and memory-plan validation as build. Check performs no backend code generation or output writing. Unsupported features in unreachable private functions impose no target failure.
 
@@ -555,7 +559,7 @@ Assembly triggers no local parsing, typing, generic inference, HIR construction,
 
 ### Package assembly
 
-`ProjectPackageAssembly` selects the compiled facade, descendant public interfaces, reachable generated work and permitted runtime requirements. It changes neither visibility nor public-boundary privacy. A package diagnosis prevents publication/lowering without mutating base artefacts.
+`ProjectPackageAssembly` selects the compiled project package surface, descendant public interfaces, reachable generated work and permitted runtime requirements. It changes neither visibility nor public-boundary privacy. A package diagnosis prevents publication/lowering without mutating base artefacts.
 
 ### Per-function reachable unions
 

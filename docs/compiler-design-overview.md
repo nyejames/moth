@@ -118,7 +118,7 @@ bind provider interfaces
 
 Summary-dependent source/generated work converges inside this transaction. Every published source and generated function has validated HIR, borrow facts and local lifetime facts, with any conservative integer proofs paired to that exact executable. Pending numeric construction state and recipes never cross publication. Link-level lifecycle validation remains a later operation.
 
-A new local semantic stage belongs inside this service. Normal modules, support modules, project facades and synthetic single-file modules use it after preparation. The compiler receives compiler-owned options, not the project tool's configuration container.
+A new local semantic stage belongs inside this service. Normal roots, support surfaces, project package surfaces and synthetic single-file modules use it after preparation. The compiler receives compiler-owned options, not the project tool's configuration container.
 
 Raw stage owners have frontend-only or narrower Rust visibility. The architecture boundary check also rejects reverse dependencies on build/project configuration. Build code cannot construct interface drafts, mutate semantic state, install summaries or rerun analyses. Named config and direct-template services are the only shorter semantic paths defined here.
 
@@ -167,11 +167,11 @@ Compile-time page fragments never live in HIR. The artefact validator checks fol
 
 A normal module may define declarations, dormant top-level runtime work and page fragments. Authored root runtime work or direct output requires an explicit purpose with an applicable consumer. `$page` supplies the HTML purpose. Compilation validates dormant work before publication. A dependency exposes declarations without activating that work or inserting fragments.
 
-Support modules and the project package facade are API-only. They permit ordinary declarations and runtime function bodies, but have no implicit entry, root runtime statements, page fragments, page purpose, route or builder artefact. Invalid root activity is diagnosed before executable HIR leaves the compiler.
+Support surfaces and the project package surface are API-only. They permit ordinary declarations and runtime function bodies, but have no implicit entry, root runtime statements, page fragments, page purpose, route or builder artefact. Invalid root activity is diagnosed before executable HIR leaves the compiler.
 
-The project facade consumes build-supplied facade visibility and produces an ordinary immutable module artefact. Its separate package assembly and project-wide assembly privilege remain build-owned.
+The project package surface consumes build-supplied package visibility and produces an ordinary immutable module artefact. Its separate package assembly and project-wide assembly privilege remain build-owned.
 
-**Phase 3 status:** the accepted target gives one structural module per rooted directory with at most one normal `@*.moth` root and one support `+*.moth` root. The current checkpoint still uses the pre-Phase-3 classification and physical project-facade role; paired-root unification, isolated scopes and facade removal are not landed.
+**Phase 3 status:** Stage 0, the structural graph and namespace construction now assign one `ModuleId` per rooted directory with optional normal `@*.moth` and support `+*.moth` surfaces, role-qualified origins and explicit consumer-position surface selection. The physical project-facade role is removed from filesystem discovery and graph topology; a selected-root `+` is an ordinary support surface. Semantic compilation of both root scopes in one module transaction, shared-helper single compilation, isolated root authoring scopes and atomic dual-surface publication remain outstanding.
 
 Public visibility uses compiler-owned export metadata. `$export` is the accepted directive direction. Prefix-only versus optional directive-block form remains unsettled. Keep one final visibility syntax while preserving facade privacy and public re-exports.
 
