@@ -641,6 +641,30 @@ mod source_package_boundary_indexes_tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn aliased_package_roots_are_rejected_before_publication() {
+        use std::os::unix::fs::symlink;
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let package_root = root.join("pkg");
+        fs::create_dir_all(&package_root).expect("should create package root");
+        let target = package_root.join("actual.moth");
+        fs::write(&target, "").expect("should write shared target");
+        symlink(&target, package_root.join("@page.moth")).expect("should create normal root");
+        symlink(&target, package_root.join("+package.moth")).expect("should create support root");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        register_pkg(&mut source_packages, &package_root);
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table).expect_err(
+            "a source package whose normal and support roots alias one file must fail discovery",
+        );
+        assert_invalid_config_reason(failure, InvalidConfigCode::MultipleModuleRootFiles);
+    }
+
     #[test]
     fn multiple_normal_module_roots_rejected_during_boundary_indexing() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -894,14 +918,17 @@ mod module_identity_tests {
     };
     use std::path::Path;
 
-    fn discover_index(
+    fn discover_result(
         root: &std::path::Path,
         entry_root_relative: &str,
-    ) -> (
-        super::source_tree_index::SourceTreeIndex,
-        std::path::PathBuf,
-        std::path::PathBuf,
-    ) {
+    ) -> Result<
+        (
+            super::source_tree_index::SourceTreeIndex,
+            std::path::PathBuf,
+            std::path::PathBuf,
+        ),
+        PreparedFailure,
+    > {
         let entry_root = root.join(entry_root_relative);
         fs::create_dir_all(&entry_root).expect("should create entry root");
 
@@ -922,10 +949,162 @@ mod module_identity_tests {
             &crate::builder_surface::SourceFileKindRegistry::default(),
             &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
-        )
-        .expect("source tree index should build");
+        )?;
 
-        (index, canonical_root, canonical_entry_root)
+        Ok((index, canonical_root, canonical_entry_root))
+    }
+
+    fn discover_index(
+        root: &std::path::Path,
+        entry_root_relative: &str,
+    ) -> (
+        super::source_tree_index::SourceTreeIndex,
+        std::path::PathBuf,
+        std::path::PathBuf,
+    ) {
+        discover_result(root, entry_root_relative).expect("source tree index should build")
+    }
+
+    fn assert_aliased_roots_rejected(
+        failure: PreparedFailure,
+        expected_normal_root: &Path,
+        expected_support_root: &Path,
+    ) {
+        use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+            InvalidConfigCode, InvalidConfigView,
+        };
+
+        let reports = prepared_failure_reports(failure);
+        let (report, diagnostic) = reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .next()
+            .expect("aliased roots should retain a diagnostic");
+        let facts = diagnostic
+            .family_view::<InvalidConfigView>()
+            .expect("aliased roots should retain typed config facts");
+        assert_eq!(facts.reason, InvalidConfigCode::MultipleModuleRootFiles);
+        let strings = report.context().strings();
+        let rendered = diagnostic
+            .string_ids()
+            .iter()
+            .map(|id| strings.resolve(*id))
+            .collect::<Vec<_>>();
+        for expected in [expected_normal_root, expected_support_root] {
+            let expected = fs::canonicalize(
+                expected
+                    .parent()
+                    .expect("an authored root should have a parent"),
+            )
+            .expect("the authored root's parent should canonicalize")
+            .join(
+                expected
+                    .file_name()
+                    .expect("an authored root should have a file name"),
+            );
+            let expected = expected.display().to_string();
+            assert!(
+                rendered.iter().any(|candidate| *candidate == expected),
+                "diagnostic must name authored root {expected}: {rendered:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn aliased_normal_and_support_root_symlinks_are_rejected() {
+        use std::os::unix::fs::symlink;
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(&src).expect("should create entry root");
+        let target = src.join("actual.moth");
+        fs::write(&target, "").expect("should write shared target");
+        let normal_root = src.join("@page.moth");
+        let support_root = src.join("+package.moth");
+        symlink(&target, &normal_root).expect("should create normal root symlink");
+        symlink(&target, &support_root).expect("should create support root symlink");
+
+        let failure = discover_result(&root, "src")
+            .expect_err("two marker aliases to one physical source must be rejected");
+        assert_aliased_roots_rejected(failure, &normal_root, &support_root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn support_root_symlink_to_regular_normal_root_is_rejected() {
+        use std::os::unix::fs::symlink;
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(&src).expect("should create entry root");
+        let normal_root = src.join("@page.moth");
+        let support_root = src.join("+package.moth");
+        fs::write(&normal_root, "").expect("should write regular normal root");
+        symlink(&normal_root, &support_root).expect("should create support root symlink");
+
+        let failure = discover_result(&root, "src")
+            .expect_err("a support alias to the normal root must be rejected");
+        assert_aliased_roots_rejected(failure, &normal_root, &support_root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn distinct_symlinked_normal_and_support_roots_form_a_paired_module() {
+        use std::os::unix::fs::symlink;
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(&src).expect("should create entry root");
+        let normal_target = src.join("actual.moth");
+        fs::write(&normal_target, "").expect("should write normal target");
+        let normal_root = src.join("@page.moth");
+        let support_root = src.join("+package.moth");
+        symlink(&normal_target, &normal_root).expect("should create normal root symlink");
+        fs::write(&support_root, "").expect("should write support root");
+
+        let (index, _project_root, entry_root) = discover_index(&root, "src");
+        let module_id = index
+            .module_identities()
+            .module_id_for_directory(&entry_root)
+            .expect("the entry root should own a paired structural module");
+        let record = index.module_identities().record(module_id);
+        assert_eq!(
+            record.normal_root_file(),
+            Some(fs::canonicalize(&normal_target).unwrap().as_path())
+        );
+        assert_eq!(
+            record.support_root_file(),
+            Some(fs::canonicalize(&support_root).unwrap().as_path())
+        );
+        assert_eq!(record.public_surface_role(), ModuleRootRole::Support);
+
+        let normal_source = index
+            .source_index_for_canonical_path(&fs::canonicalize(&normal_target).unwrap())
+            .expect("the normal root target should be indexed");
+        let support_source = index
+            .source_index_for_canonical_path(&fs::canonicalize(&support_root).unwrap())
+            .expect("the support root should be indexed");
+        assert_eq!(
+            index
+                .source(normal_source)
+                .logical_identity()
+                .module_origin()
+                .expect("normal source should have an origin")
+                .role(),
+            ModuleRootRole::Normal
+        );
+        assert_eq!(
+            index
+                .source(support_source)
+                .logical_identity()
+                .module_origin()
+                .expect("support source should have an origin")
+                .role(),
+            ModuleRootRole::Support
+        );
     }
 
     #[cfg(unix)]

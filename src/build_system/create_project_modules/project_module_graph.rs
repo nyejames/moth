@@ -160,6 +160,24 @@ impl ProjectModuleGraphNode {
             .unwrap_or(&self.shared_origin)
     }
 
+    /// The exact primary and optional secondary origins one successful artefact must publish.
+    ///
+    /// A normal root is always the primary interface. A secondary support interface exists only
+    /// when the same structural module owns both a normal and a support root. A support-only
+    /// module publishes its support origin as the primary interface and has no secondary one.
+    pub(crate) fn publication_surfaces(
+        &self,
+    ) -> (
+        &StableModuleOriginIdentity,
+        Option<&StableModuleOriginIdentity>,
+    ) {
+        let support = self
+            .normal_origin
+            .as_ref()
+            .and(self.support_origin.as_ref());
+        (self.stable_origin(), support)
+    }
+
     #[allow(dead_code)]
     /// The primary structural surface role for consumers that need one representative surface.
     pub(crate) fn role(&self) -> ModuleRootRole {

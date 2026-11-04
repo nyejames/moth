@@ -285,7 +285,7 @@ pub(crate) fn invalid_config_message(
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "Module directory '{}' contains multiple normal module root files: {}. Every module directory must contain exactly one non-config '@*.moth' root file.",
+                "Module directory '{}' contains conflicting module root files: {}. A module directory may contain at most one non-config '@*.moth' normal root and one non-config '+*.moth' support root, and every root must resolve to a distinct physical source file.",
                 string_table.resolve(*directory),
                 candidates,
             )

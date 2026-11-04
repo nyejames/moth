@@ -174,9 +174,14 @@ pub(crate) fn path_has_hidden_component_below(path: &Path, selected_root: &Path)
     })
 }
 
-/// One canonical root file discovered inside a traversed directory, with its structural role.
+/// One root file discovered inside a traversed directory, with its structural role.
+///
+/// `root_file` is the canonical physical file used for identity; `visible_root_file` retains the
+/// authored `@`/`+` spelling so a filesystem-structure diagnostic can name the marker the user
+/// actually wrote.
 struct DiscoveredDirectoryRoot {
     root_file: PathBuf,
+    visible_root_file: PathBuf,
     role: ModuleRootRole,
 }
 
@@ -774,6 +779,7 @@ impl SourceTreeIndex {
 
                 directory_roots.push(DiscoveredDirectoryRoot {
                     root_file: canonical_path,
+                    visible_root_file: path.clone(),
                     role,
                 });
             }
@@ -1157,8 +1163,8 @@ fn classify_directory_root(
     let mut support = Vec::new();
     for root in directory_roots.drain(..) {
         match root.role {
-            ModuleRootRole::Normal => normal.push(root.root_file),
-            ModuleRootRole::Support => support.push(root.root_file),
+            ModuleRootRole::Normal => normal.push(root),
+            ModuleRootRole::Support => support.push(root),
             ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => {
                 crate::compiler_bug!(
                     crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
@@ -1171,22 +1177,67 @@ fn classify_directory_root(
     if normal.len() > 1 {
         return Err(multiple_same_role_roots_error(
             directory,
-            normal,
+            normal
+                .iter()
+                .map(|root| root.visible_root_file.clone())
+                .collect(),
             string_table,
         ));
     }
     if support.len() > 1 {
         return Err(multiple_same_role_roots_error(
             directory,
-            support,
+            support
+                .iter()
+                .map(|root| root.visible_root_file.clone())
+                .collect(),
+            string_table,
+        ));
+    }
+
+    if let (Some(normal_root), Some(support_root)) = (normal.first(), support.first())
+        && normal_root.root_file == support_root.root_file
+    {
+        return Err(aliased_root_files_error(
+            directory,
+            normal_root.visible_root_file.clone(),
+            support_root.visible_root_file.clone(),
             string_table,
         ));
     }
 
     Ok(ClassifiedDirectoryRoots {
-        normal_root_file: normal.pop(),
-        support_root_file: support.pop(),
+        normal_root_file: normal.pop().map(|root| root.root_file),
+        support_root_file: support.pop().map(|root| root.root_file),
     })
+}
+
+/// Reject one physical source file reached through both structural root markers.
+///
+/// A paired module needs two authored root scopes. Canonicalizing `@page.moth` and `+package.moth`
+/// to one file would collapse them into one source identity, so the filesystem structure fails
+/// before module identity or semantic preparation begins.
+fn aliased_root_files_error(
+    directory: &Path,
+    normal_root_file: PathBuf,
+    support_root_file: PathBuf,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let diagnostic = project_structure_diagnostic(InvalidConfigReason::MultipleModuleRootFiles {
+        directory: path_id(directory, &mut diagnostic_strings),
+        candidates: vec![
+            path_id(&normal_root_file, &mut diagnostic_strings),
+            path_id(&support_root_file, &mut diagnostic_strings),
+        ],
+    });
+    let table = string_table.take_for_handoff();
+    PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        table,
+        None,
+        None,
+    ))
 }
 
 fn multiple_same_role_roots_error(
@@ -1253,7 +1304,7 @@ fn classify_package_root_directory(
     if normal_count > 1 || support_count > 1 {
         let mut candidate_paths = directory_roots
             .iter()
-            .map(|root| &root.root_file)
+            .map(|root| &root.visible_root_file)
             .collect::<Vec<_>>();
         candidate_paths.sort();
         let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);

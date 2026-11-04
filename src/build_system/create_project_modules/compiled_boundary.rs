@@ -45,7 +45,9 @@ use crate::projects::settings::Config;
 
 use super::generated_store::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::MaterialisationContextLocation;
-use super::module_artifact_store::{ModuleArtifactStore, ProviderSlot};
+use super::module_artifact_store::{
+    ModuleArtifactStore, ProviderSlot, publication_surface_mismatch,
+};
 use super::module_identity::ModuleId;
 use super::project_module_graph::ProjectModuleGraph;
 use super::resource_inputs::ResourceInputRegistry;
@@ -426,14 +428,13 @@ impl CompiledGraphBoundary {
                     }
                     *owner = Some(module_id);
                     let node = &self.structure.nodes()[index];
-                    if &artifact.interface.module_origin != node.stable_origin() {
+                    let (expected_primary, expected_support) = node.publication_surfaces();
+                    if let Some(mismatch) =
+                        publication_surface_mismatch(artifact, expected_primary, expected_support)
+                    {
                         return Err(InfrastructureFailure::internal(
                             CompilerStage::ProjectBuildAssembly,
-                            format!(
-                                "ModuleId {index} artefact interface origin {:?} disagrees with its graph node origin {:?}",
-                                artifact.interface.module_origin,
-                                node.stable_origin()
-                            ),
+                            format!("ModuleId {index} {mismatch}"),
                         ));
                     }
                 }

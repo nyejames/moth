@@ -1378,13 +1378,17 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                 };
                 match outcome.outcome {
                     DirectoryModuleTaskOutcome::Success(compiled, warnings, sidecar_warnings) => {
+                        let node = graph.node(outcome.module_id);
+                        let (expected_origin, expected_support_origin) =
+                            node.publication_surfaces();
                         publish_compiled_module(
                             &mut provider_store,
                             &mut generated_store,
                             &mut provider_materialisations,
                             resource_inputs,
                             outcome.module_id,
-                            graph.node(outcome.module_id).stable_origin(),
+                            expected_origin,
+                            expected_support_origin,
                             *compiled,
                             warnings,
                             sidecar_warnings,

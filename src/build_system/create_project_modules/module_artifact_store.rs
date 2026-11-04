@@ -43,6 +43,64 @@ pub(crate) enum ProviderSlot {
     Blocked,
 }
 
+/// Describe the first mismatch between a successful artifact's published surfaces and the
+/// structural graph's declared pair.
+///
+/// WHAT: enforces the exact normal/support shape before a success can enter any retained lane.
+/// WHY: publication and boundary validation must not trust compile-time construction to decide
+///      whether a paired module has a support interface or a single-root module lacks one.
+///      Returned prose is allocated only on failure.
+pub(crate) fn publication_surface_mismatch(
+    artifact: &CompiledModuleArtifact,
+    expected_primary: &StableModuleOriginIdentity,
+    expected_support: Option<&StableModuleOriginIdentity>,
+) -> Option<String> {
+    if artifact.interface.module_origin != *expected_primary {
+        return Some(format!(
+            "artefact primary interface origin {:?} disagrees with graph node origin {:?}",
+            artifact.interface.module_origin, expected_primary
+        ));
+    }
+
+    let Some(expected_support) = expected_support else {
+        if let Some(support_interface) = &artifact.support_interface {
+            return Some(format!(
+                "artefact publishes unexpected secondary support interface {:?} for a graph node without paired roots",
+                support_interface.module_origin
+            ));
+        }
+        return None;
+    };
+
+    if expected_primary.role() != ModuleRootRole::Normal {
+        return Some(format!(
+            "graph node declares paired roots but its primary origin {:?} is not a normal surface",
+            expected_primary
+        ));
+    }
+    if expected_support.role() != ModuleRootRole::Support
+        || !expected_support.is_same_structural_directory(expected_primary)
+    {
+        return Some(format!(
+            "graph node declares paired roots but its secondary origin {:?} is not a support surface in the primary structural directory",
+            expected_support
+        ));
+    }
+    let Some(support_interface) = &artifact.support_interface else {
+        return Some(format!(
+            "artefact is missing the secondary support interface declared by graph origin {:?}",
+            expected_support
+        ));
+    };
+    if support_interface.module_origin != *expected_support {
+        return Some(format!(
+            "artefact support interface origin {:?} disagrees with graph node support origin {:?}",
+            support_interface.module_origin, expected_support
+        ));
+    }
+    None
+}
+
 /// Exact location of one published materialisation template inside this store.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct MaterialisationContextLocation {
@@ -90,6 +148,7 @@ impl ModuleArtifactStore {
         module_id: ModuleId,
         artifact: &CompiledModuleArtifact,
         expected_origin: &StableModuleOriginIdentity,
+        expected_support_origin: Option<&StableModuleOriginIdentity>,
     ) -> Result<ModuleSuccessPublication, InfrastructureFailure> {
         if self.slot(module_id)? != ProviderSlot::Unavailable {
             crate::compiler_bug!(
@@ -98,27 +157,14 @@ impl ModuleArtifactStore {
                 module_id.index()
             );
         }
-        if artifact.interface.module_origin != *expected_origin {
-            crate::compiler_bug!(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
-                "ModuleId {} artefact interface origin {:?} disagrees with graph node origin {:?}",
-                module_id.index(),
-                artifact.interface.module_origin,
-                expected_origin
-            );
-        }
-        if let Some(support_interface) = &artifact.support_interface
-            && (support_interface.module_origin.role() != ModuleRootRole::Support
-                || !support_interface
-                    .module_origin
-                    .is_same_structural_directory(expected_origin))
+        if let Some(mismatch) =
+            publication_surface_mismatch(artifact, expected_origin, expected_support_origin)
         {
             crate::compiler_bug!(
                 crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
-                "ModuleId {} support interface origin {:?} does not belong to the structural module of {:?}",
+                "ModuleId {} {}",
                 module_id.index(),
-                support_interface.module_origin,
-                expected_origin
+                mismatch
             );
         }
 
@@ -431,7 +477,16 @@ impl ModuleArtifactStore {
         artifact: CompiledModuleArtifact,
     ) -> Result<(), InfrastructureFailure> {
         let expected_origin = artifact.interface.module_origin.clone();
-        let publication = self.preflight_success(module_id, &artifact, &expected_origin)?;
+        let expected_support_origin = artifact
+            .support_interface
+            .as_ref()
+            .map(|interface| &interface.module_origin);
+        let publication = self.preflight_success(
+            module_id,
+            &artifact,
+            &expected_origin,
+            expected_support_origin,
+        )?;
         self.reserve_success_commit(&publication);
         self.commit_success(publication, artifact);
         Ok(())

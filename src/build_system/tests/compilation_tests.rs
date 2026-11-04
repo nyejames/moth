@@ -127,6 +127,10 @@ fn publish_module_and_generated(
     generated_delta: GeneratedFunctionDelta,
     resource_source_associations: Vec<ResourceSourceAssociation>,
 ) -> Result<(), InfrastructureFailure> {
+    let expected_support_origin = artifact
+        .support_interface
+        .as_ref()
+        .map(|interface| interface.module_origin.clone());
     super::publish_module_and_generated(ModuleBoundaryPublication {
         modules,
         generated,
@@ -134,6 +138,7 @@ fn publish_module_and_generated(
         resource_inputs,
         module_id,
         expected_origin,
+        expected_support_origin: expected_support_origin.as_ref(),
         artifact,
         generated_delta,
         resource_source_associations,
@@ -418,7 +423,7 @@ fn combined_publication_rejects_expected_origin_mismatch_without_mutation() {
     );
     let actual_origin = artifact.interface.module_origin.clone();
     let expected_bug_message = format!(
-        "ModuleId 0 artefact interface origin {:?} disagrees with graph node origin {:?}",
+        "ModuleId 0 artefact primary interface origin {:?} disagrees with graph node origin {:?}",
         actual_origin, wrong_origin
     );
 
@@ -803,6 +808,7 @@ fn forced_path_exhaustion_during_module_publication_reports_capacity_diagnostic(
         &mut resource_inputs,
         ModuleId::from_index(0),
         &origin,
+        None,
         compiled,
         DiagnosticBag::new(),
         Vec::new(),
@@ -1569,6 +1575,7 @@ fn published_warnings_capture_types_and_remap_paths_after_environment_drop() {
             &mut resource_inputs,
             ModuleId::from_index(0),
             &origin,
+            None,
             compiled,
             warnings,
             Vec::new(),
@@ -1969,6 +1976,7 @@ fn publish_generated_sidecar_boundary(
             &mut resource_inputs,
             ModuleId::from_index(0),
             &origin,
+            None,
             compiled,
             DiagnosticBag::new(),
             generated_warning_bags,

@@ -90,6 +90,7 @@ pub(super) struct ModuleBoundaryPublication<'a> {
     pub resource_inputs: &'a mut ResourceInputRegistry,
     pub module_id: ModuleId,
     pub expected_origin: &'a StableModuleOriginIdentity,
+    pub expected_support_origin: Option<&'a StableModuleOriginIdentity>,
     pub artifact: CompiledModuleArtifact,
     pub generated_delta: GeneratedFunctionDelta,
     pub resource_source_associations: Vec<ResourceSourceAssociation>,
@@ -112,6 +113,7 @@ pub(super) fn publish_module_and_generated(
         resource_inputs,
         module_id,
         expected_origin,
+        expected_support_origin,
         artifact,
         generated_delta,
         resource_source_associations,
@@ -119,7 +121,12 @@ pub(super) fn publish_module_and_generated(
     // Every fallible check runs before anything mutates. The reservations and commits that follow
     // cannot fail, so a rejected publication leaves module, generated and resource registries
     // unchanged.
-    let module_publication = modules.preflight_success(module_id, &artifact, expected_origin)?;
+    let module_publication = modules.preflight_success(
+        module_id,
+        &artifact,
+        expected_origin,
+        expected_support_origin,
+    )?;
     let generated_publication = generated.preflight(&generated_delta)?;
     let resource_publication =
         resource_inputs.preflight_resource_source_associations(&resource_source_associations)?;
@@ -151,6 +158,7 @@ pub(super) fn publish_compiled_module(
     resource_inputs: &mut ResourceInputRegistry,
     module_id: ModuleId,
     expected_origin: &StableModuleOriginIdentity,
+    expected_support_origin: Option<&StableModuleOriginIdentity>,
     compiled: ModuleSemanticResult,
     mut warnings: DiagnosticBag,
     mut generated_warning_bags: Vec<DiagnosticBag>,
@@ -269,6 +277,7 @@ pub(super) fn publish_compiled_module(
         resource_inputs,
         module_id,
         expected_origin,
+        expected_support_origin,
         artifact: CompiledModuleArtifact {
             module,
             interface: public_interface,
