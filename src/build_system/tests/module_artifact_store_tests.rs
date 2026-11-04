@@ -159,3 +159,49 @@ fn module_success_preflight_rejects_duplicate_rows_without_mutation() {
     );
     assert_eq!(store.materialisation_locations().count(), 0);
 }
+
+#[test]
+fn paired_publication_preflight_failure_leaves_both_surfaces_unpublished() {
+    let package = StablePackageIdentity::project_local("module-artifact-tests");
+    let normal_origin = StableModuleOriginIdentity::from_portable_path(
+        package.clone(),
+        "paired".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let mut artifact = artifact_with_context(
+        ModuleMaterialisationContext::from_identities_for_test(Vec::new()),
+    );
+    artifact.interface.module_origin = normal_origin;
+    let mut invalid_support = artifact.interface.clone();
+    invalid_support.module_origin = artifact.interface.module_origin.clone();
+    artifact.support_interface = Some(invalid_support);
+
+    let store = ModuleArtifactStore::new(1);
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        store.preflight_success(
+            ModuleId::from_index(0),
+            &artifact,
+            &artifact.interface.module_origin,
+        )
+    }))
+    .expect_err("an invalid paired support interface must reject publication");
+    let report = payload
+        .downcast::<CompilerBugReport>()
+        .unwrap_or_else(|_| panic!("expected a CompilerBugReport payload"));
+    assert_eq!(report.stage, CompilerStage::ProjectBuildAssembly);
+    assert!(
+        report.message.contains("support interface origin")
+            && report
+                .message
+                .contains("does not belong to the structural module"),
+        "unexpected paired publication failure: {}",
+        report.message
+    );
+
+    assert_eq!(store.artifact_count(), 0);
+    assert_eq!(
+        store.slot(ModuleId::from_index(0)).unwrap(),
+        ProviderSlot::Unavailable
+    );
+    assert_eq!(store.materialisation_locations().count(), 0);
+}

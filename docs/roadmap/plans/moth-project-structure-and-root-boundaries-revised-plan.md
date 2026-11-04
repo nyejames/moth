@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-- **Status:** implemented on branch `project-structure-changes`; selected-directory roots, optional config, hidden source exclusion, hidden outputs, scaffold migration and paired normal/support semantic publication are complete. Final integration audit and closeout are in progress.
+- **Status:** implemented on branch `project-structure-changes`; selected-directory roots, optional config, hidden source exclusion, hidden outputs, scaffold migration and paired normal/support semantic publication are complete. Final integration audit, full validation and closeout passed.
 - **Goal:** compile a selected directory directly, with optional configuration, structural modules that may have separate `@` and `+` interfaces, mechanically excluded `_` directories and safe hidden output roots.
 - **Implementation owners:** the existing Stage 0 source index, module identity and graph, module namespaces, compiler semantic compilation, config boundary and build-owned output policy.
 - **Follow-ups:** a separate compiler-owned directive/configuration plan and a separate HTML `$entry` migration. Neither directive change belongs in this implementation.
