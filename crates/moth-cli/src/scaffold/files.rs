@@ -17,17 +17,42 @@ const GITIGNORE_FILE: &str = ".gitignore";
 /// Relative paths of all scaffold-owned files.
 const SCAFFOLD_OWNED_FILES: &[&str] = &[CONFIG_FILE_NAME, PAGE_FILE];
 
+/// The filesystem shape of one entry observed without following its final symlink.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ScaffoldEntryKind {
+    RegularFile,
+    Symlink,
+    Directory,
+    Other,
+}
+
+impl ScaffoldEntryKind {
+    fn from_metadata(metadata: &fs::Metadata) -> Self {
+        let file_type = metadata.file_type();
+        if file_type.is_symlink() {
+            Self::Symlink
+        } else if file_type.is_file() {
+            Self::RegularFile
+        } else if file_type.is_dir() {
+            Self::Directory
+        } else {
+            Self::Other
+        }
+    }
+}
+
 /// One scaffold-owned path that already exists in the target directory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ScaffoldConflict {
     pub(crate) relative: &'static str,
-    pub(crate) is_symlink: bool,
+    pub(crate) kind: ScaffoldEntryKind,
 }
 
 /// Run preflight checks before writing anything.
 ///
-/// Returns Ok(()) when it is safe to proceed, or Err when the user cancels
-/// or when unresolvable conflicts exist without `--force`.
+/// Returns Ok(()) when it is safe to proceed, or Err for an unsupported scaffold-owned entry
+/// kind, a non-regular `.gitignore`, a regular-file conflict without `--force`, or a declined
+/// confirmation prompt.
 pub(crate) fn run_preflight_checks(
     target: &ResolvedProjectTarget,
     force: bool,
@@ -35,23 +60,10 @@ pub(crate) fn run_preflight_checks(
 ) -> Result<(), String> {
     let conflicts = find_scaffold_conflicts(&target.project_dir)?;
 
-    let symlink_conflicts = conflicts
-        .iter()
-        .filter(|conflict| conflict.is_symlink)
-        .map(|conflict| conflict.relative)
-        .collect::<Vec<_>>();
-    if !symlink_conflicts.is_empty() {
-        let file_list = symlink_conflicts
-            .iter()
-            .map(|path| format!("  {path}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        return Err(format!(
-            "Cannot create project because scaffold-owned paths are symbolic links:\n\
-             {file_list}\n\n\
-             Replace them with regular files. --force does not write through symbolic links."
-        ));
-    }
+    reject_unsupported_conflicts(&conflicts, ScaffoldEntryKind::Symlink)?;
+    reject_unsupported_conflicts(&conflicts, ScaffoldEntryKind::Directory)?;
+    reject_unsupported_conflicts(&conflicts, ScaffoldEntryKind::Other)?;
+    reject_unsupported_gitignore(&target.project_dir)?;
 
     let conflict_names = conflicts
         .iter()
@@ -106,9 +118,77 @@ pub(crate) fn run_preflight_checks(
     Ok(())
 }
 
+fn reject_unsupported_conflicts(
+    conflicts: &[ScaffoldConflict],
+    kind: ScaffoldEntryKind,
+) -> Result<(), String> {
+    if kind == ScaffoldEntryKind::RegularFile {
+        return Ok(());
+    }
+    let paths = conflicts
+        .iter()
+        .filter(|conflict| conflict.kind == kind)
+        .map(|conflict| conflict.relative)
+        .collect::<Vec<_>>();
+    if paths.is_empty() {
+        return Ok(());
+    }
+
+    let file_list = paths
+        .iter()
+        .map(|path| format!("  {path}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (category, action) = match kind {
+        ScaffoldEntryKind::Symlink => (
+            "symbolic links",
+            "Replace them with regular files. --force does not replace symbolic links.",
+        ),
+        ScaffoldEntryKind::Directory => (
+            "directories",
+            "Remove them or replace them with regular files. --force only replaces regular files.",
+        ),
+        ScaffoldEntryKind::Other => (
+            "unsupported filesystem entries",
+            "Remove them or replace them with regular files. --force only replaces regular files.",
+        ),
+        ScaffoldEntryKind::RegularFile => unreachable!("regular files are not rejected"),
+    };
+    Err(format!(
+        "Cannot create project because scaffold-owned paths are {category}:\n\
+         {file_list}\n\n\
+         {action}"
+    ))
+}
+
+fn reject_unsupported_gitignore(project_dir: &Path) -> Result<(), String> {
+    let Some(metadata) = entry_metadata(&project_dir.join(GITIGNORE_FILE), GITIGNORE_FILE)? else {
+        return Ok(());
+    };
+    let kind = ScaffoldEntryKind::from_metadata(&metadata);
+    if kind == ScaffoldEntryKind::RegularFile {
+        return Ok(());
+    }
+    Err(format!(
+        "Cannot create project because .gitignore is {}. Remove it or replace it with a \
+         regular file; --force only replaces regular files.",
+        entry_kind_noun(kind),
+    ))
+}
+
+fn entry_kind_noun(kind: ScaffoldEntryKind) -> &'static str {
+    match kind {
+        ScaffoldEntryKind::Symlink => "a symbolic link",
+        ScaffoldEntryKind::Directory => "a directory",
+        ScaffoldEntryKind::Other => "an unsupported filesystem entry",
+        ScaffoldEntryKind::RegularFile => "a regular file",
+    }
+}
+
 /// Report each scaffold-owned path that exists, without following a final symlink.
 ///
-/// A dangling symlink is still a conflict, while a missing entry is not. Filesystem errors are
+/// The result retains the observed kind so preflight can reject symlinks, directories and other
+/// unsupported entries before prompting. A missing entry is not a conflict. Filesystem errors are
 /// returned rather than treated as an absent file.
 pub(crate) fn find_scaffold_conflicts(project_dir: &Path) -> Result<Vec<ScaffoldConflict>, String> {
     let mut conflicts = Vec::new();
@@ -119,7 +199,7 @@ pub(crate) fn find_scaffold_conflicts(project_dir: &Path) -> Result<Vec<Scaffold
         };
         conflicts.push(ScaffoldConflict {
             relative,
-            is_symlink: metadata.file_type().is_symlink(),
+            kind: ScaffoldEntryKind::from_metadata(&metadata),
         });
     }
     Ok(conflicts)
@@ -139,17 +219,24 @@ fn entry_metadata(path: &Path, relative: &str) -> Result<Option<fs::Metadata>, S
     }
 }
 
-fn scaffolding_through_symlink_error(relative: &str) -> String {
+fn unsupported_scaffold_entry_error(relative: &str, kind: ScaffoldEntryKind) -> String {
     format!(
-        "Project creation failed because {relative} is a symbolic link. \
-         The scaffold does not write through symbolic links; replace it with a regular file."
+        "Project creation failed because {relative} is {}. Replace it with a regular file.",
+        entry_kind_noun(kind),
+    )
+}
+
+fn existing_scaffold_file_needs_force(relative: &str) -> String {
+    format!(
+        "Project creation failed because {relative} already exists. \
+         Run with --force to replace an existing regular scaffold file."
     )
 }
 
 /// Create a file that must not already exist.
 ///
-/// `create_new` refuses an existing entry, including a symlink introduced after the metadata
-/// preflight, so creating a missing scaffold file never follows a link.
+/// `create_new` refuses an existing final entry, including a symlink introduced after the
+/// metadata preflight, so this creation path cannot silently reuse a path that appeared later.
 fn write_new_file(path: &Path, content: &str, relative: &str) -> Result<(), String> {
     use std::io::Write as _;
 
@@ -193,31 +280,31 @@ pub(crate) fn write_scaffold(
     let mut write_scaffold_file = |relative: &str, content: &str| -> Result<(), String> {
         let path = project_dir.join(relative);
         let metadata = entry_metadata(&path, relative)?;
-        if metadata
-            .as_ref()
-            .is_some_and(|metadata| metadata.file_type().is_symlink())
-        {
-            return Err(scaffolding_through_symlink_error(relative));
-        }
-        let existed = metadata.is_some();
-        if existed {
-            // The metadata check refuses an observed symlink; this replacement is not an atomic
-            // no-follow open.
-            fs::write(&path, content).map_err(|e| {
-                format!(
-                    "Project creation failed while writing {relative}: {e}.\n\
-                     Some scaffold directories may already have been created. \
-                     No existing files were overwritten unless --force was confirmed."
-                )
-            })?;
-        } else {
+        let Some(metadata) = metadata else {
             write_new_file(&path, content, relative)?;
-        }
-        if existed && force {
-            replaced.push(PathBuf::from(relative));
-        } else {
             created.push(PathBuf::from(relative));
+            return Ok(());
+        };
+
+        let kind = ScaffoldEntryKind::from_metadata(&metadata);
+        if kind != ScaffoldEntryKind::RegularFile {
+            return Err(unsupported_scaffold_entry_error(relative, kind));
         }
+        if !force {
+            return Err(existing_scaffold_file_needs_force(relative));
+        }
+
+        // Best-effort type guard only: a concurrent substitution after `entry_metadata` can still
+        // redirect this `fs::write`. The scaffold does not claim an atomic no-follow replacement
+        // for an existing regular file. Missing destinations use `create_new` above instead.
+        fs::write(&path, content).map_err(|e| {
+            format!(
+                "Project creation failed while writing {relative}: {e}.\n\
+                 Some scaffold directories may already have been created. \
+                 No existing files were overwritten unless --force was confirmed."
+            )
+        })?;
+        replaced.push(PathBuf::from(relative));
         Ok(())
     };
 
@@ -288,8 +375,9 @@ fn handle_gitignore(
         });
     };
 
-    if metadata.file_type().is_symlink() {
-        return Err(scaffolding_through_symlink_error(GITIGNORE_FILE));
+    let kind = ScaffoldEntryKind::from_metadata(&metadata);
+    if kind != ScaffoldEntryKind::RegularFile {
+        return Err(unsupported_scaffold_entry_error(GITIGNORE_FILE, kind));
     }
 
     // Existing .gitignore — check whether it already contains the Moth block.
@@ -314,12 +402,14 @@ fn handle_gitignore(
         true,
     )?;
     if should_append {
-        // Recheck immediately before writing so a symlink introduced after the preflight read is
-        // refused. The check is not an atomic no-follow replacement.
-        if entry_metadata(&gitignore_path, GITIGNORE_FILE)?
-            .is_some_and(|metadata| metadata.file_type().is_symlink())
-        {
-            return Err(scaffolding_through_symlink_error(GITIGNORE_FILE));
+        // Recheck immediately before writing. This is a best-effort guard, not an atomic
+        // no-follow replacement; a concurrent substitution after the check can still redirect the
+        // append.
+        if let Some(metadata) = entry_metadata(&gitignore_path, GITIGNORE_FILE)? {
+            let kind = ScaffoldEntryKind::from_metadata(&metadata);
+            if kind != ScaffoldEntryKind::RegularFile {
+                return Err(unsupported_scaffold_entry_error(GITIGNORE_FILE, kind));
+            }
         }
 
         let mut appended = existing;

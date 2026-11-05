@@ -660,6 +660,21 @@ impl SourceTreeIndex {
                 };
 
                 if is_dir {
+                    // Root markers are reserved source filenames. A directory or directory
+                    // symlink reachable under one of those names is a malformed authored root,
+                    // not a traversable module directory.
+                    if let Some(file_name) = path.file_name().and_then(|name| name.to_str())
+                        && file_name_is_module_root_file(file_name)
+                    {
+                        let canonical_target = canonicalize_source_path(&path)?;
+                        return Err(module_root_not_regular_file_error(
+                            &directory,
+                            &path,
+                            &canonical_target,
+                            string_table,
+                        ));
+                    }
+
                     if skip_policy.should_skip(&path) {
                         stats.dirs_skipped += 1;
                     } else {
@@ -798,20 +813,22 @@ impl SourceTreeIndex {
                     continue;
                 }
 
-                // A root marker must also avoid subtrees the traversal skips by policy (fixed
-                // generated directories and validated output roots). Ordinary source symlinks
-                // keep their existing silent-exclusion behaviour.
-                if is_module_root
-                    && canonical_parent.is_some_and(|parent| {
-                        skip_policy.canonical_ancestor_is_skipped(parent, &entry_root)
-                    })
-                {
-                    return Err(module_root_outside_claim_error(
-                        &directory,
-                        &path,
-                        &canonical_path,
-                        string_table,
-                    ));
+                // A source alias must not reveal a subtree the traversal skips by policy (fixed
+                // generated directories and validated output roots). Ordinary and provider-owned
+                // aliases are silently excluded; an authored root marker is a structural failure
+                // because it must resolve to a source owned by its module.
+                if canonical_parent.is_some_and(|parent| {
+                    skip_policy.canonical_ancestor_is_skipped(parent, &entry_root)
+                }) {
+                    if is_module_root {
+                        return Err(module_root_outside_claim_error(
+                            &directory,
+                            &path,
+                            &canonical_path,
+                            string_table,
+                        ));
+                    }
+                    continue;
                 }
 
                 if let Some(stem) = source_stem_from_file_name(file_name) {
@@ -1443,6 +1460,32 @@ fn module_root_outside_claim_error(
         project_structure_diagnostic(InvalidConfigReason::ModuleRootFileOutsideClaimingModule {
             root_file: path_id(visible_root_file, &mut diagnostic_strings),
             claiming_directory: path_id(directory, &mut diagnostic_strings),
+            target: path_id(target, &mut diagnostic_strings),
+        });
+    let table = string_table.take_for_handoff();
+    PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        table,
+        None,
+        None,
+    ))
+}
+
+/// Reject a reserved root-marker name that resolves to a directory or other non-file entry.
+///
+/// The authored marker stays visible while the canonical target explains where the malformed
+/// entry resolves. This is a user configuration failure, not a missing-root or IO fallback.
+fn module_root_not_regular_file_error(
+    directory: &Path,
+    visible_root_file: &Path,
+    target: &Path,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let diagnostic =
+        project_structure_diagnostic(InvalidConfigReason::ModuleRootFileNotRegularFile {
+            root_file: path_id(visible_root_file, &mut diagnostic_strings),
+            directory: path_id(directory, &mut diagnostic_strings),
             target: path_id(target, &mut diagnostic_strings),
         });
     let table = string_table.take_for_handoff();

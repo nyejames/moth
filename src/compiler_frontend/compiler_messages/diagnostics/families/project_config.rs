@@ -490,6 +490,7 @@ unit_code! {
         InvalidArtefactOutputPathVisiblePath = 89,
         AliasedModuleRootFiles = 90,
         ModuleRootFileOutsideClaimingModule = 91,
+        ModuleRootFileNotRegularFile = 92,
     }
 }
 
@@ -565,6 +566,9 @@ impl InvalidConfigCode {
             InvalidConfigReason::AliasedModuleRootFiles { .. } => Self::AliasedModuleRootFiles,
             InvalidConfigReason::ModuleRootFileOutsideClaimingModule { .. } => {
                 Self::ModuleRootFileOutsideClaimingModule
+            }
+            InvalidConfigReason::ModuleRootFileNotRegularFile { .. } => {
+                Self::ModuleRootFileNotRegularFile
             }
             InvalidConfigReason::ConfigImportUnsupported => Self::ConfigImportUnsupported,
             InvalidConfigReason::FileValuePathUnsupported => Self::FileValuePathUnsupported,
@@ -1003,6 +1007,11 @@ fn invalid_config_string_ids(
             claiming_directory,
             target,
         } => strings.extend([*root_file, *claiming_directory, *target]),
+        InvalidConfigReason::ModuleRootFileNotRegularFile {
+            root_file,
+            directory,
+            target,
+        } => strings.extend([*root_file, *directory, *target]),
         InvalidConfigReason::SourceFileFolderCollision {
             file_name,
             folder_name,
@@ -1307,6 +1316,13 @@ pub(crate) fn decode_invalid_config(
             InvalidConfigReason::ModuleRootFileOutsideClaimingModule {
                 root_file: strings.take()?,
                 claiming_directory: strings.take()?,
+                target: strings.take()?,
+            }
+        }
+        InvalidConfigCode::ModuleRootFileNotRegularFile => {
+            InvalidConfigReason::ModuleRootFileNotRegularFile {
+                root_file: strings.take()?,
+                directory: strings.take()?,
                 target: strings.take()?,
             }
         }

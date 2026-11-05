@@ -1679,11 +1679,7 @@ pub(super) fn compiled_package(prefix: &str) -> CompiledSourcePackage {
         ModuleRootRole::Normal,
     );
     let root_path = PathBuf::from(format!("{prefix}/@mod.moth"));
-    let graph = ProjectModuleGraph::from_normal_roots(vec![(
-        origin.clone(),
-        PathBuf::from(prefix),
-        root_path,
-    )]);
+    let graph = ProjectModuleGraph::from_normal_roots(vec![(origin.clone(), root_path)]);
     let root_module_id = graph
         .entry_modules()
         .first()

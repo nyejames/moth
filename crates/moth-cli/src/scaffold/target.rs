@@ -137,9 +137,15 @@ fn handle_existing_directory(path: &Path, prompt: &mut impl Prompt) -> Result<Pa
 
 /// Whether prompted text names exactly one normal child directory on this platform.
 ///
-/// Absolute paths, drive/UNC prefixes, `.`/`..` aliases and nested paths all produce any other
-/// component shape and are rejected without rewriting the input.
+/// Raw platform separators, absolute paths, drive/UNC prefixes, `.`/`..` aliases and nested paths
+/// are rejected without rewriting the input. A backslash remains a legal filename character on
+/// Unix because `std::path::is_separator` owns the platform rule.
 fn is_single_child_folder_name(name: &str) -> bool {
+    // `Path::components` normalises trailing separators, so `child/` and `child//` would pass.
+    // Reject the raw platform separator spelling before checking component shape.
+    if name.chars().any(std::path::is_separator) {
+        return false;
+    }
     let mut components = Path::new(name).components();
     matches!(
         (components.next(), components.next()),

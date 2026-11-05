@@ -160,7 +160,6 @@ fn boundary_validation_rejects_missing_successful_artefact_row() {
             ModuleRootRole::Normal,
         ),
         PathBuf::from("@missing.moth"),
-        PathBuf::from("@missing.moth"),
     )]);
     let store = ModuleArtifactStore {
         slots: vec![ProviderSlot::Successful(CompiledModuleArtifactId(0))],

@@ -690,7 +690,6 @@ fn entry_union_keeps_entry_fragment_and_excludes_linked_module_fragment() {
 
     let project_graph = ProjectModuleGraph::from_normal_roots(vec![(
         page_origin.clone(),
-        PathBuf::from("src"),
         PathBuf::from("src/@page.moth"),
     )]);
     let page_module = synthetic_module(
@@ -710,7 +709,6 @@ fn entry_union_keeps_entry_fragment_and_excludes_linked_module_fragment() {
 
     let package_graph = ProjectModuleGraph::from_normal_roots(vec![(
         provider_module_origin.clone(),
-        PathBuf::from("provider"),
         PathBuf::from("provider/@provider.moth"),
     )]);
     let provider_module = synthetic_module(

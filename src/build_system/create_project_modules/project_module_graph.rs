@@ -239,20 +239,18 @@ pub(crate) struct ProjectModuleGraph {
 impl ProjectModuleGraph {
     /// Build a synthetic graph from explicit normal module roots.
     ///
-    /// WHAT: creates one frozen `Normal` node per `(stable origin, root directory, root file)`
-    /// in the given order with dense `ModuleId` values starting at zero and no dependency edges.
+    /// WHAT: creates one frozen `Normal` node per `(stable origin, root file)` in the given order
+    /// with dense `ModuleId` values starting at zero and no dependency edges.
     /// WHY: single-file compilation is a synthetic-module mode with no `SourceTreeIndex`, and
     /// focused tests need real graph boundaries without filesystem discovery. The graph keeps
     /// the same frozen adjacency contract as discovery-built graphs.
-    pub(crate) fn from_normal_roots(
-        roots: Vec<(StableModuleOriginIdentity, PathBuf, PathBuf)>,
-    ) -> Self {
+    pub(crate) fn from_normal_roots(roots: Vec<(StableModuleOriginIdentity, PathBuf)>) -> Self {
         let node_count = roots.len();
         let nodes = roots
             .into_iter()
             .enumerate()
             .map(
-                |(index, (stable_origin, _root_directory, root_file))| ProjectModuleGraphNode {
+                |(index, (stable_origin, root_file))| ProjectModuleGraphNode {
                     module_id: ModuleId::from_index(index),
                     shared_origin: stable_origin.clone(),
                     normal_origin: Some(stable_origin),
@@ -615,20 +613,6 @@ impl ProjectModuleGraph {
         };
 
         Ok(())
-    }
-
-    /// Insert one resolved structural dependency edge.
-    ///
-    /// WHAT: the production edge-insertion path maps already-resolved `ModuleId` identities to
-    ///       the low-level [`add_dependency_edge`] inserter.
-    /// WHY: the namespace resolves dependencies to `ModuleId` directly and then calls this method
-    ///      so the graph stays the single owner of provider/consumer adjacency.
-    pub(crate) fn add_resolved_dependency_edge(
-        &mut self,
-        provider: ModuleId,
-        consumer: ModuleId,
-    ) -> Result<DependencyEdgeOutcome, InfrastructureFailure> {
-        self.add_dependency_edge(provider, consumer)
     }
 
     /// Whether a provider-before-consumer dependency edge is currently present.

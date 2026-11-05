@@ -1144,7 +1144,7 @@ fn insert_resolved_dependency_edges(
 
     for edge in ordered_edges {
         project_module_graph
-            .add_resolved_dependency_edge(edge.provider_module_id, edge.consumer_module_id)?;
+            .add_dependency_edge(edge.provider_module_id, edge.consumer_module_id)?;
     }
 
     Ok(())

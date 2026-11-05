@@ -1,3 +1,10 @@
+//! Compile-project frontend tests for source identity loading and boundary publication.
+//!
+//! WHAT: exercises directory and package boundary preparation where canonical source identity,
+//!      root surfaces and diagnostics must survive into frontend compilation.
+//! WHY: these cases assert cross-stage handoff facts rather than lexer or parser behavior, so
+//!      they live beside the frontend compilation fixtures instead of the Stage 0 discovery tests.
+
 use super::super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
 use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;

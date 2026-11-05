@@ -309,6 +309,8 @@ fn existing_directory_child_name_must_be_one_normal_component() {
         String::from("."),
         String::from(".."),
         String::from("nested/path"),
+        String::from("child/"),
+        String::from("child//"),
         absolute,
     ];
     #[cfg(windows)]
@@ -316,10 +318,14 @@ fn existing_directory_child_name_must_be_one_normal_component() {
         String::from("."),
         String::from(".."),
         String::from("nested/path"),
+        String::from("child/"),
+        String::from("child//"),
         absolute,
         String::from(r"C:\Windows"),
         String::from(r"\rooted"),
         String::from(r"nested\path"),
+        String::from(r"child\"),
+        String::from(r"child\\"),
     ];
 
     for folder_name in invalid_names {
@@ -346,6 +352,19 @@ fn existing_directory_child_name_must_be_one_normal_component() {
     let resolved =
         resolve_project_target(Some(String::from("existing")), &current, &mut prompt).unwrap();
     assert_eq!(resolved.project_dir, existing.join("child"));
+
+    // A backslash is an ordinary filename character on Unix, not a path separator.
+    #[cfg(not(windows))]
+    {
+        let mut prompt = ScriptedPrompt::new(vec![
+            String::from("2"),
+            String::from(r"child\name"),
+            String::new(),
+        ]);
+        let resolved =
+            resolve_project_target(Some(String::from("existing")), &current, &mut prompt).unwrap();
+        assert_eq!(resolved.project_dir, existing.join(r"child\name"));
+    }
 }
 
 #[test]

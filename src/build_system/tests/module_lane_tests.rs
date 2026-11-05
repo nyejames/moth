@@ -543,11 +543,7 @@ fn test_graph_boundary(
         origins
             .iter()
             .cloned()
-            .zip((0..module_count).map(|index| {
-                let root_path = PathBuf::from(format!("@module_{index}.moth"));
-                (root_path.clone(), root_path)
-            }))
-            .map(|(origin, (root_directory, root_file))| (origin, root_directory, root_file))
+            .zip((0..module_count).map(|index| PathBuf::from(format!("@module_{index}.moth"))))
             .collect(),
     );
     let mut store = ModuleArtifactStore::new(module_count);
@@ -701,11 +697,7 @@ fn materialisation_lookup_resolves_the_exact_template_row() {
         "rows".to_owned(),
         ModuleRootRole::Normal,
     );
-    let graph = ProjectModuleGraph::from_normal_roots(vec![(
-        origin,
-        PathBuf::from("@rows.moth"),
-        PathBuf::from("@rows.moth"),
-    )]);
+    let graph = ProjectModuleGraph::from_normal_roots(vec![(origin, PathBuf::from("@rows.moth"))]);
     let mut store = ModuleArtifactStore::new(1);
     let mut module = minimal_lane_module(PathBuf::from("@rows.moth"), true);
     module.metadata.materialisation_context = Some(Arc::new(
@@ -1583,7 +1575,6 @@ fn frontend_boundary_rejects_unfinished_module_slots() {
                 "first".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            first_root.clone(),
             first_root,
         ),
         (
@@ -1592,7 +1583,6 @@ fn frontend_boundary_rejects_unfinished_module_slots() {
                 "second".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            second_root.clone(),
             second_root,
         ),
     ]);
@@ -1640,7 +1630,6 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
                 ModuleRootRole::Normal,
             ),
             PathBuf::from("@success.moth"),
-            PathBuf::from("@success.moth"),
         ),
         (
             StableModuleOriginIdentity::from_portable_path(
@@ -1649,7 +1638,6 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
                 ModuleRootRole::Normal,
             ),
             PathBuf::from("@diagnosed.moth"),
-            PathBuf::from("@diagnosed.moth"),
         ),
         (
             StableModuleOriginIdentity::from_portable_path(
@@ -1657,7 +1645,6 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
                 "blocked".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            PathBuf::from("@blocked.moth"),
             PathBuf::from("@blocked.moth"),
         ),
     ]);
@@ -1819,7 +1806,6 @@ fn single_node_graph() -> ProjectModuleGraph {
             ModuleRootRole::Normal,
         ),
         PathBuf::from("@single.moth"),
-        PathBuf::from("@single.moth"),
     )])
 }
 
@@ -1935,7 +1921,6 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
                 ModuleRootRole::Normal,
             ),
             PathBuf::from("@a.moth"),
-            PathBuf::from("@a.moth"),
         ),
         (
             StableModuleOriginIdentity::from_portable_path(
@@ -1943,7 +1928,6 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
                 "b".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            PathBuf::from("@b.moth"),
             PathBuf::from("@b.moth"),
         ),
     ]);
@@ -1989,7 +1973,6 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
                     ModuleRootRole::Normal,
                 ),
                 PathBuf::from("@a.moth"),
-                PathBuf::from("@a.moth"),
             ),
             (
                 StableModuleOriginIdentity::from_portable_path(
@@ -1997,7 +1980,6 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
                     "b".to_owned(),
                     ModuleRootRole::Normal,
                 ),
-                PathBuf::from("@b.moth"),
                 PathBuf::from("@b.moth"),
             ),
         ]),
@@ -2058,7 +2040,6 @@ fn source_package_publication_rejects_unavailable_root_slot() {
                 "pkg/@mod.moth".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            PathBuf::from("pkg/@mod.moth"),
             PathBuf::from("pkg/@mod.moth"),
         )]),
         modules: ModuleArtifactStore::new(1),
@@ -2334,7 +2315,6 @@ fn boundary_with_unvisited_slot(
                         path.to_owned(),
                         ModuleRootRole::Normal,
                     ),
-                    root.clone(),
                     root,
                 )
             })

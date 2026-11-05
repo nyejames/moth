@@ -491,6 +491,16 @@ pub enum InvalidConfigReason {
         claiming_directory: StringId,
         target: StringId,
     },
+    /// A reserved `@*.moth` or `+*.moth` root marker names a directory or other non-file entry.
+    ///
+    /// The diagnostic keeps the authored marker, its containing directory and the canonical
+    /// target so the malformed filesystem structure is visible without falling back to a
+    /// missing-root error.
+    ModuleRootFileNotRegularFile {
+        root_file: StringId,
+        directory: StringId,
+        target: StringId,
+    },
     ConfigImportUnsupported,
     FileValuePathUnsupported,
     SourceFileFolderCollision {

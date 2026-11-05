@@ -538,7 +538,6 @@ fn compile_single_file_frontend_with_target(
         // admission at boundary entry instead of preparing a module it could never compile.
         let graph = ProjectModuleGraph::from_normal_roots(vec![(
             stable_origin.clone(),
-            source_root,
             entry_path.clone(),
         )]);
         let module_id = graph.entry_modules()[0];

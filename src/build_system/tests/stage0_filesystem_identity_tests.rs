@@ -1,11 +1,12 @@
-//! Stage 0 filesystem-identity tests.
+//! Stage 0 filesystem identity, structural root claims and module-topology tests.
 //!
-//! WHAT: exercises the strict UTF-8 filesystem-identity contract. Non-UTF-8 module roots, source
-//!      names, folder names, extensions, source-package prefixes and single-file entries must
-//!      surface as File infrastructure errors, and source-package canonicalization is mandatory.
-//! WHY: these invariants are Stage 0 subsystem-local facts that integration output cannot
-//!      inspect directly, so they own a focused test file beside the create-project-modules
-//!      module rather than living in the oversized Stage 0 orchestration test file.
+//! WHAT: exercises the filesystem-facing contracts that integration output cannot inspect
+//!      directly: strict UTF-8 identity, root-marker ownership and aliases, skip-policy and
+//!      hidden-subtree exclusions, source-package boundaries, and the canonical module graph
+//!      derived from discovery.
+//! WHY: these invariants are subsystem-local Stage 0 facts. Keeping their focused fixtures beside
+//!      the create-project-modules module makes failure ordering and source ownership visible
+//!      without duplicating them in the larger orchestration suites.
 
 use super::*;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -13,6 +14,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulat
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
 use crate::compiler_frontend::compiler_messages::{DiagnosticSeverity, PreparedFailure};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use std::path::Path;
 
 fn prepared_failure_reports(
     failure: PreparedFailure,
@@ -36,6 +38,72 @@ fn primary_infrastructure_error(failure: PreparedFailure) -> InfrastructureFailu
         panic!("expected an infrastructure failure, got {failure:?}");
     };
     errors.primary
+}
+
+/// Resolve one expected path to the spelling the diagnostic retains.
+///
+/// Authored symlinks stay visible in diagnostics; ordinary paths use their canonical spelling.
+fn diagnostic_path_spelling(expected: &Path) -> String {
+    let metadata = fs::symlink_metadata(expected).expect("expected path should exist");
+    if metadata.file_type().is_symlink() {
+        fs::canonicalize(
+            expected
+                .parent()
+                .expect("expected path should have a parent"),
+        )
+        .expect("expected path's parent should canonicalize")
+        .join(
+            expected
+                .file_name()
+                .expect("expected path should have a file name"),
+        )
+        .display()
+        .to_string()
+    } else {
+        fs::canonicalize(expected)
+            .expect("expected path should canonicalize")
+            .display()
+            .to_string()
+    }
+}
+
+fn assert_not_regular_file_marker_rejected(
+    failure: PreparedFailure,
+    expected_marker: &Path,
+    expected_directory: &Path,
+    expected_target: &Path,
+) {
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+        InvalidConfigCode, InvalidConfigView,
+    };
+
+    let reports = prepared_failure_reports(failure);
+    let (report, diagnostic) = reports
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("malformed root markers should retain a diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-CONFIG-0001");
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("malformed root markers should retain typed config facts");
+    assert_eq!(
+        facts.reason,
+        InvalidConfigCode::ModuleRootFileNotRegularFile
+    );
+
+    let strings = report.context().strings();
+    let rendered = diagnostic
+        .string_ids()
+        .iter()
+        .map(|id| strings.resolve(*id))
+        .collect::<Vec<_>>();
+    for expected in [expected_marker, expected_directory, expected_target] {
+        let expected = diagnostic_path_spelling(expected);
+        assert!(
+            rendered.iter().any(|candidate| *candidate == expected),
+            "diagnostic must name {expected}: {rendered:?}"
+        );
+    }
 }
 
 fn assert_first_boundary_error_code(failure: PreparedFailure, expected_code: &str) {
@@ -231,30 +299,44 @@ mod non_utf8_filesystem_identity {
     }
 
     #[test]
-    fn legacy_package_folder_does_not_scan_non_utf8_names() {
+    fn packages_folder_inside_entry_root_rejects_non_utf8_child() {
         let _temp = tempfile::tempdir().expect("should create temp dir");
         let root = _temp.path().to_path_buf();
         let packages_folder = root.join("packages");
         fs::create_dir_all(&packages_folder).expect("should create packages folder");
+        fs::write(root.join("@page.moth"), "x ~= 1\n").expect("should write entry");
 
+        // `packages/` is an ordinary source-tree directory unless a package registry claims it.
+        // The selected boundary is the project root, so traversal must report its bad child.
         let bad_name = OsString::from_vec(vec![0xC3, 0x28]);
         let bad_package = packages_folder.join(bad_name);
         fs::create_dir_all(&bad_package).expect("should create non-UTF-8 named package directory");
-        fs::create_dir_all(root.join("src")).expect("should create entry root");
-        fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
 
         let config = Config::new(root.clone());
-
+        let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
         let mut string_table = StringTable::new();
-        let resolver = super::project_roots::build_project_path_resolver(
+
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
+            canonical_root.clone(),
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &canonical_root,
+                validated_output_settings: None,
+            },
             &config,
             &crate::builder_surface::SourcePackageRegistry::default(),
             &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
-        .expect("legacy package folders must not be scanned");
+        .expect_err("an ordinary packages directory must be traversed");
 
-        assert!(resolver.source_package_roots().is_empty());
+        let error = primary_infrastructure_error(failure);
+        assert_eq!(error.kind, InfrastructureFailureKind::Filesystem);
+        assert!(
+            error.message.contains("Non-UTF-8") && error.message.contains("packages"),
+            "error should identify the non-UTF-8 packages child: {}",
+            error.message,
+        );
     }
 }
 
@@ -989,6 +1071,7 @@ mod module_identity_tests {
         discover_result(root, entry_root_relative).expect("source tree index should build")
     }
 
+    #[cfg(unix)]
     fn assert_root_ownership_rejected(
         failure: PreparedFailure,
         expected_code: crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidConfigCode,
@@ -1012,22 +1095,7 @@ mod module_identity_tests {
             .map(|id| strings.resolve(*id))
             .collect::<Vec<_>>();
         for expected in expected_paths {
-            let expected = if expected.is_dir() {
-                fs::canonicalize(expected).expect("expected directory should canonicalize")
-            } else {
-                fs::canonicalize(
-                    expected
-                        .parent()
-                        .expect("expected path should have a parent"),
-                )
-                .expect("expected path's parent should canonicalize")
-                .join(
-                    expected
-                        .file_name()
-                        .expect("expected path should have a file name"),
-                )
-            };
-            let expected = expected.display().to_string();
+            let expected = diagnostic_path_spelling(expected);
             assert!(
                 rendered.iter().any(|candidate| *candidate == expected),
                 "diagnostic must name {expected}: {rendered:?}"
@@ -1035,6 +1103,7 @@ mod module_identity_tests {
         }
     }
 
+    #[cfg(unix)]
     fn assert_aliased_roots_rejected(
         failure: PreparedFailure,
         expected_normal_root: &Path,
@@ -1361,6 +1430,39 @@ mod module_identity_tests {
 
     #[cfg(unix)]
     #[test]
+    fn ordinary_source_alias_into_skipped_directory_is_excluded() {
+        use std::os::unix::fs::symlink;
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(src.join("target")).expect("should create skipped directory");
+        fs::create_dir_all(src.join("helper")).expect("should create colliding folder");
+        fs::write(src.join("@home.moth"), "").expect("should write entry root");
+        let skipped_source = src.join("target/helper.moth");
+        fs::write(&skipped_source, "").expect("should write skipped source");
+        symlink(&skipped_source, src.join("helper.moth"))
+            .expect("should create ordinary alias into skipped directory");
+
+        let (index, _project_root, _entry_root) = discover_index(&root, "src");
+        assert_eq!(
+            index.sources().len(),
+            1,
+            "the skipped alias must not enter candidate inventory or collide with helper/"
+        );
+        let canonical_skipped_source =
+            fs::canonicalize(&skipped_source).expect("skipped source should canonicalize");
+        assert!(
+            index
+                .sources()
+                .iter()
+                .all(|source| source.canonical_path() != canonical_skipped_source),
+            "a skipped-directory alias must not contribute a source record"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn ordinary_symlink_outside_entry_root_remains_excluded() {
         use std::os::unix::fs::symlink;
 
@@ -1415,6 +1517,82 @@ mod module_identity_tests {
                 .normal_root_file(),
             Some(fs::canonicalize(&target).unwrap().as_path()),
             "a root may alias a source in an unrooted directory of the same module"
+        );
+    }
+
+    #[test]
+    fn directory_named_like_module_root_is_rejected() {
+        for marker_name in ["@page.moth", "+package.moth"] {
+            let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+            let root = _tmp_root.path().to_path_buf();
+            let src = root.join("src");
+            fs::create_dir_all(src.join(marker_name)).expect("should create marker directory");
+
+            let failure = discover_result(&root, "src")
+                .expect_err("a reserved root filename must not be a directory");
+            let marker = src.join(marker_name);
+            assert_not_regular_file_marker_rejected(
+                failure,
+                &marker,
+                &src,
+                &fs::canonicalize(&marker).expect("marker directory should canonicalize"),
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn root_marker_symlink_to_directory_is_rejected() {
+        use std::os::unix::fs::symlink;
+
+        for marker_name in ["@page.moth", "+package.moth"] {
+            let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+            let root = _tmp_root.path().to_path_buf();
+            let src = root.join("src");
+            let target_directory = src.join("ordinary-directory");
+            fs::create_dir_all(&target_directory).expect("should create target directory");
+            let marker = src.join(marker_name);
+            symlink(&target_directory, &marker).expect("should create directory marker symlink");
+
+            let failure = discover_result(&root, "src")
+                .expect_err("a root marker symlink must resolve to a regular file");
+            assert_not_regular_file_marker_rejected(
+                failure,
+                &marker,
+                &src,
+                &fs::canonicalize(&target_directory).expect("target directory should canonicalize"),
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ordinary_directory_symlink_remains_traversable() {
+        use std::os::unix::fs::symlink;
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(src.join("real")).expect("should create real directory");
+        fs::write(src.join("@home.moth"), "").expect("should write entry root");
+        fs::write(src.join("real/@real.moth"), "").expect("should write nested root");
+        symlink(src.join("real"), src.join("alias")).expect("should create directory symlink");
+
+        let (index, _project_root, _entry_root) = discover_index(&root, "src");
+        let real_directory =
+            fs::canonicalize(src.join("real")).expect("real directory should canonicalize");
+        assert!(
+            index
+                .module_identities()
+                .module_id_for_directory(&real_directory)
+                .is_some(),
+            "an ordinary directory symlink must still reach its nested module"
+        );
+        let graph = super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&index);
+        assert_eq!(
+            graph.entry_modules().len(),
+            2,
+            "the alias spelling must not create a duplicate or malformed module"
         );
     }
 
@@ -3079,6 +3257,39 @@ mod owned_source_inventory_tests {
             &mut string_table,
         )
         .expect("source tree index should build with a js provider")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_owned_alias_into_skipped_directory_is_excluded() {
+        use std::os::unix::fs::symlink;
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(src.join("target")).expect("should create skipped directory");
+        fs::create_dir_all(src.join("helper")).expect("should create colliding folder");
+        fs::write(src.join("@page.moth"), "").expect("should write entry root");
+        let skipped_source = src.join("target/helper.js");
+        fs::write(&skipped_source, "").expect("should write skipped provider source");
+        symlink(&skipped_source, src.join("helper.js"))
+            .expect("should create provider alias into skipped directory");
+
+        let index = discover_index_with_js_provider(&root, "src", "provider-project");
+        assert_eq!(
+            index.sources().len(),
+            1,
+            "the provider-owned skipped alias must not enter inventory or collide with helper/"
+        );
+        let canonical_skipped_source =
+            fs::canonicalize(&skipped_source).expect("skipped source should canonicalize");
+        assert!(
+            index
+                .sources()
+                .iter()
+                .all(|source| source.canonical_path() != canonical_skipped_source),
+            "a skipped provider alias must not contribute a source record"
+        );
     }
 
     #[test]

@@ -310,6 +310,16 @@ pub(crate) fn invalid_config_message(
             string_table.resolve(*claiming_directory),
             string_table.resolve(*target),
         ),
+        InvalidConfigReason::ModuleRootFileNotRegularFile {
+            root_file,
+            directory,
+            target,
+        } => format!(
+            "Module root marker '{}' in directory '{}' is not a regular source file (resolved to '{}'). Every '@*.moth' or '+*.moth' root must be a regular file, not a directory or other filesystem entry.",
+            string_table.resolve(*root_file),
+            string_table.resolve(*directory),
+            string_table.resolve(*target),
+        ),
         InvalidConfigReason::SourceFileFolderCollision {
             file_name,
             folder_name,

@@ -7,8 +7,8 @@
 //! protects the no-write and force command boundaries.
 
 use crate::scaffold::files::{
-    existing_contains_moth_output_block, find_scaffold_conflicts, run_preflight_checks,
-    write_scaffold,
+    ScaffoldEntryKind, existing_contains_moth_output_block, find_scaffold_conflicts,
+    run_preflight_checks, write_scaffold,
 };
 use crate::scaffold::prompt_tests::ScriptedPrompt;
 use crate::scaffold::start_page_scaffolding;
@@ -38,7 +38,8 @@ fn named_target(
 }
 
 #[test]
-fn find_scaffold_conflicts_reports_exact_owned_set_and_excludes_directories_and_gitignore() {
+fn find_scaffold_conflicts_reports_exact_owned_set_and_excludes_unowned_directories_and_gitignore()
+{
     let temp = tempfile::tempdir().unwrap();
     let project_dir = temp.path().to_path_buf();
 
@@ -125,7 +126,7 @@ fn preflight_rejects_dangling_scaffold_symlinks_even_with_force() {
     let conflicts = find_scaffold_conflicts(&project_dir).unwrap();
     assert_eq!(conflicts.len(), 1);
     assert_eq!(conflicts[0].relative, "config.moth");
-    assert!(conflicts[0].is_symlink);
+    assert_eq!(conflicts[0].kind, ScaffoldEntryKind::Symlink);
 
     for force in [false, true] {
         let target = empty_target(project_dir.clone());
@@ -246,6 +247,103 @@ fn write_scaffold_refuses_gitignore_symlinks() {
 }
 
 #[test]
+fn preflight_rejects_directory_scaffold_paths_even_with_force() {
+    for relative in ["config.moth", "@page.moth"] {
+        for force in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let project_dir = temp.path().to_path_buf();
+            fs::create_dir(project_dir.join(relative)).unwrap();
+
+            let target = empty_target(project_dir.clone());
+            let mut prompt = ScriptedPrompt::new(Vec::new());
+            let error = run_preflight_checks(&target, force, &mut prompt).unwrap_err();
+
+            assert!(
+                error.contains("directories") && error.contains(relative),
+                "force={force}, path={relative}: {error}"
+            );
+            assert!(
+                prompt.messages.is_empty(),
+                "unsupported entry kinds must fail before confirmation prompts"
+            );
+            assert!(
+                find_scaffold_conflicts(&project_dir)
+                    .unwrap()
+                    .iter()
+                    .any(|conflict| conflict.relative == relative
+                        && conflict.kind == ScaffoldEntryKind::Directory)
+            );
+        }
+    }
+}
+
+#[test]
+fn preflight_rejects_gitignore_directory_before_writes() {
+    for force in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let project_dir = temp.path().to_path_buf();
+        fs::create_dir(project_dir.join(".gitignore")).unwrap();
+
+        let target = empty_target(project_dir.clone());
+        let mut prompt = ScriptedPrompt::new(Vec::new());
+        let error = run_preflight_checks(&target, force, &mut prompt).unwrap_err();
+
+        assert!(
+            error.contains(".gitignore") && error.contains("directory"),
+            "force={force}: {error}"
+        );
+        assert!(!project_dir.join("config.moth").exists());
+        assert!(!project_dir.join("@page.moth").exists());
+    }
+}
+
+#[test]
+fn preflight_accepts_regular_gitignore_without_force_replacement() {
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().to_path_buf();
+    fs::write(project_dir.join(".gitignore"), b"custom\n").unwrap();
+
+    let target = named_target(project_dir, "Test_Site", true);
+    let mut prompt = ScriptedPrompt::new(vec![String::from("y")]);
+    run_preflight_checks(&target, true, &mut prompt).unwrap();
+
+    assert!(prompt.messages[0].contains("not empty"));
+    assert!(
+        prompt
+            .messages
+            .iter()
+            .all(|message| !message.contains("--force")),
+        "an existing regular .gitignore is an append decision, not a force replacement"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn preflight_rejects_gitignore_symlink_before_writes() {
+    use std::os::unix::fs::symlink;
+
+    for force in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let project_dir = temp.path().to_path_buf();
+        let outside = temp.path().join("outside.gitignore");
+        fs::write(&outside, b"custom\n").unwrap();
+        symlink(&outside, project_dir.join(".gitignore")).unwrap();
+
+        let target = empty_target(project_dir.clone());
+        let mut prompt = ScriptedPrompt::new(Vec::new());
+        let error = run_preflight_checks(&target, force, &mut prompt).unwrap_err();
+
+        assert!(
+            error.contains(".gitignore") && error.contains("symbolic link"),
+            "force={force}: {error}"
+        );
+        assert_eq!(fs::read(&outside).unwrap(), b"custom\n");
+        assert!(!project_dir.join("config.moth").exists());
+        assert!(!project_dir.join("@page.moth").exists());
+    }
+}
+
+#[test]
 fn preflight_non_empty_warning_confirms_or_cancels() {
     let temp = tempfile::tempdir().unwrap();
     let project_dir = temp.path().to_path_buf();
@@ -281,6 +379,84 @@ fn end_to_end_conflict_without_force_performs_no_writes() {
 
     let content = fs::read_to_string(project_dir.join("config.moth")).unwrap();
     assert_eq!(content, "original");
+}
+
+#[test]
+fn end_to_end_directory_scaffold_paths_block_before_writes() {
+    for relative in ["config.moth", "@page.moth"] {
+        for force in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let project_dir = temp.path().to_path_buf();
+            fs::create_dir(project_dir.join(relative)).unwrap();
+
+            let options = NewHtmlProjectOptions {
+                raw_path: Some(project_dir.to_string_lossy().to_string()),
+                force,
+            };
+            let mut prompt = ScriptedPrompt::new(vec![String::from("1"), String::from("")]);
+
+            let error = create_html_project_template_with_prompt(options, &mut prompt).unwrap_err();
+            assert!(
+                error.contains(relative) && error.contains("directories"),
+                "force={force}, path={relative}: {error}"
+            );
+            assert!(project_dir.join(relative).is_dir());
+            if relative == "config.moth" {
+                assert!(
+                    !project_dir.join("@page.moth").exists(),
+                    "no later scaffold file may be written after a config.moth kind error"
+                );
+            } else {
+                assert!(
+                    !project_dir.join("config.moth").exists(),
+                    "config.moth must not be created when @page.moth is a directory"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn end_to_end_gitignore_directory_blocks_before_scaffold_writes() {
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().to_path_buf();
+    fs::create_dir(project_dir.join(".gitignore")).unwrap();
+
+    let options = NewHtmlProjectOptions {
+        raw_path: Some(project_dir.to_string_lossy().to_string()),
+        force: true,
+    };
+    let mut prompt = ScriptedPrompt::new(vec![String::from("1"), String::from("")]);
+
+    let error = create_html_project_template_with_prompt(options, &mut prompt).unwrap_err();
+    assert!(error.contains(".gitignore") && error.contains("directory"));
+    assert!(!project_dir.join("config.moth").exists());
+    assert!(!project_dir.join("@page.moth").exists());
+    assert!(project_dir.join(".gitignore").is_dir());
+}
+
+#[cfg(unix)]
+#[test]
+fn end_to_end_gitignore_symlink_blocks_before_scaffold_writes() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().to_path_buf();
+    let outside = temp.path().join("outside.gitignore");
+    fs::write(&outside, b"custom\n").unwrap();
+    symlink(&outside, project_dir.join(".gitignore")).unwrap();
+
+    let options = NewHtmlProjectOptions {
+        raw_path: Some(project_dir.to_string_lossy().to_string()),
+        force: true,
+    };
+    let mut prompt = ScriptedPrompt::new(vec![String::from("1"), String::from("")]);
+
+    let error = create_html_project_template_with_prompt(options, &mut prompt).unwrap_err();
+    assert!(error.contains(".gitignore") && error.contains("symbolic link"));
+    assert_eq!(fs::read(&outside).unwrap(), b"custom\n");
+    assert!(!project_dir.join("config.moth").exists());
+    assert!(!project_dir.join("@page.moth").exists());
 }
 
 #[test]
@@ -512,6 +688,32 @@ fn invalid_direct_scaffold_name_is_rejected_without_writing_files() {
     assert!(
         !project_dir.exists(),
         "validation should precede file writes"
+    );
+}
+
+#[test]
+fn write_scaffold_directly_refuses_regular_replacement_without_force() {
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().join("project");
+    fs::create_dir(&project_dir).unwrap();
+
+    let target = named_target(project_dir.clone(), "Test_Site", false);
+    let mut prompt = ScriptedPrompt::new(Vec::new());
+    run_preflight_checks(&target, false, &mut prompt).unwrap();
+
+    // The entry appears after preflight, so the writer must enforce the force contract itself.
+    fs::write(project_dir.join("config.moth"), b"original").unwrap();
+
+    let error = write_scaffold(&target, false, &mut prompt).unwrap_err();
+    assert!(error.contains("config.moth") && error.contains("already exists"));
+    assert!(error.contains("--force"));
+    assert_eq!(
+        fs::read(project_dir.join("config.moth")).unwrap(),
+        b"original"
+    );
+    assert!(
+        !project_dir.join("@page.moth").exists(),
+        "the direct writer must stop before writing the later scaffold file"
     );
 }
 

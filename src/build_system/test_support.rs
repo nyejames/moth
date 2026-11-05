@@ -44,8 +44,7 @@ pub(crate) fn project_compilation_from_test_modules_with_resources(
                     format!("module_{index}"),
                     ModuleRootRole::Normal,
                 );
-                let root_path = PathBuf::from(format!("@module_{index}.moth"));
-                (origin, root_path.clone(), root_path)
+                (origin, PathBuf::from(format!("@module_{index}.moth")))
             })
             .collect(),
     );

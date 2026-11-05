@@ -1599,7 +1599,6 @@ fn published_warnings_capture_types_and_remap_paths_after_environment_drop() {
     let mut boundary = CompiledGraphBoundary {
         structure: ProjectModuleGraph::from_normal_roots(vec![(
             origin.clone(),
-            PathBuf::new(),
             PathBuf::from("@page.moth"),
         )]),
         modules,
@@ -1993,7 +1992,6 @@ fn publish_generated_sidecar_boundary(
     CompiledGraphBoundary {
         structure: ProjectModuleGraph::from_normal_roots(vec![(
             origin,
-            PathBuf::from(module_path),
             PathBuf::from(module_path),
         )]),
         modules,
