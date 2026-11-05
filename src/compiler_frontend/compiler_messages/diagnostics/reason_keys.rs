@@ -328,6 +328,7 @@ define_stable_reason_keys! {
         &InvalidImportPathCode::EscapesProjectRoot => "invalid_import_path.escapes_project_root",
         &InvalidImportPathCode::EscapesSourcePackageRoot => "invalid_import_path.escapes_source_package_root",
         &InvalidImportPathCode::CaseMismatch => "invalid_import_path.case_mismatch",
+        &InvalidImportPathCode::HiddenDirectory => "invalid_import_path.hidden_directory",
     },
     InvalidExternalModuleReason => {
         @delegate(reason => InvalidExternalModuleCode::of(reason).stable_reason_key());

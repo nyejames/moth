@@ -974,7 +974,23 @@ fn with_namespace_resolution(
     );
 }
 
-/// Build a retained provider-root dependency for one shell.
+/// Build a retained provider-root dependency for one pre-interned shell.
+fn retained_provider_path(path: PathId) -> RetainedDependencyPath {
+    RetainedDependencyPath {
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+        path,
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
+        target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
+        provider_target: None,
+        local_source_id: None,
+        dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId::new(
+            crate::compiler_frontend::source::SourceId::from_index(0),
+            0,
+        ),
+    }
+}
+
+/// Build a retained provider-root dependency for one pre-interned single-component shell.
 fn provider_root(
     path_segments: &[&str],
     provider_paths: &[(String, PathId)],
@@ -988,18 +1004,7 @@ fn provider_root(
         .find(|(segment, _)| segment == key)
         .map(|(_, path)| *path)
         .expect("provider path should be pre-interned");
-    RetainedDependencyPath {
-        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-        path,
-        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
-        target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
-        provider_target: None,
-        local_source_id: None,
-        dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId::new(
-            crate::compiler_frontend::source::SourceId::from_index(0),
-            0,
-        ),
-    }
+    retained_provider_path(path)
 }
 
 /// Collect production Stage 0 inputs with their original live source owner.
@@ -1873,6 +1878,81 @@ fn direct_selection_resolves_source_package_facade() {
                     assert!(
                         root_file.ends_with("helper/@mod.moth"),
                         "expected the helper package facade root file, got {:?}",
+                        root_file
+                    );
+                }
+                other => panic!("expected SourcePackageSurface, got {:?}", other),
+            }
+        },
+    );
+}
+
+#[test]
+fn underscore_prefixed_source_package_prefix_precedes_hidden_directory_rejection() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    let package_root = root.join("builder/toolkit");
+    fs::create_dir_all(&src).expect("should create src dir");
+    fs::create_dir_all(&package_root).expect("should create toolkit package dir");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "@_vendor/toolkit add\n#[:entry]\n")
+        .expect("should write entry");
+    fs::write(
+        package_root.join("@mod.moth"),
+        "export:\n    add |a I32, b I32| -> I32:\n        return a + b\n    ;\n;\n",
+    )
+    .expect("should write toolkit package root");
+
+    let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
+    source_packages
+        .register_filesystem_root("_vendor/toolkit", package_root, PackageOrigin::Builder)
+        .expect("underscore-prefixed nested package root should register");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    let declaring_source =
+        fs::canonicalize(src.join("@page.moth")).expect("declaring_source should canonicalize");
+
+    with_namespace_resolution(
+        &config,
+        &resolver,
+        &source_packages,
+        None,
+        |namespace_set,
+         source_tree_index,
+         _package_prefix,
+         string_table,
+         _provider_paths,
+         path_fork| {
+            let mut provider_path = PathId::ROOT;
+            for segment in ["_vendor", "toolkit"] {
+                provider_path = path_fork
+                    .try_intern_child(provider_path, string_table.intern(segment))
+                    .expect("nested provider path should fit");
+            }
+            let provider = retained_provider_path(provider_path);
+            let resolution =
+                DirectoryDependencyResolution::project(namespace_set, source_tree_index, path_fork);
+            let resolved = resolution
+                .resolve_dependency(&provider, &declaring_source, string_table)
+                .expect("a registered package prefix must precede hidden-directory rejection");
+            match resolved {
+                ResolvedDependency::SourcePackageSurface { root_file, .. } => {
+                    assert!(
+                        root_file.ends_with("toolkit/@mod.moth"),
+                        "expected the toolkit package facade root file, got {:?}",
                         root_file
                     );
                 }

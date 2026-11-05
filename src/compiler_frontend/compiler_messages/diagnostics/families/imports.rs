@@ -48,6 +48,7 @@ unit_code! {
         EscapesProjectRoot = 4,
         EscapesSourcePackageRoot = 5,
         CaseMismatch = 6,
+        HiddenDirectory = 7,
     }
 }
 
@@ -299,6 +300,7 @@ impl InvalidImportPathCode {
             InvalidImportPathReason::ParentDirectorySegment => Self::ParentDirectorySegment,
             InvalidImportPathReason::EscapesProjectRoot => Self::EscapesProjectRoot,
             InvalidImportPathReason::EscapesSourcePackageRoot => Self::EscapesSourcePackageRoot,
+            InvalidImportPathReason::HiddenDirectory => Self::HiddenDirectory,
             InvalidImportPathReason::CaseMismatch { .. } => Self::CaseMismatch,
         }
     }
@@ -327,6 +329,7 @@ impl InvalidImportPathCode {
             Self::ParentDirectorySegment => InvalidImportPathReason::ParentDirectorySegment,
             Self::EscapesProjectRoot => InvalidImportPathReason::EscapesProjectRoot,
             Self::EscapesSourcePackageRoot => InvalidImportPathReason::EscapesSourcePackageRoot,
+            Self::HiddenDirectory => InvalidImportPathReason::HiddenDirectory,
             Self::CaseMismatch => InvalidImportPathReason::CaseMismatch {
                 provided: provided?,
                 expected: expected?,

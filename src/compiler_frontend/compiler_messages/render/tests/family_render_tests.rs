@@ -1484,6 +1484,11 @@ fn source_dependency_renderers_use_current_language_terminology() {
             InvalidImportPathReason::ParentDirectorySegment,
             None,
         ),
+        imports::invalid_import_path(
+            dependency_path,
+            InvalidImportPathReason::HiddenDirectory,
+            None,
+        ),
         project_config::dependency_namespace_used_as_value(namespace_name, None),
         project_config::nested_dependency_traversal(namespace_name, None),
         imports::dependency_alias_case_mismatch(alias_name, symbol_name, None),
@@ -1529,7 +1534,7 @@ fn source_dependency_renderers_use_current_language_terminology() {
         .collect::<Vec<_>>();
     assert_eq!(
         rendered_lines.len(),
-        11,
+        12,
         "complete terse renderer emits one record per draft"
     );
     let rendered = rendered_lines.join("\n");
@@ -1549,6 +1554,7 @@ fn source_dependency_renderers_use_current_language_terminology() {
     for expected in [
         "Cannot resolve dependency",
         "Dependency paths containing '..'",
+        "enters a directory whose name starts with '_'",
         "dependency namespace binding",
         "Dependency namespace records do not expose nested filesystem paths",
         "Dependency alias 'readFile' case mismatch with symbol 'read_file'",

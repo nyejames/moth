@@ -331,6 +331,31 @@ fn preflight_rejects_gitignore_directory_before_writes() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn preflight_rejects_gitignore_special_entry_before_writes() {
+    use std::os::unix::net::UnixListener;
+
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().to_path_buf();
+    let _socket = UnixListener::bind(project_dir.join(".gitignore"))
+        .expect("should bind a special .gitignore entry");
+
+    for force in [false, true] {
+        let target = empty_target(project_dir.clone());
+        let mut prompt = ScriptedPrompt::new(Vec::new());
+        let error = run_preflight_checks(&target, force, &mut prompt).unwrap_err();
+
+        assert!(
+            error.contains(".gitignore") && error.contains("unsupported filesystem entry"),
+            "force={force}: {error}"
+        );
+        assert!(prompt.messages.is_empty());
+        assert!(!project_dir.join("config.moth").exists());
+        assert!(!project_dir.join("@page.moth").exists());
+    }
+}
+
 #[test]
 fn preflight_treats_regular_gitignore_as_append_not_force_conflict() {
     let temp = tempfile::tempdir().unwrap();

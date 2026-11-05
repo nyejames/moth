@@ -533,6 +533,9 @@ pub(crate) fn invalid_import_path_message(
             "Dependency path escapes the source-backed package root and is not allowed: '{}'",
             path_text
         ),
+        InvalidImportPathReason::HiddenDirectory => format!(
+            "Dependency path '{path_text}' enters a directory whose name starts with '_'. Such directories are excluded from the project's source tree and cannot be imported."
+        ),
         InvalidImportPathReason::CaseMismatch { provided, expected } => format!(
             "Dependency path case mismatch: '{}' should be '{}'.",
             context.string_table.resolve(provided),

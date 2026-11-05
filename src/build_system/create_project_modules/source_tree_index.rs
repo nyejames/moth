@@ -54,15 +54,17 @@ use super::project_structure_diagnostics::{
 
 /// Directory names that are never source regardless of configuration.
 ///
-/// Visible `dev`, `release`, `dist` and `build` directories are deliberately absent: they may
-/// contain legitimate source. Generated output is hidden from discovery by its leading `_`
-/// component instead.
+/// `_` is the general source-exclusion rule. These fixed names are intentional skips for external
+/// tooling trees, not aliases for the old visible dev/release output locations. Visible `dev`,
+/// `release`, `dist` and `build` directories are deliberately absent because they may contain
+/// legitimate source; generated output is hidden by its leading `_` component instead.
 const FIXED_SKIPPED_DIRECTORY_NAMES: &[&str] = &[".git", "target", "node_modules", ".cache"];
 
 /// Counts work performed by the Stage 0 source-tree traversal.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct SourceTreeDiscoveryStats {
     pub(crate) dirs_visited: usize,
+    /// Directory entries rejected before traversal, including aliases classified by destination.
     pub(crate) dirs_skipped: usize,
     pub(crate) files_seen: usize,
     pub(crate) normal_root_files_seen: usize,
@@ -120,22 +122,21 @@ impl SourceTreeSkipPolicy {
         }
     }
 
-    fn should_skip(&self, directory: &Path) -> bool {
-        if self.lexical_directory_is_skipped(directory) {
-            return true;
-        }
+    /// Whether an authored directory entry may become a namespace claim and be traversed.
+    ///
+    /// A normal directory is already canonical because its parent was canonicalized before
+    /// listing, so this checks only the authored rules and avoids another filesystem probe.
+    fn authored_directory_is_eligible(&self, directory: &Path, entry_root: &Path) -> bool {
+        directory.starts_with(entry_root) && !self.lexical_directory_is_skipped(directory)
+    }
 
-        // Traversal preserves the lexical spelling of the path used to reach a directory. A
-        // symlink ancestor can therefore make the same physical output tree appear under a path
-        // that does not match either stored spelling until the candidate is canonicalized here.
-        fs::canonicalize(directory)
-            .ok()
-            .is_some_and(|canonical_directory| {
-                self.canonical_output_directories.iter().any(|output_root| {
-                    canonical_directory == *output_root
-                        || canonical_directory.starts_with(output_root)
-                })
-            })
+    /// Whether a resolved directory destination may become a namespace claim and be traversed.
+    ///
+    /// Directory symlinks are classified by their physical destination before the visible alias
+    /// spelling enters dependency-name or package-prefix facts.
+    fn resolved_directory_is_eligible(&self, directory: &Path, entry_root: &Path) -> bool {
+        directory.starts_with(entry_root)
+            && !self.canonical_ancestor_is_skipped(directory, entry_root)
     }
 
     /// Apply the name and configured-path rules that need no canonicalization.
@@ -633,7 +634,7 @@ impl SourceTreeIndex {
                 .map_err(|error| Self::directory_read_error(&directory, error))?;
             if !directory.starts_with(&entry_root)
                 || !visited_directories.insert(directory.clone())
-                || path_has_hidden_component_below(&directory, &entry_root)
+                || skip_policy.canonical_ancestor_is_skipped(&directory, &entry_root)
             {
                 continue;
             }
@@ -674,7 +675,24 @@ impl SourceTreeIndex {
                         ));
                     }
 
-                    if skip_policy.should_skip(&path) {
+                    // A directory alias must be classified by its physical destination before it
+                    // becomes a namespace claim. Otherwise an alias into a hidden, skipped or
+                    // external tree can cause false file/folder or package-prefix collisions even
+                    // when traversal later drops it. Normal directories need no second probe:
+                    // their parent is already canonical.
+                    let resolved_directory = if listed_type.is_some() {
+                        None
+                    } else {
+                        Some(canonicalize_source_path(&path)?)
+                    };
+                    let eligible = match resolved_directory.as_deref() {
+                        Some(resolved) => {
+                            skip_policy.resolved_directory_is_eligible(resolved, &entry_root)
+                        }
+                        None => skip_policy.authored_directory_is_eligible(&path, &entry_root),
+                    };
+
+                    if !eligible {
                         stats.dirs_skipped += 1;
                     } else {
                         let folder_name = path
@@ -797,34 +815,18 @@ impl SourceTreeIndex {
                     canonicalize_source_path(&path)?
                 };
 
-                // A file symlink can point outside the selected boundary or into an excluded `_`
+                // A file symlink can point outside the selected boundary or into an excluded
                 // subtree even when its visible spelling looks eligible. Directory ancestry
                 // decides exclusion; an underscore-prefixed file name remains valid source.
                 // Ordinary sources outside the boundary stay silently excluded. An authored root
                 // marker, however, must resolve to a source owned by its structural module, so a
                 // filtered root target is a structural failure rather than a missing root.
                 let canonical_parent = canonical_path.parent();
-                let inside_excluded_subtree = canonical_parent
-                    .is_some_and(|parent| path_has_hidden_component_below(parent, &entry_root));
-                if !canonical_path.starts_with(&entry_root) || inside_excluded_subtree {
-                    if is_module_root {
-                        return Err(module_root_outside_claim_error(
-                            &directory,
-                            &path,
-                            &canonical_path,
-                            string_table,
-                        ));
-                    }
-                    continue;
-                }
-
-                // A source alias must not reveal a subtree the traversal skips by policy (fixed
-                // generated directories and validated output roots). Ordinary and provider-owned
-                // aliases are silently excluded; an authored root marker is a structural failure
-                // because it must resolve to a source owned by its module.
-                if canonical_parent.is_some_and(|parent| {
-                    skip_policy.canonical_ancestor_is_skipped(parent, &entry_root)
-                }) {
+                if !canonical_path.starts_with(&entry_root)
+                    || canonical_parent.is_some_and(|parent| {
+                        skip_policy.canonical_ancestor_is_skipped(parent, &entry_root)
+                    })
+                {
                     if is_module_root {
                         return Err(module_root_outside_claim_error(
                             &directory,
@@ -1086,13 +1088,49 @@ impl SourceTreeIndex {
         let mut keys = BTreeSet::new();
         for entry in Self::sorted_directory_entries(source_root)? {
             let path = entry.path();
-            let is_directory = path.is_dir();
-            if is_directory && skip_policy.should_skip(&path) {
+            // As in the traversal, a non-symlink entry's listed type avoids a metadata probe.
+            // Symlinks and unreadable entry types resolve their physical destination once.
+            let listed_file_type = entry.file_type().ok();
+            let listed_type = listed_file_type.filter(|file_type| !file_type.is_symlink());
+            let is_directory = match listed_type {
+                Some(listed) => listed.is_dir(),
+                None => path.is_dir(),
+            };
+            let is_file = match listed_type {
+                Some(listed) => listed.is_file(),
+                None => path.is_file(),
+            };
+            if !is_directory && !is_file {
                 continue;
             }
-            if !is_directory && !path.is_file() {
-                continue;
+
+            if is_directory {
+                let eligible = match listed_type {
+                    Some(_) => skip_policy.authored_directory_is_eligible(&path, source_root),
+                    None => {
+                        let canonical_directory = canonicalize_source_path(&path)?;
+                        skip_policy
+                            .resolved_directory_is_eligible(&canonical_directory, source_root)
+                    }
+                };
+                if !eligible {
+                    continue;
+                }
+            } else if listed_type.is_none() {
+                // File names may start with `_`; only the physical directory ancestry excludes a
+                // source alias. This keeps `_helper.moth` and eligible in-boundary aliases while
+                // dropping visible aliases into hidden, fixed-skipped or external trees.
+                let canonical_file = canonicalize_source_path(&path)?;
+                let Some(canonical_parent) = canonical_file.parent() else {
+                    continue;
+                };
+                if !canonical_file.starts_with(source_root)
+                    || skip_policy.canonical_ancestor_is_skipped(canonical_parent, source_root)
+                {
+                    continue;
+                }
             }
+
             let file_name = path
                 .file_name()
                 .and_then(|name| name.to_str())

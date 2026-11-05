@@ -53,8 +53,8 @@ pub(crate) struct ScaffoldConflict {
 /// Run preflight checks before writing anything.
 ///
 /// Returns Ok(()) when it is safe to proceed, or Err for an unsupported scaffold-owned entry
-/// kind, a non-regular `.gitignore`, a regular-file conflict without `--force`, or a declined
-/// confirmation prompt.
+/// kind, a non-regular or non-UTF-8 `.gitignore`, a regular-file conflict without `--force`, or a
+/// declined confirmation prompt.
 pub(crate) fn run_preflight_checks(
     target: &ResolvedProjectTarget,
     force: bool,
@@ -65,7 +65,6 @@ pub(crate) fn run_preflight_checks(
     reject_unsupported_conflicts(&conflicts, ScaffoldEntryKind::Symlink)?;
     reject_unsupported_conflicts(&conflicts, ScaffoldEntryKind::Directory)?;
     reject_unsupported_conflicts(&conflicts, ScaffoldEntryKind::Other)?;
-    reject_unsupported_gitignore(&target.project_dir)?;
     validate_existing_gitignore(&target.project_dir)?;
 
     let conflict_names = conflicts
@@ -164,34 +163,24 @@ fn reject_unsupported_conflicts(
     ))
 }
 
-fn reject_unsupported_gitignore(project_dir: &Path) -> Result<(), String> {
-    let Some(metadata) = entry_metadata(&project_dir.join(GITIGNORE_FILE), GITIGNORE_FILE)? else {
-        return Ok(());
-    };
-    let kind = ScaffoldEntryKind::from_metadata(&metadata);
-    if kind == ScaffoldEntryKind::RegularFile {
-        return Ok(());
-    }
-    Err(format!(
-        "Cannot create project because .gitignore is {}. Remove it or replace it with a \
-         regular file; --force only replaces regular files.",
-        entry_kind_noun(kind),
-    ))
-}
-
-/// Validate an existing regular `.gitignore` as UTF-8 before any scaffold writes.
+/// Validate one existing `.gitignore` entry kind and its UTF-8 bytes before any scaffold writes.
 ///
-/// WHY: a late UTF-8 or read failure would otherwise leave a partly written project even when the
-/// failure was present from the start. Preflight handles deterministic failures only; IO errors
-/// and concurrent modifications can still occur after writing begins.
+/// WHAT: one metadata read classifies the entry; an existing regular file is then read as UTF-8.
+/// WHY: validating type and content together prevents a deterministic late failure after scaffold
+/// files have been created or replaced. Preflight cannot eliminate concurrent mutations or make
+/// the whole scaffold transactional; the writer rechecks after confirmation.
 fn validate_existing_gitignore(project_dir: &Path) -> Result<(), String> {
     let path = project_dir.join(GITIGNORE_FILE);
     let Some(metadata) = entry_metadata(&path, GITIGNORE_FILE)? else {
         return Ok(());
     };
-    // `reject_unsupported_gitignore` already rejected every non-regular entry.
-    if ScaffoldEntryKind::from_metadata(&metadata) != ScaffoldEntryKind::RegularFile {
-        return Ok(());
+    let kind = ScaffoldEntryKind::from_metadata(&metadata);
+    if kind != ScaffoldEntryKind::RegularFile {
+        return Err(format!(
+            "Cannot create project because .gitignore is {}. Remove it or replace it with a \
+             regular file; --force only replaces regular files.",
+            entry_kind_noun(kind),
+        ));
     }
 
     fs::read_to_string(&path).map_err(|error| {

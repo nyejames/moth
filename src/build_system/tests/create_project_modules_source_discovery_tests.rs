@@ -2,7 +2,8 @@ use super::create_project_modules_tests::{diagnosed_reports, successful_compilat
 use super::*;
 
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
-    CrossModuleImportNotExportedView, UnsupportedExternalExtensionView,
+    CrossModuleImportNotExportedView, InvalidImportPathCode, InvalidImportPathView,
+    MissingImportTargetView, UnsupportedExternalExtensionView,
 };
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 #[test]
@@ -1524,6 +1525,154 @@ fn direct_child_private_path_bypass_is_rejected() {
         first_error_diagnostic(&failure).descriptor().code,
         "MOTH-IMPORT-0015"
     );
+}
+
+#[test]
+fn module_import_through_hidden_directory_reports_hidden_reason() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    let hidden = src.join("_private/child");
+    fs::create_dir_all(&hidden).expect("should create hidden child");
+    fs::write(hidden.join("@child.moth"), "export:\n    value #= 1\n;\n")
+        .expect("should write hidden root");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "@_private/child value\n#[:page]\n")
+        .expect("should write page");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+    let diagnostic = first_error_diagnostic(&failure);
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-IMPORT-0016",
+        "a hidden-directory traversal must use the invalid-path diagnostic, got {}",
+        diagnostic.descriptor().code
+    );
+    assert_eq!(
+        diagnostic
+            .family_view::<InvalidImportPathView>()
+            .expect("hidden import should retain typed invalid-path facts")
+            .reason,
+        InvalidImportPathCode::HiddenDirectory
+    );
+    assert_primary_span_text(&failure, &src.join("@page.moth"), "@_private/child");
+}
+
+#[test]
+fn single_component_hidden_import_remains_ambiguous_missing_target() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(src.join("_private")).expect("should create hidden directory");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "@_private value\n#[:page]\n").expect("should write page");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+    let diagnostic = first_error_diagnostic(&failure);
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-IMPORT-0005",
+        "a single hidden component may name a file or directory and must stay missing"
+    );
+    assert!(
+        diagnostic
+            .family_view::<MissingImportTargetView>()
+            .is_some()
+    );
+}
+
+#[test]
+fn underscore_prefixed_helper_file_remains_importable() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "@_helper value\n#[:page]\n").expect("should write page");
+    fs::write(src.join("_helper.moth"), "value #= 1\n").expect("should write helper");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
+}
+
+#[test]
+fn selected_hidden_root_can_import_its_visible_child_module() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let selected = _tmp_root.path().join("_prototype");
+    let child = selected.join("visible");
+    fs::create_dir_all(&child).expect("should create visible child");
+    fs::write(
+        selected.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(selected.join("@site.moth"), "@visible v\n#[:site]\n").expect("should write root");
+    fs::write(child.join("@mod.moth"), "export:\n    v #= 1\n;\n")
+        .expect("should write child root");
+
+    let mut config = Config::new(selected.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &selected.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
 }
 
 #[test]

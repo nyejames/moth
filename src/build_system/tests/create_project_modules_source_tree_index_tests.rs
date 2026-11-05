@@ -554,6 +554,237 @@ fn explicitly_selected_hidden_root_compiles_but_nested_hidden_descendants_do_not
 
 #[cfg(unix)]
 #[test]
+fn directory_alias_into_hidden_tree_creates_no_namespace_or_collision() {
+    use std::os::unix::fs::symlink;
+
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let hidden = root.join("_generated");
+    fs::create_dir_all(&hidden).expect("should create hidden directory");
+    fs::write(hidden.join("@generated.moth"), "").expect("should write hidden root");
+    fs::write(root.join("@home.moth"), "").expect("should write entry root");
+    fs::write(root.join("helper.moth"), "").expect("should write colliding file");
+    symlink(&hidden, root.join("helper")).expect("should create hidden directory alias");
+
+    let config = Config::new(root.clone());
+    let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
+    let mut string_table = StringTable::new();
+    let index = super::source_tree_index::SourceTreeIndex::discover(
+        canonical_root.clone(),
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &canonical_root,
+            validated_output_settings: None,
+        },
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
+        &mut string_table,
+    )
+    .expect("a hidden directory alias must not create a file/folder collision");
+
+    let graph = super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&index);
+    assert_eq!(
+        graph.entry_modules().len(),
+        1,
+        "only the visible entry root may become a module"
+    );
+    assert_eq!(index.stats().dirs_skipped, 2);
+    let source_paths = index
+        .sources()
+        .iter()
+        .map(|source| source.canonical_path().to_path_buf())
+        .collect::<Vec<_>>();
+    assert!(
+        source_paths.iter().all(|path| !path.starts_with(&hidden)),
+        "the alias target must contribute no source records"
+    );
+    assert!(
+        source_paths
+            .iter()
+            .any(|path| path.file_name().is_some_and(|name| name == "helper.moth")),
+        "the ordinary helper file remains eligible"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn directory_alias_into_fixed_skipped_descendant_is_excluded() {
+    use std::os::unix::fs::symlink;
+
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    fs::create_dir_all(root.join("target/nested")).expect("should create skipped descendant");
+    fs::write(root.join("target/nested/@nested.moth"), "").expect("should write skipped root");
+    fs::write(root.join("@home.moth"), "").expect("should write entry root");
+    symlink(root.join("target/nested"), root.join("visible"))
+        .expect("should create fixed-skipped descendant alias");
+
+    let config = Config::new(root.clone());
+    let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
+    let mut string_table = StringTable::new();
+    let index = super::source_tree_index::SourceTreeIndex::discover(
+        canonical_root.clone(),
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &canonical_root,
+            validated_output_settings: None,
+        },
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
+        &mut string_table,
+    )
+    .expect("a fixed-skipped descendant alias must be excluded by physical ancestry");
+
+    let graph = super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&index);
+    assert_eq!(graph.entry_modules().len(), 1);
+    assert_eq!(index.stats().dirs_skipped, 2);
+    assert!(
+        index
+            .sources()
+            .iter()
+            .all(|source| !source.canonical_path().starts_with(root.join("target")))
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn directory_alias_outside_entry_root_does_not_create_a_folder_claim() {
+    use std::os::unix::fs::symlink;
+
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let project_root = _tmp_root.path().to_path_buf();
+    let entry_root = project_root.join("src");
+    let outside = project_root.join("outside");
+    fs::create_dir_all(&entry_root).expect("should create selected source root");
+    fs::create_dir_all(&outside).expect("should create external directory");
+    fs::write(outside.join("@outside.moth"), "").expect("should write external root");
+    fs::write(entry_root.join("@home.moth"), "").expect("should write entry root");
+    fs::write(entry_root.join("helper.moth"), "").expect("should write colliding file");
+    symlink(&outside, entry_root.join("helper")).expect("should create external directory alias");
+
+    let config = Config::new(project_root.clone());
+    let canonical_project_root =
+        fs::canonicalize(&project_root).expect("project root should canonicalize");
+    let canonical_entry_root =
+        fs::canonicalize(&entry_root).expect("entry root should canonicalize");
+    let mut string_table = StringTable::new();
+    let index = super::source_tree_index::SourceTreeIndex::discover(
+        canonical_entry_root,
+        super::source_tree_index::SourceTreeProjectContext {
+            project_root: &canonical_project_root,
+            validated_output_settings: None,
+        },
+        &config,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
+        &mut string_table,
+    )
+    .expect("an external directory alias must not create a file/folder collision");
+
+    let graph = super::project_module_graph::ProjectModuleGraph::from_source_tree_index(&index);
+    assert_eq!(graph.entry_modules().len(), 1);
+    assert_eq!(index.stats().dirs_skipped, 1);
+    assert!(
+        index
+            .sources()
+            .iter()
+            .all(|source| !source.canonical_path().starts_with(&outside))
+    );
+}
+
+#[test]
+fn single_file_dependency_keys_exclude_hidden_and_fixed_directories() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    fs::write(root.join("@home.moth"), "").expect("should write entry root");
+    fs::write(root.join("helper.moth"), "").expect("should write ordinary source");
+    fs::write(root.join("_helper.moth"), "").expect("should write underscore source");
+    fs::create_dir_all(root.join("_hidden")).expect("should create hidden directory");
+    fs::write(root.join("_hidden/@hidden.moth"), "").expect("should write hidden root");
+    fs::create_dir_all(root.join("target")).expect("should create fixed-skipped directory");
+    fs::write(root.join("target/@target.moth"), "").expect("should write fixed-skipped root");
+    fs::create_dir_all(root.join("visible")).expect("should create visible directory");
+
+    let canonical_root = fs::canonicalize(&root).expect("source root should canonicalize");
+    let keys =
+        super::source_tree_index::SourceTreeIndex::single_file_dependency_keys(&canonical_root)
+            .expect("synthetic dependency keys should respect the directory skip policy");
+
+    assert!(keys.contains("helper"));
+    assert!(keys.contains("_helper"));
+    assert!(keys.contains("visible"));
+    assert!(!keys.contains("_hidden"));
+    assert!(!keys.contains("target"));
+}
+
+#[cfg(unix)]
+#[test]
+fn single_file_dependency_keys_exclude_alias_targets_by_physical_ancestry() {
+    use std::os::unix::fs::symlink;
+
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let project_root = _tmp_root.path().to_path_buf();
+    let source_root = project_root.join("src");
+    let outside = project_root.join("outside");
+    fs::create_dir_all(&source_root).expect("should create source root");
+    fs::create_dir_all(source_root.join("_hidden")).expect("should create hidden directory");
+    fs::create_dir_all(source_root.join("target/nested"))
+        .expect("should create fixed-skipped descendant");
+    fs::create_dir_all(&outside).expect("should create external directory");
+    fs::write(source_root.join("@home.moth"), "").expect("should write entry root");
+    fs::write(source_root.join("helper.moth"), "").expect("should write ordinary source");
+    fs::write(source_root.join("_helper.moth"), "").expect("should write underscore source");
+    fs::write(source_root.join("_hidden/helper.moth"), "").expect("should write hidden source");
+    fs::write(source_root.join("target/nested/helper.moth"), "")
+        .expect("should write fixed-skipped source");
+    fs::write(outside.join("helper.moth"), "").expect("should write external source");
+    symlink(
+        source_root.join("helper.moth"),
+        source_root.join("alias.moth"),
+    )
+    .expect("should create eligible source alias");
+    symlink(
+        source_root.join("_hidden"),
+        source_root.join("hidden_alias"),
+    )
+    .expect("should create hidden directory alias");
+    symlink(
+        source_root.join("target/nested"),
+        source_root.join("fixed_alias"),
+    )
+    .expect("should create fixed-skipped descendant alias");
+    symlink(&outside, source_root.join("outside_alias"))
+        .expect("should create external directory alias");
+    symlink(
+        source_root.join("_hidden/helper.moth"),
+        source_root.join("hidden_file.moth"),
+    )
+    .expect("should create hidden file alias");
+    symlink(
+        outside.join("helper.moth"),
+        source_root.join("outside_file.moth"),
+    )
+    .expect("should create external file alias");
+
+    let canonical_root = fs::canonicalize(&source_root).expect("source root should canonicalize");
+    let keys =
+        super::source_tree_index::SourceTreeIndex::single_file_dependency_keys(&canonical_root)
+            .expect("synthetic dependency keys should resolve alias destinations");
+
+    assert_eq!(
+        keys,
+        ["_helper", "alias", "helper"]
+            .into_iter()
+            .map(String::from)
+            .collect()
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn source_tree_index_excludes_file_symlinks_into_hidden_directories() {
     use std::os::unix::fs::symlink;
 

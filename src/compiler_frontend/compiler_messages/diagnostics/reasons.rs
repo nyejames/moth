@@ -754,6 +754,8 @@ pub enum InvalidImportPathReason {
     ParentDirectorySegment,
     EscapesProjectRoot,
     EscapesSourcePackageRoot,
+    /// A proven intermediate dependency-path component names a hidden source directory.
+    HiddenDirectory,
     CaseMismatch {
         provided: StringId,
         expected: StringId,

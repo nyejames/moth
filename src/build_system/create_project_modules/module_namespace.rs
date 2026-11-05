@@ -446,6 +446,15 @@ impl ModuleNamespaceSet {
             return Ok(package);
         }
 
+        // Package prefixes are validated independently and may contain underscore components, so
+        // classify packages before treating an intermediate component as a hidden source directory.
+        reject_hidden_directory_components(
+            dependency_path,
+            dependency_span,
+            string_table,
+            path_fork,
+        )?;
+
         if let Some(entry) = namespace.entries.get(&key) {
             return resolve_entry(
                 entry,
@@ -605,7 +614,17 @@ impl ModuleNamespaceSet {
             .flatten()
             .map(String::as_str);
         // Synthetic traversal belongs to the sole consumer in its one-node graph.
-        self.resolve_package_dependency(provider, ModuleId::from_index(0), local_keys, &key)
+        let package =
+            self.resolve_package_dependency(provider, ModuleId::from_index(0), local_keys, &key)?;
+        if package.is_none() {
+            reject_hidden_directory_components(
+                provider.path,
+                dependency_span,
+                string_table,
+                path_fork,
+            )?;
+        }
+        Ok(package)
     }
 
     fn resolve_package_dependency<'a>(
@@ -1063,6 +1082,37 @@ fn reject_invalid_path_components(
         .is_some_and(|component| component == "." || component == "..")
     {
         return Err(imports::bare_file_import(dependency_path, dependency_span));
+    }
+
+    Ok(())
+}
+
+/// Reject dependency paths that traverse a proven hidden source directory.
+///
+/// Only non-final components are proven directories: a component followed by another path
+/// component must contain that child. The final component may name `_helper.moth`, and a single
+/// `_private` is ambiguous without indexed directory facts, so neither is rejected merely for
+/// starting with `_`.
+fn reject_hidden_directory_components(
+    dependency_path: PathId,
+    dependency_span: Option<SourceSpan>,
+    string_table: &StringTable,
+    path_fork: &PathInternerFork,
+) -> Result<(), DiagnosticDraft> {
+    let mut scratch = Vec::new();
+    let components = path_fork.resolve_components(dependency_path, &mut scratch);
+    let Some((_final_component, directory_components)) = components.split_last() else {
+        return Ok(());
+    };
+    if directory_components
+        .iter()
+        .any(|component| string_table.resolve(*component).starts_with('_'))
+    {
+        return Err(imports::invalid_import_path(
+            dependency_path,
+            InvalidImportPathReason::HiddenDirectory,
+            dependency_span,
+        ));
     }
 
     Ok(())
