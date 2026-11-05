@@ -262,23 +262,26 @@ fn facade_project_globals_dependency(
         active_origin.role(),
         ModuleRootRole::SyntheticProjectContext | ModuleRootRole::Support
     ) && active_origin.logical_module_path().is_empty();
-    let has_project_package_support_surface =
-        prepared
-            .semantic
-            .candidate_source_ids
-            .iter()
-            .any(|source_id| {
-                prepared
-                    .semantic
-                    .source_module_origins
-                    .origin_for(*source_id)
-                    .ok()
-                    .flatten()
-                    .is_some_and(|origin| {
-                        origin.role() == ModuleRootRole::Support
-                            && origin.logical_module_path().is_empty()
-                    })
-            });
+    let has_project_package_support_surface = match prepared.semantic.support_root_file_id {
+        Some(support_root_file_id) => {
+            let support_origin = prepared
+                .semantic
+                .source_module_origins
+                .origin_for(support_root_file_id)?
+                .ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "facade dependency validation found no owning origin for paired support root source {}",
+                            support_root_file_id.index()
+                        ),
+                    )
+                })?;
+            support_origin.role() == ModuleRootRole::Support
+                && support_origin.logical_module_path().is_empty()
+        }
+        None => false,
+    };
     if !is_project_package_surface && !has_project_package_support_surface {
         return Ok(None);
     }

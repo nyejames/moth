@@ -1,6 +1,6 @@
 //! Project root and path-resolver setup for Stage 0.
 //!
-//! WHAT: interprets config paths, canonicalizes the project/entry roots, indexes independently
+//! WHAT: interprets config paths, canonicalizes the project root, indexes independently
 //! registered source-backed package boundaries, constructs the shared `ProjectPathResolver`, and
 //! builds the canonical `ProjectModuleGraph` that owns entry classification and compile-wave
 //! scheduling for the rest of Stage 0.
@@ -13,7 +13,7 @@ use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::compiler_messages::{CompilerStage, PreparedFailure};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -27,12 +27,7 @@ use super::project_module_graph::ProjectModuleGraph;
 use super::source_package_discovery::build_source_package_boundary_indexes;
 use super::source_tree_index::{SourceTreeIndex, SourceTreeProjectContext};
 
-/// The canonical selected project directory, used as both the build root and the source root.
-pub(super) struct ProjectRootResolution {
-    pub(super) project_root: PathBuf,
-}
-
-/// Canonical directory-project roots plus the canonical project module graph built from the
+/// Canonical directory-project root plus the canonical project module graph built from the
 /// single Stage 0 source-tree traversal.
 ///
 /// The `SourceTreeIndex` is retained beside the graph so later Stage 0 code can resolve `SourceId`s
@@ -83,7 +78,7 @@ pub(super) fn build_project_path_resolver_with_index(
     binding_packages: &ExternalPackageRegistry,
     string_table: &mut StringTable,
 ) -> Result<ProjectPathResolverSetup, PreparedFailure> {
-    let roots = resolve_project_roots(config)?;
+    let project_root = resolve_project_root(config)?;
 
     let source_package_boundary_indexes = build_source_package_boundary_indexes(
         builder_source_packages,
@@ -94,11 +89,10 @@ pub(super) fn build_project_path_resolver_with_index(
     let prepared_source_package_roots =
         source_package_boundary_indexes.prepared_source_package_roots();
 
-    let source_root = roots.project_root.clone();
     let source_tree_index = SourceTreeIndex::discover(
-        source_root.clone(),
+        project_root.clone(),
         SourceTreeProjectContext {
-            project_root: &roots.project_root,
+            project_root: &project_root,
             validated_output_settings,
         },
         config,
@@ -109,8 +103,8 @@ pub(super) fn build_project_path_resolver_with_index(
     )?;
 
     let resolver = ProjectPathResolver::new_with_module_roots(
-        roots.project_root,
-        source_root,
+        project_root.clone(),
+        project_root,
         prepared_source_package_roots,
         source_file_kinds,
         source_tree_index
@@ -139,16 +133,13 @@ pub(super) fn build_project_path_resolver_with_index(
     })
 }
 
-fn resolve_project_roots(config: &Config) -> Result<ProjectRootResolution, PreparedFailure> {
-    let project_root = match fs::canonicalize(&config.entry_dir) {
-        Ok(path) => path,
-        Err(error) => {
-            return Err(PreparedFailure::Infrastructure(
-                InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &config.entry_dir, format!("Failed to canonicalize project root: {error}"))
-                .into(),
-            ));
-        }
-    };
-
-    Ok(ProjectRootResolution { project_root })
+fn resolve_project_root(config: &Config) -> Result<PathBuf, PreparedFailure> {
+    let project_root = fs::canonicalize(&config.entry_dir).map_err(|error| {
+        InfrastructureFailure::filesystem(
+            CompilerStage::ProjectBuildAssembly,
+            &config.entry_dir,
+            format!("Failed to canonicalize project root: {error}"),
+        )
+    })?;
+    Ok(project_root)
 }

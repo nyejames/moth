@@ -25,7 +25,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, InvalidConfigReason, PreparedFailure,
+    CompilerStage, DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::project_globals::claims_project_globals_name;
@@ -46,7 +46,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::project_structure_diagnostics::{
     non_utf8_filesystem_name_error, path_id, project_structure_diagnostic,
@@ -121,17 +121,7 @@ impl SourceTreeSkipPolicy {
     }
 
     fn should_skip(&self, directory: &Path) -> bool {
-        let file_name = directory.file_name().and_then(|name| name.to_str());
-        let fixed_or_hidden = file_name.is_some_and(|name| {
-            FIXED_SKIPPED_DIRECTORY_NAMES.contains(&name) || directory_name_is_hidden(name)
-        });
-
-        if fixed_or_hidden
-            || self
-                .configured_directories
-                .binary_search(&directory.to_path_buf())
-                .is_ok()
-        {
+        if self.lexical_directory_is_skipped(directory) {
             return true;
         }
 
@@ -146,6 +136,40 @@ impl SourceTreeSkipPolicy {
                         || canonical_directory.starts_with(output_root)
                 })
             })
+    }
+
+    /// Apply the name and configured-path rules that need no canonicalization.
+    fn lexical_directory_is_skipped(&self, directory: &Path) -> bool {
+        let file_name = directory.file_name().and_then(|name| name.to_str());
+        let fixed_or_hidden = file_name.is_some_and(|name| {
+            FIXED_SKIPPED_DIRECTORY_NAMES.contains(&name) || directory_name_is_hidden(name)
+        });
+
+        fixed_or_hidden
+            || self
+                .configured_directories
+                .binary_search_by(|candidate| candidate.as_path().cmp(directory))
+                .is_ok()
+    }
+
+    /// Whether any canonical directory between `path` and the selected root is skipped.
+    ///
+    /// The selected root is exempt: a root named `_prototype` remains compilable when it is the
+    /// explicit source boundary. Callers pass canonical directories, so this repeats the lexical
+    /// skip rules without another canonicalization syscall.
+    fn canonical_ancestor_is_skipped(&self, path: &Path, entry_root: &Path) -> bool {
+        path.ancestors()
+            .take_while(|directory| *directory != entry_root)
+            .any(|directory| self.canonical_directory_is_skipped(directory))
+    }
+
+    /// Apply the same exclusion rules to a directory that is already canonical.
+    fn canonical_directory_is_skipped(&self, directory: &Path) -> bool {
+        self.lexical_directory_is_skipped(directory)
+            || self
+                .canonical_output_directories
+                .iter()
+                .any(|output_root| directory == output_root || directory.starts_with(output_root))
     }
 }
 
@@ -627,7 +651,9 @@ impl SourceTreeIndex {
                 // WHY: a non-symlink entry's listed type answers the kind checks, saving a `stat`.
                 // Symlinks, and entries whose type cannot be read, keep the `Path` queries, which
                 // follow the link to its target.
-                let listed_type = entry.file_type().ok().filter(|listed| !listed.is_symlink());
+                let listed_file_type = entry.file_type().ok();
+                let is_symlink = listed_file_type.is_some_and(|file_type| file_type.is_symlink());
+                let listed_type = listed_file_type.filter(|file_type| !file_type.is_symlink());
                 let is_dir = match listed_type {
                     Some(listed) => listed.is_dir(),
                     None => path.is_dir(),
@@ -654,6 +680,17 @@ impl SourceTreeIndex {
                     None => path.is_file(),
                 };
                 if !is_file {
+                    // A dangling root-marker symlink is an authored root whose source is missing.
+                    // The kind checks cannot classify it, so canonicalization reports the broken
+                    // filesystem identity instead of silently dropping the required root.
+                    let dangling_root_marker = is_symlink
+                        && path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .is_some_and(file_name_is_module_root_file);
+                    if dangling_root_marker {
+                        canonicalize_source_path(&path)?;
+                    }
                     continue;
                 }
                 stats.files_seen += 1;
@@ -737,20 +774,44 @@ impl SourceTreeIndex {
                 let canonical_path = if listed_type.is_some() {
                     path.clone()
                 } else {
-                    fs::canonicalize(&path).map_err(|error| {
-                        InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &path, format!("Failed to canonicalize source path: {error}"))
-                    })?
+                    canonicalize_source_path(&path)?
                 };
 
                 // A file symlink can point outside the selected boundary or into an excluded `_`
                 // subtree even when its visible spelling looks eligible. Directory ancestry
                 // decides exclusion; an underscore-prefixed file name remains valid source.
+                // Ordinary sources outside the boundary stay silently excluded. An authored root
+                // marker, however, must resolve to a source owned by its structural module, so a
+                // filtered root target is a structural failure rather than a missing root.
                 let canonical_parent = canonical_path.parent();
-                if !canonical_path.starts_with(&entry_root)
-                    || canonical_parent
-                        .is_some_and(|parent| path_has_hidden_component_below(parent, &entry_root))
-                {
+                let inside_excluded_subtree = canonical_parent
+                    .is_some_and(|parent| path_has_hidden_component_below(parent, &entry_root));
+                if !canonical_path.starts_with(&entry_root) || inside_excluded_subtree {
+                    if is_module_root {
+                        return Err(module_root_outside_claim_error(
+                            &directory,
+                            &path,
+                            &canonical_path,
+                            string_table,
+                        ));
+                    }
                     continue;
+                }
+
+                // A root marker must also avoid subtrees the traversal skips by policy (fixed
+                // generated directories and validated output roots). Ordinary source symlinks
+                // keep their existing silent-exclusion behaviour.
+                if is_module_root
+                    && canonical_parent.is_some_and(|parent| {
+                        skip_policy.canonical_ancestor_is_skipped(parent, &entry_root)
+                    })
+                {
+                    return Err(module_root_outside_claim_error(
+                        &directory,
+                        &path,
+                        &canonical_path,
+                        string_table,
+                    ));
                 }
 
                 if let Some(stem) = source_stem_from_file_name(file_name) {
@@ -1053,7 +1114,7 @@ impl SourceTreeIndex {
         };
         let canonical_root = fs::canonicalize(root_directory).map_err(|error| {
             InfrastructureFailure::filesystem(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                CompilerStage::ProjectBuildAssembly,
                 root_directory,
                 format!("Failed to canonicalize single-file source root: {error}"),
             )
@@ -1181,7 +1242,11 @@ impl SourceTreeIndex {
             .map_err(|error| Self::directory_read_error(directory, error))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| {
-                InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, directory, format!("Failed to read directory entry while indexing source tree: {error}"))
+                InfrastructureFailure::filesystem(
+                    CompilerStage::ProjectBuildAssembly,
+                    directory,
+                    format!("Failed to read directory entry while indexing source tree: {error}"),
+                )
             })?;
         entries.sort_by_key(|entry| entry.path());
         Ok(entries)
@@ -1189,11 +1254,26 @@ impl SourceTreeIndex {
 
     fn directory_read_error(directory: &Path, error: std::io::Error) -> InfrastructureFailure {
         InfrastructureFailure::filesystem(
-            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            CompilerStage::ProjectBuildAssembly,
             directory,
             format!("Failed to read directory while indexing source tree: {error}"),
         )
     }
+}
+
+/// Resolve one source path to its canonical identity.
+///
+/// Every caller treats a canonicalization failure as an infrastructure failure tied to the
+/// authored path, so the source-tree traversal keeps one error shape for symlinks and missing
+/// sources.
+fn canonicalize_source_path(path: &Path) -> Result<PathBuf, InfrastructureFailure> {
+    fs::canonicalize(path).map_err(|error| {
+        InfrastructureFailure::filesystem(
+            CompilerStage::ProjectBuildAssembly,
+            path,
+            format!("Failed to canonicalize source path: {error}"),
+        )
+    })
 }
 
 /// Classify one rooted directory as an optional normal/support pair.
@@ -1216,7 +1296,7 @@ fn classify_directory_root(
             ModuleRootRole::Support => support.push(root),
             ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => {
                 crate::compiler_bug!(
-                    crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                    CompilerStage::ProjectBuildAssembly,
                     "filesystem module roots may only be normal or support surfaces"
                 )
             }
@@ -1302,17 +1382,30 @@ fn validate_module_root_claims(
     claims: &[DiscoveredModuleRootClaim],
     string_table: &mut StringTable,
 ) -> Result<(), PreparedFailure> {
+    let claimed_directories: FxHashSet<&Path> = claims
+        .iter()
+        .map(|claim| claim.directory.as_path())
+        .collect();
+
     for claim in claims {
         let Some(canonical_parent) = claim.root_file.parent() else {
-            return Err(module_root_outside_claim_error(claim, string_table));
+            return Err(module_root_outside_claim_error(
+                &claim.directory,
+                &claim.visible_root_file,
+                &claim.root_file,
+                string_table,
+            ));
         };
-        let owner = claims
-            .iter()
-            .map(|candidate| candidate.directory.as_path())
-            .filter(|directory| canonical_parent.starts_with(directory))
-            .max_by_key(|directory| directory.components().count());
+        let owner = canonical_parent
+            .ancestors()
+            .find(|directory| claimed_directories.contains(*directory));
         if owner != Some(claim.directory.as_path()) {
-            return Err(module_root_outside_claim_error(claim, string_table));
+            return Err(module_root_outside_claim_error(
+                &claim.directory,
+                &claim.visible_root_file,
+                &claim.root_file,
+                string_table,
+            ));
         }
     }
     Ok(())
@@ -1340,15 +1433,17 @@ fn aliased_module_root_files_error(
 }
 
 fn module_root_outside_claim_error(
-    claim: &DiscoveredModuleRootClaim,
+    directory: &Path,
+    visible_root_file: &Path,
+    target: &Path,
     string_table: &mut StringTable,
 ) -> PreparedFailure {
     let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
     let diagnostic =
         project_structure_diagnostic(InvalidConfigReason::ModuleRootFileOutsideClaimingModule {
-            root_file: path_id(&claim.visible_root_file, &mut diagnostic_strings),
-            claiming_directory: path_id(&claim.directory, &mut diagnostic_strings),
-            target: path_id(&claim.root_file, &mut diagnostic_strings),
+            root_file: path_id(visible_root_file, &mut diagnostic_strings),
+            claiming_directory: path_id(directory, &mut diagnostic_strings),
+            target: path_id(target, &mut diagnostic_strings),
         });
     let table = string_table.take_for_handoff();
     PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
@@ -1496,7 +1591,7 @@ fn logical_module_path_from(
         .map(PathBuf::from)
         .map_err(|_| {
             InfrastructureFailure::internal(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                CompilerStage::ProjectBuildAssembly,
                 format!(
                     "Module root directory {root_directory:?} is not under the canonical base \
                  {base:?}; logical module path cannot fall back to an absolute path"
@@ -1593,7 +1688,7 @@ fn relative_source_path_from(
         .map(PathBuf::from)
         .map_err(|_| {
             InfrastructureFailure::internal(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                CompilerStage::ProjectBuildAssembly,
                 format!(
                     "Owned source {file_path:?} is not under its nearest module root \
                      {module_root_directory:?}; module-relative source path cannot fall back to \
@@ -1618,7 +1713,7 @@ fn entry_root_relative_logical_path(
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             crate::compiler_bug!(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                CompilerStage::ProjectBuildAssembly,
                 "Discovered source candidate {traversal_path:?} is not under the entry root \
                  {entry_root:?}; logical candidate path cannot fall back to an absolute path"
             )
@@ -1733,7 +1828,7 @@ fn validate_unique_source_logical_identities(
             right.canonical_path.display(),
         );
         return Err(InfrastructureFailure::internal(
-            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            CompilerStage::ProjectBuildAssembly,
             message,
         ));
     }
@@ -1766,7 +1861,7 @@ fn build_source_inventory(
             .is_some()
         {
             return Err(InfrastructureFailure::internal(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                CompilerStage::ProjectBuildAssembly,
                 format!(
                     "Source tree index classified physical source {} more than once; each canonical \
                  source path must have exactly one SourceRecord",

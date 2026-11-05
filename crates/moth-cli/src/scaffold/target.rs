@@ -5,7 +5,7 @@
 //! WHY: Path semantics (omitted, relative, absolute, home expansion) and user
 //! confirmation belong in one place, separate from file writing.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use moth_lexical::identifier::is_identifier;
 
@@ -121,12 +121,30 @@ fn handle_existing_directory(path: &Path, prompt: &mut impl Prompt) -> Result<Pa
                 if trimmed.is_empty() {
                     continue;
                 }
+                if !is_single_child_folder_name(trimmed) {
+                    return Err(format!(
+                        "Invalid project folder name `{trimmed}`. Enter one folder name only, \
+                         without path separators, parent traversal or an absolute path."
+                    ));
+                }
                 return Ok(path.join(trimmed));
             }
             "3" => return Err("Cancelled project creation.".to_string()),
             _ => continue,
         }
     }
+}
+
+/// Whether prompted text names exactly one normal child directory on this platform.
+///
+/// Absolute paths, drive/UNC prefixes, `.`/`..` aliases and nested paths all produce any other
+/// component shape and are rejected without rewriting the input.
+fn is_single_child_folder_name(name: &str) -> bool {
+    let mut components = Path::new(name).components();
+    matches!(
+        (components.next(), components.next()),
+        (Some(Component::Normal(_)), None)
+    )
 }
 
 fn handle_missing_directory(path: &Path, prompt: &mut impl Prompt) -> Result<PathBuf, String> {

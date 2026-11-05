@@ -316,6 +316,78 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
     );
 }
 
+#[test]
+fn project_facade_rejects_own_project_globals_dependency_for_paired_root_surface() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temporary project");
+    let dir = _temp.path().to_path_buf();
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project entry");
+    fs::write(
+        dir.join("+package.moth"),
+        "SITE_TITLE #= \"Moth\"\n@project\n",
+    )
+    .expect("should write paired project facade");
+    fs::create_dir_all(dir.join("components")).expect("should create nested support directory");
+    fs::write(
+        dir.join("components/+ui.moth"),
+        "SITE_TITLE #= \"Moth\"\n@project\n",
+    )
+    .expect("should write unrelated nested support module");
+    fs::create_dir_all(dir.join("pages")).expect("should create nested normal directory");
+    fs::write(
+        dir.join("pages/@pages.moth"),
+        "SITE_TITLE #= \"Moth\"\n@project\n",
+    )
+    .expect("should write unrelated nested normal module");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
+    let result = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut warning_owner,
+    );
+    let reports = diagnosed_reports(&result);
+    assert_eq!(
+        reports.counts().errors,
+        1,
+        "only the paired facade should report an error; nested support and normal roots may use @project"
+    );
+    let matching = reports
+        .iter()
+        .filter(|(_, view)| {
+            view.descriptor().code == "MOTH-SYNTAX-0019"
+                && view.reason_key()
+                    == Some(
+                        "invalid_dependency_clause.project_globals_facade_dependency_not_allowed",
+                    )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        matching.len(),
+        1,
+        "only the paired project facade should reject its own @project dependency"
+    );
+    let (report, view) = matching[0];
+    let position = DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
+        .expect("facade diagnostic should retain its authored source position");
+    assert!(
+        position.path.ends_with("+package.moth") && !position.path.ends_with("components/+ui.moth"),
+        "the paired facade diagnostic should point at the project root support root, not a nested support root"
+    );
+}
+
 #[cfg(feature = "timers")]
 #[test]
 fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completion() {

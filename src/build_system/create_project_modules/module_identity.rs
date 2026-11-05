@@ -167,20 +167,7 @@ impl ModuleIdentityRecord {
             .expect("the selected public surface must own a root file")
     }
 
-    /// The primary root file for consumers that need one representative surface.
-    ///
-    /// A paired structural module prefers its normal root. Paired consumers must select a
-    /// surface explicitly instead of relying on this compatibility accessor.
-    #[allow(dead_code)]
-    pub(crate) fn root_file(&self) -> &Path {
-        self.normal_root_file
-            .as_deref()
-            .or(self.support_root_file.as_deref())
-            .expect("a structural module has at least one root file")
-    }
-
     /// The canonical root file for one explicit surface.
-    #[allow(dead_code)]
     pub(crate) fn root_file_for_surface(&self, role: ModuleRootRole) -> Option<&Path> {
         match role {
             ModuleRootRole::Normal => self.normal_root_file(),
@@ -215,12 +202,7 @@ impl ModuleIdentityRecord {
         &self.shared_origin
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn logical_module_path(&self) -> &Path {
-        &self.logical_module_path
-    }
-
-    /// The primary role-qualified origin for legacy consumers.
+    /// The primary role-qualified origin for consumers that need one representative surface.
     pub(crate) fn stable_origin(&self) -> &StableModuleOriginIdentity {
         self.normal_origin
             .as_ref()

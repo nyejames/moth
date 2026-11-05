@@ -2,13 +2,13 @@
 //!
 //! WHAT: owns the deterministic project-module graph built directly from the Stage 0
 //! [`SourceTreeIndex`]. Each canonical module becomes one node carrying its `ModuleId`,
-//! stable origin, root role, root directory/file, nearest structural parent, direct children
-//! and structural dependency edges. The graph classifies normal entry candidates and the
-//! project package support surface, encodes strict scoped-support visibility as a query, and
-//! exposes deterministic dependency-edge insertion, an explicit construction-to-completion
-//! phase transition that freezes provider/consumer adjacency into sorted `Vec<ModuleId>` storage,
-//! and topological compile waves over those frozen provider-before-consumer edges. Source records
-//! and ownership remain in `SourceTreeIndex`.
+//! stable origin, root role, root files, nearest structural parent and structural dependency
+//! edges. The graph classifies normal entry candidates and the project package support surface,
+//! encodes strict scoped-support visibility as a query, and exposes deterministic dependency-edge
+//! insertion, an explicit construction-to-completion phase transition that freezes
+//! provider/consumer adjacency into sorted `Vec<ModuleId>` storage, and topological compile waves
+//! over those frozen provider-before-consumer edges. Source records and ownership remain in
+//! `SourceTreeIndex`.
 //! WHY: the compiler cannot schedule canonical modules until Stage 0 can distinguish normal
 //! modules, support packages and their shared helper origins, and until dependency order can be
 //! derived without a second filesystem traversal or a parallel identity/topology table. This
@@ -36,7 +36,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
-use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
+use crate::compiler_frontend::compiler_messages::{CompilerStage, DiagnosticBag, PreparedFailure};
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
@@ -89,11 +89,9 @@ pub(crate) struct ProjectModuleGraphNode {
     shared_origin: StableModuleOriginIdentity,
     normal_origin: Option<StableModuleOriginIdentity>,
     support_origin: Option<StableModuleOriginIdentity>,
-    root_directory: std::path::PathBuf,
-    normal_root_file: Option<std::path::PathBuf>,
-    support_root_file: Option<std::path::PathBuf>,
+    normal_root_file: Option<PathBuf>,
+    support_root_file: Option<PathBuf>,
     nearest_parent: Option<ModuleId>,
-    direct_children: Vec<ModuleId>,
 }
 
 impl ProjectModuleGraphNode {
@@ -102,18 +100,14 @@ impl ProjectModuleGraphNode {
         self.module_id
     }
 
-    // Structural node accessors. `module_id` and `root_file` are production-consumed
-    // by compile-wave scheduling and entry selection; the remaining identity, ancestry and
-    // source-set accessors expose data the graph carries for later provider-edge and source-set
-    // consumers and are exercised by focused graph-invariant tests.
+    // Structural node accessors. Each mirrors an identity fact the graph consumes for compile-wave
+    // scheduling, entry selection or surface queries.
     /// The role-neutral origin shared by every helper file in this structural module.
-    #[allow(dead_code)]
     pub(crate) fn shared_origin(&self) -> &StableModuleOriginIdentity {
         &self.shared_origin
     }
 
     /// The role-qualified origin for one present root surface.
-    #[allow(dead_code)]
     pub(crate) fn surface_origin(
         &self,
         role: ModuleRootRole,
@@ -126,7 +120,6 @@ impl ProjectModuleGraphNode {
     }
 
     /// Whether this structural module owns any root with the given surface role.
-    #[allow(dead_code)]
     pub(crate) fn has_surface(&self, role: ModuleRootRole) -> bool {
         self.surface_origin(role).is_some()
     }
@@ -178,7 +171,6 @@ impl ProjectModuleGraphNode {
         (self.stable_origin(), support)
     }
 
-    #[allow(dead_code)]
     /// The primary structural surface role for consumers that need one representative surface.
     pub(crate) fn role(&self) -> ModuleRootRole {
         if self.normal_origin.is_some() {
@@ -190,20 +182,12 @@ impl ProjectModuleGraphNode {
         }
     }
 
-    #[allow(dead_code)]
-    /// The canonical root directory that scopes this module.
-    pub(crate) fn root_directory(&self) -> &Path {
-        &self.root_directory
-    }
-
     /// The canonical normal root file, when this module has one.
-    #[allow(dead_code)]
     pub(crate) fn normal_root_file(&self) -> Option<&Path> {
         self.normal_root_file.as_deref()
     }
 
     /// The canonical support root file, when this module has one.
-    #[allow(dead_code)]
     pub(crate) fn support_root_file(&self) -> Option<&Path> {
         self.support_root_file.as_deref()
     }
@@ -214,18 +198,6 @@ impl ProjectModuleGraphNode {
             .as_deref()
             .or(self.support_root_file.as_deref())
             .expect("a structural graph node has at least one root file")
-    }
-
-    #[allow(dead_code)]
-    /// The nearest structural parent module, or `None` for the entry root.
-    pub(crate) fn nearest_parent(&self) -> Option<ModuleId> {
-        self.nearest_parent
-    }
-
-    #[allow(dead_code)]
-    /// Direct child modules whose nearest structural parent is this module, in `ModuleId` order.
-    pub(crate) fn direct_children(&self) -> &[ModuleId] {
-        &self.direct_children
     }
 }
 
@@ -280,16 +252,14 @@ impl ProjectModuleGraph {
             .into_iter()
             .enumerate()
             .map(
-                |(index, (stable_origin, root_directory, root_file))| ProjectModuleGraphNode {
+                |(index, (stable_origin, _root_directory, root_file))| ProjectModuleGraphNode {
                     module_id: ModuleId::from_index(index),
                     shared_origin: stable_origin.clone(),
                     normal_origin: Some(stable_origin),
                     support_origin: None,
-                    root_directory,
                     normal_root_file: Some(root_file),
                     support_root_file: None,
                     nearest_parent: None,
-                    direct_children: Vec::new(),
                 },
             )
             .collect::<Vec<_>>();
@@ -323,18 +293,15 @@ impl ProjectModuleGraph {
         for module_id in &module_ids {
             let record = identities.record(*module_id);
             let nearest_parent = identities.nearest_ancestor_module(*module_id);
-            let direct_children = identities.direct_child_modules(*module_id).to_vec();
 
             nodes.push(ProjectModuleGraphNode {
                 module_id: *module_id,
                 shared_origin: record.shared_origin().clone(),
                 normal_origin: record.surface_origin(ModuleRootRole::Normal).cloned(),
                 support_origin: record.surface_origin(ModuleRootRole::Support).cloned(),
-                root_directory: record.root_directory().to_path_buf(),
                 normal_root_file: record.normal_root_file().map(Path::to_path_buf),
                 support_root_file: record.support_root_file().map(Path::to_path_buf),
                 nearest_parent,
-                direct_children,
             });
 
             if record.normal_root_file().is_some() {
@@ -380,11 +347,9 @@ impl ProjectModuleGraph {
                 shared_origin: record.shared_origin().clone(),
                 normal_origin: record.surface_origin(ModuleRootRole::Normal).cloned(),
                 support_origin: record.surface_origin(ModuleRootRole::Support).cloned(),
-                root_directory: record.root_directory().to_path_buf(),
                 normal_root_file: record.normal_root_file().map(Path::to_path_buf),
                 support_root_file: record.support_root_file().map(Path::to_path_buf),
                 nearest_parent: None,
-                direct_children: Vec::new(),
             });
 
             if record.normal_root_file().is_some() {
@@ -407,7 +372,6 @@ impl ProjectModuleGraph {
         self.nodes.len()
     }
 
-    #[allow(dead_code)]
     /// All graph nodes in deterministic `ModuleId` order.
     pub(crate) fn nodes(&self) -> &[ProjectModuleGraphNode] {
         &self.nodes
@@ -440,7 +404,7 @@ impl ProjectModuleGraph {
     ) -> Result<&[ModuleId], InfrastructureFailure> {
         if !self.is_valid_module_id(module_id) {
             return Err(InfrastructureFailure::internal(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                CompilerStage::ProjectBuildAssembly,
                 format!(
                     "Project module graph received out-of-range ModuleId {} for provider lookup",
                     module_id.index()
@@ -529,36 +493,46 @@ impl ProjectModuleGraph {
     pub(crate) fn build_source_origin_lookup(
         &self,
         source_tree_index: &SourceTreeIndex,
-    ) -> Result<FxHashMap<std::path::PathBuf, StableModuleOriginIdentity>, InfrastructureFailure>
-    {
-        let mut origins: FxHashMap<std::path::PathBuf, StableModuleOriginIdentity> =
-            FxHashMap::default();
+    ) -> Result<FxHashMap<PathBuf, StableModuleOriginIdentity>, InfrastructureFailure> {
+        let mut origins: FxHashMap<PathBuf, StableModuleOriginIdentity> = FxHashMap::default();
 
         for node in &self.nodes {
             for source_id in source_tree_index.owned_source_indices(node.module_id()) {
                 let record = source_tree_index.source(*source_id);
                 let Some(entry_origin) = record.logical_identity().module_origin() else {
-                    return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
-                        "Project module graph owned source ID {} resolves to an unrooted record; \
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "Project module graph owned source ID {} resolves to an unrooted record; \
                          an owned source record must carry an owned logical identity",
-                        source_id.index(),
-                    )));
+                            source_id.index(),
+                        ),
+                    ));
                 };
                 if !node.owns_origin(entry_origin) {
-                    return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
-                        "Project module graph owned source entry {} has a stable identity module origin ({:?}) that does not belong to its containing structural module (shared {:?}, retained surface origins {:?})",
-                        record.canonical_path().display(),
-                        entry_origin,
-                        node.shared_origin(),
-                        [node.surface_origin(ModuleRootRole::Normal), node.surface_origin(ModuleRootRole::Support)],
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "Project module graph owned source entry {} has a stable identity module origin ({:?}) that does not belong to its containing structural module (shared {:?}, retained surface origins {:?})",
+                            record.canonical_path().display(),
+                            entry_origin,
+                            node.shared_origin(),
+                            [
+                                node.surface_origin(ModuleRootRole::Normal),
+                                node.surface_origin(ModuleRootRole::Support)
+                            ],
+                        ),
+                    ));
                 }
                 let canonical_path = record.canonical_path().to_path_buf();
                 if origins.contains_key(&canonical_path) {
-                    return Err(InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
-                        "Source tree index owned source ID sets assign canonical path {} to multiple modules; each source file must have exactly one owning module",
-                        canonical_path.display()
-                    )));
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "Source tree index owned source ID sets assign canonical path {} to multiple modules; each source file must have exactly one owning module",
+                            canonical_path.display()
+                        ),
+                    ));
                 }
                 origins.insert(canonical_path, entry_origin.clone());
             }
@@ -697,7 +671,7 @@ impl ProjectModuleGraph {
         } = &self.dependencies
         else {
             crate::compiler_bug!(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                CompilerStage::ProjectBuildAssembly,
                 "Project module graph compile waves were requested before completion; the graph must complete and freeze its adjacency before compile-wave scheduling reads it"
             );
         };
@@ -754,7 +728,7 @@ impl ProjectModuleGraph {
     /// Build an internal graph failure for mutating a completed graph.
     fn mutation_after_completion_error() -> InfrastructureFailure {
         InfrastructureFailure::internal(
-            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            CompilerStage::ProjectBuildAssembly,
             "Project module graph was mutated after completion; dependency edges must be inserted \
          before the graph completes and freezes its adjacency for compile-wave scheduling",
         )
@@ -763,7 +737,7 @@ impl ProjectModuleGraph {
     /// Build an internal graph failure for scheduling before the graph completes.
     fn scheduling_before_completion_error() -> InfrastructureFailure {
         InfrastructureFailure::internal(
-            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            CompilerStage::ProjectBuildAssembly,
             "Project module graph compile waves were requested before completion; the graph must \
          complete and freeze its adjacency before compile-wave scheduling reads it",
         )
@@ -776,7 +750,7 @@ impl ProjectModuleGraph {
         consumer: ModuleId,
     ) -> InfrastructureFailure {
         InfrastructureFailure::internal(
-            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            CompilerStage::ProjectBuildAssembly,
             format!(
                 "Project module graph received a dependency edge with an out-of-range module ID: \
              provider index {} consumer index {} but the graph has {} modules",
@@ -791,7 +765,7 @@ impl ProjectModuleGraph {
     fn self_edge_error(&self, module_id: ModuleId) -> InfrastructureFailure {
         let origin = self.describe_module(module_id);
         InfrastructureFailure::internal(
-            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            CompilerStage::ProjectBuildAssembly,
             format!(
                 "Project module graph received a self-dependency edge from module {origin}; a module \
              cannot be its own provider"

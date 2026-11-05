@@ -47,7 +47,11 @@ fn find_scaffold_conflicts_reports_exact_owned_set_and_excludes_directories_and_
         fs::write(project_dir.join(file), b"old").unwrap();
     }
     assert_eq!(
-        find_scaffold_conflicts(&project_dir),
+        find_scaffold_conflicts(&project_dir)
+            .unwrap()
+            .iter()
+            .map(|conflict| conflict.relative)
+            .collect::<Vec<_>>(),
         vec!["config.moth", "@page.moth",]
     );
 
@@ -58,7 +62,7 @@ fn find_scaffold_conflicts_reports_exact_owned_set_and_excludes_directories_and_
         fs::create_dir_all(clean_dir.join(dir)).unwrap();
     }
     fs::write(clean_dir.join(".gitignore"), b"old").unwrap();
-    assert!(find_scaffold_conflicts(&clean_dir).is_empty());
+    assert!(find_scaffold_conflicts(&clean_dir).unwrap().is_empty());
 }
 
 #[test]
@@ -106,6 +110,139 @@ fn preflight_force_confirmation_confirms_or_cancels() {
     let mut prompt = ScriptedPrompt::new(vec![String::from("n")]);
     let error = run_preflight_checks(&target, true, &mut prompt).unwrap_err();
     assert_eq!(error, "Cancelled project creation.");
+}
+
+#[cfg(unix)]
+#[test]
+fn preflight_rejects_dangling_scaffold_symlinks_even_with_force() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().to_path_buf();
+    let dangling_target = project_dir.join("missing-target");
+    symlink(&dangling_target, project_dir.join("config.moth")).unwrap();
+
+    let conflicts = find_scaffold_conflicts(&project_dir).unwrap();
+    assert_eq!(conflicts.len(), 1);
+    assert_eq!(conflicts[0].relative, "config.moth");
+    assert!(conflicts[0].is_symlink);
+
+    for force in [false, true] {
+        let target = empty_target(project_dir.clone());
+        let mut prompt = ScriptedPrompt::new(Vec::new());
+        let error = run_preflight_checks(&target, force, &mut prompt).unwrap_err();
+        assert!(
+            error.contains("symbolic links") && error.contains("config.moth"),
+            "force={force}: {error}"
+        );
+    }
+    assert!(
+        !dangling_target.exists(),
+        "preflight must not create a dangling symlink target"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn write_scaffold_refuses_scaffold_symlinks_with_and_without_force() {
+    use std::os::unix::fs::symlink;
+
+    for force in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let project_dir = temp.path().join("project");
+        fs::create_dir(&project_dir).unwrap();
+        let outside = temp.path().join("outside.moth");
+        fs::write(&outside, b"keep me").unwrap();
+        symlink(&outside, project_dir.join("config.moth")).unwrap();
+
+        let target = named_target(project_dir.clone(), "Test_Site", true);
+        let mut prompt = ScriptedPrompt::new(Vec::new());
+
+        let error = write_scaffold(&target, force, &mut prompt).unwrap_err();
+        assert!(
+            error.contains("config.moth") && error.contains("symbolic link"),
+            "force={force}: {error}"
+        );
+        assert_eq!(
+            fs::read(&outside).unwrap(),
+            b"keep me",
+            "the symlink target outside the project must stay untouched"
+        );
+        assert!(
+            fs::symlink_metadata(project_dir.join("config.moth"))
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the refused scaffold path must stay the authored symlink"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn write_scaffold_rechecks_symlinks_after_preflight() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().join("project");
+    fs::create_dir(&project_dir).unwrap();
+    let target = named_target(project_dir.clone(), "Test_Site", false);
+
+    let mut prompt = ScriptedPrompt::new(Vec::new());
+    run_preflight_checks(&target, false, &mut prompt).unwrap();
+
+    let outside = temp.path().join("outside.moth");
+    fs::write(&outside, b"keep me").unwrap();
+    symlink(&outside, project_dir.join("@page.moth")).unwrap();
+
+    let mut prompt = ScriptedPrompt::new(Vec::new());
+    let error = write_scaffold(&target, false, &mut prompt).unwrap_err();
+    assert!(error.contains("@page.moth") && error.contains("symbolic link"));
+    assert_eq!(fs::read(&outside).unwrap(), b"keep me");
+}
+
+#[cfg(unix)]
+#[test]
+fn write_scaffold_refuses_gitignore_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    for dangling in [true, false] {
+        let temp = tempfile::tempdir().unwrap();
+        let project_dir = temp.path().join("project");
+        fs::create_dir(&project_dir).unwrap();
+        let outside = temp.path().join("outside.gitignore");
+        if !dangling {
+            fs::write(&outside, b"custom\n").unwrap();
+        }
+        symlink(&outside, project_dir.join(".gitignore")).unwrap();
+
+        let target = named_target(project_dir.clone(), "Test_Site", false);
+        let mut prompt = ScriptedPrompt::new(Vec::new());
+
+        let error = write_scaffold(&target, true, &mut prompt).unwrap_err();
+        assert!(
+            error.contains(".gitignore") && error.contains("symbolic link"),
+            "dangling={dangling}: {error}"
+        );
+        if dangling {
+            assert!(
+                !outside.exists(),
+                "a dangling .gitignore symlink must not create its target"
+            );
+        } else {
+            assert_eq!(
+                fs::read(&outside).unwrap(),
+                b"custom\n",
+                "an existing .gitignore target must stay untouched"
+            );
+        }
+        assert!(
+            fs::symlink_metadata(project_dir.join(".gitignore"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+    }
 }
 
 #[test]

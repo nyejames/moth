@@ -17,6 +17,13 @@ const GITIGNORE_FILE: &str = ".gitignore";
 /// Relative paths of all scaffold-owned files.
 const SCAFFOLD_OWNED_FILES: &[&str] = &[CONFIG_FILE_NAME, PAGE_FILE];
 
+/// One scaffold-owned path that already exists in the target directory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ScaffoldConflict {
+    pub(crate) relative: &'static str,
+    pub(crate) is_symlink: bool,
+}
+
 /// Run preflight checks before writing anything.
 ///
 /// Returns Ok(()) when it is safe to proceed, or Err when the user cancels
@@ -26,10 +33,33 @@ pub(crate) fn run_preflight_checks(
     force: bool,
     prompt: &mut impl Prompt,
 ) -> Result<(), String> {
-    let conflicts = find_scaffold_conflicts(&target.project_dir);
+    let conflicts = find_scaffold_conflicts(&target.project_dir)?;
 
-    if !conflicts.is_empty() && !force {
-        let file_list = conflicts
+    let symlink_conflicts = conflicts
+        .iter()
+        .filter(|conflict| conflict.is_symlink)
+        .map(|conflict| conflict.relative)
+        .collect::<Vec<_>>();
+    if !symlink_conflicts.is_empty() {
+        let file_list = symlink_conflicts
+            .iter()
+            .map(|path| format!("  {path}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(format!(
+            "Cannot create project because scaffold-owned paths are symbolic links:\n\
+             {file_list}\n\n\
+             Replace them with regular files. --force does not write through symbolic links."
+        ));
+    }
+
+    let conflict_names = conflicts
+        .iter()
+        .map(|conflict| conflict.relative)
+        .collect::<Vec<_>>();
+
+    if !conflict_names.is_empty() && !force {
+        let file_list = conflict_names
             .iter()
             .map(|path| format!("  {path}"))
             .collect::<Vec<_>>()
@@ -41,8 +71,8 @@ pub(crate) fn run_preflight_checks(
         ));
     }
 
-    if !conflicts.is_empty() && force {
-        let file_list = conflicts
+    if !conflict_names.is_empty() && force {
+        let file_list = conflict_names
             .iter()
             .map(|path| format!("  {path}"))
             .collect::<Vec<_>>()
@@ -60,7 +90,7 @@ pub(crate) fn run_preflight_checks(
         }
     }
 
-    if target.target_was_non_empty && conflicts.is_empty() {
+    if target.target_was_non_empty && conflict_names.is_empty() {
         let message = format!(
             "WARNING: The target directory is not empty:\n\
              {}\n\n\
@@ -76,12 +106,60 @@ pub(crate) fn run_preflight_checks(
     Ok(())
 }
 
-pub fn find_scaffold_conflicts(project_dir: &Path) -> Vec<&'static str> {
-    SCAFFOLD_OWNED_FILES
-        .iter()
-        .copied()
-        .filter(|relative| project_dir.join(relative).exists())
-        .collect()
+/// Report each scaffold-owned path that exists, without following a final symlink.
+///
+/// A dangling symlink is still a conflict, while a missing entry is not. Filesystem errors are
+/// returned rather than treated as an absent file.
+pub(crate) fn find_scaffold_conflicts(project_dir: &Path) -> Result<Vec<ScaffoldConflict>, String> {
+    let mut conflicts = Vec::new();
+    for relative in SCAFFOLD_OWNED_FILES {
+        let path = project_dir.join(relative);
+        let Some(metadata) = entry_metadata(&path, relative)? else {
+            continue;
+        };
+        conflicts.push(ScaffoldConflict {
+            relative,
+            is_symlink: metadata.file_type().is_symlink(),
+        });
+    }
+    Ok(conflicts)
+}
+
+/// Read one path's metadata without following a final symlink.
+///
+/// `Ok(None)` distinguishes a missing entry from filesystem errors, which stay visible instead of
+/// being reported as a clean target.
+fn entry_metadata(path: &Path, relative: &str) -> Result<Option<fs::Metadata>, String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!(
+            "Project creation failed while inspecting {relative}: {error}."
+        )),
+    }
+}
+
+fn scaffolding_through_symlink_error(relative: &str) -> String {
+    format!(
+        "Project creation failed because {relative} is a symbolic link. \
+         The scaffold does not write through symbolic links; replace it with a regular file."
+    )
+}
+
+/// Create a file that must not already exist.
+///
+/// `create_new` refuses an existing entry, including a symlink introduced after the metadata
+/// preflight, so creating a missing scaffold file never follows a link.
+fn write_new_file(path: &Path, content: &str, relative: &str) -> Result<(), String> {
+    use std::io::Write as _;
+
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|error| format!("Project creation failed while creating {relative}: {error}."))?;
+    file.write_all(content.as_bytes())
+        .map_err(|error| format!("Project creation failed while writing {relative}: {error}."))
 }
 
 /// Write the complete scaffold to disk.
@@ -114,14 +192,27 @@ pub(crate) fn write_scaffold(
     // Helper to write a scaffold-owned file and track its disposition.
     let mut write_scaffold_file = |relative: &str, content: &str| -> Result<(), String> {
         let path = project_dir.join(relative);
-        let existed = path.exists();
-        fs::write(&path, content).map_err(|e| {
-            format!(
-                "Project creation failed while writing {relative}: {e}.\n\
-                 Some scaffold directories may already have been created. \
-                 No existing files were overwritten unless --force was confirmed."
-            )
-        })?;
+        let metadata = entry_metadata(&path, relative)?;
+        if metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.file_type().is_symlink())
+        {
+            return Err(scaffolding_through_symlink_error(relative));
+        }
+        let existed = metadata.is_some();
+        if existed {
+            // The metadata check refuses an observed symlink; this replacement is not an atomic
+            // no-follow open.
+            fs::write(&path, content).map_err(|e| {
+                format!(
+                    "Project creation failed while writing {relative}: {e}.\n\
+                     Some scaffold directories may already have been created. \
+                     No existing files were overwritten unless --force was confirmed."
+                )
+            })?;
+        } else {
+            write_new_file(&path, content, relative)?;
+        }
         if existed && force {
             replaced.push(PathBuf::from(relative));
         } else {
@@ -169,17 +260,18 @@ fn handle_gitignore(
 ) -> Result<GitignoreResult, String> {
     let gitignore_path = project_dir.join(GITIGNORE_FILE);
 
-    if !gitignore_path.exists() {
+    let metadata = entry_metadata(&gitignore_path, GITIGNORE_FILE)?;
+    let Some(metadata) = metadata else {
         let should_create = prompt.confirm("Add a .gitignore with Moth defaults? [Y/n]: ", true)?;
         if should_create {
-            fs::write(
+            write_new_file(
                 &gitignore_path,
                 start_page_scaffolding::gitignore_template(),
+                GITIGNORE_FILE,
             )
-            .map_err(|e| {
+            .map_err(|error| {
                 format!(
-                    "Project creation failed while writing .gitignore: {e}.\n\
-                     Some scaffold directories may already have been created. \
+                    "{error}\nSome scaffold directories may already have been created. \
                      No existing files were overwritten unless --force was confirmed."
                 )
             })?;
@@ -194,6 +286,10 @@ fn handle_gitignore(
             updated: None,
             skipped: Some(PathBuf::from(GITIGNORE_FILE)),
         });
+    };
+
+    if metadata.file_type().is_symlink() {
+        return Err(scaffolding_through_symlink_error(GITIGNORE_FILE));
     }
 
     // Existing .gitignore — check whether it already contains the Moth block.
@@ -218,6 +314,14 @@ fn handle_gitignore(
         true,
     )?;
     if should_append {
+        // Recheck immediately before writing so a symlink introduced after the preflight read is
+        // refused. The check is not an atomic no-follow replacement.
+        if entry_metadata(&gitignore_path, GITIGNORE_FILE)?
+            .is_some_and(|metadata| metadata.file_type().is_symlink())
+        {
+            return Err(scaffolding_through_symlink_error(GITIGNORE_FILE));
+        }
+
         let mut appended = existing;
         let block = moth_output_append_block(&appended);
         if !appended.ends_with('\n') {

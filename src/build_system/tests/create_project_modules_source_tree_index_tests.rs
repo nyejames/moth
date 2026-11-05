@@ -563,8 +563,6 @@ fn source_tree_index_excludes_file_symlinks_into_hidden_directories() {
     fs::create_dir_all(root.join("docs")).expect("should create visible folder");
     symlink(hidden.join("helper.moth"), root.join("docs.moth"))
         .expect("should create colliding-name symlink into hidden directory");
-    symlink(hidden.join("helper.moth"), root.join("+api.moth"))
-        .expect("should create facade symlink into hidden directory");
 
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
@@ -596,11 +594,5 @@ fn source_tree_index_excludes_file_symlinks_into_hidden_directories() {
             .iter()
             .any(|path| path.file_name().is_some_and(|name| name == "_helper.moth")),
         "an underscore-prefixed file in a visible directory remains eligible"
-    );
-    assert!(
-        source_paths
-            .iter()
-            .all(|path| path.file_name().is_some_and(|name| name != "+api.moth")),
-        "a facade symlink into a hidden directory must not become the project facade"
     );
 }

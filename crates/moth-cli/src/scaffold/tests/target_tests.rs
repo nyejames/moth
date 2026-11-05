@@ -297,6 +297,58 @@ fn existing_directory_menu_offers_use_child_or_cancel() {
 }
 
 #[test]
+fn existing_directory_child_name_must_be_one_normal_component() {
+    let temp = tempfile::tempdir().unwrap();
+    let existing = temp.path().join("existing");
+    fs::create_dir(&existing).unwrap();
+    let current = temp.path().to_path_buf();
+    let absolute = current.join("escaped").to_string_lossy().into_owned();
+
+    #[cfg(not(windows))]
+    let invalid_names = vec![
+        String::from("."),
+        String::from(".."),
+        String::from("nested/path"),
+        absolute,
+    ];
+    #[cfg(windows)]
+    let invalid_names = vec![
+        String::from("."),
+        String::from(".."),
+        String::from("nested/path"),
+        absolute,
+        String::from(r"C:\Windows"),
+        String::from(r"\rooted"),
+        String::from(r"nested\path"),
+    ];
+
+    for folder_name in invalid_names {
+        let mut prompt = ScriptedPrompt::new(vec![String::from("2"), folder_name.clone()]);
+        let error = resolve_project_target(Some(String::from("existing")), &current, &mut prompt)
+            .unwrap_err();
+        assert!(
+            error.contains("Invalid project folder name"),
+            "case {folder_name:?}: {error}"
+        );
+        assert_eq!(
+            fs::read_dir(&existing).unwrap().count(),
+            0,
+            "rejected folder name {folder_name:?} must not write into the chosen directory"
+        );
+    }
+
+    // One ordinary child name still resolves under the selected directory.
+    let mut prompt = ScriptedPrompt::new(vec![
+        String::from("2"),
+        String::from("child"),
+        String::new(),
+    ]);
+    let resolved =
+        resolve_project_target(Some(String::from("existing")), &current, &mut prompt).unwrap();
+    assert_eq!(resolved.project_dir, existing.join("child"));
+}
+
+#[test]
 fn missing_directory_confirms_or_cancels() {
     let temp = tempfile::tempdir().unwrap();
     let current = temp.path().to_path_buf();
