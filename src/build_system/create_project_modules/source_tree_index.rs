@@ -2,9 +2,10 @@
 //!
 //! WHAT: performs one deterministic traversal per project or source-package boundary, preparing
 //! canonical module identities, source ownership and sibling dependency-name collision facts. Project
-//! boundaries also own entry/package-prefix collisions and optional project-facade discovery;
-//! package boundaries own their required public normal-root validation. Each discovered root gets
-//! a deterministic `ModuleId`, explicit `ModuleRootRole` and boundary-relative logical module path.
+//! boundaries also own entry/package-prefix collisions;
+//! package boundaries own their required public normal-root validation. Each rooted directory gets
+//! one deterministic `ModuleId`, explicit normal/support surface facts and one boundary-relative
+//! logical module path; shared helpers belong to that one structural module.
 //! WHY: filesystem discovery belongs to Stage 0. Keeping it here prevents the frontend resolver,
 //! module inventory, and collision validators from repeating the same expensive walk.
 //!
@@ -21,11 +22,10 @@ use crate::builder_surface::external_import_providers::provider::ExternalFileExt
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, InvalidConfigReason, PreparedFailure,
+    CompilerStage, DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::project_globals::claims_project_globals_name;
@@ -35,8 +35,8 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::source::{SourceKind, SourceRegistrationIndex};
 use crate::compiler_frontend::source_packages::root_file::{
-    file_name_is_legacy_hash_root_file, file_name_is_module_root_file,
-    file_name_is_normal_module_root_file, file_name_is_support_root_file,
+    file_name_is_config_file, file_name_is_legacy_hash_root_file, file_name_is_module_root_file,
+    file_name_is_normal_module_root_file,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::counter_observation;
@@ -46,33 +46,30 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::project_structure_diagnostics::{
     non_utf8_filesystem_name_error, path_id, project_structure_diagnostic,
 };
 
-const FIXED_SKIPPED_DIRECTORY_NAMES: &[&str] = &[
-    ".git",
-    "target",
-    "node_modules",
-    "release",
-    "dev",
-    "dist",
-    "build",
-    ".cache",
-];
+/// Directory names that are never source regardless of configuration.
+///
+/// `_` is the general source-exclusion rule. These fixed names are intentional skips for external
+/// tooling trees, not aliases for the old visible dev/release output locations. Visible `dev`,
+/// `release`, `dist` and `build` directories are deliberately absent because they may contain
+/// legitimate source; generated output is hidden by its leading `_` component instead.
+const FIXED_SKIPPED_DIRECTORY_NAMES: &[&str] = &[".git", "target", "node_modules", ".cache"];
 
 /// Counts work performed by the Stage 0 source-tree traversal.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct SourceTreeDiscoveryStats {
     pub(crate) dirs_visited: usize,
+    /// Directory entries rejected before traversal, including aliases classified by destination.
     pub(crate) dirs_skipped: usize,
     pub(crate) files_seen: usize,
     pub(crate) normal_root_files_seen: usize,
     pub(crate) support_root_files_seen: usize,
     pub(crate) module_roots_found: usize,
-    pub(crate) project_package_facade_found: bool,
 }
 
 /// Directory names and configured output boundaries excluded from entry-root traversal.
@@ -125,39 +122,118 @@ impl SourceTreeSkipPolicy {
         }
     }
 
-    fn should_skip(&self, directory: &Path) -> bool {
-        let fixed_name = directory
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| FIXED_SKIPPED_DIRECTORY_NAMES.contains(&name));
+    /// Whether an authored directory entry may become a namespace claim and be traversed.
+    ///
+    /// A normal directory is already canonical because its parent was canonicalized before
+    /// listing, so this checks only the authored rules and avoids another filesystem probe.
+    fn authored_directory_is_eligible(&self, directory: &Path, entry_root: &Path) -> bool {
+        directory.starts_with(entry_root) && !self.lexical_directory_is_skipped(directory)
+    }
 
-        if fixed_name
+    /// Whether a resolved directory destination may become a namespace claim and be traversed.
+    ///
+    /// Directory symlinks are classified by their physical destination before the visible alias
+    /// spelling enters dependency-name or package-prefix facts.
+    fn resolved_directory_is_eligible(&self, directory: &Path, entry_root: &Path) -> bool {
+        directory.starts_with(entry_root)
+            && !self.canonical_ancestor_is_skipped(directory, entry_root)
+    }
+
+    /// Apply the name and configured-path rules that need no canonicalization.
+    fn lexical_directory_is_skipped(&self, directory: &Path) -> bool {
+        let file_name = directory.file_name().and_then(|name| name.to_str());
+        let fixed_or_hidden = file_name.is_some_and(|name| {
+            FIXED_SKIPPED_DIRECTORY_NAMES.contains(&name) || directory_name_is_hidden(name)
+        });
+
+        fixed_or_hidden
             || self
                 .configured_directories
-                .binary_search(&directory.to_path_buf())
+                .binary_search_by(|candidate| candidate.as_path().cmp(directory))
                 .is_ok()
-        {
-            return true;
-        }
+    }
 
-        // Traversal preserves the lexical spelling of the path used to reach a directory. A
-        // symlink ancestor can therefore make the same physical output tree appear under a path
-        // that does not match either stored spelling until the candidate is canonicalized here.
-        fs::canonicalize(directory)
-            .ok()
-            .is_some_and(|canonical_directory| {
-                self.canonical_output_directories.iter().any(|output_root| {
-                    canonical_directory == *output_root
-                        || canonical_directory.starts_with(output_root)
-                })
-            })
+    /// Whether any canonical directory between `path` and the selected root is skipped.
+    ///
+    /// The selected root is exempt: a root named `_prototype` remains compilable when it is the
+    /// explicit source boundary. Callers pass canonical directories, so this repeats the lexical
+    /// skip rules without another canonicalization syscall.
+    fn canonical_ancestor_is_skipped(&self, path: &Path, entry_root: &Path) -> bool {
+        path.ancestors()
+            .take_while(|directory| *directory != entry_root)
+            .any(|directory| self.canonical_directory_is_skipped(directory))
+    }
+
+    /// Apply the same exclusion rules to a directory that is already canonical.
+    fn canonical_directory_is_skipped(&self, directory: &Path) -> bool {
+        self.lexical_directory_is_skipped(directory)
+            || self
+                .canonical_output_directories
+                .iter()
+                .any(|output_root| directory == output_root || directory.starts_with(output_root))
     }
 }
 
-/// One canonical root file discovered inside a traversed directory, with its structural role.
+/// Whether a directory name is hidden from source discovery by the `_` prefix.
+///
+/// Only directory components are hidden. A file such as `_helper.moth` in a visible directory
+/// remains eligible source.
+fn directory_name_is_hidden(name: &str) -> bool {
+    name.starts_with('_')
+}
+
+/// Whether a canonical directory path contains a hidden component below the selected root.
+///
+/// The selected root itself is exempt: `moth check website/_prototype/` compiles that root, while
+/// any `_` descendant stays excluded. Canonical ancestry means a visible symlink alias cannot
+/// reveal a hidden physical subtree.
+pub(crate) fn path_has_hidden_component_below(path: &Path, selected_root: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(selected_root) else {
+        return false;
+    };
+    relative.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(directory_name_is_hidden)
+    })
+}
+
+/// One root file discovered inside a traversed directory, with its structural role.
+///
+/// `root_file` is the canonical physical file used for identity; `visible_root_file` retains the
+/// authored `@`/`+` spelling so a filesystem-structure diagnostic can name the marker the user
+/// actually wrote.
 struct DiscoveredDirectoryRoot {
     root_file: PathBuf,
+    visible_root_file: PathBuf,
     role: ModuleRootRole,
+}
+
+/// The optional normal and support surfaces discovered in one rooted directory.
+#[derive(Default)]
+struct ClassifiedDirectoryRoots {
+    normal_root: Option<DiscoveredDirectoryRoot>,
+    support_root: Option<DiscoveredDirectoryRoot>,
+}
+
+/// One canonical root-file claim discovered before structural module identities are built.
+///
+/// Canonical paths decide physical identity, while both authored and canonical spellings remain
+/// available for diagnostics. Claims are collected before source IDs exist so a file can be
+/// rejected when two modules claim it or when it resolves outside the module that roots it.
+struct DiscoveredModuleRootClaim {
+    directory: PathBuf,
+    root_file: PathBuf,
+    visible_root_file: PathBuf,
+}
+
+/// One rooted directory discovered before its structural identity record is constructed.
+struct DiscoveredModuleRecord {
+    directory: PathBuf,
+    normal_root_file: Option<PathBuf>,
+    support_root_file: Option<PathBuf>,
+    logical_module_path: PathBuf,
 }
 
 /// One recognized source candidate discovered by the Stage 0 traversal, before ownership
@@ -174,6 +250,12 @@ struct DiscoveredSourceCandidate {
     classification: SourceClassification,
     supported: bool,
     logical_candidate_path: String,
+    /// The discovered module-root surface role, retained before canonicalization.
+    ///
+    /// A root file reached through a symlink has a visible `@`/`+` spelling but a differently
+    /// named canonical target. Role inference from the canonical filename loses the surface, so
+    /// classification consumes the role discovered from the visible entry instead.
+    root_role: Option<ModuleRootRole>,
 }
 
 /// Zero-based row handle for a source candidate in one [`SourceTreeIndex`].
@@ -414,7 +496,6 @@ struct SourceTreeBoundary<'a> {
 #[derive(Clone, Copy)]
 enum SourceTreeBoundaryKind<'a> {
     Project {
-        project_root: &'a Path,
         source_packages: &'a SourcePackageRegistry,
     },
     Package {
@@ -440,18 +521,16 @@ impl SourceTreeIndex {
     /// diagnostic lane. Legacy `#*.moth` root-like filenames are rejected with a structured
     /// diagnostic that tells the author to rename to `@*.moth`. Normal roots carry the `Normal`
     /// role used by the project module graph to classify entry modules; the graph, not this index,
-    /// owns entry selection. The optional project-root `+*.moth` facade beside `config.moth` is
-    /// discovered as a separate `ProjectPackageFacade` node outside the entry-root containment
-    /// tree and is never an entry.
+    /// owns entry selection. A project-root support root is an ordinary structural module when it
+    /// lies inside the selected directory; it is never an entry candidate.
     ///
     /// The same traversal inventories every compiler-recognized source candidate (`.moth`,
     /// `.mtf` and `.md`) and every explicit
     /// provider-owned file whose extension is registered with the external provider registry but is
     /// not a compiler `SourceFileKind`. Unknown extensions never enter owned source sets. After
     /// deterministic `ModuleIdentityTable` construction, each recognized candidate is classified
-    /// under its nearest containing normal or support root into
-    /// central [`SourceRecord`] table; the optional project facade owns its root file even
-    /// though it sits outside entry-root containment. Recognized candidates with no enclosing
+    /// under its nearest containing normal or support root into the central [`SourceRecord`]
+    /// table. Recognized candidates with no enclosing
     /// module root remain explicit unrooted [`SourceRecord`]s rather than being silently
     /// discarded. Sorted rows are handed to the boundary's compiler-facing registration index.
     pub(super) fn discover(
@@ -464,7 +543,7 @@ impl SourceTreeIndex {
         string_table: &mut StringTable,
     ) -> Result<Self, PreparedFailure> {
         let SourceTreeProjectContext {
-            project_root,
+            project_root: _project_root,
             validated_output_settings,
         } = project_context;
         let boundary = SourceTreeBoundary {
@@ -474,10 +553,7 @@ impl SourceTreeIndex {
                 &entry_root,
                 validated_output_settings,
             ),
-            kind: SourceTreeBoundaryKind::Project {
-                project_root,
-                source_packages,
-            },
+            kind: SourceTreeBoundaryKind::Project { source_packages },
         };
         Self::discover_for_boundary(
             boundary,
@@ -521,7 +597,7 @@ impl SourceTreeIndex {
 
     /// Run the shared boundary-parameterized source-tree traversal.
     /// This is the single filesystem inventory implementation. The boundary descriptor supplies
-    /// the stable package identity, skip policy, project-only facade and entry-root prefix
+    /// the stable package identity, skip policy and entry-root prefix
     /// collision inputs, and selects package-specific root-directory classification. Every other
     /// step — per-directory collision checks, candidate inventory and nearest-module ownership —
     /// is shared between project and package boundaries. Compiler identity assignment happens in
@@ -538,25 +614,17 @@ impl SourceTreeIndex {
             skip_policy,
             kind,
         } = boundary;
-        // One stable package identity shared by every node in this boundary's graph: normal
-        // roots, support roots and, for project boundaries, the optional package facade. It is
-        // derived from the configured project name (project boundary) or the registry's
-        // `PackageOrigin` plus package prefix (package boundary), never from an absolute path.
+        // One stable package identity shared by every structural module in this boundary:
+        // normal roots, support roots and their role-neutral helper origin. It is derived from
+        // the configured project name (project boundary) or the registry's `PackageOrigin` plus
+        // package prefix (package boundary), never from an absolute path.
         let mut stats = SourceTreeDiscoveryStats::default();
         let mut queue = VecDeque::from([entry_root.clone()]);
         let mut visited_directories = BTreeSet::new();
         let mut records = Vec::new();
+        let mut root_claims = Vec::new();
+        let mut root_claim_by_canonical = FxHashMap::<PathBuf, usize>::default();
         let mut recognized_candidates: Vec<DiscoveredSourceCandidate> = Vec::new();
-
-        // The optional project package facade is discovered only for project boundaries; package
-        // boundaries have no facade and their root directory is the package public surface.
-        let facade_root_file = match kind {
-            SourceTreeBoundaryKind::Project { project_root, .. } => {
-                discover_project_package_facade(project_root, &mut stats, string_table)?
-            }
-            SourceTreeBoundaryKind::Package { .. } => None,
-        };
-        let facade_file_for_inventory = facade_root_file.clone();
 
         while let Some(directory) = queue.pop_front() {
             // Symlink aliases are one physical subtree; canonicalize before indexing so aliases
@@ -564,7 +632,9 @@ impl SourceTreeIndex {
             // boundary.
             let directory = fs::canonicalize(&directory)
                 .map_err(|error| Self::directory_read_error(&directory, error))?;
-            if !directory.starts_with(&entry_root) || !visited_directories.insert(directory.clone())
+            if !directory.starts_with(&entry_root)
+                || !visited_directories.insert(directory.clone())
+                || skip_policy.canonical_ancestor_is_skipped(&directory, &entry_root)
             {
                 continue;
             }
@@ -582,14 +652,47 @@ impl SourceTreeIndex {
                 // WHY: a non-symlink entry's listed type answers the kind checks, saving a `stat`.
                 // Symlinks, and entries whose type cannot be read, keep the `Path` queries, which
                 // follow the link to its target.
-                let listed_type = entry.file_type().ok().filter(|listed| !listed.is_symlink());
+                let listed_file_type = entry.file_type().ok();
+                let listed_type = listed_file_type.filter(|file_type| !file_type.is_symlink());
                 let is_dir = match listed_type {
                     Some(listed) => listed.is_dir(),
                     None => path.is_dir(),
                 };
 
                 if is_dir {
-                    if skip_policy.should_skip(&path) {
+                    // Root markers are reserved source filenames. A directory or directory
+                    // symlink reachable under one of those names is a malformed authored root,
+                    // not a traversable module directory.
+                    if let Some(file_name) = path.file_name().and_then(|name| name.to_str())
+                        && file_name_is_module_root_file(file_name)
+                    {
+                        let canonical_target = canonicalize_source_path(&path)?;
+                        return Err(module_root_not_regular_file_error(
+                            &directory,
+                            &path,
+                            &canonical_target,
+                            string_table,
+                        ));
+                    }
+
+                    // A directory alias must be classified by its physical destination before it
+                    // becomes a namespace claim. Otherwise an alias into a hidden, skipped or
+                    // external tree can cause false file/folder or package-prefix collisions even
+                    // when traversal later drops it. Normal directories need no second probe:
+                    // their parent is already canonical.
+                    let resolved_directory = if listed_type.is_some() {
+                        None
+                    } else {
+                        Some(canonicalize_source_path(&path)?)
+                    };
+                    let eligible = match resolved_directory.as_deref() {
+                        Some(resolved) => {
+                            skip_policy.resolved_directory_is_eligible(resolved, &entry_root)
+                        }
+                        None => skip_policy.authored_directory_is_eligible(&path, &entry_root),
+                    };
+
+                    if !eligible {
                         stats.dirs_skipped += 1;
                     } else {
                         let folder_name = path
@@ -609,6 +712,23 @@ impl SourceTreeIndex {
                     None => path.is_file(),
                 };
                 if !is_file {
+                    // Filesystem `is_file` and `is_dir` cannot classify sockets, pipes and other
+                    // non-regular entries. A reserved root-marker name in any existing form is an
+                    // authored root, so canonicalize it and reject it instead of silently dropping
+                    // the required root. A dangling marker symlink still fails canonicalization.
+                    let is_root_marker = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(file_name_is_module_root_file);
+                    if is_root_marker {
+                        let canonical_target = canonicalize_source_path(&path)?;
+                        return Err(module_root_not_regular_file_error(
+                            &directory,
+                            &path,
+                            &canonical_target,
+                            string_table,
+                        ));
+                    }
                     continue;
                 }
                 stats.files_seen += 1;
@@ -619,6 +739,13 @@ impl SourceTreeIndex {
                         .ok_or_else(|| {
                             non_utf8_filesystem_name_error(&path, "source tree file name")
                         })?;
+
+                // `config.moth` is a reserved configuration source, not a module helper. Only the
+                // selected root's config participates in bootstrap; a nested config is inert to
+                // the enclosing build and must not enter module ownership or dependency names.
+                if file_name_is_config_file(file_name) {
+                    continue;
+                }
 
                 if let SourceTreeBoundaryKind::Project { .. } = kind
                     && directory == entry_root
@@ -638,10 +765,6 @@ impl SourceTreeIndex {
                             None,
                         ),
                     ));
-                }
-
-                if let Some(stem) = source_stem_from_file_name(file_name) {
-                    source_files_by_stem.insert(stem.to_owned(), file_name.to_owned());
                 }
 
                 // Legacy `#*.moth` root-like filenames are invalid; roots use the `@` prefix.
@@ -689,21 +812,37 @@ impl SourceTreeIndex {
                 let canonical_path = if listed_type.is_some() {
                     path.clone()
                 } else {
-                    fs::canonicalize(&path).map_err(|error| {
-                        InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &path, format!("Failed to canonicalize source path: {error}"))
-                    })?
+                    canonicalize_source_path(&path)?
                 };
 
-                if let Some(kind) = source_kind
-                    // When the project root equals the entry root, the facade root file is
-                    // reached by the traversal. It is owned only
-                    // by the facade module through the direct facade assignment below, so it must
-                    // not also enter the ordinary supported-candidate list.
-                    && {
-                        let is_facade_file = Some(&canonical_path) == facade_root_file.as_ref();
-                        !is_facade_file
-                    }
+                // A file symlink can point outside the selected boundary or into an excluded
+                // subtree even when its visible spelling looks eligible. Directory ancestry
+                // decides exclusion; an underscore-prefixed file name remains valid source.
+                // Ordinary sources outside the boundary stay silently excluded. An authored root
+                // marker, however, must resolve to a source owned by its structural module, so a
+                // filtered root target is a structural failure rather than a missing root.
+                let canonical_parent = canonical_path.parent();
+                if !canonical_path.starts_with(&entry_root)
+                    || canonical_parent.is_some_and(|parent| {
+                        skip_policy.canonical_ancestor_is_skipped(parent, &entry_root)
+                    })
                 {
+                    if is_module_root {
+                        return Err(module_root_outside_claim_error(
+                            &directory,
+                            &path,
+                            &canonical_path,
+                            string_table,
+                        ));
+                    }
+                    continue;
+                }
+
+                if let Some(stem) = source_stem_from_file_name(file_name) {
+                    source_files_by_stem.insert(stem.to_owned(), file_name.to_owned());
+                }
+
+                if let Some(kind) = source_kind {
                     let logical_candidate_path =
                         entry_root_relative_logical_path(&path, &entry_root)?;
                     recognized_candidates.push(DiscoveredSourceCandidate {
@@ -711,10 +850,13 @@ impl SourceTreeIndex {
                         classification: SourceClassification::CompilerSemantic(kind),
                         supported: source_supported,
                         logical_candidate_path,
+                        root_role: is_module_root
+                            .then(|| module_root_role_for_file_name(file_name))
+                            .flatten(),
                     });
                 } else if let Some(extension) = provider_extension {
-                    // Provider-owned files are never module roots, so they need no facade
-                    // exclusion. They enter the inventory as explicit provider-owned candidates
+                    // Provider-owned files are never module roots. They enter the inventory as
+                    // explicit provider-owned candidates
                     // classified under their nearest enclosing module root, exactly like
                     // compiler semantic candidates.
                     let logical_candidate_path =
@@ -724,20 +866,11 @@ impl SourceTreeIndex {
                         classification: SourceClassification::ProviderOwned(extension),
                         supported: true,
                         logical_candidate_path,
+                        root_role: None,
                     });
                 }
 
                 if !is_module_root {
-                    continue;
-                }
-
-                // The project package facade is discovered beside config.moth at the project root
-                // and classified as a separate node. Skip it here so a directory shared with the
-                // facade does not also classify it as a support root or trigger mixed-root
-                // rejection. This also prevents the facade file from entering directory root
-                // classification when it lies inside the traversal.
-                let is_facade_file = Some(&canonical_path) == facade_root_file.as_ref();
-                if is_facade_file {
                     continue;
                 }
 
@@ -752,6 +885,7 @@ impl SourceTreeIndex {
 
                 directory_roots.push(DiscoveredDirectoryRoot {
                     root_file: canonical_path,
+                    visible_root_file: path.clone(),
                     role,
                 });
             }
@@ -849,10 +983,10 @@ impl SourceTreeIndex {
                 }
             }
 
-            // Package boundaries require exactly one root at the package root directory and
-            // report package-specific missing/multiple-root diagnostics there. Every other
-            // directory (and all project-boundary directories) uses the shared one-root-per-
-            // directory classification with its mixed/multiple-root diagnostic.
+            // Package boundaries require a root at the package root directory and report
+            // package-specific missing/multiple-root diagnostics there. Every other directory
+            // (and all project-boundary directories) uses the shared per-directory classifier,
+            // which accepts one normal and one support surface per structural module.
             let directory_root = match kind {
                 SourceTreeBoundaryKind::Package { package_prefix } if directory == entry_root => {
                     classify_package_root_directory(
@@ -866,56 +1000,62 @@ impl SourceTreeIndex {
                     classify_directory_root(&directory, &mut directory_roots, string_table)?
                 }
             };
-            if let Some(root) = directory_root {
+            let ClassifiedDirectoryRoots {
+                normal_root,
+                support_root,
+            } = directory_root;
+            let has_any_root = normal_root.is_some() || support_root.is_some();
+            if has_any_root {
+                for root in [normal_root.as_ref(), support_root.as_ref()]
+                    .into_iter()
+                    .flatten()
+                {
+                    register_module_root_claim(
+                        &mut root_claims,
+                        &mut root_claim_by_canonical,
+                        &directory,
+                        root,
+                        string_table,
+                    )?;
+                }
+
                 // WHY: `directory` is canonical (canonicalized when popped), so it is the record's
                 // identity; re-canonicalizing would repeat the same syscall for the same answer.
                 let logical_module_path = logical_module_path_from(&directory, &entry_root)?;
 
                 stats.module_roots_found += 1;
-                records.push(ModuleIdentityRecord::new(
+                records.push(DiscoveredModuleRecord {
                     directory,
-                    root.root_file,
-                    root.role,
+                    normal_root_file: normal_root.map(|root| root.root_file),
+                    support_root_file: support_root.map(|root| root.root_file),
                     logical_module_path,
-                    &boundary_package,
-                )?);
+                });
             }
 
             subdirectories.sort();
             queue.extend(subdirectories);
         }
 
-        if let Some(facade_file) = facade_root_file {
-            let SourceTreeBoundaryKind::Project { project_root, .. } = kind else {
-                crate::compiler_bug!(
-                    CompilerStage::ProjectBuildAssembly,
-                    "only project boundaries discover a project package facade"
-                )
-            };
-            let facade_directory = fs::canonicalize(project_root).map_err(|error| {
-                InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, project_root, format!("Failed to canonicalize project root directory: {error}"))
-            })?;
-
-            records.push(ModuleIdentityRecord::new(
-                facade_directory.clone(),
-                facade_file,
-                ModuleRootRole::ProjectPackageFacade,
-                logical_module_path_from(&facade_directory, &facade_directory)?,
-                &boundary_package,
-            )?);
-        }
-
+        validate_module_root_claims(&root_claims, string_table)?;
         record_discovery_metrics(&stats);
 
+        let records = records
+            .into_iter()
+            .map(|record| {
+                ModuleIdentityRecord::new(
+                    record.directory,
+                    record.normal_root_file,
+                    record.support_root_file,
+                    record.logical_module_path,
+                    &boundary_package,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let module_identities = ModuleIdentityTable::from_records(records);
         let module_roots = module_identities.derive_module_root_table();
         let module_count = module_identities.module_ids().count();
 
-        let classified = classify_owned_sources(
-            &module_identities,
-            recognized_candidates,
-            facade_file_for_inventory,
-        )?;
+        let classified = classify_owned_sources(&module_identities, recognized_candidates)?;
         validate_unique_source_logical_identities(&classified)?;
 
         let SourceInventory {
@@ -948,13 +1088,49 @@ impl SourceTreeIndex {
         let mut keys = BTreeSet::new();
         for entry in Self::sorted_directory_entries(source_root)? {
             let path = entry.path();
-            let is_directory = path.is_dir();
-            if is_directory && skip_policy.should_skip(&path) {
+            // As in the traversal, a non-symlink entry's listed type avoids a metadata probe.
+            // Symlinks and unreadable entry types resolve their physical destination once.
+            let listed_file_type = entry.file_type().ok();
+            let listed_type = listed_file_type.filter(|file_type| !file_type.is_symlink());
+            let is_directory = match listed_type {
+                Some(listed) => listed.is_dir(),
+                None => path.is_dir(),
+            };
+            let is_file = match listed_type {
+                Some(listed) => listed.is_file(),
+                None => path.is_file(),
+            };
+            if !is_directory && !is_file {
                 continue;
             }
-            if !is_directory && !path.is_file() {
-                continue;
+
+            if is_directory {
+                let eligible = match listed_type {
+                    Some(_) => skip_policy.authored_directory_is_eligible(&path, source_root),
+                    None => {
+                        let canonical_directory = canonicalize_source_path(&path)?;
+                        skip_policy
+                            .resolved_directory_is_eligible(&canonical_directory, source_root)
+                    }
+                };
+                if !eligible {
+                    continue;
+                }
+            } else if listed_type.is_none() {
+                // File names may start with `_`; only the physical directory ancestry excludes a
+                // source alias. This keeps `_helper.moth` and eligible in-boundary aliases while
+                // dropping visible aliases into hidden, fixed-skipped or external trees.
+                let canonical_file = canonicalize_source_path(&path)?;
+                let Some(canonical_parent) = canonical_file.parent() else {
+                    continue;
+                };
+                if !canonical_file.starts_with(source_root)
+                    || skip_policy.canonical_ancestor_is_skipped(canonical_parent, source_root)
+                {
+                    continue;
+                }
             }
+
             let file_name = path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -998,7 +1174,7 @@ impl SourceTreeIndex {
         };
         let canonical_root = fs::canonicalize(root_directory).map_err(|error| {
             InfrastructureFailure::filesystem(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                CompilerStage::ProjectBuildAssembly,
                 root_directory,
                 format!("Failed to canonicalize single-file source root: {error}"),
             )
@@ -1030,15 +1206,17 @@ impl SourceTreeIndex {
 
     /// The canonical root file of the module rooted at this boundary's entry root.
     ///
-    /// WHAT: for a package boundary index, the package public-surface normal root file. Returns
-    /// `None` when no module is rooted at the entry root.
+    /// WHAT: for a package boundary index, the package's selected public-surface root file.
+    /// A support root is the external surface when present; otherwise the normal root is the
+    /// public surface. Returns `None` when no module is rooted at the entry root.
     /// WHY: the package-boundary index owner derives the resolver's narrow package-root view
     /// from this indexed fact instead of a separate `read_dir` or root-file discovery pass.
     pub(crate) fn root_file_for_entry_root(&self) -> Option<&Path> {
         let module_id = self
             .module_identities
             .module_id_for_directory(&self.entry_root)?;
-        Some(self.module_identities.record(module_id).root_file())
+        let record = self.module_identities.record(module_id);
+        Some(record.public_root_file())
     }
 
     #[cfg(test)]
@@ -1124,7 +1302,11 @@ impl SourceTreeIndex {
             .map_err(|error| Self::directory_read_error(directory, error))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| {
-                InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, directory, format!("Failed to read directory entry while indexing source tree: {error}"))
+                InfrastructureFailure::filesystem(
+                    CompilerStage::ProjectBuildAssembly,
+                    directory,
+                    format!("Failed to read directory entry while indexing source tree: {error}"),
+                )
             })?;
         entries.sort_by_key(|entry| entry.path());
         Ok(entries)
@@ -1132,170 +1314,296 @@ impl SourceTreeIndex {
 
     fn directory_read_error(directory: &Path, error: std::io::Error) -> InfrastructureFailure {
         InfrastructureFailure::filesystem(
-            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            CompilerStage::ProjectBuildAssembly,
             directory,
             format!("Failed to read directory while indexing source tree: {error}"),
         )
     }
 }
 
-/// Discover the optional project package facade beside `config.moth` at the project root.
+/// Resolve one source path to its canonical identity.
 ///
-/// WHAT: scans the project root for one direct-child `+*.moth` file.
-/// WHY: the facade is a node outside the entry-root containment tree. Discovering it here keeps it
-///      out of the per-directory root classification so a shared directory does not classify it as
-///      a support root or trigger mixed-root rejection.
-fn discover_project_package_facade(
-    project_root: &Path,
-    stats: &mut SourceTreeDiscoveryStats,
-    string_table: &mut StringTable,
-) -> Result<Option<PathBuf>, PreparedFailure> {
-    // A project-root read failure is an infrastructure error, not the absence of a facade.
-    // Preserve it through the file-error lane with the project-root path so the build boundary
-    // can render it instead of silently treating the facade as missing.
-    let entries = fs::read_dir(project_root).map_err(|error| {
+/// Every caller treats a canonicalization failure as an infrastructure failure tied to the
+/// authored path, so the source-tree traversal keeps one error shape for symlinks and missing
+/// sources.
+fn canonicalize_source_path(path: &Path) -> Result<PathBuf, InfrastructureFailure> {
+    fs::canonicalize(path).map_err(|error| {
         InfrastructureFailure::filesystem(
-            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
-            project_root,
-            format!("Failed to read project root while discovering package facade: {error}"),
+            CompilerStage::ProjectBuildAssembly,
+            path,
+            format!("Failed to canonicalize source path: {error}"),
         )
-    })?;
-
-    let mut support_roots = Vec::new();
-    for entry in entries {
-        let path = entry
-            .map_err(|error| {
-                InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, project_root, format!(
-                    "Failed to read project root entry while discovering package facade: {error}"
-                ))
-            })?
-            .path();
-
-        if !path.is_file() {
-            continue;
-        }
-
-        let file_name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| {
-                non_utf8_filesystem_name_error(&path, "project package facade candidate name")
-            })?;
-
-        if file_name_claims_project_globals_facade(file_name) {
-            let diagnostic =
-                project_structure_diagnostic(InvalidConfigReason::ProjectGlobalsNameReserved);
-            let table = string_table.take_for_handoff();
-            return Err(PreparedFailure::Diagnosed(
-                PreparedDiagnosticBatch::capture_from_bag(
-                    DiagnosticBag::from(diagnostic),
-                    table,
-                    None,
-                    None,
-                ),
-            ));
-        }
-
-        if file_name_is_support_root_file(file_name) {
-            let canonical = fs::canonicalize(&path).map_err(|error| {
-                InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &path, format!("Failed to canonicalize project package facade path: {error}"))
-            })?;
-            support_roots.push(canonical);
-        }
-    }
-
-    support_roots.sort();
-
-    if support_roots.len() > 1 {
-        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-        let candidates = support_roots
-            .iter()
-            .map(|path| path_id(path, &mut diagnostic_strings))
-            .collect();
-        let diagnostic =
-            project_structure_diagnostic(InvalidConfigReason::MultipleModuleRootFiles {
-                directory: path_id(project_root, &mut diagnostic_strings),
-                candidates,
-            });
-        let table = string_table.take_for_handoff();
-        return Err(PreparedFailure::Diagnosed(
-            PreparedDiagnosticBatch::capture_from_bag(
-                DiagnosticBag::from(diagnostic),
-                table,
-                None,
-                None,
-            ),
-        ));
-    }
-
-    if support_roots.len() == 1 {
-        stats.project_package_facade_found = true;
-        Ok(support_roots.pop())
-    } else {
-        Ok(None)
-    }
+    })
 }
 
-/// Reject multiple or mixed roots in one directory and return the single allowed root.
+/// Classify one rooted directory as an optional normal/support pair.
+///
+/// At most one `@*.moth` and one `+*.moth` are allowed. Two roots of the same surface are
+/// rejected with the existing candidate-listing diagnostic. A directory with neither is not a
+/// structural module.
 fn classify_directory_root(
     directory: &Path,
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
     string_table: &mut StringTable,
-) -> Result<Option<DiscoveredDirectoryRoot>, PreparedFailure> {
-    if directory_roots.is_empty() {
-        return Ok(None);
+) -> Result<ClassifiedDirectoryRoots, PreparedFailure> {
+    directory_roots.sort_by(|left, right| left.root_file.cmp(&right.root_file));
+
+    let mut normal = Vec::new();
+    let mut support = Vec::new();
+    for root in directory_roots.drain(..) {
+        match root.role {
+            ModuleRootRole::Normal => normal.push(root),
+            ModuleRootRole::Support => support.push(root),
+            ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => {
+                crate::compiler_bug!(
+                    CompilerStage::ProjectBuildAssembly,
+                    "filesystem module roots may only be normal or support surfaces"
+                )
+            }
+        }
     }
 
-    if directory_roots.len() > 1 {
-        directory_roots.sort_by(|left, right| left.root_file.cmp(&right.root_file));
-        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-        let candidates = directory_roots
-            .iter()
-            .map(|root| path_id(&root.root_file, &mut diagnostic_strings))
-            .collect();
-        let diagnostic =
-            project_structure_diagnostic(InvalidConfigReason::MultipleModuleRootFiles {
-                directory: path_id(directory, &mut diagnostic_strings),
-                candidates,
-            });
-        let table = string_table.take_for_handoff();
-        return Err(PreparedFailure::Diagnosed(
-            PreparedDiagnosticBatch::capture_from_bag(
-                DiagnosticBag::from(diagnostic),
-                table,
-                None,
-                None,
-            ),
+    if normal.len() > 1 {
+        return Err(multiple_same_role_roots_error(
+            directory,
+            normal
+                .iter()
+                .map(|root| root.visible_root_file.clone())
+                .collect(),
+            string_table,
+        ));
+    }
+    if support.len() > 1 {
+        return Err(multiple_same_role_roots_error(
+            directory,
+            support
+                .iter()
+                .map(|root| root.visible_root_file.clone())
+                .collect(),
+            string_table,
         ));
     }
 
-    Ok(Some(directory_roots.pop().expect(
-        "non-empty directory root list has one root after validation",
-    )))
+    if let (Some(normal_root), Some(support_root)) = (normal.first(), support.first())
+        && normal_root.root_file == support_root.root_file
+    {
+        return Err(aliased_root_files_error(
+            directory,
+            normal_root.visible_root_file.clone(),
+            support_root.visible_root_file.clone(),
+            string_table,
+        ));
+    }
+
+    Ok(ClassifiedDirectoryRoots {
+        normal_root: normal.pop(),
+        support_root: support.pop(),
+    })
 }
 
-/// Classify the single required root at one source-package root directory.
+/// Record one canonical root-file claim and reject a second structural module claiming it.
 ///
-/// WHAT: a package boundary requires exactly one direct-child normal root at its root directory
-/// and reports package-specific missing-root and multiple-root diagnostics with the typed
-/// `SourcePackageMissingRoot`/`SourcePackageMultipleRoots` payloads, listing candidates in
-/// deterministic order. The shared one-module-root-per-directory rule rejects a support
-/// root beside that normal root.
-/// WHY: the package index traversal owns root discovery for the package boundary, so the
-/// root-directory classification must produce package-specific structured diagnostics rather
-/// than the generic `MultipleModuleRootFiles` rejection or a silent empty result.
+/// The check runs during traversal, before any module identity or source identity is built. A
+/// visible root marker and its canonical target are one claim; only a second authored root marker
+/// resolving to the same file conflicts.
+fn register_module_root_claim(
+    claims: &mut Vec<DiscoveredModuleRootClaim>,
+    claim_by_canonical: &mut FxHashMap<PathBuf, usize>,
+    directory: &Path,
+    root: &DiscoveredDirectoryRoot,
+    string_table: &mut StringTable,
+) -> Result<(), PreparedFailure> {
+    if let Some(previous_index) = claim_by_canonical.get(&root.root_file).copied() {
+        let previous = &claims[previous_index];
+        return Err(aliased_module_root_files_error(
+            &previous.visible_root_file,
+            &root.visible_root_file,
+            &root.root_file,
+            string_table,
+        ));
+    }
+
+    claim_by_canonical.insert(root.root_file.clone(), claims.len());
+    claims.push(DiscoveredModuleRootClaim {
+        directory: directory.to_path_buf(),
+        root_file: root.root_file.clone(),
+        visible_root_file: root.visible_root_file.clone(),
+    });
+    Ok(())
+}
+
+/// Reject a root file that resolves outside the structural module it roots.
+///
+/// A root symlink may point at an ordinary source file in the same module, including an unrooted
+/// subdirectory. It may not point into another structural module or an unrooted part of the entry
+/// root, because Stage 0 would then assign the file to a different owner and the claiming module
+/// would have no root source.
+fn validate_module_root_claims(
+    claims: &[DiscoveredModuleRootClaim],
+    string_table: &mut StringTable,
+) -> Result<(), PreparedFailure> {
+    let claimed_directories: FxHashSet<&Path> = claims
+        .iter()
+        .map(|claim| claim.directory.as_path())
+        .collect();
+
+    for claim in claims {
+        let Some(canonical_parent) = claim.root_file.parent() else {
+            return Err(module_root_outside_claim_error(
+                &claim.directory,
+                &claim.visible_root_file,
+                &claim.root_file,
+                string_table,
+            ));
+        };
+        let owner = canonical_parent
+            .ancestors()
+            .find(|directory| claimed_directories.contains(*directory));
+        if owner != Some(claim.directory.as_path()) {
+            return Err(module_root_outside_claim_error(
+                &claim.directory,
+                &claim.visible_root_file,
+                &claim.root_file,
+                string_table,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn aliased_module_root_files_error(
+    first_root: &Path,
+    second_root: &Path,
+    target: &Path,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let diagnostic = project_structure_diagnostic(InvalidConfigReason::AliasedModuleRootFiles {
+        first_root: path_id(first_root, &mut diagnostic_strings),
+        second_root: path_id(second_root, &mut diagnostic_strings),
+        target: path_id(target, &mut diagnostic_strings),
+    });
+    let table = string_table.take_for_handoff();
+    PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        table,
+        None,
+        None,
+    ))
+}
+
+fn module_root_outside_claim_error(
+    directory: &Path,
+    visible_root_file: &Path,
+    target: &Path,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let diagnostic =
+        project_structure_diagnostic(InvalidConfigReason::ModuleRootFileOutsideClaimingModule {
+            root_file: path_id(visible_root_file, &mut diagnostic_strings),
+            claiming_directory: path_id(directory, &mut diagnostic_strings),
+            target: path_id(target, &mut diagnostic_strings),
+        });
+    let table = string_table.take_for_handoff();
+    PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        table,
+        None,
+        None,
+    ))
+}
+
+/// Reject a reserved root-marker name that resolves to a directory or other non-file entry.
+///
+/// The authored marker stays visible while the canonical target explains where the malformed
+/// entry resolves. This is a user configuration failure, not a missing-root or IO fallback.
+fn module_root_not_regular_file_error(
+    directory: &Path,
+    visible_root_file: &Path,
+    target: &Path,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let diagnostic =
+        project_structure_diagnostic(InvalidConfigReason::ModuleRootFileNotRegularFile {
+            root_file: path_id(visible_root_file, &mut diagnostic_strings),
+            directory: path_id(directory, &mut diagnostic_strings),
+            target: path_id(target, &mut diagnostic_strings),
+        });
+    let table = string_table.take_for_handoff();
+    PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        table,
+        None,
+        None,
+    ))
+}
+
+/// Reject one physical source file reached through both structural root markers.
+///
+/// A paired module needs two authored root scopes. Canonicalizing `@page.moth` and `+package.moth`
+/// to one file would collapse them into one source identity, so the filesystem structure fails
+/// before module identity or semantic preparation begins.
+fn aliased_root_files_error(
+    directory: &Path,
+    normal_root_file: PathBuf,
+    support_root_file: PathBuf,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let diagnostic = project_structure_diagnostic(InvalidConfigReason::MultipleModuleRootFiles {
+        directory: path_id(directory, &mut diagnostic_strings),
+        candidates: vec![
+            path_id(&normal_root_file, &mut diagnostic_strings),
+            path_id(&support_root_file, &mut diagnostic_strings),
+        ],
+    });
+    let table = string_table.take_for_handoff();
+    PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        table,
+        None,
+        None,
+    ))
+}
+
+fn multiple_same_role_roots_error(
+    directory: &Path,
+    mut candidates: Vec<PathBuf>,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    candidates.sort();
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let candidates = candidates
+        .iter()
+        .map(|root| path_id(root, &mut diagnostic_strings))
+        .collect();
+    let diagnostic = project_structure_diagnostic(InvalidConfigReason::MultipleModuleRootFiles {
+        directory: path_id(directory, &mut diagnostic_strings),
+        candidates,
+    });
+    let table = string_table.take_for_handoff();
+    PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        table,
+        None,
+        None,
+    ))
+}
+
+/// Classify the roots at one source-package root directory.
+///
+/// A package may be normal-only, support-only or paired. A support root beside a normal root is
+/// the external package surface; the normal root remains the internal interface. Missing roots
+/// and duplicate roots keep package-specific typed diagnostics.
 fn classify_package_root_directory(
     directory: &Path,
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
     package_prefix: &str,
     string_table: &mut StringTable,
-) -> Result<Option<DiscoveredDirectoryRoot>, PreparedFailure> {
-    let normal_roots = directory_roots
-        .iter()
-        .filter(|root| root.role == ModuleRootRole::Normal)
-        .collect::<Vec<_>>();
-
-    if normal_roots.is_empty() {
+) -> Result<ClassifiedDirectoryRoots, PreparedFailure> {
+    if directory_roots.is_empty() {
         let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
         let diagnostic =
             project_structure_diagnostic(InvalidConfigReason::SourcePackageMissingRoot {
@@ -1313,10 +1621,18 @@ fn classify_package_root_directory(
         ));
     }
 
-    if normal_roots.len() > 1 {
-        let mut candidate_paths = normal_roots
+    let normal_count = directory_roots
+        .iter()
+        .filter(|root| root.role == ModuleRootRole::Normal)
+        .count();
+    let support_count = directory_roots
+        .iter()
+        .filter(|root| root.role == ModuleRootRole::Support)
+        .count();
+    if normal_count > 1 || support_count > 1 {
+        let mut candidate_paths = directory_roots
             .iter()
-            .map(|root| &root.root_file)
+            .map(|root| &root.visible_root_file)
             .collect::<Vec<_>>();
         candidate_paths.sort();
         let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
@@ -1341,14 +1657,12 @@ fn classify_package_root_directory(
         ));
     }
 
-    // A package root still follows the global one-module-root-per-directory rule. A support root
-    // beside the required normal root is rejected by the shared classifier, not silently ignored.
     classify_directory_root(directory, directory_roots, string_table)
 }
 
 /// Compute the source-relative logical module path for a canonical root directory.
 ///
-/// `base` is the canonical entry root (or, for the facade, the project root). A canonical root
+/// `base` is the canonical entry root. A canonical root
 /// directory discovered under the entry root always shares that prefix, so a `strip_prefix`
 /// failure is a proven internal invariant: it means the entry root was not canonicalized before
 /// indexing or the directory escaped the entry-root tree. Rather than silently falling back to an
@@ -1363,7 +1677,7 @@ fn logical_module_path_from(
         .map(PathBuf::from)
         .map_err(|_| {
             InfrastructureFailure::internal(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                CompilerStage::ProjectBuildAssembly,
                 format!(
                     "Module root directory {root_directory:?} is not under the canonical base \
                  {base:?}; logical module path cannot fall back to an absolute path"
@@ -1396,14 +1710,6 @@ fn file_name_claims_project_globals_root(file_name: &str) -> bool {
             .and_then(|name| name.strip_suffix(LANGUAGE_SOURCE_SUFFIX))
             .is_some_and(claims_project_globals_name)
     })
-}
-
-/// Whether a filename can be the reserved project package facade root.
-fn file_name_claims_project_globals_facade(file_name: &str) -> bool {
-    file_name
-        .strip_prefix('+')
-        .and_then(|name| name.strip_suffix(LANGUAGE_SOURCE_SUFFIX))
-        .is_some_and(claims_project_globals_name)
 }
 
 /// Extract the dependency-name stem from a compiler-recognized source file name.
@@ -1468,7 +1774,7 @@ fn relative_source_path_from(
         .map(PathBuf::from)
         .map_err(|_| {
             InfrastructureFailure::internal(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                CompilerStage::ProjectBuildAssembly,
                 format!(
                     "Owned source {file_path:?} is not under its nearest module root \
                      {module_root_directory:?}; module-relative source path cannot fall back to \
@@ -1493,7 +1799,7 @@ fn entry_root_relative_logical_path(
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             crate::compiler_bug!(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                CompilerStage::ProjectBuildAssembly,
                 "Discovered source candidate {traversal_path:?} is not under the entry root \
                  {entry_root:?}; logical candidate path cannot fall back to an absolute path"
             )
@@ -1508,20 +1814,38 @@ fn entry_root_relative_logical_path(
 /// root by walking parent directories through the identity table. A nested module root and all
 /// files beneath it transfer to the nested module because the nearest-module walk finds it
 /// first. Unrooted internal subdirectories stay owned by their nearest ancestor module. The
-/// optional project facade owns its root file even though it sits outside entry-root
-/// containment, so it is added directly as a classified owned source. Recognized candidates with
-/// no enclosing module root become explicit deterministic unrooted classified sources.
+/// Recognized candidates with no enclosing module root become explicit deterministic unrooted
+/// classified sources.
 /// WHY: one authoritative classification is the single input for source ownership. Each
 /// classified source carries its portable logical identity and explicit ownership.
 /// Source ordering uses the stable identity's explicit ordering.
 fn classify_owned_sources(
     module_identities: &ModuleIdentityTable,
     recognized_candidates: Vec<DiscoveredSourceCandidate>,
-    facade_file_for_inventory: Option<PathBuf>,
 ) -> Result<Vec<ClassifiedSource>, InfrastructureFailure> {
+    // Two visible entries can resolve to one physical source (a root symlink and its target, or
+    // two aliases). Retain one record and prefer the candidate that carries a discovered root
+    // surface role, so a symlinked `@root` does not lose its surface to its plain target spelling.
+    let mut candidates =
+        Vec::<DiscoveredSourceCandidate>::with_capacity(recognized_candidates.len());
+    let mut position_by_canonical = FxHashMap::<PathBuf, usize>::default();
+    for candidate in recognized_candidates {
+        if let Some(position) = position_by_canonical
+            .get(&candidate.canonical_path)
+            .copied()
+        {
+            if candidates[position].root_role.is_none() && candidate.root_role.is_some() {
+                candidates[position] = candidate;
+            }
+            continue;
+        }
+        position_by_canonical.insert(candidate.canonical_path.clone(), candidates.len());
+        candidates.push(candidate);
+    }
+
     let mut classified = Vec::new();
 
-    for candidate in recognized_candidates {
+    for candidate in candidates {
         let Some(parent_directory) = candidate.canonical_path.parent() else {
             classified.push(unrooted_classified(candidate));
             continue;
@@ -1536,10 +1860,13 @@ fn classify_owned_sources(
         let record = module_identities.record(module_id);
         let relative_path =
             relative_source_path_from(&candidate.canonical_path, record.root_directory())?;
-        let stable_identity = StableOwnedSourceIdentity::from_relative_source_path(
-            record.stable_origin().clone(),
-            &relative_path,
-        )?;
+        let source_origin = candidate
+            .root_role
+            .and_then(|role| record.surface_origin(role))
+            .unwrap_or_else(|| record.shared_origin())
+            .clone();
+        let stable_identity =
+            StableOwnedSourceIdentity::from_relative_source_path(source_origin, &relative_path)?;
 
         classified.push(ClassifiedSource {
             canonical_path: candidate.canonical_path,
@@ -1547,41 +1874,6 @@ fn classify_owned_sources(
             supported: candidate.supported,
             logical_identity: SourceLogicalIdentity::Owned(stable_identity),
             ownership: SourceOwnership::Owned(module_id),
-        });
-    }
-
-    // The optional project package facade root file lives beside config.moth, outside entry-root
-    // containment. When the project root equals the entry root, the traversal reaches the facade
-    // file, which is excluded from the supported-candidate list so it appears exactly once, owned
-    // only by the facade module. Assign it directly to the facade module as a classified owned
-    // source.
-    if let Some(facade_file) = facade_file_for_inventory {
-        let facade_module_id = module_identities.module_ids().find(|module_id| {
-            module_identities.record(*module_id).role() == ModuleRootRole::ProjectPackageFacade
-        });
-
-        let facade_module_id = facade_module_id.ok_or_else(|| {
-            InfrastructureFailure::internal(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
-                format!(
-                    "A project package facade file {facade_file:?} was discovered but no matching \
-                     facade module record exists; the facade source must not be silently skipped"
-                ),
-            )
-        })?;
-        let record = module_identities.record(facade_module_id);
-        let relative_path = relative_source_path_from(&facade_file, record.root_directory())?;
-        let stable_identity = StableOwnedSourceIdentity::from_relative_source_path(
-            record.stable_origin().clone(),
-            &relative_path,
-        )?;
-
-        classified.push(ClassifiedSource {
-            canonical_path: facade_file,
-            classification: SourceClassification::CompilerSemantic(SourceFileKind::Moth),
-            supported: true,
-            logical_identity: SourceLogicalIdentity::Owned(stable_identity),
-            ownership: SourceOwnership::Owned(facade_module_id),
         });
     }
 
@@ -1622,7 +1914,7 @@ fn validate_unique_source_logical_identities(
             right.canonical_path.display(),
         );
         return Err(InfrastructureFailure::internal(
-            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+            CompilerStage::ProjectBuildAssembly,
             message,
         ));
     }
@@ -1655,7 +1947,7 @@ fn build_source_inventory(
             .is_some()
         {
             return Err(InfrastructureFailure::internal(
-                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                CompilerStage::ProjectBuildAssembly,
                 format!(
                     "Source tree index classified physical source {} more than once; each canonical \
                  source path must have exactly one SourceRecord",
@@ -1710,14 +2002,6 @@ fn record_discovery_metrics(stats: &SourceTreeDiscoveryStats) {
     counter_observation!(
         "source_tree_index.module_roots_found",
         stats.module_roots_found as f64,
-    );
-    counter_observation!(
-        "source_tree_index.project_package_facade_found",
-        if stats.project_package_facade_found {
-            1.0
-        } else {
-            0.0
-        },
     );
 }
 

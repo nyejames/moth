@@ -1535,7 +1535,7 @@ fn rebuild_origins(state: &mut FlowState) {
 }
 
 // Its counterpart is boracle/oracle/execute.rs:369 is_place_available_without_materialising.
-// Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
+// Independence contract: boracle/oracle/mod.rs:5-6 and docs/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 fn place_is_in_generation(
     problem: &BorrowProblem,
     generation: PlaceId,
@@ -1583,7 +1583,7 @@ fn replace_mode_generation(
 }
 
 // Its counterpart is boracle/oracle/calls.rs:109 execute_call_effect (Fresh/AliasParams/Alias/Unknown dispatch).
-// Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
+// Independence contract: boracle/oracle/mod.rs:5-6 and docs/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 fn call_result_origins(
     problem: &BorrowProblem,
     provenance: &CallResultProvenance,

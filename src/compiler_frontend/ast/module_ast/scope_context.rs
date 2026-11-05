@@ -378,6 +378,17 @@ pub(crate) struct FileValueResolutionServices {
     pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
     pub(crate) module_resources: Rc<RefCell<ModuleResourceTable>>,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
+    /// Public trait declarations that own a stable source-derived origin in this module.
+    ///
+    /// Shared helper traits are registered with their defining `Shared` origin rather than the
+    /// active root's surface origin, so generic materialisation resolves the same identity the
+    /// public interface publishes.
+    pub(crate) public_source_trait_origins: std::sync::Arc<
+        rustc_hash::FxHashMap<
+            crate::compiler_frontend::symbols::path_interner::PathId,
+            crate::compiler_frontend::semantic_identity::OriginTraitId,
+        >,
+    >,
     pub(crate) frozen_identity_handle: FrozenIdentityHandle,
 }
 
@@ -395,6 +406,7 @@ impl FileValueResolutionServices {
             stage0_resolution_facts: Some(stage0_resolution_facts),
             module_resources: Rc::clone(&self.module_resources),
             module_origin: self.module_origin.clone(),
+            public_source_trait_origins: std::sync::Arc::clone(&self.public_source_trait_origins),
             frozen_identity_handle: self.frozen_identity_handle.clone(),
         })
     }

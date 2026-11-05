@@ -1,0 +1,86 @@
+**Current support versus accepted design.** Paired normal/support roots and
+source-package publication are implemented. The deferred `$project` directive
+form remains queued. The project package surface is API-only: no generic
+directive can turn it into an application entry.
+
+The project package facade exposes a project's public API to external
+consumers. A project-root `+*.moth` is an ordinary support root of that
+structural module, not a separate facade node.
+
+### The package surface
+
+One optional `+*.moth` root at the selected project directory is the external
+project package surface. The suffix after `+` is cosmetic. Package assembly
+selects that support interface; it never falls back to the normal root.
+
+The support root may define and export its own legal API-only declarations:
+functions, structs, choices, type aliases, traits and compile-time constants.
+Helpers are shared with the normal root, but the two roots cannot import each
+other.
+
+### Facade restrictions
+
+The facade:
+
+- never bypasses an `export:` boundary
+- isn't visible to internal project modules
+- cannot depend on `@project`
+- cannot expose a semantic fact that depends on project-private context
+- rejects top-level runtime work and page fragments
+- cannot declare root-only `$page` metadata
+- has no implicit entry
+- emits no route or HTML artefact
+
+Support roots and the project package facade reject top-level runtime work and
+page fragments. They don't merely stay inactive. Generic directives also cannot
+promote a facade or support root into an application entry. A future directive
+cannot weaken this API-only boundary without an explicit contract owned by the
+facade/package design.
+
+### Project package assembly
+
+The compiler produces one immutable module artefact with normal and support
+interfaces. `ProjectPackageAssembly` is a separate link plan over:
+
+- the selected support interface
+- selected descendant public interfaces
+- reachable generated functions
+- package runtime requirements permitted by the target
+
+Assembly never recompiles or mutates the facade.
+
+A project may be both an application and a package. Without the facade it has
+no externally consumable Moth package surface.
+
+The facade package identity comes from `project.name`.
+
+### External package eligibility
+
+The build system rejects any declaration whose public semantic facts or
+reachable executable implementation directly or transitively depend on private
+`@project`. This includes an exported function that calls a private
+project-dependent helper.
+
+The validator doesn't treat implementation-only dependence as a reusable
+package specialisation mechanism.
+
+### Dependency package facades
+
+A dependency package exposes its facade and immutable artefacts to consumers.
+Consumers never see the dependency's private `@project`.
+
+No declaration exposed through a dependency package facade may directly or
+transitively depend on that dependency's private `@project`. Private
+declarations may use the dependency's own `@project` only when no external
+package export can reach or expose them.
+
+Configuration namespaces are scoped to one project or package compilation
+boundary. A consuming command's unqualified CLI or programmatic inputs don't
+implicitly satisfy a dependency's `$config` contracts.
+
+### Concepts related to the project package facade
+
+- For module root rules see @#module-roots (Module roots).
+- For page purpose and non-activation see @#entry-runtime-and-fragments (Active-root runtime and fragments).
+- For package origins and backing see @../packages/#package-origins-and-backing (Package origins and backing).
+- For the full facade contract see @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build system design).

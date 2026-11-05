@@ -14,7 +14,6 @@ use crate::build_system::build::BackendBuilder;
 use crate::build_system::create_project_modules::module_namespace::{
     DirectoryDependencyResolution, ModuleNamespaceSet, ResolvedDependency,
 };
-use crate::build_system::create_project_modules::resolve_project_entry_root;
 use crate::build_system::create_project_modules::source_package_discovery::build_source_package_boundary_indexes;
 use crate::build_system::create_project_modules::source_tree_index::SourceTreeIndex;
 use crate::build_system::project_config::{
@@ -149,8 +148,7 @@ fn configured_resolver_with_source_file_kinds(
     // WHAT: rebuilds the same canonical resolver the real project build uses.
     // WHY: module-discovery tests should exercise the exact path rules used in production.
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
-    let entry_root =
-        fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
+    let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let mut index_string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
@@ -665,8 +663,7 @@ fn discover_modules_for_test_with_resource_inputs(
 )> {
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
-    let entry_root =
-        fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
+    let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let source_tree_index = match super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
@@ -735,6 +732,7 @@ fn discover_modules_for_test_with_resource_inputs(
                 &path_fork,
             ),
             &mut resource_inputs,
+            true,
             false,
             &mut selected_source_texts,
             &mut string_table,
@@ -797,8 +795,7 @@ fn discover_modules_for_test_with_providers(
 ) -> CompilationResult<ModuleCompilationSchedule> {
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
-    let entry_root =
-        fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
+    let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let source_tree_index = match super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
@@ -865,6 +862,7 @@ fn discover_modules_for_test_with_providers(
                 &path_fork,
             ),
             &mut resource_inputs,
+            true,
             false,
             &mut selected_source_texts,
             &mut string_table,
@@ -923,8 +921,7 @@ fn with_namespace_resolution(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
-    let entry_root =
-        fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
+    let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let external_import_providers =
         crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default();
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
@@ -977,7 +974,23 @@ fn with_namespace_resolution(
     );
 }
 
-/// Build a retained provider-root dependency for one shell.
+/// Build a retained provider-root dependency for one pre-interned shell.
+fn retained_provider_path(path: PathId) -> RetainedDependencyPath {
+    RetainedDependencyPath {
+        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+        path,
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
+        target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
+        provider_target: None,
+        local_source_id: None,
+        dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId::new(
+            crate::compiler_frontend::source::SourceId::from_index(0),
+            0,
+        ),
+    }
+}
+
+/// Build a retained provider-root dependency for one pre-interned single-component shell.
 fn provider_root(
     path_segments: &[&str],
     provider_paths: &[(String, PathId)],
@@ -991,18 +1004,7 @@ fn provider_root(
         .find(|(segment, _)| segment == key)
         .map(|(_, path)| *path)
         .expect("provider path should be pre-interned");
-    RetainedDependencyPath {
-        span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
-        path,
-        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE,
-        target: crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::Source,
-        provider_target: None,
-        local_source_id: None,
-        dependency_shell_id: crate::compiler_frontend::symbols::identity::DependencyShellId::new(
-            crate::compiler_frontend::source::SourceId::from_index(0),
-            0,
-        ),
-    }
+    retained_provider_path(path)
 }
 
 /// Collect production Stage 0 inputs with their original live source owner.
@@ -1216,6 +1218,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
             input_files,
             &mut span_view,
             &entry_file_path,
+            None,
             local_string_table,
             source_files.fork_path_interner(),
             source_byte_count,
@@ -1229,6 +1232,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
             input_files,
             &mut span_view,
             &entry_file_path,
+            None,
             local_string_table,
             source_files.fork_path_interner(),
             source_byte_count,
@@ -1253,8 +1257,7 @@ fn discover_modules_and_graph_for_test(
 ) {
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
-    let entry_root =
-        fs::canonicalize(resolve_project_entry_root(config)).expect("entry root should resolve");
+    let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
         super::source_tree_index::SourceTreeProjectContext {
@@ -1320,6 +1323,7 @@ fn discover_modules_and_graph_for_test(
                 &path_fork,
             ),
             &mut resource_inputs,
+            true,
             false,
             &mut selected_source_texts,
             &mut string_table,
@@ -1636,7 +1640,7 @@ fn write_cross_module_project(
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(module_a.join("@pageA.moth"), "@module_b\n#[:pageA]\n").expect("should write pageA");
@@ -1680,11 +1684,7 @@ pub(super) fn compiled_package(prefix: &str) -> CompiledSourcePackage {
         ModuleRootRole::Normal,
     );
     let root_path = PathBuf::from(format!("{prefix}/@mod.moth"));
-    let graph = ProjectModuleGraph::from_normal_roots(vec![(
-        origin.clone(),
-        PathBuf::from(prefix),
-        root_path,
-    )]);
+    let graph = ProjectModuleGraph::from_normal_roots(vec![(origin.clone(), root_path)]);
     let root_module_id = graph
         .entry_modules()
         .first()
@@ -1706,6 +1706,7 @@ pub(super) fn compiled_package(prefix: &str) -> CompiledSourcePackage {
                     reusable_evidence: Vec::new(),
                     concrete_call_summaries: Vec::new(),
                 },
+                support_interface: None,
             },
         )
         .expect("test package root should publish");
@@ -1765,7 +1766,7 @@ fn direct_selection_resolves_cross_module_child_facade() {
     fs::create_dir_all(src.join("child")).expect("should create child module dir");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@child greet\n#[:entry]\n").expect("should write entry");
@@ -1828,7 +1829,7 @@ fn direct_selection_resolves_source_package_facade() {
     fs::create_dir_all(&package_root).expect("should create helper package dir");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@helper add\n#[:entry]\n").expect("should write entry");
@@ -1877,6 +1878,81 @@ fn direct_selection_resolves_source_package_facade() {
                     assert!(
                         root_file.ends_with("helper/@mod.moth"),
                         "expected the helper package facade root file, got {:?}",
+                        root_file
+                    );
+                }
+                other => panic!("expected SourcePackageSurface, got {:?}", other),
+            }
+        },
+    );
+}
+
+#[test]
+fn underscore_prefixed_source_package_prefix_precedes_hidden_directory_rejection() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    let package_root = root.join("builder/toolkit");
+    fs::create_dir_all(&src).expect("should create src dir");
+    fs::create_dir_all(&package_root).expect("should create toolkit package dir");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "@_vendor/toolkit add\n#[:entry]\n")
+        .expect("should write entry");
+    fs::write(
+        package_root.join("@mod.moth"),
+        "export:\n    add |a I32, b I32| -> I32:\n        return a + b\n    ;\n;\n",
+    )
+    .expect("should write toolkit package root");
+
+    let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
+    source_packages
+        .register_filesystem_root("_vendor/toolkit", package_root, PackageOrigin::Builder)
+        .expect("underscore-prefixed nested package root should register");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    let declaring_source =
+        fs::canonicalize(src.join("@page.moth")).expect("declaring_source should canonicalize");
+
+    with_namespace_resolution(
+        &config,
+        &resolver,
+        &source_packages,
+        None,
+        |namespace_set,
+         source_tree_index,
+         _package_prefix,
+         string_table,
+         _provider_paths,
+         path_fork| {
+            let mut provider_path = PathId::ROOT;
+            for segment in ["_vendor", "toolkit"] {
+                provider_path = path_fork
+                    .try_intern_child(provider_path, string_table.intern(segment))
+                    .expect("nested provider path should fit");
+            }
+            let provider = retained_provider_path(provider_path);
+            let resolution =
+                DirectoryDependencyResolution::project(namespace_set, source_tree_index, path_fork);
+            let resolved = resolution
+                .resolve_dependency(&provider, &declaring_source, string_table)
+                .expect("a registered package prefix must precede hidden-directory rejection");
+            match resolved {
+                ResolvedDependency::SourcePackageSurface { root_file, .. } => {
+                    assert!(
+                        root_file.ends_with("toolkit/@mod.moth"),
+                        "expected the toolkit package facade root file, got {:?}",
                         root_file
                     );
                 }

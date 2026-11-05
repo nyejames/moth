@@ -304,6 +304,8 @@ pub struct AstBuildResult {
 
     /// Direct public-interface projection input consumed by the public-interface draft builder.
     pub public_interface_projection_input: AstPublicInterfaceProjectionInput,
+    /// The paired support surface projection input, when this module owns a support root.
+    pub support_public_interface_projection_input: Option<AstPublicInterfaceProjectionInput>,
 
     /// Construction-only declaring-module capture consumed before HIR lowering.
     ///

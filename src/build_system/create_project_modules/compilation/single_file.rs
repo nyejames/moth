@@ -538,7 +538,6 @@ fn compile_single_file_frontend_with_target(
         // admission at boundary entry instead of preparing a module it could never compile.
         let graph = ProjectModuleGraph::from_normal_roots(vec![(
             stable_origin.clone(),
-            source_root,
             entry_path.clone(),
         )]);
         let module_id = graph.entry_modules()[0];
@@ -581,6 +580,7 @@ fn compile_single_file_frontend_with_target(
             input_files,
             &mut source_spans,
             &entry_path,
+            None,
             local_table,
             path_fork,
             source_byte_count,
@@ -592,6 +592,7 @@ fn compile_single_file_frontend_with_target(
             input_files,
             &mut source_spans,
             &entry_path,
+            None,
             local_table,
             path_fork,
             source_byte_count,
@@ -607,15 +608,13 @@ fn compile_single_file_frontend_with_target(
             config_boundary::source_contract_facts_from_prepared(&prepared, string_table, base_len);
         let effective_project_fields =
             config_boundary::effective_project_fields(config, string_table)?;
-        let fixed_project_facts =
-            config_boundary::fixed_project_contract_facts(&effective_project_fields);
         let direct_project_facts = config_boundary::input_contract_facts(&effective_project_fields);
         let project_globals =
             config_boundary::build_project_globals_interface(config, &effective_project_fields)?;
         let fallback_span = None;
         let build_config_values = config_boundary::resolve_boundary_build_config(
             &source_facts,
-            &fixed_project_facts,
+            &[],
             &direct_project_facts,
             build_config_inputs,
             builder_surface.config_globals(),
@@ -635,7 +634,6 @@ fn compile_single_file_frontend_with_target(
             source_facts,
             build_config_inputs.clone(),
             builder_surface.config_globals().clone(),
-            fixed_project_facts,
             direct_project_facts,
             project_globals.as_ref(),
         );

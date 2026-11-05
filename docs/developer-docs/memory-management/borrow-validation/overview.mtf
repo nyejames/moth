@@ -1,0 +1,38 @@
+# Borrow validation
+
+Roots, joins, optional transfer safety and facts.
+
+## Contract
+
+- Input: validated HIR, access/effect metadata, and external boundary classifications
+- Output: normalised semantic places and overlap facts, value origins and preliminary provenance, shared and exclusive access liveness, path-sensitive future-use and last-use classifications, optional affine-transfer candidates, capable-source-death and temporary-borrow-safety proofs, preliminary return-root alias and projection evidence and resolved external access-boundary classifications
+- Decides: shared/exclusive conflicts and whether transfer is safe as an optimisation
+- Must not decide: lifetime topology, physical ownership, final allocation, or backend lowering
+- Invariant: borrow validation reads HIR and writes side tables; it doesn't rewrite HIR
+
+This output contract is solver-independent. The live current alpha implementation, its coverage and the production work queue are maintained in `docs/roadmap/plans/production-borrow-checker.md`, not in this semantic reference. Replacing its internal lattice or advisory scaffolding must preserve this contract.
+
+A future `$checked:` proof-budget block may authorise substantially deeper
+conflict-directed analysis. Its spelling and compiler-owned direction are
+reserved for that future surface, while proof-tier semantics and soundness
+evidence remain open. It preserves the same safety contract and ordinary fast
+path; it is not current production behaviour.
+
+## Main paths
+
+- `src/compiler_frontend/analysis/borrow_checker/`
+- `src/compiler_frontend/analysis/borrow_checker/problem/`
+- `src/compiler_frontend/analysis/borrow_checker/last_use/`
+- `src/compiler_frontend/analysis/borrow_checker/boracle/` (feature-gated developer path)
+
+## Read next
+
+- `docs/roadmap/plans/production-borrow-checker.md` for live implementation status and follow-up decisions
+
+- `docs/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`
+- `docs/developer-docs/memory-management/boracle/boracle-reference-solver.mtf` for the permanent reference solver and its opt-in developer lane
+- `docs/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf` for the bounded operational oracle that executes a normalized problem and is compared against the reference solver
+- `docs/developer-docs/memory-management/checked-proof-budget-research/checked-proof-budget-research.mtf` for the future proof-budget proposal and constraints current research should preserve
+- `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+- `docs/developer-docs/memory-management/ownership-and-drops/overview.mtf`
+- `docs/compiler-design-overview.md`, especially Stage 5 and Stage 6

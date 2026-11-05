@@ -60,18 +60,18 @@ fn assert_config_input_overflow_build(
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let temporary_directory = tempfile::tempdir().expect("should create temp dir");
     let root = temporary_directory.path();
-    let facade_directory = root.join("src/facade");
+    let facade_directory = root.join("facade");
     fs::create_dir_all(&facade_directory).expect("should create facade module folder");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"k1_diagnostic_regression\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"k1_diagnostic_regression\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
     let consumer_source = format!(
         "@facade {imported_name}\n\noverflow || -> I32, Error!:\n    return {expression}\n;\n"
     );
-    let consumer_path = root.join("src/@page.moth");
+    let consumer_path = root.join("@page.moth");
     fs::write(&consumer_path, consumer_source).expect("should write consumer source");
     let facade_path = facade_directory.join("@mod.moth");
     fs::write(

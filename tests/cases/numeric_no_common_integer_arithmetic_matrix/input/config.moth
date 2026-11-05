@@ -2,7 +2,5 @@ project_error_limit #I32? = none
 
 project #= (
     name = "exact_arithmetic_matrix",
-    entry_root = "src",
-    max_errors_per_project = project_error_limit,
-)
+    max_errors_per_project = project_error_limit)
 html #= ()

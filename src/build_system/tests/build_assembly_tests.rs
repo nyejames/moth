@@ -303,7 +303,11 @@ fn empty_interface(module_origin: StableModuleOriginIdentity) -> PublicSemanticI
 }
 
 fn artifact(module: Module, interface: PublicSemanticInterface) -> CompiledModuleArtifact {
-    CompiledModuleArtifact { module, interface }
+    CompiledModuleArtifact {
+        module,
+        interface,
+        support_interface: None,
+    }
 }
 
 fn boundary(
@@ -333,10 +337,17 @@ fn module_record(
     logical_module_path: &str,
     package: &StablePackageIdentity,
 ) -> ModuleIdentityRecord {
+    let (normal_root_file, support_root_file) = match role {
+        ModuleRootRole::Normal => (Some(PathBuf::from(root_file)), None),
+        ModuleRootRole::Support | ModuleRootRole::SyntheticProjectContext => {
+            (None, Some(PathBuf::from(root_file)))
+        }
+        ModuleRootRole::Shared => (None, None),
+    };
     ModuleIdentityRecord::new(
         PathBuf::from(root_directory),
-        PathBuf::from(root_file),
-        role,
+        normal_root_file,
+        support_root_file,
         PathBuf::from(logical_module_path),
         package,
     )
@@ -377,7 +388,7 @@ fn package_facade_rejects_project_context_declaration_provenance() {
     let facade_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
         "".to_owned(),
-        ModuleRootRole::ProjectPackageFacade,
+        ModuleRootRole::Support,
     );
     let declaration_origin = OriginConstantId::new(facade_origin.clone(), "config".to_owned());
     let declaration_resource = resource(&facade_origin, "assets/config.svg");
@@ -399,7 +410,7 @@ fn package_facade_rejects_project_context_declaration_provenance() {
     let graph = ProjectModuleGraph::from_test_records(vec![module_record(
         "/synthetic/provenance-declaration",
         "/synthetic/provenance-declaration/+package.moth",
-        ModuleRootRole::ProjectPackageFacade,
+        ModuleRootRole::Support,
         "",
         &package,
     )]);
@@ -679,7 +690,6 @@ fn entry_union_keeps_entry_fragment_and_excludes_linked_module_fragment() {
 
     let project_graph = ProjectModuleGraph::from_normal_roots(vec![(
         page_origin.clone(),
-        PathBuf::from("src"),
         PathBuf::from("src/@page.moth"),
     )]);
     let page_module = synthetic_module(
@@ -699,7 +709,6 @@ fn entry_union_keeps_entry_fragment_and_excludes_linked_module_fragment() {
 
     let package_graph = ProjectModuleGraph::from_normal_roots(vec![(
         provider_module_origin.clone(),
-        PathBuf::from("provider"),
         PathBuf::from("provider/@provider.moth"),
     )]);
     let provider_module = synthetic_module(
@@ -755,12 +764,64 @@ fn entry_union_keeps_entry_fragment_and_excludes_linked_module_fragment() {
 }
 
 #[test]
+fn package_owner_lookup_registers_the_structural_shared_origin() {
+    let package = StablePackageIdentity::project_local("shared-owner-map");
+    let record = module_record(
+        "/synthetic/shared-owner-map",
+        "/synthetic/shared-owner-map/+package.moth",
+        ModuleRootRole::Support,
+        "",
+        &package,
+    );
+    let shared_origin = record.shared_origin().clone();
+    let stable_origin = record.stable_origin().clone();
+    assert_ne!(
+        shared_origin, stable_origin,
+        "a support root and its shared helper origin must be distinct"
+    );
+
+    let graph = ProjectModuleGraph::from_test_records(vec![record]);
+    let module_id = ModuleId::from_index(0);
+    let project = boundary(
+        graph,
+        vec![artifact(
+            synthetic_module("+package.moth", Vec::new(), None, Vec::new()),
+            empty_interface(stable_origin.clone()),
+        )],
+    );
+
+    let owners = super::super::build_module_owner_by_origin(
+        &project,
+        &CompletedSourcePackageRegistry::new(),
+    )
+    .expect("owner lookup should build");
+    assert_eq!(
+        owners.get(&shared_origin),
+        Some(
+            &crate::build_system::create_project_modules::compiled_boundary::CompiledModuleRef::Project(
+                module_id
+            )
+        ),
+        "a shared helper origin must resolve to its structural module owner"
+    );
+    assert_eq!(
+        owners.get(&stable_origin),
+        Some(
+            &crate::build_system::create_project_modules::compiled_boundary::CompiledModuleRef::Project(
+                module_id
+            )
+        ),
+        "the support surface origin must resolve to the same structural module owner"
+    );
+}
+
+#[test]
 fn package_facade_rejects_project_context_reachable_private_helper() {
     let package = StablePackageIdentity::project_local("assembly-provenance-helper");
     let facade_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
         "".to_owned(),
-        ModuleRootRole::ProjectPackageFacade,
+        ModuleRootRole::SyntheticProjectContext,
     );
     let child_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
@@ -826,7 +887,7 @@ fn package_facade_rejects_project_context_reachable_private_helper() {
         module_record(
             "/synthetic/provenance-helper",
             "/synthetic/provenance-helper/+package.moth",
-            ModuleRootRole::ProjectPackageFacade,
+            ModuleRootRole::SyntheticProjectContext,
             "",
             &package,
         ),
@@ -867,7 +928,7 @@ fn package_union_follows_facade_export_and_excludes_hidden_child_export() {
     let facade_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
         "".to_owned(),
-        ModuleRootRole::ProjectPackageFacade,
+        ModuleRootRole::SyntheticProjectContext,
     );
     let child_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
@@ -924,7 +985,7 @@ fn package_union_follows_facade_export_and_excludes_hidden_child_export() {
         module_record(
             "/synthetic/project",
             "/synthetic/project/+package.moth",
-            ModuleRootRole::ProjectPackageFacade,
+            ModuleRootRole::SyntheticProjectContext,
             "",
             &package,
         ),
@@ -996,7 +1057,7 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
     let facade_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
         "".to_owned(),
-        ModuleRootRole::ProjectPackageFacade,
+        ModuleRootRole::SyntheticProjectContext,
     );
     let child_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
@@ -1065,7 +1126,7 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
         module_record(
             "/synthetic/nominal",
             "/synthetic/nominal/+package.moth",
-            ModuleRootRole::ProjectPackageFacade,
+            ModuleRootRole::SyntheticProjectContext,
             "",
             &package,
         ),

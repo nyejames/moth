@@ -5,7 +5,7 @@
 **Baseline reviewed:** `main` at `34afc996b746bfe93281dad115c40083a9106ac8`  
 **Activation branch:** `main`  
 **Activation HEAD:** `357dbab3190f1d7160488479ac7cf246d569fded` (squash-merged upstream as `03168082de813b9ce060a9cceb1667f8ea8e1fa1`)  
-**Primary companion work:** Retained Edge Counting, whose canonical authority is `docs/src/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`  
+**Primary companion work:** Retained Edge Counting, whose canonical authority is `docs/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`  
 **Required final code gate:** `just validate`  
 **Required documentation-only gate:** `moth build docs --release` or `cargo run --quiet -- build docs --release`  
 
@@ -639,11 +639,11 @@ Accepted design must be authoritative before implementation starts. This phase d
 
 ### Memory authority tasks
 
-- [x] Rewrite `docs/src/developer-docs/memory-management/overview.mtf` around the six cooperating mechanisms.
+- [x] Rewrite `docs/developer-docs/memory-management/overview.mtf` around the six cooperating mechanisms.
 - [x] Replace the two-proof-layer GC fallback wording with mandatory topology plus collector-free strategy selection.
 - [x] Add retained-edge liveness, cleanup frontiers, inferred intervals, region epochs and REC's narrow role.
 - [x] Update the memory task-reading guide with the REC canonical page and the correct route for collection retention work.
-- [x] Rewrite `docs/src/developer-docs/memory-management/@page.moth` with the concise final summary and detailed-page routing.
+- [x] Rewrite `docs/developer-docs/memory-management/@page.moth` with the concise final summary and detailed-page routing.
 - [x] Update `access-and-aliasing` with last-use centrality, allocation-family meaning and the static provenance versus runtime responsibility distinction.
 - [x] Update `borrow-validation` with the final last-use contract and explicit handoff to retained-edge analysis.
 - [x] Update `lifetime-regions-and-escape-validation` with non-lexical intervals, retained-edge liveness, cleanup frontiers, epochs, cycles requiring one declared region and REC eligibility.
@@ -665,7 +665,7 @@ Accepted design must be authoritative before implementation starts. This phase d
 
 ### Language and design-scope tasks
 
-- [x] Update `docs/src/docs/design-scope/design-principles.mtf` so memory safety is no longer described as a GC baseline.
+- [x] Update `docs/docs/design-scope/design-principles.mtf` so memory safety is no longer described as a GC baseline.
 - [x] Update the excluded-language inventory with no source REC, no implicit cyclic regions and no backend-specific legality.
 - [x] Update fixed and growable collection references with `clear()` and compiler-known retained-edge effects. `clear` is documented as an accepted sixth operation with implementation deferred: only maps expose it today.
 - [x] Update map and collection docs with the trusted dynamic-storage role.
@@ -1248,7 +1248,7 @@ Channel semantics must be constrained before any async implementation starts.
 
 ### Tasks
 
-- [ ] Update `docs/src/docs/async/@page.moth` to make send a mandatory affine transfer.
+- [ ] Update `docs/docs/async/@page.moth` to make send a mandatory affine transfer.
 - [ ] Define the successful-send responsibility commit point.
 - [ ] Define failed-send responsibility preservation.
 - [ ] Define queue and receiver lifecycle ownership.
@@ -1446,8 +1446,8 @@ Do not collapse these rows into one generic "memory management" status.
 
 | File or area | Required change |
 |---|---|
-| `docs/src/developer-docs/memory-management/overview.mtf` | six-part final model, collector-free invariant, REC boundary |
-| `docs/src/developer-docs/memory-management/@page.moth` | concise introduction and REC route |
+| `docs/developer-docs/memory-management/overview.mtf` | six-part final model, collector-free invariant, REC boundary |
+| `docs/developer-docs/memory-management/@page.moth` | concise introduction and REC route |
 | `access-and-aliasing/**` | last-use centrality, allocation families, field-splitting extension |
 | `borrow-validation/**` | affine transfer facts and handoff to retained-edge analysis |
 | `lifetime-regions-and-escape-validation/**` | intervals, liveness, frontiers, epochs, cycles requiring one declared region |
@@ -1457,11 +1457,11 @@ Do not collapse these rows into one generic "memory management" status.
 | new `retained-edge-counting/**` | canonical REC technical authority, routed from the memory index |
 | `docs/compiler-design-overview.md` | analysis owner, summaries, artifacts and backend handoff |
 | `docs/build-system-design.md` | lifecycle instantiation, strategy plans and capability verification |
-| `docs/src/docs/collections/**` | trusted builtin effects and collection `clear()` |
-| `docs/src/docs/design-scope/**` | remove GC baseline and preserve exclusions |
-| `docs/src/docs/async/@page.moth` | mandatory send transfer and memory prerequisites |
-| `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf` | concise user-facing final model only |
-| `docs/src/docs/progress/@page.moth` | separate accepted-design and implementation rows |
+| `docs/docs/collections/**` | trusted builtin effects and collection `clear()` |
+| `docs/docs/design-scope/**` | remove GC baseline and preserve exclusions |
+| `docs/docs/async/@page.moth` | mandatory send transfer and memory prerequisites |
+| `docs/docs/cheatsheet/moth-language-cheatsheet.mtf` | concise user-facing final model only |
+| `docs/docs/progress/@page.moth` | separate accepted-design and implementation rows |
 | `docs/roadmap/roadmap.md` | parent and companion plan sequencing, no superseded collector-first wording |
 | `docs/roadmap/plans/grouped-memory-design.md` | superseded and deleted; its declared region implementation detail now lives in Phases 7 and 8, and every live link points at this plan |
 | historical memory cleanup plan | confirm the file is absent and record that no historical annotation is required |

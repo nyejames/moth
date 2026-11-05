@@ -11,17 +11,17 @@ docs/roadmap/plans/retained-edge-counting-design-and-implementation-plan.md
 Canonical implementation authority:
 
 ```text
-docs/src/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf
+docs/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf
 ```
 
 Companion to:
 
 - the parent plan `docs/roadmap/plans/final-memory-management-redesign-and-implementation-plan.md`
-- `docs/src/developer-docs/memory-management/overview.mtf`
-- `docs/src/developer-docs/memory-management/ownership-and-drops/`
-- `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/`
-- `docs/src/developer-docs/memory-management/declared-regions/`
-- `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/`
+- `docs/developer-docs/memory-management/overview.mtf`
+- `docs/developer-docs/memory-management/ownership-and-drops/`
+- `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/`
+- `docs/developer-docs/memory-management/declared-regions/`
+- `docs/developer-docs/memory-management/runtime-and-backend-lowering/`
 
 The canonical REC page now exists. REC implementation remains deferred and follows the phases in this plan.
 
@@ -1744,7 +1744,7 @@ The documentation migration and consistency pass now use the accepted collector-
 
 ### Tasks
 
-- [x] Update `docs/src/developer-docs/memory-management/overview.mtf` with the six-part memory model and concise REC role.
+- [x] Update `docs/developer-docs/memory-management/overview.mtf` with the six-part memory model and concise REC role.
 - [x] Update `ownership-and-drops` to the Affine Ownership ABI and two-bit handle extension.
 - [x] Update lifetime-region docs with retained-edge liveness, cleanup frontiers, region epochs and REC eligibility.
 - [x] Update declared-region docs with hard count-free declared-region ownership and cycle policy.
@@ -1758,7 +1758,7 @@ The documentation migration and consistency pass now use the accepted collector-
 - [x] Update `docs/build-system-design.md` physical-strategy plans, capability metadata and release verification.
 - [x] Update the README memory goal from optional GC avoidance to the accepted collector-free release direction.
 - [x] Update the language cheatsheet with only a concise user-facing statement. Do not expose REC mechanics as source semantics.
-- [x] Update `docs/src/docs/progress/@page.moth` with separate rows for topology, retained-edge liveness, Affine Ownership ABI, REC planning, REC backend lowering, declared regions and collector-free release verification.
+- [x] Update `docs/docs/progress/@page.moth` with separate rows for topology, retained-edge liveness, Affine Ownership ABI, REC planning, REC backend lowering, declared regions and collector-free release verification.
 - [x] Mark old compiler paths that still assume GC fallback as incomplete migration work.
 - [x] Link this plan from the main final memory-management plan.
 

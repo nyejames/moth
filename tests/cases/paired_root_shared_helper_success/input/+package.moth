@@ -1,0 +1,7 @@
+@impl value, Message
+
+label #= "support"
+
+export:
+    @impl value, Message
+;

@@ -555,11 +555,11 @@ fn build_html_project_local_js_import_emits_generated_glue() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    let src = root.join("src");
+    let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@drawing.js draw\nvalue = draw()\n")
@@ -650,7 +650,7 @@ fn build_html_project_reexport_fixture_emits_provider_and_exact_wrappers() {
     );
 
     let provider_path = "_moth/js/components/background-animation.js";
-    let source = root.join("src/components/background-animation.js");
+    let source = root.join("components/background-animation.js");
     assert_deferred_provider_sources(&mut result.project, &[(provider_path, source.as_path())]);
     let outputs = BuiltOutputs::index(&result.project);
     let glue_path = outputs.exactly_one_path("generated glue module", |path| {
@@ -744,7 +744,7 @@ impl BackendBuilder for RegisteredJsPackageBuilder {
             (
                 "binding.js",
                 "projectValue",
-                self.project_root.join("src/binding.js"),
+                self.project_root.join("binding.js"),
             ),
             (
                 "providers/binding.js",
@@ -875,14 +875,14 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
             let mut sources = vec![
                 (
                     project_root.join("config.moth"),
-                    "project #= (\n    name = \"package_campaign\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+                    "project #= (\n    name = \"package_campaign\",\n)\nhtml #= ()\n",
                 ),
                 (
-                    project_root.join("src/@page.moth"),
+                    project_root.join("@page.moth"),
                     "@binding.js provider_value as project_value\n@campaign package_value\n@x/y\n[:project=[project_value()]|package=[package_value()]|[y.marker]]\n",
                 ),
                 (
-                    project_root.join("src/binding.js"),
+                    project_root.join("binding.js"),
                     "/** @moth.sig provider_value || -> String */\nexport function projectValue() { return \"project:17\"; }\n",
                 ),
                 (package_root.join("@mod.moth"), package_root_source),
@@ -922,7 +922,7 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
                 )
                 .unwrap_or_else(|never| match never {}),
             );
-            let project_source = project_root.join("src/binding.js");
+            let project_source = project_root.join("binding.js");
             let package_source = package_root.join("providers/binding.js");
             assert_deferred_provider_sources(
                 &mut built.project,
@@ -1057,7 +1057,7 @@ fn build_html_normal_sibling_name_is_not_visible_from_child_module() {
         let mut sources = [
             (
                 "config.moth",
-                "project #= (\n    name = \"sibling_boundary\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+                "project #= (\n    name = \"sibling_boundary\",\n)\nhtml #= ()\n",
             ),
             ("src/@page.moth", "@consumer value\n[:[value]]\n"),
             (
@@ -1105,14 +1105,14 @@ fn build_html_project_shared_support_provider_keeps_page_wrappers_isolated() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let temp = tempfile::tempdir().expect("should create temp dir");
     let root = temp.path();
-    let src = root.join("src");
+    let src = root.to_path_buf();
     let shared = src.join("shared");
     let about = src.join("about");
     fs::create_dir_all(&shared).expect("should create support package");
     fs::create_dir_all(&about).expect("should create second page");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"shared_pages\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"shared_pages\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1220,8 +1220,8 @@ fn build_html_project_binding_topology_emits_only_demanded_wrappers_and_whole_as
         .unwrap_or_else(|never| match never {}),
     );
 
-    let inner_source = root.join("src/outer/inner/binding.js");
-    let alternate_source = root.join("src/alternate/binding.js");
+    let inner_source = root.join("outer/inner/binding.js");
+    let alternate_source = root.join("alternate/binding.js");
     assert_deferred_provider_sources(
         &mut result.project,
         &[
@@ -1272,12 +1272,12 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    let src = root.join("src");
+    let src = root.to_path_buf();
     let facade = src.join("drawing");
     fs::create_dir_all(&facade).expect("should create facade");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1355,11 +1355,11 @@ fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module()
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    let src = root.join("src");
+    let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1399,11 +1399,11 @@ fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_m
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    let src = root.join("src");
+    let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1441,11 +1441,11 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    let src = root.join("src");
+    let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1500,11 +1500,11 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    let src = root.join("src");
+    let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1568,11 +1568,11 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    let src = root.join("src");
+    let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1647,11 +1647,11 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    let src = root.join("src");
+    let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1709,12 +1709,12 @@ fn build_project_discards_backend_warnings_when_multimodule_diagnostics_fail() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    let src_dir = root.join("src");
+    let src_dir = root.to_path_buf();
     let docs_dir = src_dir.join("docs");
     fs::create_dir_all(&docs_dir).expect("should create docs directory");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src_dir.join("@page.moth"), "value = 1\n").expect("should write homepage");
@@ -1749,12 +1749,12 @@ fn build_html_project_literal_const_change_reaches_next_build_without_asset() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    let src = root.join("src");
+    let src = root.to_path_buf();
     let helper = src.join("helper");
     fs::create_dir_all(&helper).expect("should create helper dir");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1837,11 +1837,11 @@ fn build_html_project_mixed_const_and_function_emits_single_glue_module() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    let src = root.join("src");
+    let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1909,12 +1909,11 @@ fn build_html_project_mixed_const_and_function_emits_single_glue_module() {
 /// Write a directory project whose pages under `page_dirs` all call `page_export` from one
 /// fallible provider. An empty directory is the homepage.
 fn write_shared_glue_project(root: &Path, page_dirs: &[&str], page_export: &str) {
-    let src = root.join("src");
-    let shared = src.join("shared");
+    let shared = root.join("shared");
     fs::create_dir_all(&shared).expect("should create provider facade");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"shared_glue\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"shared_glue\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1928,7 +1927,7 @@ fn write_shared_glue_project(root: &Path, page_dirs: &[&str], page_export: &str)
     )
     .expect("should write provider");
     for page_dir in page_dirs {
-        let page_root = src.join(page_dir);
+        let page_root = root.join(page_dir);
         fs::create_dir_all(&page_root).expect("should create page directory");
         fs::write(
             page_root.join("@page.moth"),
@@ -2030,7 +2029,7 @@ fn build_html_project_release_wrappers_get_their_own_glue_name() {
 fn rebuild_with_new_wrapper_selection_replaces_stale_glue_and_keeps_unowned_files() {
     let temp = tempfile::tempdir().expect("should create temp dir");
     let root = temp.path();
-    let glue_directory = root.join("dev").join(GLUE_MODULE_PREFIX);
+    let glue_directory = root.join("_dev").join(GLUE_MODULE_PREFIX);
     let mut previous_glue = None;
     for page_export in ["get_number", "get_other"] {
         write_shared_glue_project(root, &["", "about"], page_export);
@@ -2057,7 +2056,7 @@ fn rebuild_with_new_wrapper_selection_replaces_stale_glue_and_keeps_unowned_file
         assert_eq!(glue_files.len(), 1, "one shared glue file on disk");
         let glue_file = glue_files.pop().expect("one glue file");
         let manifest =
-            fs::read_to_string(root.join("dev/.moth_manifest")).expect("manifest should exist");
+            fs::read_to_string(root.join("_dev/.moth_manifest")).expect("manifest should exist");
         assert_eq!(
             manifest
                 .lines()

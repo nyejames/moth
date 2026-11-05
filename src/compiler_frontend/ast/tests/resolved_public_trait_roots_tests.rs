@@ -23,6 +23,14 @@ use crate::compiler_frontend::traits::definitions::{ResolvedTraitDefinition, Tra
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::syntax::TraitDeclarationSyntax;
 
+fn active_root_file_id(headers: &[Header]) -> SourceId {
+    headers
+        .iter()
+        .find(|header| header.file_role.is_active_module_root())
+        .map(|header| header.tokens.source())
+        .unwrap_or(SourceId::COMPILATION_ROOT)
+}
+
 fn root_span() -> SourceSpan {
     SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start())
 }
@@ -161,6 +169,7 @@ fn retains_directly_authored_active_root_public_source_traits_in_order() {
     let trait_roots = build_resolved_public_trait_roots(
         &headers,
         &Default::default(),
+        active_root_file_id(&headers),
         &trait_environment,
         &string_table,
     )
@@ -226,6 +235,7 @@ fn excludes_private_traits() {
     let trait_roots = build_resolved_public_trait_roots(
         &headers,
         &Default::default(),
+        active_root_file_id(&headers),
         &trait_environment,
         &string_table,
     )
@@ -283,6 +293,7 @@ fn excludes_imported_and_non_active_root_traits() {
     let trait_roots = build_resolved_public_trait_roots(
         &headers,
         &Default::default(),
+        active_root_file_id(&headers),
         &trait_environment,
         &string_table,
     )
@@ -325,6 +336,7 @@ fn rejects_source_trait_header_resolving_to_compiler_owned_core_trait() {
     let result = build_resolved_public_trait_roots(
         &headers,
         &Default::default(),
+        active_root_file_id(&headers),
         &trait_environment,
         &string_table,
     );
@@ -373,6 +385,7 @@ fn excludes_non_trait_declarations() {
     let trait_roots = build_resolved_public_trait_roots(
         &headers,
         &Default::default(),
+        active_root_file_id(&headers),
         &trait_environment,
         &string_table,
     )
@@ -404,6 +417,7 @@ fn missing_trait_definition_is_infrastructure_failure() {
     let result = build_resolved_public_trait_roots(
         &headers,
         &Default::default(),
+        active_root_file_id(&headers),
         &trait_environment,
         &string_table,
     );
@@ -478,6 +492,7 @@ fn retains_public_incompatibilities_symmetrically_for_direct_public_traits() {
     let trait_roots = build_resolved_public_trait_roots(
         &headers,
         &Default::default(),
+        active_root_file_id(&headers),
         &trait_environment,
         &string_table,
     )
@@ -552,6 +567,7 @@ fn private_incompatibility_relation_is_absent_from_trait_roots() {
     let trait_roots = build_resolved_public_trait_roots(
         &headers,
         &Default::default(),
+        active_root_file_id(&headers),
         &trait_environment,
         &string_table,
     )

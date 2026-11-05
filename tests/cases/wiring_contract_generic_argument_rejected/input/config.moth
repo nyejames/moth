@@ -1,5 +1,3 @@
 project #= (
-    name = "wiring_contract_generic_argument_rejected",
-    entry_root = "src",
-)
+    name = "wiring_contract_generic_argument_rejected")
 html #= ()

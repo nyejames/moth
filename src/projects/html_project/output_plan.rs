@@ -89,7 +89,7 @@ impl From<InfrastructureFailure> for LogicalHtmlPathError {
 ///
 /// WHAT: maps Moth entry conventions to one route value:
 ///
-/// - Directory builds use only the module root directory relative to `entry_root`, so a root
+/// - Directory builds use only the module root directory relative to the selected source root, so a root
 ///   module emits `index.html` and a nested module emits `<directory>/index.html`.
 /// - Single-file builds strip a cosmetic `@` prefix and name the page `<stem>.html`.
 ///
@@ -97,28 +97,28 @@ impl From<InfrastructureFailure> for LogicalHtmlPathError {
 /// route semantics from the logical path.
 pub(crate) fn derive_logical_html_path(
     entry_point: &Path,
-    entry_root: Option<&Path>,
+    source_root: Option<&Path>,
 ) -> Result<CanonicalPageRoute, LogicalHtmlPathError> {
-    if let Some(entry_root) = entry_root {
-        return derive_logical_html_path_from_entry_root(entry_point, entry_root);
+    if let Some(source_root) = source_root {
+        return derive_logical_html_path_from_source_root(entry_point, source_root);
     }
 
     derive_single_file_logical_html_path(entry_point)
 }
 
-fn derive_logical_html_path_from_entry_root(
+fn derive_logical_html_path_from_source_root(
     entry_point: &Path,
-    entry_root: &Path,
+    source_root: &Path,
 ) -> Result<CanonicalPageRoute, LogicalHtmlPathError> {
     // Route derivation is deterministic: discovery order never affects output paths.
-    let relative_entry = entry_point.strip_prefix(entry_root).map_err(|_| {
+    let relative_entry = entry_point.strip_prefix(source_root).map_err(|_| {
         InfrastructureFailure::filesystem(
             CompilerStage::ProjectBuildAssembly,
             entry_point,
             format!(
-                "HTML entry '{}' is not inside the configured entry root '{}'.",
+                "HTML entry '{}' is not inside the selected source root '{}'.",
                 entry_point.display(),
-                entry_root.display(),
+                source_root.display(),
             ),
         )
     })?;
@@ -126,7 +126,7 @@ fn derive_logical_html_path_from_entry_root(
 
     // Directory routes describe module directories, not cosmetic normal-root filenames. The
     // active root module is the homepage and every nested module is folder-backed at its
-    // entry-root-relative directory.
+    // source-root-relative directory.
     if parent.as_os_str().is_empty() {
         return Ok(CanonicalPageRoute {
             logical_html_path: PathBuf::from("index.html"),

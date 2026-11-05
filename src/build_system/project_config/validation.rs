@@ -44,7 +44,7 @@ use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 // -------------------------
 //  Validation Entry Point
@@ -79,7 +79,6 @@ pub(super) fn validate_and_apply_config_declarations(
     );
 
     let mut errors = Vec::new();
-    let mut saw_project_record = false;
     // WHY: the output roots have one value and one authored span for the whole project, so two
     // sections that own them would replace each other instead of failing.
     ensure_single_output_root_owner(config_schemas.project_sections())
@@ -117,9 +116,20 @@ pub(super) fn validate_and_apply_config_declarations(
         }
     }
 
+    for section in config_schemas.project_sections() {
+        if section.required && !authored_sections.contains(section.name.as_ref()) {
+            errors.push(config_diagnostic(
+                None,
+                InvalidConfigReason::MissingActiveBuilderSection {
+                    section: diagnostic_strings.intern(section.name.as_ref()),
+                },
+                None,
+            ));
+        }
+    }
+
     for declaration in &compiled_config.declarations {
         if diagnostic_strings.strings().resolve(declaration.name) == "project" {
-            saw_project_record = true;
             if matches!(declaration.value, PublicFoldedValue::Record(_)) {
                 validate_and_apply_project_record(
                     config,
@@ -183,29 +193,6 @@ pub(super) fn validate_and_apply_config_declarations(
         }
 
         // Unregistered top-level constants are private folding helpers of any value shape.
-    }
-
-    if !saw_project_record {
-        errors.push(config_diagnostic(
-            None,
-            InvalidConfigReason::MissingProjectRecord,
-            compiled_config
-                .declarations
-                .first()
-                .and_then(|declaration| declaration.span),
-        ));
-    }
-
-    for section in config_schemas.project_sections() {
-        if section.required && !authored_sections.contains(section.name.as_ref()) {
-            errors.push(config_diagnostic(
-                None,
-                InvalidConfigReason::MissingActiveBuilderSection {
-                    section: diagnostic_strings.intern(section.name.as_ref()),
-                },
-                None,
-            ));
-        }
     }
 
     if errors.is_empty() {
@@ -303,12 +290,7 @@ fn apply_project_record_fields(
     for field in fields {
         if matches!(
             field.name.as_str(),
-            "name"
-                | "entry_root"
-                | "version"
-                | "author"
-                | "license"
-                | "template_const_loop_iteration_limit"
+            "name" | "version" | "author" | "license" | "template_const_loop_iteration_limit"
         ) {
             if let Some(span) = field.span {
                 config.setting_spans.insert(field.name.clone(), span);
@@ -317,20 +299,26 @@ fn apply_project_record_fields(
             }
         }
 
+        if field.name == "entry_root" {
+            errors.push(config_diagnostic(
+                Some(diagnostic_strings.intern("entry_root")),
+                InvalidConfigReason::InvalidProjectSettingValue {
+                    value: diagnostic_strings.intern("entry_root"),
+                    expected: diagnostic_strings.intern(
+                        "remove entry_root: the selected project directory is now the source root",
+                    ),
+                },
+                field.span,
+            ));
+            continue;
+        }
+
         match (field.name.as_str(), field.value) {
             ("name", ValidatedConfigValue::String(value)) => {
                 if let Err(diagnostic) =
                     assign_project_name(config, value, field.span, diagnostic_strings)
                 {
                     errors.push(diagnostic);
-                }
-            }
-
-            ("entry_root", ValidatedConfigValue::String(value)) => {
-                if let Err(mut diagnostics) =
-                    assign_entry_root(config, value, field.span, diagnostic_strings)
-                {
-                    errors.append(&mut diagnostics);
                 }
             }
 
@@ -1263,6 +1251,52 @@ fn config_diagnostic(
     project_config::invalid_config_reason(key, reason, span)
 }
 
+/// Apply builder schema defaults when no `config.moth` source exists.
+///
+/// WHAT: validates and applies every optional builder section's declared defaults and diagnoses
+/// each required section that has no authored record.
+/// WHY: directory compilation accepts a missing config without manufacturing a source file, but
+/// its effective settings must match an empty authored config. Required builder settings remain
+/// explicit errors rather than invented values.
+pub(super) fn apply_defaults_without_config(
+    config: &mut Config,
+    config_schemas: &ConfigSchemas,
+    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
+) -> Result<(), ConfigApplyError> {
+    ensure_single_output_root_owner(config_schemas.project_sections())
+        .map_err(ConfigApplyError::Compiler)?;
+    let mut errors = Vec::new();
+
+    for section in config_schemas.project_sections() {
+        if section.required {
+            errors.push(config_diagnostic(
+                None,
+                InvalidConfigReason::MissingActiveBuilderSection {
+                    section: diagnostic_strings.intern(section.name.as_ref()),
+                },
+                None,
+            ));
+            continue;
+        }
+
+        let field_indexes = SchemaFieldIndexes::build(&section.schema);
+        apply_omitted_section_defaults(
+            config,
+            section,
+            &field_indexes,
+            diagnostic_strings,
+            &mut errors,
+        )
+        .map_err(ConfigApplyError::Compiler)?;
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(ConfigApplyError::Diagnostics(errors))
+    }
+}
+
 // -------------------------
 //  Directory Output Setting Validation
 // -------------------------
@@ -1270,8 +1304,8 @@ fn config_diagnostic(
 /// Validate directory output settings after config values are applied.
 ///
 /// WHAT: rejects the effective development and release output folders that are empty,
-/// absolute, parent-traversing, current-directory, equal to the project root, inside
-/// `entry_root`, or equal to each other.
+/// absolute, parent-traversing, current-directory, visible to source discovery, outside the
+/// project root, or equal to each other.
 /// WHY: directory output roots must be safe and distinct before any output writing or
 /// cleanup runs. Single-file output stays separate because it writes to the command
 /// working directory.
@@ -1282,15 +1316,6 @@ pub(crate) fn validate_directory_output_settings(
     let mut errors = Vec::new();
 
     let project_root = &config.entry_dir;
-    // An empty or "." entry root resolves to the project root, so output containment is validated
-    // against that root only. When entry_root is a strict subdirectory, enforce that the output is
-    // outside it.
-    let resolved_entry_root =
-        if config.entry_root.as_os_str().is_empty() || config.entry_root == Path::new(".") {
-            None
-        } else {
-            Some(project_root.join(&config.entry_root))
-        };
 
     let (dev_setting, release_setting) = effective_output_settings(config);
 
@@ -1298,7 +1323,6 @@ pub(crate) fn validate_directory_output_settings(
         dev_setting.key,
         &dev_setting.folder,
         project_root,
-        resolved_entry_root.as_deref(),
         config,
         diagnostic_strings,
         &mut errors,
@@ -1307,7 +1331,6 @@ pub(crate) fn validate_directory_output_settings(
         release_setting.key,
         &release_setting.folder,
         project_root,
-        resolved_entry_root.as_deref(),
         config,
         diagnostic_strings,
         &mut errors,
@@ -1379,18 +1402,15 @@ fn validate_one_output_folder(
     key: &str,
     folder: &Path,
     project_root: &Path,
-    resolved_entry_root: Option<&Path>,
     config: &Config,
     diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
     errors: &mut Vec<DiagnosticDraft>,
 ) -> Option<ValidatedOutputFolder> {
     let span = config.setting_span(key);
 
-    match classify_output_folder(folder, project_root, resolved_entry_root) {
+    match classify_output_folder(folder, project_root) {
         Ok(mut valid) => {
-            if let Err(reason) =
-                validate_output_folder_containment(&valid, project_root, resolved_entry_root)
-            {
+            if let Err(reason) = validate_output_folder_containment(&valid, project_root) {
                 let folder_id = Some(diagnostic_strings.intern(&folder.to_string_lossy()));
                 errors.push(output_folder_diagnostic(
                     key,
@@ -1457,63 +1477,11 @@ fn validate_output_folders_distinct(
     }
 }
 
-fn assign_entry_root(
-    config: &mut Config,
-    value: String,
-    span: Option<SourceSpan>,
-    diagnostic_strings: &mut DiagnosticStringBuilder<'_>,
-) -> Result<(), Vec<DiagnosticDraft>> {
-    if entry_root_escapes_project(&value, &config.entry_dir) {
-        return Err(vec![config_diagnostic(
-            Some(diagnostic_strings.intern("entry_root")),
-            InvalidConfigReason::InvalidProjectSettingValue {
-                value: diagnostic_strings.intern(&value),
-                expected: diagnostic_strings.intern(
-                    "a relative directory strictly below the project root, with no parent-directory segments",
-                ),
-            },
-            span,
-        )]);
-    }
-
-    config.entry_root = PathBuf::from(value);
-    Ok(())
-}
-
 fn is_retired_flat_config_key(key: &str) -> bool {
     matches!(
         key,
         "dev_folder" | "output_folder" | "package_folders" | "project_name"
     )
-}
-
-fn entry_root_escapes_project(value: &str, project_root: &Path) -> bool {
-    if value.is_empty() || value == "." {
-        return true;
-    }
-
-    let path = Path::new(value);
-    if path.is_absolute()
-        || path.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::Prefix(_) | Component::RootDir
-            )
-        })
-    {
-        return true;
-    }
-
-    let Ok(canonical_project) = project_root.canonicalize() else {
-        return false;
-    };
-    let Ok(canonical_entry) = project_root.join(path).canonicalize() else {
-        return false;
-    };
-
-    canonical_entry == canonical_project
-        || !canonical_entry.is_dir()
-        || canonical_entry.strip_prefix(&canonical_project).is_err()
 }
 
 fn output_folder_diagnostic(

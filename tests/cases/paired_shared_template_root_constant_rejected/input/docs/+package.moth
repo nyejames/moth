@@ -1,0 +1,9 @@
+@intro content as intro_content
+@other content as other_content
+export:
+    @intro content as intro_content
+
+    @other content as other_content
+
+    support_only #= "support"
+;

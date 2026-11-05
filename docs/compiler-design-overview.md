@@ -10,13 +10,13 @@ Accepted roadmap plans and their approved design decisions resolve gaps or confl
 
 Companion authorities:
 
-- `docs/src/developer-docs/language/overview.mtf` routes to canonical unsuffixed language references. They own source syntax and observable semantics. Paired Basic pages teach subsets.
+- `docs/developer-docs/language/overview.mtf` routes to canonical unsuffixed language references. They own source syntax and observable semantics. Paired Basic pages teach subsets.
 - `docs/compiler-data-layout-design.md` owns source, token and diagnostic representation, identity lifetimes and the three failure lanes.
-- [Wasm optimisation](src/developer-docs/wasm-optimisation/overview.mtf) routes to the authority for backend optimisation goals, pass placement and the policy shared with Lappet. Language semantics and validated memory contracts remain with their existing owners.
-- `docs/src/developer-docs/memory-management/overview.mtf` routes to reference semantics, access validation, lifetime topology and physical memory contracts. Its permanent contracts take precedence over measurement reports and implementation proposals.
-- `docs/src/docs/directives/directives.mtf` owns directive grammar and extension limits. `docs/src/docs/mon/mon-format.mtf` owns MON literal-data semantics.
-- `docs/src/docs/design-scope/` owns accepted and excluded language boundaries. `docs/src/developer-docs/style-guide/style-guide.mtf` owns implementation standards.
-- `docs/roadmap/roadmap.md` and its plans record accepted work, sequencing and open design. `docs/src/docs/progress/@page.moth` and the packages-and-builders matrix record support.
+- [Wasm optimisation](developer-docs/wasm-optimisation/overview.mtf) routes to the authority for backend optimisation goals, pass placement and the policy shared with Lappet. Language semantics and validated memory contracts remain with their existing owners.
+- `docs/developer-docs/memory-management/overview.mtf` routes to reference semantics, access validation, lifetime topology and physical memory contracts. Its permanent contracts take precedence over measurement reports and implementation proposals.
+- `docs/docs/directives/directives.mtf` owns directive grammar and extension limits. `docs/docs/mon/mon-format.mtf` owns MON literal-data semantics.
+- `docs/docs/design-scope/` owns accepted and excluded language boundaries. `docs/developer-docs/style-guide/style-guide.mtf` owns implementation standards.
+- `docs/roadmap/roadmap.md` and its plans record accepted work, sequencing and open design. `docs/docs/progress/@page.moth` and the packages-and-builders matrix record support.
 
 Educational compiler pages explain these contracts without overriding them. Routine internal API details belong in owning modules and doc comments. Use `index.md` to locate code rather than treating a source-path inventory as architecture.
 
@@ -44,7 +44,7 @@ For every compiler task, read the authority text and `Architectural invariants`.
 | Lifetimes, retention and cleanup frontiers | `Lifetime-region and escape validation` | Build design > `HTML project builder > Link planning and lifetime topology` |
 | Physical memory strategies and REC | `Lifetime-region and escape validation > Memory-strategy planning` | The memory overview's runtime/backend route |
 | Reachability, target checks and backend inputs | `Per-function link facts`, `Target-contract validation` and `Backend-facing compiler handoff` | Build entry/package and builder sections |
-| Wasm optimisation and native compilation policy | `Backend-facing compiler handoff` | [Wasm optimisation authority](src/developer-docs/wasm-optimisation/wasm-optimisation.mtf) and the affected semantic or memory owner |
+| Wasm optimisation and native compilation policy | `Backend-facing compiler handoff` | [Wasm optimisation authority](developer-docs/wasm-optimisation/wasm-optimisation.mtf) and the affected semantic or memory owner |
 | MON codec boundaries | `Rust-only MON service` | MON format and data-layout design > `MON data handoff` |
 
 `Stage 4`, `Stage 5` and `Stage 6` above are under `Frontend stages`. `Build design` means `docs/build-system-design.md`.
@@ -118,7 +118,7 @@ bind provider interfaces
 
 Summary-dependent source/generated work converges inside this transaction. Every published source and generated function has validated HIR, borrow facts and local lifetime facts, with any conservative integer proofs paired to that exact executable. Pending numeric construction state and recipes never cross publication. Link-level lifecycle validation remains a later operation.
 
-A new local semantic stage belongs inside this service. Normal modules, support modules, project facades and synthetic single-file modules use it after preparation. The compiler receives compiler-owned options, not the project tool's configuration container.
+A new local semantic stage belongs inside this service. Normal roots, support surfaces, project package surfaces and synthetic single-file modules use it after preparation. The compiler receives compiler-owned options, not the project tool's configuration container.
 
 Raw stage owners have frontend-only or narrower Rust visibility. The architecture boundary check also rejects reverse dependencies on build/project configuration. Build code cannot construct interface drafts, mutate semantic state, install summaries or rerun analyses. Named config and direct-template services are the only shorter semantic paths defined here.
 
@@ -167,9 +167,9 @@ Compile-time page fragments never live in HIR. The artefact validator checks fol
 
 A normal module may define declarations, dormant top-level runtime work and page fragments. Authored root runtime work or direct output requires an explicit purpose with an applicable consumer. `$page` supplies the HTML purpose. Compilation validates dormant work before publication. A dependency exposes declarations without activating that work or inserting fragments.
 
-Support modules and the project package facade are API-only. They permit ordinary declarations and runtime function bodies, but have no implicit entry, root runtime statements, page fragments, page purpose, route or builder artefact. Invalid root activity is diagnosed before executable HIR leaves the compiler.
+Support surfaces and the project package surface are API-only. They permit ordinary declarations and runtime function bodies, but have no implicit entry, root runtime statements, page fragments, page purpose, route or builder artefact. Invalid root activity is diagnosed before executable HIR leaves the compiler.
 
-The project facade consumes build-supplied facade visibility and produces an ordinary immutable module artefact. Its separate package assembly and project-wide assembly privilege remain build-owned.
+The project package surface consumes build-supplied package visibility and produces an ordinary immutable module artefact. Its separate package assembly and project-wide assembly privilege remain build-owned.
 
 Public visibility uses compiler-owned export metadata. `$export` is the accepted directive direction. Prefix-only versus optional directive-block form remains unsettled. Keep one final visibility syntax while preserving facade privacy and public re-exports.
 
@@ -290,7 +290,7 @@ An optional WIT-compatible export projects a package facade for foreign consumer
 
 ## Exact numeric identities and physical representation
 
-The canonical numeric and cast references routed by `docs/src/developer-docs/language/overview.mtf` own the complete source contract and operator matrix. This section owns compiler identities and their separation from physical representation. Stage 4 > `Numeric typing and literal materialisation` owns construction-only inference and its publication boundary.
+The canonical numeric and cast references routed by `docs/developer-docs/language/overview.mtf` own the complete source contract and operator matrix. This section owns compiler identities and their separation from physical representation. Stage 4 > `Numeric typing and literal materialisation` owns construction-only inference and its publication boundary.
 
 ### Canonical numeric identities
 
@@ -349,7 +349,7 @@ The compiler records project provenance through folded values, compile-time-deri
 
 Exported and custom-error boundary diagnostics carry a bounded failure witness (`BuiltinFailureWitness`). The witness retains at most three private call sites plus the terminal numeric operation or compound write-back, with its typed builtin cause codes and an elided-hop count for any further hops. The bound lives in the single shared `retain_bounded_witness_hops` in `src/compiler_frontend/ast/expressions/failure_facts.rs`, used by both the AST and HIR witness walkers. Source order selects the witness at each hop and canonical diagnostic ordering ignores worker completion order, so parallel and repeated compilation agree. The walk is a deterministic depth-first search over those ordered contributors: it skips recursive back-edges and backtracks from dead ends, so a later real producer behind an earlier recursive call still supplies the origin. The same-compound write-back keeps precedence over its arithmetic wherever the remaining order starts. Cross-module leaves, external leaves and unresolvable callees stop the witness as terminal leaves, all without inventing an origin or cause codes, and only a skipped back-edge permits trying the next contributor. A missing summary is a compiler error, never evidence of no failure. Donor ownership is preserved because only stable identities resolve and donor-local IDs never cross the boundary. The boundary emits one diagnostic, not a cascade at every private hop.
 
-The evidence and corrective guidance each implicit-failure, catch and error-boundary diagnostic must show live in the Diagnostics section of `docs/src/developer-docs/style-guide/style-guide.mtf`.
+The evidence and corrective guidance each implicit-failure, catch and error-boundary diagnostic must show live in the Diagnostics section of `docs/developer-docs/style-guide/style-guide.mtf`.
 
 ### Synthetic compile-time interfaces
 
@@ -705,7 +705,7 @@ A runtime anonymous record uses an ordinary hidden nominal struct, distinct from
 
 Resolve nested children before registering ordered parent fields. Hidden anonymous parents may contain hidden children, including an existing child value. This exception does not allow hidden types in authored nominal fields, function arguments/returns, exported surfaces, collections/maps or generic arguments. Check restrictions recursively through parents, optionals and captures. An extracted ordinary leaf retains its normal uses.
 
-Empty runtime records are invalid. Constant-looking fields alone do not select the const-record path. Ordinary struct construction, projection, copy, access and lifetime rules apply, with no anonymous-specific HIR/backend node or structural type unification. See `docs/src/docs/structs/anonymous-records.mtf` and `docs/roadmap/plans/runtime-anonymous-records-plan.md` for the full local-use contract.
+Empty runtime records are invalid. Constant-looking fields alone do not select the const-record path. Ordinary struct construction, projection, copy, access and lifetime rules apply, with no anonymous-specific HIR/backend node or structural type unification. See `docs/docs/structs/anonymous-records.mtf` and `docs/roadmap/plans/runtime-anonymous-records-plan.md` for the full local-use contract.
 
 #### Static Bool control-flow specialisation
 
@@ -851,7 +851,7 @@ The direct `.mtf` service has no containing output artefact or route. It returns
 
 Wiring has two constrained parameter contracts. A **wire** preserves a binding instance's continuing identity. A **constructor route** records how future input completes a known choice constructor. These routes are unrelated to HTML URL routes. Messages remain ordinary choice values.
 
-`of` is head-directed: the preceding compiler-known head determines whether the specification describes an ordinary generic type, a wire parameter or a constructor-route parameter. Sharing syntax adds neither user-defined specification grammars nor first-class capability containers. `docs/src/docs/wiring/wiring.mtf` owns the exact Wiring source contract and its channel boundary.
+`of` is head-directed: the preceding compiler-known head determines whether the specification describes an ordinary generic type, a wire parameter or a constructor-route parameter. Sharing syntax adds neither user-defined specification grammars nor first-class capability containers. `docs/docs/wiring/wiring.mtf` owns the exact Wiring source contract and its channel boundary.
 
 A V1 `Wire of T` parameter accepts a named local binding or a compatible existing wire parameter. An ordinary local acquires identity only when a wire-receiving call needs it, with no `Wire()` constructor or call-site marker. Mutable and immutable locals are eligible. Projections, indexed places and fresh/computed expressions are not. An ordinary `T` receiver reads the current value under normal access rules. A compatible wire receiver forwards identity. An ordinary value parameter does not preserve its caller's identity merely because its body could use one.
 
@@ -979,7 +979,7 @@ The module artefact validator, not HIR validation, checks folded fragments and t
 - Target validation checks reachable exact operations and target capabilities. Lowerers consume canonical HIR numeric domains and the physical plan rather than parallel width tables or semantic profile inputs.
 - Binary-float and Dec formatting use the common value-to-string boundary for templates and runtime lowering.
 
-- HIR validates supported external binary-float success payloads at their resolved exact precision before ordinary Moth code can observe them. The guarded boundary alone may hold a non-finite raw ABI carrier. Ordinary calls, handled or propagated success extraction, direct returns, constants and supported nested result shapes consume the same boundary classification and precision policy, never a package-name test. Unsupported shapes retain a capability diagnostic. [External binding contracts](src/docs/packages/external-binding-contracts.mtf) owns integrity-failure delivery and preservation of returned errors. Trusted registration failures retain the compiler invariant lane rather than becoming user data errors.
+- HIR validates supported external binary-float success payloads at their resolved exact precision before ordinary Moth code can observe them. The guarded boundary alone may hold a non-finite raw ABI carrier. Ordinary calls, handled or propagated success extraction, direct returns, constants and supported nested result shapes consume the same boundary classification and precision policy, never a package-name test. Unsupported shapes retain a capability diagnostic. [External binding contracts](docs/packages/external-binding-contracts.mtf) owns integrity-failure delivery and preservation of returned errors. Trusted registration failures retain the compiler invariant lane rather than becoming user data errors.
 
 Target-specific check elision remains a lowerer responsibility; each backend consumes only the proof classes it supports. Check elision is independent of failure delivery and preserves explicit failure continuations. Scalar size, alignment and computation carriers remain distinct from semantic numeric identity. Broader numeric proof algorithms remain deferred.
 
@@ -1078,7 +1078,7 @@ The planner owns every concrete physical transition. It translates each semantic
 
 Physical coalescing finishes before plan validation and fingerprinting. It may retain storage longer without widening semantic topology or changing outlives/legality. A full-control release variant cannot select `HostGC` or fall back to a tracing/reachability collector. Failure to provide a physical strategy for proven-legal topology is a compiler bug.
 
-`docs/src/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf` > `ValidatedMemoryPlan contract` owns complete plan contents and publication invariants. Its `Planning order` and the build document define orchestration. `check` validates the plan before stopping short of lowering/output.
+`docs/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf` > `ValidatedMemoryPlan contract` owns complete plan contents and publication invariants. Its `Planning order` and the build document define orchestration. `check` validates the plan before stopping short of lowering/output.
 
 ### Declared regions and backend handoff
 
@@ -1141,7 +1141,7 @@ Lowerers implement language-owned operations with native instructions or helpers
 
 A semantic type describes language meaning. Scalar storage describes bytes/alignment. A computation carrier is the target register/value representation used to operate on those bytes. Carrier or storage width never changes canonical identity.
 
-`docs/src/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf` > `Scalar storage and carriers` defines ordinary Wasm scalar sizes, carriers, alignment and load/store behaviour. The runtime/backend memory authority owns physical planning and aggregate layout. Other targets supply physical policies preserving the same semantics.
+`docs/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf` > `Scalar storage and carriers` defines ordinary Wasm scalar sizes, carriers, alignment and load/store behaviour. The runtime/backend memory authority owns physical planning and aggregate layout. Other targets supply physical policies preserving the same semantics.
 
 Scalar metadata alone creates no allocation family and moves no aggregate-layout or cleanup authority from `ValidatedMemoryPlan`. Compact storage creates neither a buffer source type nor arithmetic for `Byte`.
 
@@ -1162,7 +1162,7 @@ serve source calls, constructors, directives and named records. The
 compiler-local declaration-shell owner continues to serve headers and
 body-local declarations. MON uses neither parser.
 
-`docs/src/docs/mon/mon-format.mtf` owns root/field grammar, qualifiers, maps, defaults, encoding and receiver validation. `docs/compiler-data-layout-design.md` > `MON data handoff` owns cursor/input lifetime, spans, bounded allocation and public error context. Rust API signatures and routine internal shapes belong in public doc comments and their implementations, not a second field catalogue here.
+`docs/docs/mon/mon-format.mtf` owns root/field grammar, qualifiers, maps, defaults, encoding and receiver validation. `docs/compiler-data-layout-design.md` > `MON data handoff` owns cursor/input lifetime, spans, bounded allocation and public error context. Rust API signatures and routine internal shapes belong in public doc comments and their implementations, not a second field catalogue here.
 
 ### Isolation and schema ownership
 

@@ -1,0 +1,143 @@
+@project-layout content as project_layout
+@project-layout-basic content as project_layout_basic
+@project-config content as project_config
+@project-config-basic content as project_config_basic
+@module-roots content as module_roots
+@module-roots-basic content as module_roots_basic
+@public-api content as public_api
+@public-api-basic content as public_api_basic
+@entry-runtime-and-fragments content as entry_runtime_and_fragments
+@entry-runtime-and-fragments-basic content as entry_runtime_and_fragments_basic
+@html-routing-and-artifacts content as html_routing_and_artifacts
+@html-routing-and-artifacts-basic content as html_routing_and_artifacts_basic
+@build-inputs content as build_inputs
+@build-inputs-basic content as build_inputs_basic
+@entry-config content as entry_config
+@entry-config-basic content as entry_config_basic
+@project-package-facade content as project_package_facade
+@project-package-facade-basic content as project_package_facade_basic
+@styles navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+    sidebar,
+    init_docs_sidebar
+
+page_title #= "Project structure"
+page_description #= "How Moth projects are structured, how modules are discovered and how the HTML builder emits pages."
+page_head #= language_theme_head
+
+#[navbar]
+#[sidebar]
+init_docs_sidebar()!
+#[section, $md:
+    # Project structure
+
+    A Moth project combines directory-scoped modules, an optional root-level
+    project config and a builder that selects the final artefacts.
+
+    Normal module roots start with `@`. Support and package-facade roots start
+    with `+`. The rest of the filename stays cosmetic. `export:` currently
+    defines the public API. `$page` will declare HTML artefacts; today the
+    builder still selects entries from implemented root activity.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):project-layout]
+        [$insert("title"):Project layout]
+        [$insert("advanced"):[project_layout]]
+
+        [project_layout_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):project-config]
+        [$insert("title"):Project config]
+        [$insert("advanced"):[project_config]]
+
+        [project_config_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):module-roots]
+        [$insert("title"):Module roots]
+        [$insert("advanced"):[module_roots]]
+
+        [module_roots_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):public-api]
+        [$insert("title"):Public API]
+        [$insert("advanced"):[public_api]]
+
+        [public_api_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):entry-runtime-and-fragments]
+        [$insert("title"):Active-root runtime and fragments]
+        [$insert("advanced"):[entry_runtime_and_fragments]]
+
+        [entry_runtime_and_fragments_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):html-routing-and-artifacts]
+        [$insert("title"):HTML routing and artefacts]
+        [$insert("advanced"):[html_routing_and_artifacts]]
+
+        [html_routing_and_artifacts_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):build-inputs]
+        [$insert("title"):Build configuration values]
+        [$insert("advanced"):[build_inputs]]
+
+        [build_inputs_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):entry-config]
+        [$insert("title"):Entry metadata and page directives]
+        [$insert("advanced"):[entry_config]]
+
+        [entry_config_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):project-package-facade]
+        [$insert("title"):Project package facade]
+        [$insert("advanced"):[project_package_facade]]
+
+        [project_package_facade_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../memory/]
+        [$insert("previous_title"):Memory and lifetimes]
+        [$insert("next_path"):../packages/]
+        [$insert("next_title"):Packages and dependencies]
+    ]
+]

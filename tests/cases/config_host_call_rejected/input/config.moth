@@ -1,1 +1,1 @@
-entry_root #= io.line("src")
+sample_key #= io.line("src")

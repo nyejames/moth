@@ -437,6 +437,7 @@ fn prepare_active_root_with_role(
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let options = HeaderParseOptions {
         entry_file_id: None,
+        support_root_file_id: None,
         entry_file_role: None,
         active_root_role,
     };

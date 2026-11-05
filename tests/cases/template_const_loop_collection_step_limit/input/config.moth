@@ -1,6 +1,4 @@
 project #= (
     name = "template_const_loop_collection_step_limit",
-    entry_root = "src",
-    template_const_loop_iteration_limit = 3,
-)
+    template_const_loop_iteration_limit = 3)
 html #= ()

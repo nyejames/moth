@@ -2,7 +2,7 @@
 
 Looking for: the area accepting, rejecting, transforming or handing off data differently from the accepted contract.
 
-Judge against canonical documents and the [progress matrix](../../src/docs/progress/@page.moth), never against current behaviour alone. A missing deferred feature is not a defect.
+Judge against canonical documents and the [progress matrix](../../docs/progress/@page.moth), never against current behaviour alone. A missing deferred feature is not a defect.
 
 **Evidence bar:** an exact violated contract or invariant, plus a path or state trace that violates it. A design preference is not a correctness finding.
 

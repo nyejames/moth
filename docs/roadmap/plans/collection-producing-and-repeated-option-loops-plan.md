@@ -72,21 +72,21 @@ Read these from the active worktree before implementation:
   - `Lifetime-region and escape validation`
 - `docs/build-system-design.md`
   - target validation and backend handoff sections if backend capability coverage is affected
-- `docs/src/docs/loops/@page.moth`
-- `docs/src/docs/loops/conditional-loops.mtf`
-- `docs/src/docs/loops/collection-loops.mtf`
-- `docs/src/docs/loops/range-loops.mtf`
-- `docs/src/docs/loops/loop-control.mtf`
-- `docs/src/docs/branching/value-producing-if.mtf`
-- `docs/src/docs/errors/options.mtf`
-- `docs/src/docs/async/@page.moth`
-- `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf`
-- `docs/src/developer-docs/memory-management/overview.mtf`
+- `docs/docs/loops/@page.moth`
+- `docs/docs/loops/conditional-loops.mtf`
+- `docs/docs/loops/collection-loops.mtf`
+- `docs/docs/loops/range-loops.mtf`
+- `docs/docs/loops/loop-control.mtf`
+- `docs/docs/branching/value-producing-if.mtf`
+- `docs/docs/errors/options.mtf`
+- `docs/docs/async/@page.moth`
+- `docs/docs/cheatsheet/moth-language-cheatsheet.mtf`
+- `docs/developer-docs/memory-management/overview.mtf`
 - the routed borrow-validation and lifetime material for collection retention and loop liveness
-- `docs/src/developer-docs/style-guide/style-guide.mtf`
-- `docs/src/developer-docs/style-guide/testing.mtf`
-- `docs/src/developer-docs/style-guide/validation.mtf`
-- `docs/src/docs/progress/@page.moth`
+- `docs/developer-docs/style-guide/style-guide.mtf`
+- `docs/developer-docs/style-guide/testing.mtf`
+- `docs/developer-docs/style-guide/validation.mtf`
+- `docs/docs/progress/@page.moth`
 - `docs/roadmap/roadmap.md`
 
 The active documentation is the authority if any source path or internal Rust name in this queued plan has moved.
@@ -1320,9 +1320,9 @@ Update the loop documentation so the final source model is visible in one place.
 
 Expected changes:
 
-- [ ] add a Basic and Advanced "Collection-producing loops" section under `docs/src/docs/loops/`
-- [ ] add a Basic and Advanced or appropriately routed "Repeated option capture" section under `docs/src/docs/loops/`
-- [ ] update `docs/src/docs/loops/@page.moth`
+- [ ] add a Basic and Advanced "Collection-producing loops" section under `docs/docs/loops/`
+- [ ] add a Basic and Advanced or appropriately routed "Repeated option capture" section under `docs/docs/loops/`
+- [ ] update `docs/docs/loops/@page.moth`
 - [ ] update conditional, collection and range loop pages only where their interaction with production needs clarification
 - [ ] update `loop-control.mtf` for producing-loop `then`, `continue` and `break`
 - [ ] update `value-producing-if.mtf` to distinguish scalar completeness from collection-producing loop fallthrough
@@ -1353,7 +1353,7 @@ Do not teach a fictional iterator object as the conceptual model.
 
 ## Async documentation
 
-Verify `docs/src/docs/async/@page.moth` still reserves `yield` for explicit coroutine suspension.
+Verify `docs/docs/async/@page.moth` still reserves `yield` for explicit coroutine suspension.
 
 Only edit it if a short distinction is needed after the new loop docs land.
 
@@ -1393,7 +1393,7 @@ A target that accepts the source only because it already supports ordinary growa
 Suggested searches:
 
 ```bash
-rg -n 'ProducingLoop|Iterator|Generator|yield|active_.*target' src docs/src/docs
+rg -n 'ProducingLoop|Iterator|Generator|yield|active_.*target' src docs/docs
 rg -n 'ParsedLoopHeader|parse_.*loop.*header|TYPE_PARAMETER_BRACKET' src/compiler_frontend/ast
 rg -n 'OptionPresentCapture|parse_.*option.*capture|is \|' src/compiler_frontend/ast
 rg -n 'CollectionPushGrowable|PushGrowable' src/compiler_frontend src/backends

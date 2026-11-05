@@ -115,7 +115,7 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), entry_source).expect("should write entry");

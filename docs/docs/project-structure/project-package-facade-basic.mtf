@@ -1,0 +1,35 @@
+**Accepted API-only boundary.** The external project package surface is
+implemented. It cannot become an application entry through generic directives.
+
+A project can expose a public package API to other projects through an optional
+`+*.moth` root at the selected project directory.
+
+### What the package surface does
+
+A `+*.moth` root at the project root is the project package's support surface.
+It exports declarations that external consumers can bind. Without it, the
+project has no externally consumable package surface. When an `@*.moth` normal
+root is also present, both roots share helpers but keep isolated authoring
+scopes and interfaces.
+
+The support surface rejects top-level runtime work and page fragments. It
+cannot declare root-only `$page` metadata, has no implicit entry and emits no
+route.
+
+### How it reaches descendant modules
+
+The support surface follows the ordinary support visibility rule. It does not
+receive a privileged namespace over descendant modules, and internal project
+modules cannot import it as a private back door.
+
+### Privacy and inputs
+
+It cannot depend on `@project` or expose declarations that depend on
+project-private context. Configuration input contracts stay scoped to one
+project or package boundary; a consumer doesn't satisfy a dependency's
+contracts implicitly.
+
+### Concepts related to the facade basics
+
+- For module root rules see @#module-roots (Module roots).
+- For page purpose and dependency non-activation see @#entry-runtime-and-fragments (Active-root runtime and fragments).

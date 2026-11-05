@@ -124,6 +124,7 @@ fn test_file_value_resolution_services(
         ))),
         module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
         module_origin: None,
+        public_source_trait_origins: Arc::default(),
         frozen_identity_handle: FrozenIdentityHandle::new(),
     })
 }
@@ -194,6 +195,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_recovery_policy(
 
     let options = HeaderParseOptions {
         entry_file_id: None,
+        support_root_file_id: None,
         entry_file_role: None,
         active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     };

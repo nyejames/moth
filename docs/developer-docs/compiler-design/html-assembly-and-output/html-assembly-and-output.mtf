@@ -1,0 +1,238 @@
+# Building and writing the final page
+
+Every earlier stage produced records. The HTML builder's job is to turn the right records into one working document and a safe output set without rediscovering source structure or letting each backend spray files into the tree. This is harvest time, not another season of growth from seed.
+
+The Alpha builder currently receives grouped `html` settings and reserved `page_*` metadata. The resolved `$html_builder` settings and root-only `$page` metadata described here are accepted queued handoff facts; output ownership, fragment order and resource rules remain shared.
+
+This is the last primary stop on the chronological route. The fragment at the end is still:
+
+[codeblock, $code("html"):
+<p>Hello, Priya!</p>
+]
+
+## Assembly inputs
+
+The builder consumes explicit inputs such as:
+
+- entry assembly and activated root metadata
+- folded compile-time fragments and insertion indexes
+- runtime fragment slots and the entry invocation plan
+- selected functions and their target labels
+- JavaScript and Wasm outputs plus physical variants
+- runtime helpers and shared runtime modules
+- external glue and import maps
+- reachable resource uses and the stable origins behind them
+- resolved `$page` metadata and `$html_builder` settings
+
+If a fact is missing, an upstream owner failed. The builder should not open `greeting.moth` to peek at source again.
+
+[diagram:
+    [$insert("label"): Everything converges, nothing is rediscovered]
+    [$insert("caption"): Harvest time. Every input arrived as a record from an owner upstream, which is why the builder never has to open a source file.]
+
+    [stage:
+        [node:
+            [$insert("href"): ../linking-entries-and-reachability/]
+            [$insert("eyebrow"): From the compiler]
+            [$insert("title"): Semantic records]
+            Entry assembly, activated root metadata, folded fragments with insertion indexes and reachable resource uses.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../backend-lowering/]
+            [$insert("eyebrow"): From the backends]
+            [$insert("title"): Emitted code]
+            JavaScript, Wasm and physical variants, runtime helpers, shared runtime modules, external glue and import maps.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Builder]
+            [$insert("title"): One document and one output plan]
+            Placement, conflict resolution and URL contexts settle here. This is the only stage that makes physical decisions.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Written under one owned root]
+                [fanout:
+                [detail:
+                    [$insert("href"): ./]
+                    HTML document
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    JavaScript and Wasm
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    Runtime assets
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    Output manifest
+                ]
+                ]
+            ]
+        ]
+    ]
+]
+
+## Document shell and fragments
+
+Assembly plans route and document metadata, then builds a shell.
+
+**Compile-time fragments** insert at recorded indexes first. They are already strings. The greeting's static paragraph wants this path when everything folded.
+
+**Runtime path:** invoke the entry once for the activated root and branch on its typed outcome. Its built-in `Error!` channel sits alongside the fragment-collection success slots. Stage that invocation's runtime fragment results and publish them, in source order, only after success. On error, discard unpublished results and never read undefined success slots.
+
+Failure leaves the static HTML in place and does not undo earlier explicit IO, title changes or host calls. Staging is not a transaction over the DOM or application state. There is no automatic retry. Release shows a fixed safe notice as escaped text, not the application's `Error` message as HTML, and that notice does not depend on the failed application template. A wholly static page does not gain mandatory runtime code merely because the entry may return `Error!`.
+
+Development presentation stays local to the failing invocation. It does not fail the completed compilation, change global build success or affect other entries. The dev view reuses the compiler-error presentation, keeps hot reload, and reports in the browser and the server terminal. Three categories stay distinct: an explicit entry `Error!` outcome, a compiler-identified assertion failure, and an unexpected fault that escaped the owned startup wrapper. Assertion identity is compiler-owned, never message-text matching. The report protocol, including same-origin validation, deduplication and the prohibition on global build-state poisoning, lives in `docs/build-system-design.md` > `Development entry-error reports`. The @../../../docs/progress (Progress matrix) records current support.
+
+The result is a document anatomy: HTML shell, paragraph text, script tags, runtime references and whatever the entry needs to boot.
+
+## External work
+
+External JavaScript assets arrive **demand-driven**. Import maps and glue appear because link facts and bindings required them, not because a page collected script tags out of habit.
+
+## Resources and output records
+
+The compiler hands over semantic facts and no physical decisions. A resource use is a stable origin plus the location that wanted it, and the strings carrying it still hold an unresolved anchor rather than a URL. Placement, conflicts, copying and link text are all builder work, and this is the stage that does it.
+
+**Liveness is exact.** Entry planning unions the resource uses reachable from the selected entry, from reachable source and generated functions, from runtime and compile-time fragments, from entry settings and from provider requirements. Every physical-target-bearing file path became a build input and a watch interest long before this. That happened before AST and never depended on reachability. A `.moth` path has no file value at all and earns a `SourceKindNoFileValue` diagnostic if something asks for one. A site-root `@/` is a structural piece with no physical target. Emission is the narrower question. A resource that nothing reachable uses is never read, never hashed and never written, though the watcher still knows the physical targets that were authored.
+
+**Then placement.** Project-local resources keep their path relative to the selected project directory. Package resources sit under one package prefix, chosen so no two packages can ever land on the same prefix. Provider-managed output uses its declared stable path. Conflicts settle here: one origin at one path deduplicates, different origins at the same path fail with both authored locations and resource output collides with HTML, JavaScript, Wasm and manifest output on equal terms. All of that completes before a single resource byte is read.
+
+**Only then, link text.** Each use gets a URL context, meaning the artefact whose URL rules observe the string: the page document for inline CSS, the stylesheet for standalone CSS. The builder renders a lexical relative path from that artefact's parent, with `/` separators, percent-encoded segments, `./` on same-or-descendant paths and `../` retained. A builder that cannot assign a context to a reachable use rejects it rather than guessing one.
+
+The site root is the other structural piece, and it plays by different rules. It names no file, has no origin and joins no union. It renders from the project-origin policy of the selected artefact instead.
+
+A builder with no such policy rejects a reachable site-root use during target contract validation. It never quietly settles for `/`. That origin is also never prepended to an ordinary resource URL, which keeps the two path systems from bleeding into each other.
+
+Nothing here scans rendered HTML, CSS or Markdown to rediscover files. The records were complete when they arrived.
+
+Manifests remember what this builder produced. Incremental builds compare records. Humans and tools can audit the set.
+
+## Writing and ownership
+
+[diagram:
+    [$insert("label"): Nobody writes a file until the whole set is agreed]
+    [$insert("caption"): Backends hand over records rather than writing directly, so conflicts surface before any byte lands and cleanup knows exactly what it owns.]
+
+    [stage:
+        [node:
+            [$insert("href"): ../backend-lowering/]
+            [$insert("eyebrow"): Backends]
+            [$insert("title"): Emit records]
+            Each backend describes what it produced. None of them opens an output directory of its own.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Build system]
+            [$insert("title"): Validate the whole set]
+            Every declared path is checked together. A conflicting manifest is rejected here, before writing rather than after.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Build system]
+            [$insert("title"): Write and record]
+            Unchanged bytes are skipped. Everything written is recorded in the manifest.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Cleanup, keyed by builder and profile]
+                [lane:
+                [detail:
+                    [$insert("href"): ./]
+                    A debug build never tidies up after a release build
+                ]
+                ]
+            ]
+        ]
+    ]
+]
+
+The build system owns output validation, writing, manifests and stale cleanup.
+
+Practical rules that keep disks sane:
+
+- skip writes when bytes did not change
+- clean stale files owned by the selected builder **and build profile**
+- never delete files owned by another builder or another profile
+- reject a conflicting manifest before writing rather than after
+- declare every produced path so ownership transitions stay honest
+
+Ownership is keyed by builder identity and build profile together. A debug build does not get to tidy up after a release build.
+
+Backends emit data into central records. They do not each open a private output directory and hope the next clean step guesses right.
+
+## Final checkpoint
+
+A conceptual output tree for the walkthrough might contain:
+
+[codeblock, $code("text"):
+output/
+├── index.html          -- or route-shaped HTML
+├── *.js                -- page scripts and helpers
+├── *.wasm              -- when the partition needs it
+├── runtime/            -- shared helpers as designed
+└── manifest            -- owned output inventory
+]
+
+Open the HTML. Find the fragment:
+
+[codeblock, $code("html"):
+<p>Hello, Priya!</p>
+]
+
+That string travelled a long way: characters, tokens, shells, bindings, types, folded constants, template handoff, diagnostics that stayed quiet, HIR, memory rules, artefacts, entry plans, target assignment, lowering and assembly. Each owner removed one ambiguity and refused to rebuild the previous owner's work from bare source.
+
+No later primary tutorial page follows in this series. Deep dives live in language, memory and progress authorities when you need the fine print.
+
+## What can fail here
+
+- invalid route or output path
+- a reachable resource use with no assignable URL context
+- a reachable site-root use on a target with no project-origin policy
+- duplicate or conflicting output paths
+- failed target record
+- stale-file ownership conflict
+
+A *missing* physical target is not an assembly failure. Paths resolve once during Stage 0, well before AST, so that diagnostic arrived many stages ago.
+
+An *unreadable* one is a different story. Resource bytes are read only after placement and conflict validation, so a file that resolved fine at Stage 0 and then became unreadable can still fail output emission as a filesystem error.
+
+Backend generation failures belong to the backend article. Assembly failures belong here.
+
+## Why Moth does it this way
+
+**Alternative:** let each backend write files, or let builders rescan source.
+
+**Choice:** central output records, validation, manifests and stale cleanup.
+
+**Benefit:** output ownership stays auditable and repeatable.
+
+**Cost:** builders must declare every produced file and ownership transition.
+
+## Roadmap and current status
+
+- **Accepted design:** build-system-owned output writing and manifests, and structural resource anchors the builder lowers once placement and a URL context exist.
+- **Current implementation:** HTML, resource and backend progress rows. Resource linking uses structural Resource/SiteRoot pieces, exact live-origin unions and builder-owned URL contexts.
+- **Queued work:** `html_project_backend_wasm_final_implementation_plan.md` and `html-page-directives-and-runtime-title-plan.md`.
+- **Deferred or outside scope:** backend-owned output directories, content-addressed output names and general resource transformation pipelines. Stale artefact cleanup itself is accepted and current, scoped to manifest paths the selected builder and profile own.
+
+## Exit state
+
+Generated HTML, runtime assets and an owned output manifest sit on disk. The final fragment is `<p>Hello, Priya!</p>`. The chronological educational route ends here.

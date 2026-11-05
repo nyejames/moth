@@ -1,0 +1,4 @@
+@shared helper_value
+export:
+    @shared helper_value
+;

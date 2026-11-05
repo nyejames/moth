@@ -210,17 +210,19 @@ impl StablePackageIdentity {
     }
 }
 
-/// The structural role of one canonical module root.
+/// The structural role of one canonical module origin.
 ///
 /// `Normal` roots (`@*.moth`) are entry candidates. `Support` roots (`+*.moth`) are scoped package
-/// roots that are never entry candidates. `ProjectPackageFacade` is the optional project-root
-/// `+*.moth` beside `config.moth`; Stage 0 assigns it from location rather than filename alone and
-/// it never participates in entry-root containment or dependency-resolution lookup.
+/// roots that are never entry candidates. `Shared` is the role-neutral defining origin for helper
+/// files that are owned once by a structural directory module and may be reached by both root
+/// surfaces. `SyntheticProjectContext` is retained only for the synthetic `@project` context; it has
+/// no filesystem or graph meaning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ModuleRootRole {
     Normal,
     Support,
-    ProjectPackageFacade,
+    Shared,
+    SyntheticProjectContext,
 }
 
 impl ModuleRootRole {
@@ -251,21 +253,20 @@ impl StableModuleOriginIdentity {
     /// Construct the stable origin for the synthetic project-global context.
     ///
     /// Project globals have no source file or filesystem-backed module root. The reserved
-    /// `project-globals` logical marker keeps this synthetic origin distinct from the real
-    /// project-package facade, whose logical path is empty, while reusing the existing
-    /// project-local package and facade-role identity vocabulary.
+    /// `project-globals` logical marker keeps this synthetic origin distinct from every
+    /// filesystem root surface, whose logical path is empty at the selected root.
     pub(crate) fn project_context(package: StablePackageIdentity) -> Self {
         Self {
             package,
             logical_module_path: "project-globals".to_owned(),
-            role: ModuleRootRole::ProjectPackageFacade,
+            role: ModuleRootRole::SyntheticProjectContext,
         }
     }
 
     /// Build the cross-build identity from a base-relative logical module path.
     ///
     /// `relative_logical_path` is the `PathBuf` produced by stripping the canonical root
-    /// directory against its base (the entry root, or the project root for the facade). It is
+    /// directory against its base (the entry root). It is
     /// converted to a portable forward-slash spelling so the identity is self-contained and
     /// platform-independent.
     ///
@@ -318,6 +319,40 @@ impl StableModuleOriginIdentity {
     /// The structural root role.
     pub(crate) fn role(&self) -> ModuleRootRole {
         self.role
+    }
+
+    /// Rebind the same package and logical module path to one surface role.
+    ///
+    /// WHAT: preserves the stable package and module path while selecting the normal, support or
+    ///       role-neutral shared origin of the same structural directory.
+    /// WHY: one paired semantic compilation holds the active normal origin and needs the matching
+    ///      origin for declarations authored in the support root or a shared helper.
+    pub(crate) fn with_role(&self, role: ModuleRootRole) -> Self {
+        Self {
+            package: self.package.clone(),
+            logical_module_path: self.logical_module_path.clone(),
+            role,
+        }
+    }
+
+    /// Whether two origins belong to the same rooted directory module.
+    ///
+    /// A shared helper origin and a root-qualified origin at the same package and logical module
+    /// path belong to one structural module. Two different root surfaces do not: a normal and a
+    /// support origin at the same path remain isolated scopes.
+    pub(crate) fn is_same_structural_module(&self, other: &Self) -> bool {
+        if self == other {
+            return true;
+        }
+        if self.package != other.package || self.logical_module_path != other.logical_module_path {
+            return false;
+        }
+        self.role == ModuleRootRole::Shared || other.role == ModuleRootRole::Shared
+    }
+
+    /// Whether two origins name the same rooted directory, regardless of root surface role.
+    pub(crate) fn is_same_structural_directory(&self, other: &Self) -> bool {
+        self.package == other.package && self.logical_module_path == other.logical_module_path
     }
 }
 

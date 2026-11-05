@@ -22,7 +22,7 @@ When canonical authorities conflict, record the exact incompatible statements an
 
 ## Status against reality
 
-Compare canonical design with the [progress matrix](../../src/docs/progress/@page.moth):
+Compare canonical design with the [progress matrix](../../docs/progress/@page.moth):
 
 - supported rows describe behaviour the compiler actually claims
 - partial rows name the implemented subset and the important gaps
@@ -37,7 +37,7 @@ A code defect found here becomes a linked Correctness finding; a missing test be
 
 Verify every in-scope path and reference actually resolves. Search for old paths and terminology rather than only checking visible links: renamed modules, old project or language names, old file extensions, removed keywords, renamed stages or IRs, old diagnostic prefixes or command names.
 
-`index.md` stays a locator, not a competing design authority. Generated output under `docs/release/**` is never cited as a source owner and is never edited directly.
+`index.md` stays a locator, not a competing design authority. Generated output under `docs/_release/**` is never cited as a source owner and is never edited directly.
 
 ## Examples
 

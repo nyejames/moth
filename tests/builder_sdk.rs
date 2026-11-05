@@ -20,6 +20,10 @@ const UNTERMINATED_RECORD_PAGE_SOURCE: &str = "stats #= (a = 1\n";
 /// Imports `greet` from the `@ui` package that only one test builder registers.
 const UI_IMPORT_PAGE_SOURCE: &str = "@ui greet\nvalue = greet()\n";
 
+/// Imports a shared helper constant and a shared nominal with a receiver method from `@ui`.
+const UI_SUPPORT_HELPER_IMPORT_PAGE_SOURCE: &str =
+    "@ui value, Message\nmessage = Message(\"hello\")\nio.line([: [value] [message.label()]])\n";
+
 /// A `Byte` value passed to a host function that takes `Byte`.
 const HOST_BYTE_PAGE_SOURCE: &str = "@platform takes_byte\noctet Byte = 42\ntakes_byte(octet)\n";
 
@@ -85,14 +89,12 @@ impl ProjectBuilder for PackageFacadeBuilder {
 /// Writes a one-page project whose page holds `page_source` and, when requested, its
 /// `+package.moth` facade beside `config.moth`.
 fn write_project(project_root: &Path, page_source: &str, with_facade: bool) {
-    let src = project_root.join("src");
-    fs::create_dir_all(&src).expect("should create src");
     fs::write(
         project_root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\n",
+        "project #= (\n    name = \"docs\",\n)\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), page_source).expect("should write page");
+    fs::write(project_root.join("@page.moth"), page_source).expect("should write page");
     if with_facade {
         fs::write(
             project_root.join("+package.moth"),
@@ -256,6 +258,36 @@ impl ProjectBuilder for ByteParameterBuilder {
     }
 }
 
+/// Writes a paired `@ui` source package whose external surface is its `+` root.
+fn write_ui_paired_package(package_root: &Path) {
+    fs::write(
+        package_root.join("@mod.moth"),
+        "normal_value #= \"normal\"\n",
+    )
+    .expect("should write normal package root");
+    fs::write(
+        package_root.join("+package.moth"),
+        "export:\n    @impl greeting\n;\n",
+    )
+    .expect("should write support package facade");
+    fs::write(package_root.join("impl.moth"), "greeting #= \"support\"\n")
+        .expect("should write shared package helper");
+}
+
+/// Writes a support-only `@ui` package root that re-exports shared helper declarations.
+fn write_ui_support_package(package_root: &Path) {
+    fs::write(
+        package_root.join("+package.moth"),
+        "export:\n    @impl value, Message\n;\n",
+    )
+    .expect("should write support package facade");
+    fs::write(
+        package_root.join("impl.moth"),
+        "value #= 7\n\nMessage = | text String |\n\nlabel |this Message| -> String:\n    return this.text\n;\n",
+    )
+    .expect("should write shared package helpers");
+}
+
 /// Writes a `@ui` package root whose only module exports `greet`.
 fn write_ui_package(package_root: &Path) {
     fs::write(
@@ -303,6 +335,44 @@ fn independent_definitions_do_not_share_source_packages() {
     assert_eq!(error.kind(), ErrorKind::Compilation);
     build_project(&ui_builder, BuildRequest::new(project_dir.path()))
         .expect("the first builder should still resolve @ui after the failing build");
+}
+
+#[test]
+fn builder_registered_support_only_source_package_publishes_its_support_interface() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(
+        project_dir.path(),
+        UI_SUPPORT_HELPER_IMPORT_PAGE_SOURCE,
+        false,
+    );
+    let ui_dir = tempfile::tempdir().expect("should create package directory");
+    write_ui_support_package(ui_dir.path());
+    let builder = UiPackageBuilder {
+        ui_root: ui_dir.path().to_path_buf(),
+    };
+
+    build_project(&builder, BuildRequest::new(project_dir.path())).expect(
+        "a builder-registered support-only package should publish its support interface and import",
+    );
+}
+
+#[test]
+fn builder_registered_paired_source_package_publishes_its_support_interface() {
+    let project_dir = tempfile::tempdir().expect("should create project directory");
+    write_project(
+        project_dir.path(),
+        "@ui greeting\nio.line([: [greeting]])\n",
+        false,
+    );
+    let ui_dir = tempfile::tempdir().expect("should create package directory");
+    write_ui_paired_package(ui_dir.path());
+    let builder = UiPackageBuilder {
+        ui_root: ui_dir.path().to_path_buf(),
+    };
+
+    build_project(&builder, BuildRequest::new(project_dir.path())).expect(
+        "external consumers must receive the paired package support interface, not its normal root",
+    );
 }
 
 #[test]

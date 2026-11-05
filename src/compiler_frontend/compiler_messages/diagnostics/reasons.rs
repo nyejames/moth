@@ -355,8 +355,6 @@ impl UnsupportedBackendFeatureReason {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidConfigReason {
     MissingKey,
-    MissingConfigFile,
-    MissingProjectRecord,
     MissingActiveBuilderSection {
         section: StringId,
     },
@@ -463,9 +461,6 @@ pub enum InvalidConfigReason {
         artefact_kind: StringId,
         reason: InvalidOutputFolderReason,
     },
-    ConfiguredEntryRootMissing {
-        entry_root: StringId,
-    },
     EntryRootPackagePrefixCollision {
         prefix: StringId,
         entry_folder: StringId,
@@ -485,6 +480,26 @@ pub enum InvalidConfigReason {
     MultipleModuleRootFiles {
         directory: StringId,
         candidates: Vec<StringId>,
+    },
+    AliasedModuleRootFiles {
+        first_root: StringId,
+        second_root: StringId,
+        target: StringId,
+    },
+    ModuleRootFileOutsideClaimingModule {
+        root_file: StringId,
+        claiming_directory: StringId,
+        target: StringId,
+    },
+    /// A reserved `@*.moth` or `+*.moth` root marker names a directory or other non-file entry.
+    ///
+    /// The diagnostic keeps the authored marker, its containing directory and the canonical
+    /// target so the malformed filesystem structure is visible without falling back to a
+    /// missing-root error.
+    ModuleRootFileNotRegularFile {
+        root_file: StringId,
+        directory: StringId,
+        target: StringId,
     },
     ConfigImportUnsupported,
     FileValuePathUnsupported,
@@ -523,7 +538,8 @@ pub enum InvalidOutputFolderReason {
     ParentDirectorySegment,
     CurrentDirectory,
     InvalidPathComponent,
-    InsideOrEqualToEntryRoot,
+    /// A multi-component directory output path has no `_`-prefixed directory component.
+    VisibleDirectoryOutputPath,
     ResolvesOutsideProjectRoot,
 }
 
@@ -738,6 +754,8 @@ pub enum InvalidImportPathReason {
     ParentDirectorySegment,
     EscapesProjectRoot,
     EscapesSourcePackageRoot,
+    /// A proven intermediate dependency-path component names a hidden source directory.
+    HiddenDirectory,
     CaseMismatch {
         provided: StringId,
         expected: StringId,
@@ -758,6 +776,10 @@ pub enum InvalidCompileTimePathReason {
     EscapesModuleBoundary,
     EscapesSymlink,
     EscapesProjectRoot,
+    /// The target lies inside a `_`-prefixed directory excluded from source discovery.
+    HiddenPath,
+    /// The target is the reserved `config.moth` source, which is not a module helper.
+    ReservedConfigFile,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

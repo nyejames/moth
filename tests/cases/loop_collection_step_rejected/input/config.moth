@@ -1,5 +1,3 @@
 project #= (
-    name = "loop_collection_step_rejected",
-    entry_root = "src",
-)
+    name = "loop_collection_step_rejected")
 html #= ()

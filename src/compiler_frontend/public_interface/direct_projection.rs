@@ -487,7 +487,11 @@ fn project_declaration_records<'a>(
     for binding in export_bindings {
         // Provider-owned bindings stay in the draft for publication closure. They must not
         // consume local roots or trait records during direct projection.
-        if binding.origin().module_origin() != binding.exporting_module() {
+        if !binding
+            .origin()
+            .module_origin()
+            .is_same_structural_module(binding.exporting_module())
+        {
             continue;
         }
 

@@ -137,7 +137,6 @@ struct ExportProjectionFixture {
     string_table: StringTable,
     path_fork: PathInternerFork,
     active_root_file_id: SourceId,
-    module_root: PathId,
     module_origin: StableModuleOriginIdentity,
 }
 
@@ -146,6 +145,14 @@ struct ExportProjectionFixture {
 /// model the already-bound public export map so they exercise semantic projection rather than
 /// duplicating path-resolver setup owned by header binding.
 fn build_reexport_fixture(sources: &[(&str, &str)], project_name: &str) -> ExportProjectionFixture {
+    build_reexport_fixture_with_shared_sources(sources, project_name, &[])
+}
+
+fn build_reexport_fixture_with_shared_sources(
+    sources: &[(&str, &str)],
+    project_name: &str,
+    shared_source_paths: &[&str],
+) -> ExportProjectionFixture {
     let active_path = PathBuf::from(
         sources
             .first()
@@ -183,13 +190,30 @@ fn build_reexport_fixture(sources: &[(&str, &str)], project_name: &str) -> Expor
         .get_by_canonical_path(&active_path)
         .expect("the projection active root should have a file identity")
         .id;
+    let package = StablePackageIdentity::project_local(project_name);
     let module_origin = StableModuleOriginIdentity::from_portable_path(
-        StablePackageIdentity::project_local(project_name),
+        package.clone(),
         "active".to_owned(),
         ModuleRootRole::Normal,
     );
+    let mut origin_by_path = rustc_hash::FxHashMap::default();
+    for path in &canonical_paths {
+        let origin = if shared_source_paths
+            .iter()
+            .any(|shared_path| std::path::Path::new(shared_path) == path)
+        {
+            StableModuleOriginIdentity::from_portable_path(
+                package.clone(),
+                "active".to_owned(),
+                ModuleRootRole::Shared,
+            )
+        } else {
+            module_origin.clone()
+        };
+        origin_by_path.insert(path.clone(), origin);
+    }
     let source_module_origins =
-        SourceModuleOriginTable::from_synthetic_origin(&source_files, &module_origin);
+        SourceModuleOriginTable::from_graph_ownership(&source_files, &origin_by_path);
     let module_root = path_fork
         .try_intern_portable_path("module-root", &mut string_table)
         .expect("test path fits");
@@ -228,7 +252,6 @@ fn build_reexport_fixture(sources: &[(&str, &str)], project_name: &str) -> Expor
         string_table,
         path_fork,
         active_root_file_id,
-        module_root,
         module_origin,
     }
 }
@@ -393,7 +416,11 @@ fn same_module_reexport_preserves_alias_origin_and_authored_provenance() {
         .canonical_source_by_symbol_path
         .insert(target_path, target_source);
     fixture.module_symbols.module_root_public_exports.insert(
-        fixture.module_root,
+        *fixture
+            .module_symbols
+            .source_paths_by_source_id
+            .get(&fixture.active_root_file_id)
+            .expect("active root source path should be prepared"),
         [PublicExportEntry {
             export_name: fixture.string_table.intern("PublicValue"),
             target: PublicExportTarget::SourceDeclaration { path: target_path },
@@ -427,6 +454,80 @@ fn same_module_reexport_preserves_alias_origin_and_authored_provenance() {
         .iter()
         .find(|entry| entry.public_name == "PublicValue")
         .expect("same-module re-export should retain target provenance");
+    assert_eq!(provenance.span, expected_span);
+}
+
+#[test]
+fn helper_reexport_preserves_role_neutral_defining_origin() {
+    let mut fixture = build_reexport_fixture_with_shared_sources(
+        &[
+            ("src/@page.moth", "placeholder #= 1\n"),
+            ("src/impl.moth", "value #= 1\n"),
+        ],
+        "shared-helper-reexport",
+        &["src/impl.moth"],
+    );
+    let target_header = header_named(
+        &fixture.headers,
+        "value",
+        &fixture.string_table,
+        &fixture.path_fork,
+    );
+    let target_path = target_header.declaration_path;
+    let target_source = fixture
+        .module_symbols
+        .source_paths_by_source_id
+        .get(&target_header.tokens.source())
+        .copied()
+        .expect("target header source path should be prepared");
+    let expected_span = target_header.name_span;
+
+    fixture
+        .module_symbols
+        .canonical_source_by_symbol_path
+        .insert(target_path, target_source);
+    fixture.module_symbols.module_root_public_exports.insert(
+        *fixture
+            .module_symbols
+            .source_paths_by_source_id
+            .get(&fixture.active_root_file_id)
+            .expect("active root source path should be prepared"),
+        [PublicExportEntry {
+            export_name: fixture.string_table.intern("PublicValue"),
+            target: PublicExportTarget::SourceDeclaration { path: target_path },
+        }]
+        .into_iter()
+        .collect(),
+    );
+
+    let seed = build_direct_export_seed(
+        &fixture.source_module_origins,
+        fixture.active_root_file_id,
+        &fixture.headers,
+        &fixture.module_symbols,
+        &SourceProviderDependencySet::default(),
+        &ExternalPackageRegistry::default(),
+        &fixture.string_table,
+        &fixture.path_fork,
+    )
+    .expect("shared-helper re-export projection should succeed");
+
+    let shared_origin = StableModuleOriginIdentity::from_portable_path(
+        fixture.module_origin.package().clone(),
+        "active".to_owned(),
+        ModuleRootRole::Shared,
+    );
+    let binding = binding_for(&seed, "PublicValue");
+    assert_eq!(
+        binding.origin(),
+        &OriginDeclarationId::Constant(OriginConstantId::new(shared_origin, "value".to_owned())),
+        "a re-exported helper declaration must keep its role-neutral defining identity"
+    );
+    let provenance = seed
+        .export_diagnostic_provenance()
+        .iter()
+        .find(|entry| entry.public_name == "PublicValue")
+        .expect("helper re-export should retain target provenance");
     assert_eq!(provenance.span, expected_span);
 }
 
@@ -473,7 +574,11 @@ fn provider_reexport_preserves_alias_and_provider_provenance() {
     }])
     .expect("one authored provider should register");
     fixture.module_symbols.module_root_public_exports.insert(
-        fixture.module_root,
+        *fixture
+            .module_symbols
+            .source_paths_by_source_id
+            .get(&fixture.active_root_file_id)
+            .expect("active root source path should be prepared"),
         [PublicExportEntry {
             export_name: fixture.string_table.intern("PublicImported"),
             target: PublicExportTarget::ProviderSelection {
@@ -555,7 +660,11 @@ fn external_binding_export_identity_resolves_in_independent_registry() {
     );
     let export_name = fixture.string_table.intern("PublicLength");
     fixture.module_symbols.module_root_public_exports.insert(
-        fixture.module_root,
+        *fixture
+            .module_symbols
+            .source_paths_by_source_id
+            .get(&fixture.active_root_file_id)
+            .expect("active root source path should be prepared"),
         [PublicExportEntry {
             export_name,
             target: PublicExportTarget::External(ExternalSymbolId::Function(donor_length)),
@@ -786,93 +895,6 @@ fn out_of_range_active_root_file_id_fails_internally() {
     assert!(
         error.message.contains("out-of-range"),
         "the error must state the out-of-range violation, got: {}",
-        error.message
-    );
-}
-
-#[test]
-fn conflicting_public_header_ownership_fails_internally() {
-    // Hidden invariant: when two directly-defined public headers resolve to different owning
-    // module origins, the projection must fail rather than picking one silently.
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut headers = parse_single_file_headers_with_fork(
-        "export:\n    alpha #= 1\n    beta #= 2\n;\n",
-        &mut string_table,
-        &mut path_fork,
-    );
-
-    let file_path = PathBuf::from("src/@page.moth");
-    let second_path = PathBuf::from("src/other.moth");
-    let source_files = SourceDatabase::build(
-        [file_path.clone(), second_path.clone()],
-        &file_path,
-        None,
-        &mut string_table,
-    )
-    .expect("source file table should build with two files");
-    let active_file_id = source_files
-        .get_by_canonical_path(&file_path)
-        .expect("active root should be in the source file table")
-        .id;
-    let other_file_id = source_files
-        .get_by_canonical_path(&second_path)
-        .expect("second file should be in the source file table")
-        .id;
-
-    let active_origin = StableModuleOriginIdentity::from_portable_path(
-        StablePackageIdentity::project_local("test-project"),
-        "active".to_owned(),
-        ModuleRootRole::Normal,
-    );
-    let other_origin = StableModuleOriginIdentity::from_portable_path(
-        StablePackageIdentity::project_local("test-project"),
-        "other".to_owned(),
-        ModuleRootRole::Normal,
-    );
-
-    let mut origin_by_canonical_path = rustc_hash::FxHashMap::default();
-    origin_by_canonical_path.insert(file_path.clone(), active_origin.clone());
-    origin_by_canonical_path.insert(second_path.clone(), other_origin.clone());
-    let source_module_origins =
-        SourceModuleOriginTable::from_graph_ownership(&source_files, &origin_by_canonical_path);
-
-    // Assign every header's retained file id so the projection can resolve its origin. `alpha`
-    // carries the active file id (matching the active root origin) while `beta` carries the
-    // other file id, so its table origin is the other module origin and the projection detects
-    // the ownership conflict.
-    let mut constant_index = 0usize;
-    for header in &mut headers.headers {
-        if matches!(header.kind, HeaderKind::Constant { .. }) {
-            header.tokens = header.tokens.rebind_source(if constant_index == 1 {
-                other_file_id
-            } else {
-                active_file_id
-            });
-            constant_index += 1;
-        }
-    }
-
-    let result = build_direct_export_seed(
-        &source_module_origins,
-        active_file_id,
-        &headers.headers,
-        &headers.module_symbols,
-        &SourceProviderDependencySet::default(),
-        &ExternalPackageRegistry::default(),
-        &string_table,
-        &path_fork,
-    );
-
-    let error = match result {
-        Err(error) => error,
-        Ok(_) => panic!("conflicting public header ownership must fail"),
-    };
-    assert!(
-        error
-            .message
-            .contains("does not match the active root origin"),
-        "the error must state the ownership conflict, got: {}",
         error.message
     );
 }

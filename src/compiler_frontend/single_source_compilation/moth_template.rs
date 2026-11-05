@@ -731,6 +731,7 @@ fn fold_template_semantics(
                 ))),
                 module_resources: Rc::clone(&module_resources),
                 module_origin,
+                public_source_trait_origins: Arc::default(),
                 frozen_identity_handle,
             })
         });
@@ -823,6 +824,7 @@ fn prepare_template_source(
 ) -> SourcePreparationDelta {
     let options = HeaderParseOptions {
         entry_file_id: Some(entry_file_id),
+        support_root_file_id: None,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };

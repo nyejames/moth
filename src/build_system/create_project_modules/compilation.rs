@@ -90,6 +90,7 @@ pub(super) struct ModuleBoundaryPublication<'a> {
     pub resource_inputs: &'a mut ResourceInputRegistry,
     pub module_id: ModuleId,
     pub expected_origin: &'a StableModuleOriginIdentity,
+    pub expected_support_origin: Option<&'a StableModuleOriginIdentity>,
     pub artifact: CompiledModuleArtifact,
     pub generated_delta: GeneratedFunctionDelta,
     pub resource_source_associations: Vec<ResourceSourceAssociation>,
@@ -112,6 +113,7 @@ pub(super) fn publish_module_and_generated(
         resource_inputs,
         module_id,
         expected_origin,
+        expected_support_origin,
         artifact,
         generated_delta,
         resource_source_associations,
@@ -119,7 +121,12 @@ pub(super) fn publish_module_and_generated(
     // Every fallible check runs before anything mutates. The reservations and commits that follow
     // cannot fail, so a rejected publication leaves module, generated and resource registries
     // unchanged.
-    let module_publication = modules.preflight_success(module_id, &artifact, expected_origin)?;
+    let module_publication = modules.preflight_success(
+        module_id,
+        &artifact,
+        expected_origin,
+        expected_support_origin,
+    )?;
     let generated_publication = generated.preflight(&generated_delta)?;
     let resource_publication =
         resource_inputs.preflight_resource_source_associations(&resource_source_associations)?;
@@ -151,6 +158,7 @@ pub(super) fn publish_compiled_module(
     resource_inputs: &mut ResourceInputRegistry,
     module_id: ModuleId,
     expected_origin: &StableModuleOriginIdentity,
+    expected_support_origin: Option<&StableModuleOriginIdentity>,
     compiled: ModuleSemanticResult,
     mut warnings: DiagnosticBag,
     mut generated_warning_bags: Vec<DiagnosticBag>,
@@ -205,6 +213,7 @@ pub(super) fn publish_compiled_module(
         string_table: _,
         path_fork: _,
         public_interface,
+        support_public_interface,
     } = compiled;
     if !path_remap.is_identity() {
         module.remap_path_ids(&path_remap);
@@ -268,9 +277,11 @@ pub(super) fn publish_compiled_module(
         resource_inputs,
         module_id,
         expected_origin,
+        expected_support_origin,
         artifact: CompiledModuleArtifact {
             module,
             interface: public_interface,
+            support_interface: support_public_interface,
         },
         generated_delta,
         resource_source_associations,
@@ -612,6 +623,18 @@ pub(crate) fn build_provider_binding_index(
 ) -> FxHashMap<(ModuleId, DependencyShellId), usize> {
     let mut index = FxHashMap::default();
     for (binding_index, binding) in provider_bindings.iter().enumerate() {
+        if !matches!(
+            binding.provider_surface,
+            crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal
+                | crate::compiler_frontend::semantic_identity::ModuleRootRole::Support
+        ) {
+            crate::compiler_bug!(
+                CompilerStage::ProjectBuildAssembly,
+                "ModuleId {} resolved a cross-module provider edge to a non-surface role {:?}",
+                binding.consumer_module_id.index(),
+                binding.provider_surface
+            );
+        }
         let shell_id = binding.dependency_shell_id;
         let key = (binding.consumer_module_id, shell_id);
         if index.insert(key, binding_index).is_some() {
@@ -1065,6 +1088,7 @@ pub(super) fn prepare_source_package_check_only_jobs(
             &inventory.path_resolver,
             external_imports,
             package_resolution,
+            &inventory.graph,
             string_table,
             &inventory.path_interner,
             &mut selected_source_texts,
@@ -1213,7 +1237,6 @@ pub(super) fn compile_source_package_inventories(
                         BuildConfigInputSet::new(),
                         config_globals.clone(),
                         Vec::new(),
-                        Vec::new(),
                         None,
                     ),
                     graph,
@@ -1321,7 +1344,6 @@ pub(super) fn compile_source_package_inventories(
                     canonical_source_facts,
                     BuildConfigInputSet::new(),
                     config_globals.clone(),
-                    Vec::new(),
                     Vec::new(),
                     None,
                 ),
@@ -1568,6 +1590,7 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
                 &mut external_imports,
                 directory_dependency_resolution,
                 &mut resource_inputs,
+                mode.requires_normal_entry(),
                 mode.includes_check_only(),
                 &mut selected_source_texts,
                 string_table,
@@ -1673,6 +1696,7 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
                 &project_path_resolver,
                 &mut external_imports,
                 directory_dependency_resolution,
+                &project_setup.project_module_graph,
                 string_table,
                 &project_path_interner,
                 &mut project_check_only_source_texts,
@@ -1721,8 +1745,6 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
 
         let effective_project_fields =
             config_boundary::effective_project_fields(config, string_table)?;
-        let fixed_project_facts =
-            config_boundary::fixed_project_contract_facts(&effective_project_fields);
         let direct_project_facts = config_boundary::input_contract_facts(&effective_project_fields);
         let project_fallback = config.setting_span("project");
         let project_source_files = Arc::clone(project_sources.sources());
@@ -1756,7 +1778,7 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
         );
         let project_build_config_values = config_boundary::resolve_boundary_build_config(
             &project_source_facts,
-            &fixed_project_facts,
+            &[],
             &direct_project_facts,
             &canonical_project_inputs,
             &config_globals,
@@ -1829,7 +1851,6 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
                 project_source_facts,
                 build_config_inputs.clone(),
                 config_globals.clone(),
-                fixed_project_facts.clone(),
                 direct_project_facts.clone(),
                 project_globals.as_ref(),
             ),

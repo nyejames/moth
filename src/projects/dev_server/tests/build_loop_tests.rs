@@ -256,7 +256,6 @@ fn directory_build_result(project_root: &Path, output_folder: &str) -> BuildResu
         directory_output_plan: Some(ValidatedOutputPlan {
             output_root: project_root.join(output_folder),
             project_root: project_root.to_path_buf(),
-            entry_root: project_root.to_path_buf(),
             owner,
             setting_span: None,
         }),
@@ -500,8 +499,8 @@ fn successful_rebuild_updates_output_and_watch_roots_from_new_plan() {
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
     let executor = FakeExecutor::new(vec![
-        Ok(directory_build_result(&root, "dev")),
-        Ok(directory_build_result(&root, "preview")),
+        Ok(directory_build_result(&root, "_dev")),
+        Ok(directory_build_result(&root, "_preview")),
     ]);
 
     let first_report = run_single_build_cycle(&state, &executor, &root, &Vec::new());
@@ -514,7 +513,7 @@ fn successful_rebuild_updates_output_and_watch_roots_from_new_plan() {
             .output_dir,
         fs::canonicalize(&root)
             .expect("test root should canonicalize")
-            .join("dev")
+            .join("_dev")
     );
 
     let second_report = run_single_build_cycle(&state, &executor, &root, &Vec::new());
@@ -524,15 +523,15 @@ fn successful_rebuild_updates_output_and_watch_roots_from_new_plan() {
         .lock()
         .expect("build state should not be poisoned");
     let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
-    assert_eq!(build_state.output_dir, canonical_root.join("preview"));
+    assert_eq!(build_state.output_dir, canonical_root.join("_preview"));
     assert_eq!(
         second_report
             .watch_scope
             .expect("successful rebuild should return a watch scope")
             .output_dir,
-        canonical_root.join("preview")
+        canonical_root.join("_preview")
     );
-    assert!(root.join("preview/index.html").exists());
+    assert!(root.join("_preview/index.html").exists());
 
     drop(build_state);
 }
@@ -865,11 +864,11 @@ fn dev_cycle_warning_context_is_released_with_its_cycle_report() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    let source_root = root.join("src");
+    let source_root = root.to_path_buf();
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1089,11 +1088,11 @@ fn project_build_executor_writes_the_validated_directory_plan() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    let source_root = root.join("src");
+    let source_root = root.to_path_buf();
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "version #Config of String = \"authored\"\nproject #= (\n    name = \"docs\",\n    version = version,\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
+        "version #Config of String = \"authored\"\nproject #= (\n    name = \"docs\",\n    version = version,\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
     )
     .expect("should write project config");
     fs::write(
@@ -1119,7 +1118,7 @@ fn project_build_executor_writes_the_validated_directory_plan() {
         crate::timing::start_raw_benchmark_collection(true).expect("timing session should start");
     let first = run_single_build_cycle(&state, &executor, &root, &[]);
     assert!(first.build_ok);
-    let first_output = fs::read_to_string(root.join("preview/index.html"))
+    let first_output = fs::read_to_string(root.join("_preview/index.html"))
         .expect("first directory dev build should write its page");
     assert!(
         first_output.contains("<h1>cli</h1>"),
@@ -1135,7 +1134,7 @@ fn project_build_executor_writes_the_validated_directory_plan() {
     assert!(second.build_ok);
     #[cfg(feature = "timers")]
     let _second_timing_snapshot = second_timing_session.finish();
-    let second_output = fs::read_to_string(root.join("preview/index.html"))
+    let second_output = fs::read_to_string(root.join("_preview/index.html"))
         .expect("repeated directory dev build should write its page");
     assert!(
         second_output.contains("<h1>cli</h1>"),
@@ -1162,12 +1161,12 @@ fn project_build_executor_writes_the_validated_directory_plan() {
         .clone();
     assert_eq!(
         published_output_dir,
-        root.join("preview")
+        root.join("_preview")
             .canonicalize()
             .expect("published preview directory should canonicalize")
     );
-    assert!(root.join("preview/index.html").exists());
-    assert!(!root.join("dev/index.html").exists());
+    assert!(root.join("_preview/index.html").exists());
+    assert!(!root.join("_dev/index.html").exists());
 }
 
 #[cfg(feature = "timers")]
@@ -1176,11 +1175,11 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    let source_root = root.join("src");
+    let source_root = root.to_path_buf();
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(source_root.join("@page.moth"), "#[:<h1>Dev Cycle</h1>]\n")
@@ -1950,12 +1949,12 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let temp = tempfile::tempdir().expect("create real rebuild project");
     let root = temp.path();
-    let source = root.join("src");
+    let source = root.to_path_buf();
     fs::create_dir_all(source.join("support")).expect("create support module");
     fs::create_dir_all(source.join("other")).expect("create other page");
     fs::write(
         root.join("config.moth"),
-        "project #= (name = \"rebuild_contract\", entry_root = \"src\")\nhtml #= ()\n",
+        "project #= (name = \"rebuild_contract\")\nhtml #= ()\n",
     )
     .expect("write config");
     fs::write(
@@ -2084,7 +2083,7 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
             .iter()
             .all(|destination| { destination.outcome == OutputWriteOutcome::SkippedUnchanged })
     );
-    let successful_bytes = fs::read(root.join("dev/index.html")).expect("latest successful page");
+    let successful_bytes = fs::read(root.join("_dev/index.html")).expect("latest successful page");
     let supporting_asset = get_bytes(&state, "/site.css");
     assert_eq!(supporting_asset, b"body { color: green; }");
 
@@ -2100,7 +2099,7 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
         "diagnosed compilation must never write"
     );
     assert_eq!(
-        fs::read(root.join("dev/index.html")).expect("old artifact remains"),
+        fs::read(root.join("_dev/index.html")).expect("old artifact remains"),
         successful_bytes,
     );
     let error_page = get_page(&state);
@@ -2119,7 +2118,8 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
 }
 
 /// Dev project config that retains one module error before discovery stops.
-const MODULE_LIMIT_CONFIG_SOURCE: &str = "project #= (name = \"diagnostic_stop\", entry_root = \"src\", max_errors_per_module = 1)\nhtml #= ()\n";
+const MODULE_LIMIT_CONFIG_SOURCE: &str =
+    "project #= (name = \"diagnostic_stop\", max_errors_per_module = 1)\nhtml #= ()\n";
 
 /// Two independent ordinary bodies whose unknown names end discovery after the first error.
 const TWO_FAILING_BODIES_SOURCE: &str = "\
@@ -2150,7 +2150,7 @@ fn real_module_allowance_stop_reaches_browser_error_page_and_clears_after_repair
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let temp = tempfile::tempdir().expect("create real stop project");
     let root = temp.path();
-    let source = root.join("src");
+    let source = root.to_path_buf();
     fs::create_dir_all(&source).expect("create source directory");
     fs::write(root.join("config.moth"), MODULE_LIMIT_CONFIG_SOURCE).expect("write config");
     fs::write(source.join("@page.moth"), TWO_FAILING_BODIES_SOURCE).expect("write failing page");

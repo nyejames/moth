@@ -1,2 +1,2 @@
-entry_root #= "src"
+sample_key #= "src"
 package_folders = {"lib"}

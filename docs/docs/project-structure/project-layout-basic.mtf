@@ -1,0 +1,57 @@
+**Current versus accepted.** Alpha scaffolds use declaration-owned `#Config of T`
+inputs with grouped parenthesised config and reserved page metadata. The accepted
+`$config`/`$project`/`$html_builder` and root-only `$page` forms are queued.
+`moth new` does not emit them yet.
+
+A Moth project is the directory you select. That directory is both the build
+root and the source root. There is no implicit `src/` folder.
+
+### Accepted starter config
+
+The queued directive form leaves version optional and has no `entry_root`:
+
+[codeblock, $code("moth"):
+    $project(
+        name = "my_site",
+    )
+
+    $html_builder
+]
+
+### Where things live
+
+- `config.moth` at the selected root is optional and controls build settings.
+- Everything below the selected root is source unless it is excluded or is a generated hidden output.
+- `_dev/` and `_release/` are generated output. Do not edit them.
+
+### Up to two root files per module directory
+
+Each source directory can have one `@*.moth` normal root and one `+*.moth`
+support root. They form one structural module with shared helper files and two
+isolated interfaces. The text after `@` stays cosmetic, so `@page.moth`,
+`@api.moth` and `@mod.moth` all create the same root role. A normal root becomes
+an HTML artefact only when it declares a root-only page:
+
+[codeblock, $code("moth"):
+    $page
+]
+
+The current scaffold's `@page.moth` filename doesn't mean it already has this
+accepted page syntax.
+
+### Shared scoped packages
+
+A `+*.moth` root creates a scoped support surface. For example,
+`shared/+package.moth` creates `@shared`. Its owner module, normal sibling
+modules and their descendants may depend on it. Other support packages in the
+same scope and the package's private implementation subtree cannot. When a
+directory has both roots, helpers are shared while each root keeps a separate
+authoring scope and public interface. A parent module selects a paired child's
+`@` surface; eligible sibling branches select its `+` surface. The parent never
+falls back to support exports. A project-root `+*.moth` is selected by project
+package assembly as the external package surface.
+
+### Outputs are generated
+
+The build command creates hidden output folders. They are not source. The
+builder cleans up stale artefacts automatically.

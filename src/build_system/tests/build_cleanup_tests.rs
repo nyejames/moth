@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use crate::build_system::output::manifest::{
     BUILD_MANIFEST_FILENAME, read_build_manifest, remove_manifest_tracked_stale_artifacts,
-    validate_output_root_is_safe, write_build_manifest,
+    validate_directory_output_root_safety, write_build_manifest,
 };
 use crate::compiler_tests::test_fs::{assert_directory, assert_path_missing};
 
@@ -427,7 +427,7 @@ fn validate_output_root_rejects_dangerous_paths() {
     ];
 
     for dangerous in dangerous_paths {
-        let result = validate_output_root_is_safe(&dangerous, &project_dir, None);
+        let result = validate_directory_output_root_safety(&dangerous, &project_dir);
         assert!(
             result.is_err(),
             "should reject dangerous path: {}",
@@ -440,9 +440,9 @@ fn validate_output_root_rejects_dangerous_paths() {
 fn validate_output_root_accepts_project_subdirectory() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
-    fs::create_dir_all(root.join("dev")).expect("should create output dir");
+    fs::create_dir_all(root.join("_dev")).expect("should create output dir");
 
-    let result = validate_output_root_is_safe(&root.join("dev"), &root, None);
+    let result = validate_directory_output_root_safety(&root.join("_dev"), &root);
     assert!(
         result.is_ok(),
         "should accept output root inside project directory"

@@ -1,0 +1,7 @@
+project #= (
+    name = "external_js_imports",
+)
+html #= (
+    dev_output = "_dev",
+    release_output = "_release",
+)

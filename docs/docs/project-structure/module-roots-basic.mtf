@@ -1,0 +1,40 @@
+**Current versus accepted.** The Alpha builder still finds HTML entries from root activity. The accepted design uses a root-only `$page` declaration. Current `export:` blocks are implemented; later `$export` migration remains deferred.
+
+Each source directory forms at most one structural module. A normal module
+uses an `@*.moth` root, while an API-only support package uses a `+*.moth` root. A
+directory may contain one root of each role, forming one paired module with a
+normal interface and a separately published support interface.
+
+### One root per role
+
+The filename after `@` or `+` does not matter. `@page.moth`, `@mod.moth` and
+`@api.moth` all create the same normal-root role. One directory cannot contain
+two roots of the same role. A normal root and a support root may coexist, but
+they must resolve to distinct physical source files owned by that module.
+
+### Bind the module, not the root file
+
+Normal module-root files have no direct dependency form. Bind the directory's public module surface.
+
+The `@` in `@page.moth` marks the file as a module root on disk. The `@` in
+`@pages` starts a dependency path. They share the same symbol but are not
+combined. Do not write `@@pages`. The second `@` is invalid.
+
+[codeblock, $code("moth"):
+    @pages
+]
+
+### Root and helper roles
+
+The root file defines the module identity. Files without `@` remain helpers in
+that module. Helpers cannot become entries or pages on their own.
+
+After the accepted page cutover, an HTML artefact needs an explicit root
+purpose:
+
+[codeblock, $code("moth"):
+    $page
+]
+
+`export:` currently controls public declarations. The later `$export` spelling
+will replace it; both forms won't remain permanent alternatives.

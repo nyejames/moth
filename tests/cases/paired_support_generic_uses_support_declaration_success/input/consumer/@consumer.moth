@@ -1,0 +1,6 @@
+@pkg Box, show
+export:
+    render || -> String:
+        return show(Box("ok"))
+    ;
+;

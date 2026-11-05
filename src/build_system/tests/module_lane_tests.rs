@@ -543,11 +543,7 @@ fn test_graph_boundary(
         origins
             .iter()
             .cloned()
-            .zip((0..module_count).map(|index| {
-                let root_path = PathBuf::from(format!("@module_{index}.moth"));
-                (root_path.clone(), root_path)
-            }))
-            .map(|(origin, (root_directory, root_file))| (origin, root_directory, root_file))
+            .zip((0..module_count).map(|index| PathBuf::from(format!("@module_{index}.moth"))))
             .collect(),
     );
     let mut store = ModuleArtifactStore::new(module_count);
@@ -558,6 +554,7 @@ fn test_graph_boundary(
                 CompiledModuleArtifact {
                     module,
                     interface: empty_test_interface_for_origin(origins[index].clone()),
+                    support_interface: None,
                 },
             )
             .expect("test store should publish each module");
@@ -603,6 +600,7 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("high/@mod.moth"), true),
                 interface: empty_test_interface("high".to_owned()),
+                support_interface: None,
             },
         )
         .expect("higher-ID provider should publish first");
@@ -612,6 +610,7 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("low/@mod.moth"), true),
                 interface: empty_test_interface("low".to_owned()),
+                support_interface: None,
             },
         )
         .expect("lower-ID consumer should publish second");
@@ -670,6 +669,7 @@ fn duplicate_declaration_inside_one_materialisation_context_raises_compiler_bug(
             CompiledModuleArtifact {
                 module,
                 interface: empty_test_interface("dup".to_owned()),
+                support_interface: None,
             },
         )
     }))
@@ -697,11 +697,7 @@ fn materialisation_lookup_resolves_the_exact_template_row() {
         "rows".to_owned(),
         ModuleRootRole::Normal,
     );
-    let graph = ProjectModuleGraph::from_normal_roots(vec![(
-        origin,
-        PathBuf::from("@rows.moth"),
-        PathBuf::from("@rows.moth"),
-    )]);
+    let graph = ProjectModuleGraph::from_normal_roots(vec![(origin, PathBuf::from("@rows.moth"))]);
     let mut store = ModuleArtifactStore::new(1);
     let mut module = minimal_lane_module(PathBuf::from("@rows.moth"), true);
     module.metadata.materialisation_context = Some(Arc::new(
@@ -716,6 +712,7 @@ fn materialisation_lookup_resolves_the_exact_template_row() {
             CompiledModuleArtifact {
                 module,
                 interface: empty_test_interface("rows".to_owned()),
+                support_interface: None,
             },
         )
         .expect("row context should publish");
@@ -1578,7 +1575,6 @@ fn frontend_boundary_rejects_unfinished_module_slots() {
                 "first".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            first_root.clone(),
             first_root,
         ),
         (
@@ -1587,7 +1583,6 @@ fn frontend_boundary_rejects_unfinished_module_slots() {
                 "second".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            second_root.clone(),
             second_root,
         ),
     ]);
@@ -1598,6 +1593,7 @@ fn frontend_boundary_rejects_unfinished_module_slots() {
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@first.moth"), true),
                 interface: empty_test_interface("first".to_owned()),
+                support_interface: None,
             },
         )
         .expect("first module should publish");
@@ -1634,7 +1630,6 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
                 ModuleRootRole::Normal,
             ),
             PathBuf::from("@success.moth"),
-            PathBuf::from("@success.moth"),
         ),
         (
             StableModuleOriginIdentity::from_portable_path(
@@ -1643,7 +1638,6 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
                 ModuleRootRole::Normal,
             ),
             PathBuf::from("@diagnosed.moth"),
-            PathBuf::from("@diagnosed.moth"),
         ),
         (
             StableModuleOriginIdentity::from_portable_path(
@@ -1651,7 +1645,6 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
                 "blocked".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            PathBuf::from("@blocked.moth"),
             PathBuf::from("@blocked.moth"),
         ),
     ]);
@@ -1662,6 +1655,7 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@success.moth"), true),
                 interface: empty_test_interface("success".to_owned()),
+                support_interface: None,
             },
         )
         .expect("success module should publish");
@@ -1812,7 +1806,6 @@ fn single_node_graph() -> ProjectModuleGraph {
             ModuleRootRole::Normal,
         ),
         PathBuf::from("@single.moth"),
-        PathBuf::from("@single.moth"),
     )])
 }
 
@@ -1867,6 +1860,7 @@ fn boundary_validation_rejects_blocked_lane_mismatch_in_both_directions() {
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@single.moth"), false),
                 interface: empty_test_interface("single".to_owned()),
+                support_interface: None,
             },
         )
         .expect("slot should publish");
@@ -1927,7 +1921,6 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
                 ModuleRootRole::Normal,
             ),
             PathBuf::from("@a.moth"),
-            PathBuf::from("@a.moth"),
         ),
         (
             StableModuleOriginIdentity::from_portable_path(
@@ -1935,7 +1928,6 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
                 "b".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            PathBuf::from("@b.moth"),
             PathBuf::from("@b.moth"),
         ),
     ]);
@@ -1981,7 +1973,6 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
                     ModuleRootRole::Normal,
                 ),
                 PathBuf::from("@a.moth"),
-                PathBuf::from("@a.moth"),
             ),
             (
                 StableModuleOriginIdentity::from_portable_path(
@@ -1989,7 +1980,6 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
                     "b".to_owned(),
                     ModuleRootRole::Normal,
                 ),
-                PathBuf::from("@b.moth"),
                 PathBuf::from("@b.moth"),
             ),
         ]),
@@ -2051,7 +2041,6 @@ fn source_package_publication_rejects_unavailable_root_slot() {
                 ModuleRootRole::Normal,
             ),
             PathBuf::from("pkg/@mod.moth"),
-            PathBuf::from("pkg/@mod.moth"),
         )]),
         modules: ModuleArtifactStore::new(1),
         generated: BoundaryGeneratedFunctionStore::default(),
@@ -2103,6 +2092,7 @@ fn materialisation_rows_iterate_in_deterministic_publication_order() {
             CompiledModuleArtifact {
                 module: second_module,
                 interface: empty_test_interface("second".to_owned()),
+                support_interface: None,
             },
         )
         .expect("higher module id publishes first");
@@ -2119,6 +2109,7 @@ fn materialisation_rows_iterate_in_deterministic_publication_order() {
             CompiledModuleArtifact {
                 module: first_module,
                 interface: empty_test_interface("first".to_owned()),
+                support_interface: None,
             },
         )
         .expect("lower module id publishes second");
@@ -2324,7 +2315,6 @@ fn boundary_with_unvisited_slot(
                         path.to_owned(),
                         ModuleRootRole::Normal,
                     ),
-                    root.clone(),
                     root,
                 )
             })
@@ -2337,6 +2327,7 @@ fn boundary_with_unvisited_slot(
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@success.moth"), true),
                 interface: empty_test_interface("success".to_owned()),
+                support_interface: None,
             },
         )
         .expect("the retained success should publish");

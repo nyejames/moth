@@ -22,7 +22,7 @@ available.
   management remains deferred.
 
 [Runtime design](docs/design.md), [package-manager design](docs/package-manager.md)
-and [Wasm optimisation](../../docs/src/developer-docs/wasm-optimisation/overview.mtf)
+and [Wasm optimisation](../../docs/developer-docs/wasm-optimisation/overview.mtf)
 own the accepted direction. This living roadmap owns delivery, findings and
 open decisions. Record a checkpoint's decision in its permanent owner before
 implementing the affected slice. Keep unresolved questions explicit rather
@@ -113,7 +113,7 @@ Rust layout, second type registry or general serialisation framework. Attribute
 errors to both the Moth call and the registered host binding where available.
 
 **Documentation.** The accepted V1 physical boundary lives in the compiler-owned
-[native host ABI](../../docs/src/developer-docs/memory-management/native-host-abi/native-host-abi.mtf).
+[native host ABI](../../docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf).
 [Host ABI adapter responsibilities](docs/host-abi.md) owns Lappet's adapter,
 staging, resource-table and fault duties. Link each executable adapter example
 to tests.

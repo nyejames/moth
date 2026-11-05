@@ -26,13 +26,13 @@ Implementation names and internal Rust layouts may follow the activation tree. S
 Read `AGENTS.md`, the complete codebase style guide and the language cheatsheet. Read both `docs/compiler-design-overview.md` and `docs/build-system-design.md` in full for this cross-stage change. Also read:
 
 - `docs/compiler-data-layout-design.md` for retained syntax, source identities, spans and diagnostic storage.
-- `docs/src/developer-docs/language/overview.mtf` and its relevant canonical unsuffixed references, including exact numeric types, literal and cast rules.
-- `docs/src/docs/directives/directives.mtf`, published before activation.
-- `docs/src/docs/project-structure/project-config.mtf`, `build-inputs.mtf` and `entry-config.mtf`.
-- `docs/src/docs/functions/calls-and-access.mtf`, `parameters-and-defaults.mtf` and the constants references.
-- `docs/src/docs/templates/template-directives.mtf`, `template-slots.mtf` and `child-wrappers.mtf`.
-- `docs/src/docs/resources/file-paths.mtf` and `file-values.mtf`.
-- The full testing guide and the applicable validation-guide sections under `docs/src/developer-docs/style-guide/`.
+- `docs/developer-docs/language/overview.mtf` and its relevant canonical unsuffixed references, including exact numeric types, literal and cast rules.
+- `docs/docs/directives/directives.mtf`, published before activation.
+- `docs/docs/project-structure/project-config.mtf`, `build-inputs.mtf` and `entry-config.mtf`.
+- `docs/docs/functions/calls-and-access.mtf`, `parameters-and-defaults.mtf` and the constants references.
+- `docs/docs/templates/template-directives.mtf`, `template-slots.mtf` and `child-wrappers.mtf`.
+- `docs/docs/resources/file-paths.mtf` and `file-values.mtf`.
+- The full testing guide and the applicable validation-guide sections under `docs/developer-docs/style-guide/`.
 - Both progress matrices, `docs/roadmap/roadmap.md` and `index.md` as a locator.
 
 Use the current authority paths when files have moved. Record the replacement path in working notes. Never restore an obsolete subsystem solely because an anchor below names its former location.
@@ -77,10 +77,7 @@ Directive names do not reserve the corresponding ordinary identifiers. In partic
 The implemented non-template forms are:
 
 ```moth
-$config
-version #String = "0.1.0"
-
-$project(name = "my_site", version = version, entry_root = "src")
+$project(name = "my_site")
 
 $html_builder
 ```
@@ -211,7 +208,7 @@ semantic fingerprint inputs.
 
 ### Configuration dependence survives folding
 
-Project identity, source-discovery and compiler-control settings remain fixed-only. Reject `$config` dependence in `$project`'s `name`, `entry_root` and `template_const_loop_iteration_limit` arguments, including dependence through earlier helper constants. An ordinary compile-time value without input dependence remains valid.
+Project identity, source-discovery and compiler-control settings remain fixed-only. Reject `$config` dependence in `$project`'s `name` and `template_const_loop_iteration_limit` arguments, including dependence through earlier helper constants. An ordinary compile-time value without input dependence remains valid.
 
 A folded value equal to a literal is not evidence that it was fixed. Reuse existing value-dependency/provenance facts to preserve this distinction through folding. Do not discover it by rescanning argument source, and do not add runtime taint metadata.
 
@@ -223,20 +220,19 @@ The parameter order is the following order for positional calls:
 
 | Parameter | Type | Default | Configurable value permitted |
 |---|---|---|---|
-| `name` | `String` | Required | No. |
-| `version` | `String` | Required | Yes. |
-| `entry_root` | `String` | `"src"` | No. |
+| `name` | `String` | The selected directory name | No. |
+| `version` | `String?` | `none` | Yes. |
 | `author` | `String?` | `none` | Yes. |
 | `license` | `String?` | `none` | Yes. |
 | `template_const_loop_iteration_limit` | `I32` | The existing compiler-owned default limit | No. |
 
-Retain existing field-domain and output/source-path validation. In particular, project name validation and the requirement that a directory project's entry root be strictly beneath its project root remain intact. Preserve the numeric limit policy through its one owner rather than copying a magic number into multiple signatures. The loop-limit API uses I32, while its compiler resource bound remains a separate check.
+Retain existing field-domain validation. An omitted name defaults to the exact final component of the selected directory and must be a valid Moth project identifier; it is never silently rewritten. There is no `entry_root`; the selected directory is the build and source root. Preserve the numeric limit policy through its one owner rather than copying a magic number into multiple signatures. The loop-limit API uses I32, while its compiler resource bound remains a separate check.
 
-`version` has no declaration default. `"0.1.0"` belongs to the starter `$config` example, not to `$project`'s signature. A literal version is valid when the author wants a fixed version. A configurable version must come from an earlier explicit `$config` declaration. Missing version is diagnosed even when an unused input contract named `version` exists.
+`version` is optional and defaults to `none`. `"0.1.0"` belongs to a starter example, not to `$project`'s signature. A literal version is valid when the author wants a fixed version. A configurable version must come from an earlier explicit `$config` declaration.
 
 The signature is closed. Reject arbitrary metadata fields, misspelled standard fields and `metadata = ...`. No custom project metadata storage or open-record fallback is retained. Ordinary helper records in config remain ordinary private constants. Project-wide reusable constants belong in ordinary source/support packages. A possible future metadata directive has no current syntax or implementation commitment.
 
-Keep explicit `@project` imports, predefined field identity, field-level provenance and the existing project-package exposure restrictions. Changing required `version` from optional to `String` must be reflected in the synthetic interface and its consumers, not only in config validation.
+Keep explicit `@project` imports, predefined field identity, field-level provenance and the existing project-package exposure restrictions. Optional `version` must be reflected in the synthetic interface and its consumers, not only in config validation.
 
 ## 5. `$html_builder`
 
@@ -246,8 +242,8 @@ Migrate the existing HTML settings into one closed directive signature. The posi
 
 | Parameter | Type | Default |
 |---|---|---|
-| `dev_output` | `String` | `"dev"` |
-| `release_output` | `String` | `"release"` |
+| `dev_output` | `String` | `"_dev"` |
+| `release_output` | `String` | `"_release"` |
 | `origin` | `String` | `"/"` |
 | `page_url_style` | `String` | `"trailing_slash"` |
 | `redirect_index_html` | `Bool` | `true` |
@@ -313,15 +309,8 @@ The structural feature predicate details, the feature-declaration directive's sp
 The config generator for `moth new html` must emit this pattern, preserving the existing scaffold's selected project name and any intentionally retained starter settings:
 
 ```moth
-$config
-version #String = "0.1.0"
-
 $project(
     name = "my_site",
-    version = version,
-    entry_root = "src",
-    author = "",
-    license = "MIT",
 )
 
 $html_builder(
@@ -331,7 +320,7 @@ $html_builder(
 )
 ```
 
-`my_site` represents the existing escaped generated project name. Preserve the current generator's source-string escaping. The version declaration and explicit argument are required starter content, not an optional documentation example.
+`my_site` represents the selected scaffold name. The generated name is an explicit valid identifier; the scaffold never rewrites an invalid explicit name. Version is optional and is not boilerplate starter content. The selected directory is the source root, so the starter has no `entry_root`.
 
 Migrate all operational `config.moth` inputs and actual declaration-owned `#Config` contracts needed by the repository's commands, fixtures, benchmarks, package scaffolds and docs build. Custom open project metadata must move to ordinary source constants where needed. Update consumers instead of silently deleting still-used data.
 
@@ -403,7 +392,7 @@ This reminder neither activates recovery work nor adds a parallel config path.
 ### Phase 3: Config directive consumers
 
 - [ ] Implement the exact closed `$project` and `$html_builder` signatures.
-- [ ] Require authored name/version and required singleton config directives. Fill defaults once.
+- [ ] Apply optional name/version defaults and required singleton config directives. Fill defaults once.
 - [ ] Apply specialised domain validation through the existing build/config owners.
 - [ ] Publish predefined `@project` metadata separately from explicit input-contract results.
 - [ ] Remove open metadata, recognised-record extraction and inactive-section handling.
@@ -411,7 +400,7 @@ This reminder neither activates recovery work nor adds a parallel config path.
 
 ### Phase 4: Scaffolding and complete removal
 
-- [ ] Update `config_template` with the required `$config` version example and explicit version argument.
+- [ ] Update `config_template` with a minimal `$project` name and no version, `entry_root` or HTML boilerplate.
 - [ ] Exercise the actual `moth new html` output, not just a hand-written equivalent.
 - [ ] Delete obsolete types, schemas, validators, reservations, fallback paths and tests with no remaining owner.
 - [ ] Keep page extraction operational and record the precise later page cutover boundary.
@@ -441,14 +430,14 @@ Use manifest-backed language/project cases for public behaviour, subsystem-local
 | Exact numeric inputs | All eleven fixed widths and optional wrapping, U64 input above I32 range, direct F16/F32 rounding and finite checks, decimal-category rejection at integer contracts, exact typed-input matching, matching bootstrap/source normalisation and rejection of Byte/Dec input contracts. |
 | Input resolution | CLI/global/default order, bootstrap/source matching, conflicting defaults despite override, unknown input after source inventory and package-boundary isolation. |
 | Metadata separation | `$project(version = "1.0")` does not provide or block source input `version`. An explicit same-name `$config` does. Renamed argument slots do not rename contracts. |
-| Required version | Missing version fails even if a version contract exists. Literal version works. Earlier `$config` version works. `none` fails for required String version. |
-| Fixed-only settings | Direct and helper-derived configurable name, entry root and loop-limit arguments fail. Equivalent fixed constants work. |
+| Optional version | Omitted version and `none` mean unversioned. A literal or earlier `$config` version works. A version contract does not supply an omitted field implicitly. |
+| Fixed-only settings | Direct and helper-derived configurable name and loop-limit arguments fail. Equivalent fixed constants work. There is no entry-root argument. |
 | Strict project | Unknown/custom/`metadata` arguments fail, predefined `@project` fields remain available and helper/input bindings are not automatically published. |
 | HTML settings | All signature defaults, closed URL style, output containment/profile conflicts and browser document defaults remain correct. |
 | Reclaimed names | Ordinary `Config`, `config`, `project` and `html` bindings/types work where ordinary naming permits. They have no hidden configuration effects. |
 | Stage ownership | Retained syntax consumed once, source/span remaps preserved, no config HIR and no later AST/TIR/name rescanning. |
 | Static selection | Both ordinary-if branches remain frontend-valid, inactive runtime requirements disappear normally and unknown directives are not excused by a false condition. |
-| Starter output | Generated config includes `$config` followed by `version #String = "0.1.0"`, supplies version explicitly, builds/checks on the current page path and accepts `--input version=0.2.0`. |
+| Starter output | Generated config contains a minimal `$project` with an explicit valid name, no version and no `entry_root`; it builds and checks with the current page path. An explicit version override remains supported when authored. |
 
 Do not add `$test` fixtures as if a user test runner exists. Compiler testing infrastructure remains independent of the future source directive.
 
@@ -456,7 +445,7 @@ Do not add `$test` fixtures as if a user test runner exists. Compiler testing in
 
 Review changed owners from their entry points. Confirm one authority for parsing, routing, config resolution and typed output, with no wrappers preserving removed APIs. Check source-location accuracy, user diagnostic versus infrastructure lanes, unnecessary allocations, obsolete comments, dead schema machinery and nominal-type pollution.
 
-Confirm the repository can generate and compile a fresh starter project, configuration metadata cannot supply implicit input contracts and missing `$project` version never falls back to `"0.1.0"`.
+Confirm the repository can generate and compile a fresh starter project, configuration metadata cannot supply implicit input contracts and an omitted `$project` version never falls back to `"0.1.0"`.
 
 Run `just validate` or its maintainer-approved replacement from the activation validation guide. Run `moth build docs --release` or the equivalent Cargo command when source docs change. Report any missing gate honestly. Do not mark acceptance solely from tests using private entry points that bypass public command validation.
 

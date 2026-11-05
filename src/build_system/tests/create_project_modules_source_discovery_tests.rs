@@ -2,7 +2,8 @@ use super::create_project_modules_tests::{diagnosed_reports, successful_compilat
 use super::*;
 
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
-    CrossModuleImportNotExportedView, UnsupportedExternalExtensionView,
+    CrossModuleImportNotExportedView, InvalidImportPathCode, InvalidImportPathView,
+    MissingImportTargetView, UnsupportedExternalExtensionView,
 };
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 #[test]
@@ -14,7 +15,7 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@helper\n#[:entry]\n").expect("should write entry");
@@ -67,7 +68,7 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@reachable\n@leaf\n#[:entry]\n")
@@ -239,7 +240,7 @@ fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@intro\n@notes\n#[:entry]\n").expect("should write entry");
@@ -512,7 +513,7 @@ fn provider_backed_imports_are_resolved_without_becoming_source_inputs() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -560,7 +561,7 @@ fn synthetic_nested_module_provider_resolves_from_owning_module_root() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "#[:entry]\n").expect("should write entry root");
@@ -642,7 +643,7 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
         fs::create_dir_all(feature.join("feature")).expect("should create nested provider folder");
         fs::write(
             root.join(settings::CONFIG_FILE_NAME),
-            "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+            "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
         )
         .expect("should write config");
         fs::write(src.join("@page.moth"), "#[:entry]\n").expect("should write entry root");
@@ -696,7 +697,7 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
         )
         .expect("both nested provider clauses should resolve");
 
-        let source = "feature/@page.moth";
+        let source = "src/feature/@page.moth";
         let local = resolution_table
             .get(source, "drawing.js")
             .expect("local module-relative provider key should exist");
@@ -745,7 +746,7 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -842,7 +843,7 @@ fn canonical_multi_entry_discovery_calls_provider_once() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -906,7 +907,7 @@ fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -992,7 +993,7 @@ fn unsupported_external_extension_in_multi_entry_preserves_diagnostic_shape() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -1053,7 +1054,7 @@ fn directory_provider_dependency_calls_provider_once_for_repeated_physical_sourc
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     // The entry imports the same .js file twice under distinct local aliases, so the physical
@@ -1106,7 +1107,7 @@ fn directory_provider_dependency_rejects_cross_module_target() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -1165,7 +1166,7 @@ fn directory_provider_dependency_missing_target_reports_structured_diagnostic_wi
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     // The imported .js file does not exist on disk, so it is absent from the source tree index.
@@ -1238,7 +1239,7 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -1316,7 +1317,7 @@ fn scoped_support_package_is_visible_by_name_to_owner_and_sibling_descendant() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@site.moth"), "@markdown render\n#[:site]\n")
@@ -1360,7 +1361,7 @@ fn recognized_source_stem_collision_is_ambiguous_without_extension_precedence() 
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@HELPER\n#[:page]\n").expect("should write root");
@@ -1397,7 +1398,7 @@ fn binding_package_and_local_module_prefix_collision_is_ambiguous() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@core/io input\n#[:page]\n").expect("should write root");
@@ -1431,7 +1432,7 @@ fn binding_package_case_variant_import_with_local_file_is_ambiguous() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@core/IO\n#[:[IO.value]]\n").expect("should write root");
@@ -1466,7 +1467,7 @@ fn directory_source_dependency_rejects_obsolete_relative_form() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@./helper value\n#[:page]\n").expect("should write root");
@@ -1499,7 +1500,7 @@ fn direct_child_private_path_bypass_is_rejected() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@child/private value\n#[:page]\n")
@@ -1527,6 +1528,154 @@ fn direct_child_private_path_bypass_is_rejected() {
 }
 
 #[test]
+fn module_import_through_hidden_directory_reports_hidden_reason() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    let hidden = src.join("_private/child");
+    fs::create_dir_all(&hidden).expect("should create hidden child");
+    fs::write(hidden.join("@child.moth"), "export:\n    value #= 1\n;\n")
+        .expect("should write hidden root");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "@_private/child value\n#[:page]\n")
+        .expect("should write page");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+    let diagnostic = first_error_diagnostic(&failure);
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-IMPORT-0016",
+        "a hidden-directory traversal must use the invalid-path diagnostic, got {}",
+        diagnostic.descriptor().code
+    );
+    assert_eq!(
+        diagnostic
+            .family_view::<InvalidImportPathView>()
+            .expect("hidden import should retain typed invalid-path facts")
+            .reason,
+        InvalidImportPathCode::HiddenDirectory
+    );
+    assert_primary_span_text(&failure, &src.join("@page.moth"), "@_private/child");
+}
+
+#[test]
+fn single_component_hidden_import_remains_ambiguous_missing_target() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(src.join("_private")).expect("should create hidden directory");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "@_private value\n#[:page]\n").expect("should write page");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+    let diagnostic = first_error_diagnostic(&failure);
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-IMPORT-0005",
+        "a single hidden component may name a file or directory and must stay missing"
+    );
+    assert!(
+        diagnostic
+            .family_view::<MissingImportTargetView>()
+            .is_some()
+    );
+}
+
+#[test]
+fn underscore_prefixed_helper_file_remains_importable() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "@_helper value\n#[:page]\n").expect("should write page");
+    fs::write(src.join("_helper.moth"), "value #= 1\n").expect("should write helper");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
+}
+
+#[test]
+fn selected_hidden_root_can_import_its_visible_child_module() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let selected = _tmp_root.path().join("_prototype");
+    let child = selected.join("visible");
+    fs::create_dir_all(&child).expect("should create visible child");
+    fs::write(
+        selected.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(selected.join("@site.moth"), "@visible v\n#[:site]\n").expect("should write root");
+    fs::write(child.join("@mod.moth"), "export:\n    v #= 1\n;\n")
+        .expect("should write child root");
+
+    let mut config = Config::new(selected.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &selected.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    successful_compilation_value(discover_modules_for_test(
+        &config,
+        &resolver,
+        &style_directives,
+    ));
+}
+
+#[test]
 fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
@@ -1535,7 +1684,7 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@helper\n@intro\n#[:entry]\n").expect("should write entry");
@@ -1610,7 +1759,7 @@ fn canonical_discovery_consumes_moth_tokens_for_every_reachable_file() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 

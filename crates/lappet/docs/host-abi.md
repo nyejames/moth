@@ -9,9 +9,9 @@ resource tables, host context and fault handling. It does not define the ABI.
 
 | Owner | Contract |
 |---|---|
-| [Native host ABI](../../../docs/src/developer-docs/memory-management/native-host-abi/native-host-abi.mtf) | Carriers, frames, validation direction, staged-text and call-scope protocols, resource-token carriage, import/export identity and the host manifest |
-| [Host packages](../../../docs/src/developer-docs/project-builders/host-packages.mtf) | The Rust signature profile and the Moth meaning of each shape |
-| [Memory lowering](../../../docs/src/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf) | The restricted host-binding profile and `ValidatedMemoryPlan` |
+| [Native host ABI](../../../docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf) | Carriers, frames, validation direction, staged-text and call-scope protocols, resource-token carriage, import/export identity and the host manifest |
+| [Host packages](../../../docs/developer-docs/project-builders/host-packages.mtf) | The Rust signature profile and the Moth meaning of each shape |
+| [Memory lowering](../../../docs/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf) | The restricted host-binding profile and `ValidatedMemoryPlan` |
 | [Runtime design](design.md) | Instances, scheduling, capabilities and failure categories |
 
 When this document and a compiler authority disagree, the compiler authority

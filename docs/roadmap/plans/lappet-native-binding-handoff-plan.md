@@ -28,11 +28,11 @@ belongs to Lappet roadmap milestone 3.
 Follow the root `AGENTS.md` and `crates/lappet/AGENTS.md` routes. These are the
 authorities this work consumes:
 
-- `docs/src/developer-docs/memory-management/native-host-abi/native-host-abi.mtf`
+- `docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf`
   owns the accepted V1 physical boundary and its compiler prerequisites.
 - `crates/lappet/docs/host-abi.md` owns Lappet's adapter, staging,
   resource-table and fault duties and its deferred tests.
-- `docs/src/developer-docs/project-builders/creating-a-builder.mtf` and
+- `docs/developer-docs/project-builders/creating-a-builder.mtf` and
   `capabilities-and-directives.mtf` describe the public SDK target. Their
   `#[moth::host_function]` and `moth::host_binding!` spellings are accepted
   future conveniences. Today's descriptors are the manual `moth::host` types.

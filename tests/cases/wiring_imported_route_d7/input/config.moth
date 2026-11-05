@@ -1,5 +1,3 @@
 project #= (
-    name = "wiring_imported_route_d7",
-    entry_root = "src",
-)
+    name = "wiring_imported_route_d7")
 html #= ()

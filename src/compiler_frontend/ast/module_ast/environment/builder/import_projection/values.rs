@@ -258,7 +258,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
 fn is_project_globals_origin(origin: &OriginDeclarationId) -> bool {
     let module_origin = origin.module_origin();
-    module_origin.role() == ModuleRootRole::ProjectPackageFacade
+    module_origin.role() == ModuleRootRole::SyntheticProjectContext
         && module_origin.logical_module_path() == "project-globals"
 }
 

@@ -5,7 +5,9 @@
 //! WHY: Path semantics (omitted, relative, absolute, home expansion) and user
 //! confirmation belong in one place, separate from file writing.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+
+use moth_lexical::identifier::is_identifier;
 
 use crate::scaffold::prompt::Prompt;
 
@@ -33,15 +35,26 @@ pub fn resolve_project_target(
         .and_then(|name| name.to_str())
         .unwrap_or("Moth Project")
         .to_owned();
+    let proposed_name = if is_identifier(&default_name) {
+        default_name.clone()
+    } else {
+        package_identifier_from_display_name(&default_name)
+    };
 
     let name_input = prompt.ask(&format!(
-        "Project name (press Enter to use {default_name}): "
+        "Project name (press Enter to use {proposed_name}): "
     ))?;
-    let project_name = package_identifier_from_display_name(if name_input.trim().is_empty() {
-        &default_name
+    let trimmed_input = name_input.trim();
+    let project_name = if trimmed_input.is_empty() {
+        proposed_name
+    } else if is_identifier(trimmed_input) {
+        trimmed_input.to_owned()
     } else {
-        name_input.trim()
-    });
+        return Err(format!(
+            "Invalid project name `{trimmed_input}`. Use a Moth project identifier: \
+             letters, digits and underscores, not starting with a digit."
+        ));
+    };
 
     Ok(ResolvedProjectTarget {
         project_dir: resolved_dir,
@@ -108,12 +121,36 @@ fn handle_existing_directory(path: &Path, prompt: &mut impl Prompt) -> Result<Pa
                 if trimmed.is_empty() {
                     continue;
                 }
+                if !is_single_child_folder_name(trimmed) {
+                    return Err(format!(
+                        "Invalid project folder name `{trimmed}`. Enter one folder name only, \
+                         without path separators, parent traversal or an absolute path."
+                    ));
+                }
                 return Ok(path.join(trimmed));
             }
             "3" => return Err("Cancelled project creation.".to_string()),
             _ => continue,
         }
     }
+}
+
+/// Whether prompted text names exactly one normal child directory on this platform.
+///
+/// Raw platform separators, absolute paths, drive/UNC prefixes, `.`/`..` aliases and nested paths
+/// are rejected without rewriting the input. A backslash remains a legal filename character on
+/// Unix because `std::path::is_separator` owns the platform rule.
+fn is_single_child_folder_name(name: &str) -> bool {
+    // `Path::components` normalises trailing separators, so `child/` and `child//` would pass.
+    // Reject the raw platform separator spelling before checking component shape.
+    if name.chars().any(std::path::is_separator) {
+        return false;
+    }
+    let mut components = Path::new(name).components();
+    matches!(
+        (components.next(), components.next()),
+        (Some(Component::Normal(_)), None)
+    )
 }
 
 fn handle_missing_directory(path: &Path, prompt: &mut impl Prompt) -> Result<PathBuf, String> {
@@ -240,13 +277,14 @@ pub(super) fn normalize_path(path: &Path) -> PathBuf {
     result
 }
 
-/// Convert a directory or prompt name into a `project.name` package identifier.
+/// Convert a directory basename into a proposed `project.name` package identifier.
 ///
-/// WHAT: keeps letters, digits and underscores; every other run of characters
+/// WHAT: keeps ASCII letters, digits and underscores; every other run of characters
 /// becomes one underscore. Names that would start with a digit or be empty
 /// after sanitising get a `project` prefix.
-/// WHY: `config.moth` requires `project.name` to be a valid Moth project identifier,
-/// so `moth new` must not write hyphenated or spaced names that fail the first build.
+/// WHY: an invalid directory basename needs a visible suggested identifier for the scaffold
+/// prompt. An explicit user-supplied name is validated and preserved exactly instead of using
+/// this conversion.
 pub(super) fn package_identifier_from_display_name(name: &str) -> String {
     let mut identifier = String::new();
     let mut pending_separator = false;

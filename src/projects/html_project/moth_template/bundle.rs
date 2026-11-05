@@ -185,6 +185,7 @@ pub(super) fn prepare_file_value_bundle(
         })?;
     let discovery_options = HeaderParseOptions {
         entry_file_id: Some(entry_file_id),
+        support_root_file_id: None,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };

@@ -58,7 +58,8 @@ use crate::compiler_frontend::public_interface::{
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
-    OriginFunctionId, OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
+    ModuleRootRole, OriginFunctionId, OriginTraitId, OriginTypeCategory, OriginTypeId,
+    StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -83,6 +84,10 @@ pub(crate) struct ModuleMaterialisationCapture {
     /// Requester-owned declaring modules remain separate from the generated body's provider.
     retained_declaring_contexts: Vec<Arc<ModuleMaterialisationContext>>,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
+    /// The authored surface role for every source file in this module.
+    source_roles_by_path: FxHashMap<PathId, ModuleRootRole>,
+    pub(crate) public_source_trait_origins:
+        Arc<FxHashMap<PathId, crate::compiler_frontend::semantic_identity::OriginTraitId>>,
     pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
     pub(crate) frozen_identity_handle: FrozenIdentityHandle,
     pub(crate) type_environment: TypeEnvironment,
@@ -152,6 +157,8 @@ pub(crate) struct ModuleMaterialisationEnvironmentInput<'a> {
     pub(crate) default_const_templates_by_path:
         FxHashMap<PathId, (PublicConstTemplate, Option<OwnedFoldedString>)>,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
+    pub(crate) public_source_trait_origins:
+        Arc<FxHashMap<PathId, crate::compiler_frontend::semantic_identity::OriginTraitId>>,
     pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
     pub(crate) frozen_identity_handle: FrozenIdentityHandle,
     pub(crate) string_table: &'a StringTable,
@@ -304,40 +311,54 @@ impl ModuleMaterialisationPreparedBuilder {
 
     pub(crate) fn freeze(
         mut self,
-        public_interface: &PublicSemanticInterface,
+        public_interfaces: &[&PublicSemanticInterface],
     ) -> Result<Option<ModuleMaterialisationContext>, InfrastructureFailure> {
         // Public convergence replaces owned facts only. AST/default projection ended at detach.
         let context = Arc::make_mut(&mut self.context.stable_context);
         let mut declarations = std::mem::take(&mut context.declaration_closure).into_vec();
-        for declaration in &public_interface.declarations {
-            if let Some(existing) = declarations
-                .iter_mut()
-                .find(|existing| existing.origin == declaration.origin)
-            {
-                *existing = declaration.clone();
-            } else {
-                declarations.push(declaration.clone());
+        for public_interface in public_interfaces {
+            for declaration in &public_interface.declarations {
+                if let Some(existing) = declarations
+                    .iter_mut()
+                    .find(|existing| existing.origin == declaration.origin)
+                {
+                    *existing = declaration.clone();
+                } else {
+                    declarations.push(declaration.clone());
+                }
             }
         }
         declarations.sort_by(|left, right| left.origin.cmp(&right.origin));
         context.declaration_closure = declarations.into_boxed_slice();
         let mut evidence_records = std::mem::take(&mut context.evidence).into_vec();
-        for evidence in &public_interface.reusable_evidence {
-            if let Some(existing) = evidence_records
-                .iter_mut()
-                .find(|existing| existing.identity == evidence.identity)
-            {
-                *existing = evidence.clone();
-            } else {
-                evidence_records.push(evidence.clone());
+        for public_interface in public_interfaces {
+            for evidence in &public_interface.reusable_evidence {
+                if let Some(existing) = evidence_records
+                    .iter_mut()
+                    .find(|existing| existing.identity == evidence.identity)
+                {
+                    *existing = evidence.clone();
+                } else {
+                    evidence_records.push(evidence.clone());
+                }
             }
         }
         evidence_records.sort_by(|left, right| left.identity.cmp(&right.identity));
         context.evidence = evidence_records.into_boxed_slice();
+        let mut published_summaries = Vec::new();
+        for public_interface in public_interfaces {
+            for summary in &public_interface.concrete_call_summaries {
+                if !published_summaries
+                    .iter()
+                    .any(|published: &crate::compiler_frontend::public_interface::ConcreteCallSummaryRecord| published.origin == summary.origin)
+                {
+                    published_summaries.push(summary.clone());
+                }
+            }
+        }
         let mut imported_summaries = FxHashMap::default();
         for record in &context.concrete_call_summaries {
-            if !public_interface
-                .concrete_call_summaries
+            if !published_summaries
                 .iter()
                 .any(|published| published.origin == record.origin)
             {
@@ -346,7 +367,7 @@ impl ModuleMaterialisationPreparedBuilder {
         }
         context.concrete_call_summaries = retained_concrete_call_summaries(
             &imported_summaries,
-            &public_interface.concrete_call_summaries,
+            &published_summaries,
             &context.declaration_closure,
             &context.evidence,
         )?;
@@ -1745,8 +1766,11 @@ impl ModuleMaterialisationCapture {
                 let mut scratch = Vec::new();
                 path_fork.render_portable(path, &self.string_table, &mut scratch)
             };
-            let identity =
-                ModulePrivateNominalIdentity::new(module_origin.clone(), defining_path, category);
+            let identity = ModulePrivateNominalIdentity::new(
+                self.surface_origin_for_path(module_origin, &path, path_fork),
+                defining_path,
+                category,
+            );
             self.type_environment.register_canonical_identity(
                 CanonicalTypeIdentity::ModulePrivateNominal(identity.clone()),
                 type_id,
@@ -1771,23 +1795,30 @@ impl ModuleMaterialisationCapture {
                 })?;
                 Ok((
                     trait_id,
+                    *path,
                     self.string_table.resolve(defining_name).to_owned(),
                 ))
             })
             .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
-        for (trait_id, defining_name) in private_traits {
+        for (trait_id, trait_path, defining_name) in private_traits {
+            let identity = self
+                .public_source_trait_origins
+                .get(&trait_path)
+                .cloned()
+                .map(CanonicalTraitIdentity::Source)
+                .unwrap_or_else(|| {
+                    CanonicalTraitIdentity::Source(OriginTraitId::new(
+                        self.surface_origin_for_path(module_origin, &trait_path, path_fork),
+                        defining_name,
+                    ))
+                });
             if self
                 .trait_environment
-                .canonical_identity_for_id(trait_id)
+                .id_for_canonical_identity(&identity)
                 .is_none()
             {
-                Rc::make_mut(&mut self.trait_environment).register_canonical_identity(
-                    CanonicalTraitIdentity::Source(OriginTraitId::new(
-                        module_origin.clone(),
-                        defining_name,
-                    )),
-                    trait_id,
-                )?;
+                Rc::make_mut(&mut self.trait_environment)
+                    .register_canonical_identity(identity, trait_id)?;
             }
         }
 
@@ -1808,13 +1839,14 @@ impl ModuleMaterialisationCapture {
                         &mut scratch,
                     )
                 };
-                Ok((definition.id, defining_path))
+                Ok((definition.id, definition.canonical_path, defining_path))
             })
             .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
-        for (trait_id, defining_path) in private_traits {
+        for (trait_id, trait_path, defining_path) in private_traits {
+            let module_origin = self.surface_origin_for_path(module_origin, &trait_path, path_fork);
             Rc::make_mut(&mut self.trait_environment).register_canonical_identity(
                 CanonicalTraitIdentity::ModulePrivate(ModulePrivateTraitIdentity::new(
-                    module_origin.clone(),
+                    module_origin,
                     defining_path,
                 )),
                 trait_id,
@@ -1822,6 +1854,27 @@ impl ModuleMaterialisationCapture {
         }
 
         Ok(())
+    }
+
+    /// The declaring source surface origin for one declaration path.
+    ///
+    /// WHAT: a declaration path's parent is its source file; the captured file-role table maps
+    ///       that source to the normal, support or shared origin of this structural module.
+    fn surface_origin_for_path(
+        &self,
+        module_origin: &StableModuleOriginIdentity,
+        declaration_path: &PathId,
+        path_fork: &PathInternerFork,
+    ) -> StableModuleOriginIdentity {
+        let source_path = path_fork
+            .try_parent(*declaration_path)
+            .unwrap_or(PathId::ROOT);
+        let role = self
+            .source_roles_by_path
+            .get(&source_path)
+            .copied()
+            .unwrap_or(module_origin.role());
+        module_origin.with_role(role)
     }
 
     fn private_executable_identity(
@@ -1862,7 +1915,7 @@ impl ModuleMaterialisationCapture {
         };
 
         Ok(ModulePrivateExecutableIdentity::new(
-            module_origin.clone(),
+            self.surface_origin_for_path(module_origin, path, path_fork),
             declaring_source,
             category,
             name,
@@ -1877,6 +1930,7 @@ impl ModuleMaterialisationCapture {
             public_trait_roots,
             default_const_templates_by_path,
             module_origin,
+            public_source_trait_origins,
             stage0_resolution_facts,
             frozen_identity_handle,
             string_table,
@@ -1889,6 +1943,18 @@ impl ModuleMaterialisationCapture {
             inherited_stable_context: None,
             retained_declaring_contexts: Vec::new(),
             module_origin,
+            source_roles_by_path: lookups
+                .module_symbols
+                .file_roles_by_source
+                .iter()
+                .map(|(path, role)| {
+                    (
+                        *path,
+                        role.active_surface().unwrap_or(ModuleRootRole::Shared),
+                    )
+                })
+                .collect(),
+            public_source_trait_origins,
             stage0_resolution_facts,
             frozen_identity_handle,
             type_environment: type_environment.fork_for_generated(),

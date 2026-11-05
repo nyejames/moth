@@ -1,0 +1,140 @@
+**Current support versus accepted design.** Directory commands now select one
+directory as both build root and source root. `config.moth` is optional and its
+`project` record may omit `name` and `version`. Generated outputs default to
+`_dev` and `_release`. The accepted `$config`, `$project`, `$html_builder` and
+root-only `$page` forms are queued, and `moth new` does not emit them yet.
+
+A Moth project is a directory tree rooted at the directory selected by the
+command. There is no implicit `src/` entry directory, and a nested
+`config.moth` never applies to an enclosing build.
+
+### Accepted starter shape
+
+The queued directive form leaves version optional:
+
+[codeblock, $code("moth"):
+    $project(
+        name = "my_site",
+    )
+
+    $html_builder
+]
+
+This is accepted queued design, not a claim about the current `moth new`
+scaffold. Keep operational projects on the current declaration-owned
+`#Config` and grouped parenthesised config until the general-directive
+cutover. `$project` never accepts `entry_root`.
+
+### Project root contents
+
+[codeblock, $code("text"):
+    website/
+    ├── config.moth           # optional
+    ├── @site.moth
+    ├── shared/
+    │   └── +package.moth
+    ├── pages/
+    │   └── @pages.moth
+    ├── _dev/
+    │   └── .moth_manifest
+    ├── _release/
+    │   └── .moth_manifest
+    └── .gitignore
+]
+
+### Directory roles
+
+- The selected directory is the only build root and the top of the discoverable source tree.
+- `config.moth` is optional. When present, only the one at the selected root applies. It is not module source.
+- A directory named `src/` is ordinary source content, not a configured entry root. There is no `entry_root`.
+- `_dev/` and `_release/` are hidden generated output folders, not source folders. The build system manages them through manifests.
+- `.moth_manifest` files are build-system metadata used for safe stale-output cleanup. They are not source.
+- A directory component below the selected root whose name starts with `_` is excluded from that build. Select it directly to compile it.
+
+### Structural packages
+
+Project-local source-backed packages are structural `+*.moth` support packages.
+A `+*.moth` file in a source directory marks that directory as a scoped
+support package root named by its containing directory.
+
+In the example above, `shared/+package.moth` creates the scoped `@shared`
+support package. It is visible to its owner normal module, normal sibling
+modules and their descendants. It is not dependency-bound from its own private
+implementation subtree or from another support package in the same scope.
+
+No folder gains package meaning without a `+*.moth` root. Ordinary directories
+do not automatically become packages.
+
+A directory may contain both an `@*.moth` normal root and a `+*.moth` support
+root. They are two isolated surfaces of one structural module: helpers are
+shared, roots cannot import each other, and both interfaces publish only from
+one successful semantic transaction. A project-root `+*.moth` is the ordinary
+support surface selected by project package assembly; there is no separate
+facade node or special assembly namespace.
+
+For the full package contract see @../packages/#project-local-packages (Project-local packages).
+
+### Normal module-root files inside source directories
+
+A non-config file whose name starts with `@` and ends with `.moth` is a module
+root. The filename after `@` has no language-level semantic role.
+`@page.moth`, `@mod.moth`, `@api.moth` and `@anything.moth` are equivalent root
+filenames.
+
+The current `moth new html` scaffold uses `@page.moth` at the selected root as a
+conventional root filename. That convention does not make the filename a page.
+In the accepted design, the root file declares an HTML artefact with a
+root-only `$page` directive:
+
+[codeblock, $code("moth"):
+    $page
+]
+
+Helpers in ordinary files stay inside the surrounding module and cannot become
+entries on their own.
+
+### Current scaffold notice
+
+The current scaffold creates current-syntax `config.moth` with an explicit valid
+project name, a root-level `@page.moth`, and a `.gitignore` containing `/_dev`
+and `/_release`. The generated config is:
+
+[codeblock, $code("moth"):
+    project #= (
+        name = "my_site",
+    )
+    html #= ()
+]
+
+It does not emit the accepted starter `$config`/`$project`/`$html_builder` shape
+or a live `$page` declaration. Deleting the generated config is valid when the
+directory name is a valid project identifier.
+
+### Source versus output
+
+Developers own source directories. The builder generates hidden output folders
+and owns their stale-output cleanup. Treat generated artefacts as output, not
+source. A visible directory named `release` remains ordinary source.
+
+### Builder-neutral frontend versus builder-owned output
+
+The compiler frontend discovers modules, resolves dependencies, checks types,
+lowers code and validates borrowing. A project builder then decides how
+compiled modules become real output files. The current user-facing builder is
+the HTML project builder.
+
+This separation lets the same frontend feed other builders. The frontend does
+not decide which modules produce artefacts. The builder owns that decision.
+
+### Only config.moth has config semantics
+
+No other filename has config meaning. `@config.moth` is a module root, not a
+config file. Alternate config filenames, compatibility handling and
+config-specific diagnostics for other names are not supported. A nested
+`config.moth` is reserved and inert to the enclosing build.
+
+### Concepts related to project layout
+
+- For config key rules see @#project-config (Project config).
+- For module root rules see @#module-roots (Module roots).
+- For HTML routes and artefacts see @#html-routing-and-artifacts (HTML routing and artefacts).

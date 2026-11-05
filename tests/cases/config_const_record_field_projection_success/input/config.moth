@@ -1,9 +1,6 @@
 defaults #= (
-    entry_root = "src",
 )
 
 project #= (
-    name = "test_project",
-    entry_root = defaults.entry_root,
-)
+    name = "test_project")
 html #= ()

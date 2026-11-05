@@ -1,8 +1,0 @@
-project #= (
-    name = "many_medium_files",
-    entry_root = "src",
-)
-html #= (
-    dev_output = "dev",
-    release_output = "release",
-)

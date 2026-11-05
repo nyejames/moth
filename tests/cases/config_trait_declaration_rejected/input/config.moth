@@ -1,7 +1,5 @@
 project #= (
-    name = "test_project",
-    entry_root = "src",
-)
+    name = "test_project")
 
 DISPLAY_TEXT must:
     display |This| -> String

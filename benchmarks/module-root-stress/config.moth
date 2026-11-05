@@ -1,8 +1,0 @@
-project #= (
-    name = "module_root_stress",
-    entry_root = "src",
-)
-html #= (
-    dev_output = "dev",
-    release_output = "release",
-)

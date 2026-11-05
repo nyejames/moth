@@ -243,6 +243,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
         .expect("standalone Moth template source identity was not registered");
     let options = HeaderParseOptions {
         entry_file_id: Some(entry_file_id),
+        support_root_file_id: None,
         entry_file_role: None,
         active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
     };
@@ -650,6 +651,7 @@ impl MothTemplateScopeFixture {
         let external_package_registry = Arc::new(ExternalPackageRegistry::new());
         let options = HeaderParseOptions {
             entry_file_id: None,
+            support_root_file_id: None,
             entry_file_role: None,
             active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         };

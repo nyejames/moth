@@ -7,12 +7,13 @@ use std::ffi::OsStr;
 #[cfg(unix)]
 use std::ffi::OsString;
 use std::fs;
+use std::io::Write;
 #[cfg(target_os = "linux")]
 use std::os::unix::ffi::OsStrExt;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 use tempfile::tempdir;
 
@@ -41,7 +42,8 @@ second || -> I32:
 ";
 
 /// Directory-project config retaining one module error before discovery stops.
-const MODULE_LIMIT_CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_module = 1,\n)\nhtml #= ()\n";
+const MODULE_LIMIT_CONFIG_SOURCE: &str =
+    "project #= (\n    name = \"docs\",\n    max_errors_per_module = 1,\n)\nhtml #= ()\n";
 
 fn run_moth(arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_moth"))
@@ -75,26 +77,22 @@ fn write_source(root: &std::path::Path, name: &str, source: &str) -> std::path::
 }
 
 fn write_directory_html_project(root: &Path, page_source: &str) {
-    let src = root.join("src");
-    fs::create_dir_all(&src).expect("src should be created");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("config should be written");
-    fs::write(src.join("@page.moth"), page_source).expect("page source should be written");
+    fs::write(root.join("@page.moth"), page_source).expect("page source should be written");
 }
 
 fn write_directory_html_config_input_project(root: &Path) {
-    let src = root.join("src");
-    fs::create_dir_all(&src).expect("src should be created");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
     )
     .expect("config should be written");
     fs::write(
-        src.join("@page.moth"),
+        root.join("@page.moth"),
         "enabled #Config of Bool\nresult ~= 0\nif enabled:\n    ~result = 1\n;\n",
     )
     .expect("page source should be written");
@@ -111,6 +109,177 @@ fn valid_single_file_check_exits_successfully() {
     ]);
 
     assert!(output.status.success());
+}
+
+#[cfg(unix)]
+#[test]
+fn cross_directory_root_alias_is_a_typed_diagnostic_not_a_compiler_bug() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempdir().expect("temporary directory should be created");
+    let project = root.path().join("project");
+    fs::create_dir_all(project.join("child")).expect("child directory should be created");
+    write_directory_html_project(&project, "page_title #= \"root\"\n");
+    symlink(
+        project.join("@page.moth"),
+        project.join("child/@child.moth"),
+    )
+    .expect("child root symlink should be created");
+
+    let output = run_moth(&["check", project.to_str().expect("path should be UTF-8")]);
+    let report = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert_eq!(output.status.code(), Some(1), "report: {report}");
+    assert!(
+        report.contains("resolve to the same physical source file"),
+        "the root alias must be a typed layout diagnostic: {report}"
+    );
+    assert!(
+        !report.contains("COMPILER BUG"),
+        "the root alias must not escape as a compiler bug: {report}"
+    );
+}
+
+fn write_support_scope_project(project: &Path) {
+    fs::create_dir_all(project.join("pages/extras")).expect("pages extras should be created");
+    write_source(
+        project,
+        "config.moth",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    );
+    write_source(project, "@site.moth", "");
+    write_source(project, "pages/@pages.moth", "");
+    write_source(
+        project,
+        "pages/extras/+extras.moth",
+        "export:\n    extra #= 1\n;\n",
+    );
+}
+
+fn terse_diagnostic_detail(report: &str, code: &str) -> String {
+    report
+        .lines()
+        .find(|line| line.starts_with(&format!("E|{code}|")))
+        .and_then(|line| line.splitn(5, '|').nth(4))
+        .unwrap_or_else(|| panic!("expected a terse {code} diagnostic in: {report}"))
+        .to_owned()
+}
+
+#[test]
+fn support_scope_diagnostic_matches_canonical_and_check_only_lanes() {
+    let root = tempdir().expect("temporary directory should be created");
+    let canonical_project = root.path().join("canonical");
+    write_support_scope_project(&canonical_project);
+    write_source(&canonical_project, "pages/+package.moth", "@extras extra\n");
+
+    let canonical = run_moth(&[
+        "check",
+        canonical_project
+            .to_str()
+            .expect("canonical path should be UTF-8"),
+        "--terse",
+    ]);
+    let canonical_report = format!(
+        "{}{}",
+        String::from_utf8_lossy(&canonical.stdout),
+        String::from_utf8_lossy(&canonical.stderr)
+    );
+    assert_eq!(canonical.status.code(), Some(1), "{canonical_report}");
+    let canonical_detail = terse_diagnostic_detail(&canonical_report, "MOTH-IMPORT-0015");
+
+    let check_only_project = root.path().join("check_only");
+    write_support_scope_project(&check_only_project);
+    write_source(
+        &check_only_project,
+        "pages/+package.moth",
+        "export:\n    marker #= 1\n;\n",
+    );
+    write_source(&check_only_project, "pages/orphan.moth", "@extras extra\n");
+
+    let check_only = run_moth(&[
+        "check",
+        check_only_project
+            .to_str()
+            .expect("check-only path should be UTF-8"),
+        "--terse",
+    ]);
+    let check_only_report = format!(
+        "{}{}",
+        String::from_utf8_lossy(&check_only.stdout),
+        String::from_utf8_lossy(&check_only.stderr)
+    );
+    assert_eq!(check_only.status.code(), Some(1), "{check_only_report}");
+    let check_only_detail = terse_diagnostic_detail(&check_only_report, "MOTH-IMPORT-0015");
+
+    assert_eq!(
+        check_only_detail, canonical_detail,
+        "canonical and check-only preparation must emit the same support diagnostic"
+    );
+}
+
+#[test]
+fn paired_provider_check_only_uses_the_selected_surface() {
+    let root = tempdir().expect("temporary directory should be created");
+    let project = root.path().join("project");
+    fs::create_dir_all(project.join("consumer")).expect("consumer directory should be created");
+    fs::create_dir_all(project.join("pkg")).expect("provider directory should be created");
+
+    write_source(
+        &project,
+        "config.moth",
+        "project #= (name = \"check_only\")\nhtml #= ()\n",
+    );
+    write_source(&project, "@page.moth", "@consumer run\n[:run]\n");
+    write_source(
+        &project,
+        "consumer/@consumer.moth",
+        "export:\n    run #= \"ok\"\n;\n",
+    );
+    write_source(
+        &project,
+        "consumer/orphan.moth",
+        "@pkg support_only\norphan || -> String:\n    return support_only\n;\n",
+    );
+    write_source(
+        &project,
+        "pkg/+package.moth",
+        "export:\n    support_only #= \"support\"\n;\n",
+    );
+    write_source(
+        &project,
+        "pkg/@mod.moth",
+        "export:\n    normal_only #= \"normal\"\n;\n",
+    );
+
+    let check = run_moth_from_dir(&project, &["check", ".", "--terse"]);
+    assert!(
+        check.status.success(),
+        "check-only support import failed: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+
+    // The orphan must really enter check-only compilation, and it must bind the support
+    // interface rather than silently falling back to the paired normal interface.
+    write_source(
+        &project,
+        "consumer/orphan.moth",
+        "@pkg normal_only\norphan || -> String:\n    return normal_only\n;\n",
+    );
+    let wrong_surface = run_moth_from_dir(&project, &["check", ".", "--terse"]);
+    let report = format!(
+        "{}{}",
+        String::from_utf8_lossy(&wrong_surface.stdout),
+        String::from_utf8_lossy(&wrong_surface.stderr)
+    );
+    assert!(!wrong_surface.status.success());
+    assert!(
+        report.contains("MOTH-IMPORT-0011"),
+        "expected support-surface rejection, got: {report}"
+    );
 }
 
 #[test]
@@ -169,7 +338,7 @@ fn build_command_executes_with_typed_config_input() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(root.path().join("preview/index.html").is_file());
+    assert!(root.path().join("_preview/index.html").is_file());
 }
 
 #[test]
@@ -189,17 +358,15 @@ fn check_command_executes_with_typed_config_input() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(!root.path().join("preview").exists());
+    assert!(!root.path().join("_preview").exists());
 }
 
 #[test]
 fn check_orders_the_module_stop_before_the_terse_summary_and_omits_it_when_complete() {
     let root = tempdir().expect("temporary directory should be created");
-    let src = root.path().join("src");
-    fs::create_dir_all(&src).expect("src should be created");
     fs::write(root.path().join("config.moth"), MODULE_LIMIT_CONFIG_SOURCE)
         .expect("limited config should be written");
-    fs::write(src.join("@page.moth"), TWO_FAILING_BODIES_SOURCE)
+    fs::write(root.path().join("@page.moth"), TWO_FAILING_BODIES_SOURCE)
         .expect("page source should be written");
     let stop_line =
         "Diagnostic discovery stopped early (module error limit): later code was not checked.";
@@ -308,7 +475,7 @@ fn invalid_syntax_project_build_exits_with_failure() {
 fn output_root_write_failure_exits_with_failure_without_benchmark_status() {
     let root = tempdir().expect("temporary directory should be created");
     write_directory_html_project(root.path(), "#[:<h1>Hello</h1>]\nentry = \".\"\n");
-    fs::write(root.path().join("dev"), b"occupied output root")
+    fs::write(root.path().join("_dev"), b"occupied output root")
         .expect("output-root collision file should be written");
 
     let output = run_moth_with_bench_status(
@@ -665,5 +832,108 @@ fn assert_no_status_record(output: &Output) {
     assert!(
         records.is_empty(),
         "unexpected benchmark status output: {stdout}"
+    );
+}
+
+#[test]
+fn scaffolded_project_checks_and_builds_with_generated_config() {
+    let temp = tempdir().expect("should create temp dir");
+    let project = temp.path().join("my-site");
+    let project_argument = project.to_string_lossy().into_owned();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_moth"))
+        .args(["new", "html", &project_argument])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("should start moth new");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should be piped")
+        .write_all(b"y\n\nY\n")
+        .expect("should answer scaffold prompts");
+    let scaffold = child.wait_with_output().expect("should finish moth new");
+    assert!(
+        scaffold.status.success(),
+        "scaffold failed: {}",
+        String::from_utf8_lossy(&scaffold.stderr)
+    );
+
+    let config = fs::read_to_string(project.join("config.moth"))
+        .expect("generated config should be readable");
+    assert!(
+        config.contains("name = \"my_site\""),
+        "invalid generated config: {config}"
+    );
+    assert!(!config.contains("entry_root"));
+    assert!(!config.contains("version"));
+
+    let check = run_moth(&["check", &project_argument, "--terse"]);
+    assert!(
+        check.status.success(),
+        "scaffolded check failed: {}",
+        String::from_utf8_lossy(&check.stdout)
+    );
+
+    let build = run_moth(&["build", &project_argument]);
+    assert!(
+        build.status.success(),
+        "scaffolded dev build failed: {}",
+        String::from_utf8_lossy(&build.stdout)
+    );
+    assert!(project.join("_dev/index.html").is_file());
+
+    let release = run_moth(&["build", &project_argument, "--release"]);
+    assert!(
+        release.status.success(),
+        "scaffolded release build failed: {}",
+        String::from_utf8_lossy(&release.stdout)
+    );
+    assert!(project.join("_release/index.html").is_file());
+}
+
+#[test]
+fn check_only_shared_helper_rejects_lateral_support_import() {
+    let root = tempdir().expect("temporary directory should be created");
+    let project = root.path().join("project");
+    fs::create_dir_all(project.join("pkg")).expect("provider directory should be created");
+
+    write_source(
+        &project,
+        "config.moth",
+        "project #= (name = \"check_only\")\nhtml #= ()\n",
+    );
+    write_source(&project, "@page.moth", "[:ok]\n");
+    write_source(
+        &project,
+        "+package.moth",
+        "export:\n    root_support #= \"root\"\n;\n",
+    );
+    write_source(
+        &project,
+        "shared.moth",
+        "@pkg support_only\n\nhelper || -> String:\n    return support_only\n;\n",
+    );
+    write_source(
+        &project,
+        "pkg/+package.moth",
+        "export:\n    support_only #= \"support\"\n;\n",
+    );
+
+    let check = run_moth_from_dir(&project, &["check", ".", "--terse"]);
+    let report = format!(
+        "{}{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(
+        !check.status.success(),
+        "a check-only shared helper must reject a lateral support import: {report}"
+    );
+    assert!(
+        report.contains("MOTH-IMPORT-0015") && report.contains("shared.moth"),
+        "expected shared-helper support rejection, got: {report}"
     );
 }

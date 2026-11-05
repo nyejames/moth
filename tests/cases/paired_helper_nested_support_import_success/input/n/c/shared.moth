@@ -1,0 +1,5 @@
+@pkg support_only
+
+helper_value || -> String:
+    return support_only
+;

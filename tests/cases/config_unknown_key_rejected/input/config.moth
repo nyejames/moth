@@ -1,7 +1,4 @@
 project #= (
-    name = "test_project",
-    entry_root = "src",
-)
+    name = "test_project")
 html #= (
-    not_a_supported_field = "nope",
-)
+    not_a_supported_field = "nope")

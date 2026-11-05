@@ -367,7 +367,7 @@ mod tests {
         let facade_origin = StableModuleOriginIdentity::from_portable_path(
             package,
             String::new(),
-            ModuleRootRole::ProjectPackageFacade,
+            ModuleRootRole::SyntheticProjectContext,
         );
 
         assert_eq!(interface.interface().module_origin, synthetic_origin);

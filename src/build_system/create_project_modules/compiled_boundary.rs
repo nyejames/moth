@@ -30,7 +30,7 @@ use crate::compiler_frontend::instrumentation::MemoryLedgerSnapshot;
 use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedDeclarationIdentity, ModuleRootRole, StablePackageIdentity,
+    GeneratedDeclarationIdentity, StablePackageIdentity,
 };
 #[cfg(feature = "data_layout_memory_probe")]
 use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabaseRetentionMetrics};
@@ -45,7 +45,9 @@ use crate::projects::settings::Config;
 
 use super::generated_store::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::MaterialisationContextLocation;
-use super::module_artifact_store::{ModuleArtifactStore, ProviderSlot};
+use super::module_artifact_store::{
+    ModuleArtifactStore, ProviderSlot, publication_surface_mismatch,
+};
 use super::module_identity::ModuleId;
 use super::project_module_graph::ProjectModuleGraph;
 use super::resource_inputs::ResourceInputRegistry;
@@ -426,14 +428,13 @@ impl CompiledGraphBoundary {
                     }
                     *owner = Some(module_id);
                     let node = &self.structure.nodes()[index];
-                    if &artifact.interface.module_origin != node.stable_origin() {
+                    let (expected_primary, expected_support) = node.publication_surfaces();
+                    if let Some(mismatch) =
+                        publication_surface_mismatch(artifact, expected_primary, expected_support)
+                    {
                         return Err(InfrastructureFailure::internal(
                             CompilerStage::ProjectBuildAssembly,
-                            format!(
-                                "ModuleId {index} artefact interface origin {:?} disagrees with its graph node origin {:?}",
-                                artifact.interface.module_origin,
-                                node.stable_origin()
-                            ),
+                            format!("ModuleId {index} {mismatch}"),
                         ));
                     }
                 }
@@ -575,8 +576,8 @@ impl CompiledSourcePackage {
     /// Validate package identity and root ownership before registry publication.
     ///
     /// WHAT: proves the root `ModuleId` is in range, the root node belongs to this package's
-    ///       stable identity, the root role is a normal API-compatible package entry root, the
-    ///       root reached a final outcome, and a successful root interface agrees with the graph
+    ///       stable identity, the root role is the selected public package surface role, the root
+    ///       reached a final outcome, and a successful root interface agrees with the graph
     ///       node's origin. The boundary must already be finished (or be validated by this call
     ///       through the embedded boundary proof).
     /// WHY: `CompletedSourcePackageRegistry::publish` mutates registry state, so the package
@@ -613,23 +614,15 @@ impl CompiledSourcePackage {
                 ),
             ));
         }
-        if node.role() != ModuleRootRole::Normal {
-            return Err(InfrastructureFailure::internal(
-                CompilerStage::ProjectBuildAssembly,
-                format!(
-                    "Source package @{} root module has role {:?}; packages require a normal entry-root module",
-                    self.package_prefix(),
-                    node.role()
-                ),
-            ));
-        }
+        let public_surface_role = node.public_surface_role();
+        let public_surface_origin = node.public_surface_origin();
 
         match self.boundary.modules.slot(self.root_module_id)? {
             ProviderSlot::Successful(_) => {
                 let interface = self
                     .boundary
                     .modules
-                    .interface(self.root_module_id)?
+                    .interface_for_surface(self.root_module_id, public_surface_role)?
                     .ok_or_else(|| {
                         InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                             "Source package @{} root ModuleId {} holds a successful slot without a published interface",
@@ -637,14 +630,15 @@ impl CompiledSourcePackage {
                             root_index
                         ))
                     })?;
-                if &interface.module_origin != node.stable_origin() {
+                if &interface.module_origin != public_surface_origin {
                     return Err(InfrastructureFailure::internal(
                         CompilerStage::ProjectBuildAssembly,
                         format!(
-                            "Source package @{} root interface origin {:?} disagrees with its graph node origin {:?}",
+                            "Source package @{} root interface origin {:?} disagrees with its selected {:?} public-surface origin {:?}",
                             self.package_prefix(),
                             interface.module_origin,
-                            node.stable_origin()
+                            public_surface_role,
+                            public_surface_origin
                         ),
                     ));
                 }
@@ -677,9 +671,24 @@ impl CompiledSourcePackage {
 
     /// The completed facade interface for this package boundary.
     pub(crate) fn root_interface(&self) -> Result<&PublicSemanticInterface, InfrastructureFailure> {
+        let node = self
+            .boundary
+            .structure
+            .nodes()
+            .get(self.root_module_id.index())
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "Source package @{} root ModuleId {} is out of range",
+                        self.package_prefix(),
+                        self.root_module_id.index()
+                    ),
+                )
+            })?;
         self.boundary
             .modules
-            .interface(self.root_module_id)?
+            .interface_for_surface(self.root_module_id, node.public_surface_role())?
             .ok_or_else(|| {
                 InfrastructureFailure::internal(
                     CompilerStage::ProjectBuildAssembly,

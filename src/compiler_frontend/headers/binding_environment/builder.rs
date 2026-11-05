@@ -1376,22 +1376,21 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     }
     fn same_directory_root_file(&self, source_file: &PathId) -> Option<PathId> {
         let moth_template_directory = self.source_directory(source_file)?;
+        let mut roots = self.module_symbols.file_roles_by_source.iter().filter_map(
+            |(candidate_source, role)| {
+                (role.is_export_capable()
+                    && self.source_directory(candidate_source) == Some(moth_template_directory))
+                .then_some(*candidate_source)
+            },
+        );
 
-        self.module_symbols
-            .file_roles_by_source
-            .iter()
-            .find_map(|(candidate_source, role)| {
-                if !role.is_export_capable() {
-                    return None;
-                }
-
-                let candidate_directory = self.source_directory(candidate_source)?;
-                if candidate_directory == moth_template_directory {
-                    Some(*candidate_source)
-                } else {
-                    None
-                }
-            })
+        let root = roots.next()?;
+        // A shared source may not inherit one arbitrary root's declaration surface. A paired
+        // directory therefore gives `.mtf` helpers no implicit root-constant scope.
+        if roots.next().is_some() {
+            return None;
+        }
+        Some(root)
     }
 
     fn source_directory(&self, source_file: &PathId) -> Option<PathId> {
@@ -1427,11 +1426,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         &self,
         root_file: &PathId,
     ) -> Option<&FxHashSet<PublicExportEntry>> {
-        let module_root = self.module_symbols.file_module_membership.get(root_file)?;
-
         self.module_symbols
             .module_root_public_exports
-            .get(module_root)
+            .get(root_file)
     }
 
     fn resolve_and_register_selection_bindings(

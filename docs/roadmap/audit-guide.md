@@ -22,7 +22,7 @@ Follow [AGENTS.md](../../AGENTS.md) task routing first. Then read:
 1. The chosen checklist under [audit-kinds](./audit-kinds/).
 2. The [audit log](./audit-log.md) row for the area, if it has one.
 3. Open findings and any recent report for the same area.
-4. The canonical authorities the area's subject matter routes to, plus the [progress matrix](../src/docs/progress/@page.moth) when current support status matters.
+4. The canonical authorities the area's subject matter routes to, plus the [progress matrix](../docs/progress/@page.moth) when current support status matters.
 
 Do not blanket-read every design document. Follow the routing.
 
@@ -141,7 +141,7 @@ A candidate may instead be rejected, superseded or blocked on a design decision.
 
 **Verification** is done by someone other than the implementer. Read the original evidence, inspect the changed boundary, confirm no parallel path survives, and confirm linked test or documentation changes were independently authorised. A green suite is necessary and not sufficient.
 
-Use `just validate` for code-bearing fixes and the documentation release-build gate for documentation-only work. See the [validation guide](../src/developer-docs/style-guide/validation.mtf). Record exactly what ran, passed, failed and was not run.
+Use `just validate` for code-bearing fixes and the documentation release-build gate for documentation-only work. See the [validation guide](../developer-docs/style-guide/validation.mtf). Record exactly what ran, passed, failed and was not run.
 
 ## Recording coverage
 

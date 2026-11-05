@@ -180,8 +180,9 @@ impl BuilderSurface {
 
 /// The grouped `project #= (...)` record schema with compiler-owned fields only.
 ///
-/// WHAT: `name` is required; `entry_root` defaults to `src`; remaining compiler-owned
-///       project fields stay optional. Additional authored metadata is preserved.
+/// WHAT: `name` and the remaining compiler-owned project fields are optional. An omitted name
+///       defaults to the selected directory name; version absence stays optional. Additional
+///       authored metadata is preserved.
 /// WHY: compiler-owned project fields must stay off builder section schemas, and open
 ///      metadata must survive for `@project`.
 fn compiler_project_record_schema() -> ConfigSchema {
@@ -189,13 +190,7 @@ fn compiler_project_record_schema() -> ConfigSchema {
     let root = schema.root();
 
     schema
-        .register_field(root, ConfigSchemaField::string("name").required())
-        .expect("project schema is under construction");
-    schema
-        .register_field(
-            root,
-            ConfigSchemaField::string_with_default("entry_root", "src"),
-        )
+        .register_field(root, ConfigSchemaField::string("name"))
         .expect("project schema is under construction");
     schema
         .register_field(

@@ -30,6 +30,10 @@ impl PortableRelativePath {
         &self.components
     }
 
+    fn from_components(components: Vec<String>) -> Self {
+        Self { components }
+    }
+
     pub(crate) fn identity_components(&self) -> Vec<String> {
         self.components
             .iter()
@@ -98,6 +102,35 @@ pub(crate) fn parse_relative_path(
     }
 
     Ok(PortableRelativePath { components })
+}
+
+/// Parse and normalize one directory output root spelling.
+///
+/// WHAT: validates portable-relative syntax and guarantees the emitted root is hidden from source
+/// discovery. A single-component name receives exactly one leading `_`. A multi-component path
+/// keeps its authored spelling but must contain at least one `_`-prefixed directory component that
+/// encloses the emitted root, so generated content is mechanically excluded from the source tree.
+/// WHY: every builder uses the same output-name rule, and normalization must happen once before
+/// containment, identity or manifest checks so those consumers see the path that will be written.
+/// The transform is idempotent: `_dev` stays `_dev` and `_generated/site` stays unchanged.
+pub(crate) fn normalize_directory_output_relative_path(
+    raw: &str,
+) -> Result<PathBuf, InvalidOutputFolderReason> {
+    let portable = parse_relative_path(raw)?;
+    let mut components = portable.components().to_vec();
+
+    if components.len() == 1 {
+        if !components[0].starts_with('_') {
+            components[0].insert(0, '_');
+        }
+    } else if !components
+        .iter()
+        .any(|component| component.starts_with('_'))
+    {
+        return Err(InvalidOutputFolderReason::VisibleDirectoryOutputPath);
+    }
+
+    Ok(PortableRelativePath::from_components(components).to_path_buf())
 }
 
 /// Percent-encode one URL path segment according to RFC 3986.

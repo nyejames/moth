@@ -7,10 +7,10 @@ This README is the package's living development document. It holds design direct
 | Owner | Holds |
 |---|---|
 | This README | Living design, development plan, investigations and future ideas |
-| `docs/src/docs/packages/builder/graphics/` | Accepted public API and semantics |
+| `docs/docs/packages/builder/graphics/` | Accepted public API and semantics |
 | Packages and builders progress matrix | Current implementation status and accepted next gaps |
 | `docs/compiler-design-overview.md`, `docs/build-system-design.md` | Cross-package compiler and build architecture |
-| `docs/src/docs/packages/external-binding-contracts.mtf` | The annotated JavaScript binding contract the package is written against |
+| `docs/docs/packages/external-binding-contracts.mtf` | The annotated JavaScript binding contract the package is written against |
 
 ## Current state
 
@@ -74,7 +74,7 @@ The public API isn't built from unexplained numeric WebGL constants. Primitive m
 
 ### Numeric precision
 
-WebGL consumes 32-bit floats for vertex data, uniforms and clear values. `F32` gives an exact binary32 slot where the API needs it and `F64` keeps its binary64 width. The shared boundary requires finite values at each declared precision. `F32` parameters arrive as exact binary32 values and `F32` results round once at binary32. The [external binding contract](../../../../../../docs/src/docs/packages/external-binding-contracts.mtf) owns the validation and failure rules.
+WebGL consumes 32-bit floats for vertex data, uniforms and clear values. `F32` gives an exact binary32 slot where the API needs it and `F64` keeps its binary64 width. The shared boundary requires finite values at each declared precision. `F32` parameters arrive as exact binary32 values and `F32` results round once at binary32. The [external binding contract](../../../../../../docs/docs/packages/external-binding-contracts.mtf) owns the validation and failure rules.
 
 ### Async and callback boundary
 

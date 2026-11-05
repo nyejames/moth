@@ -27,6 +27,7 @@ use crate::compiler_frontend::headers::module_symbols::{
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
 use crate::compiler_frontend::headers::types::DependencyBindingSyntax;
 use crate::compiler_frontend::public_interface::PublicDeclarationSemantics;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::source_packages::match_package_prefix;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
@@ -362,13 +363,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             }
         }
 
-        let module_root = self
-            .module_symbols
-            .file_module_membership
-            .get(source_file)?;
         self.module_symbols
             .module_root_public_exports
-            .get(module_root)
+            .get(source_file)
             .cloned()
     }
 
@@ -451,6 +448,16 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 return Ok(None);
             }
 
+            let consumer_surface = self
+                .module_symbols
+                .file_roles_by_source
+                .get(source_file)
+                .and_then(|role| role.active_surface())
+                .unwrap_or(ModuleRootRole::Normal);
+            if boundary.surface != consumer_surface {
+                continue;
+            }
+
             if self
                 .module_symbols
                 .module_file_paths
@@ -521,7 +528,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         if self
             .module_symbols
             .module_root_public_exports
-            .contains_key(target_root)
+            .contains_key(target_file)
         {
             return Err(diagnostics::cross_module_dependency_not_exported(
                 &clause.dependency.path,

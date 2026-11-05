@@ -19,12 +19,12 @@ docs/roadmap/plans/boracle-next-research-plans/boracle-loop-generation-epochs-an
 Canonical authorities:
 
 - `docs/compiler-design-overview.md`
-- `docs/src/developer-docs/memory-management/overview.mtf`
-- `docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`
-- `docs/src/developer-docs/memory-management/boracle/boracle-reference-solver.mtf`
-- `docs/src/developer-docs/style-guide/style-guide.mtf`
-- `docs/src/developer-docs/style-guide/testing.mtf`
-- `docs/src/developer-docs/style-guide/validation.mtf`
+- `docs/developer-docs/memory-management/overview.mtf`
+- `docs/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`
+- `docs/developer-docs/memory-management/boracle/boracle-reference-solver.mtf`
+- `docs/developer-docs/style-guide/style-guide.mtf`
+- `docs/developer-docs/style-guide/testing.mtf`
+- `docs/developer-docs/style-guide/validation.mtf`
 
 ## Purpose
 

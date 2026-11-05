@@ -1,15 +1,16 @@
 debug/
 tmp/
 target/
-docs/dev/
+docs/_dev/
+docs/_release/
 test_output/
 benchmarks/local-data/
 benchmarks/old-benchmarks/
 benchmarks/results/
 
 # Benchmark build outputs
-benchmarks/**/dev/
-benchmarks/**/release/
+benchmarks/**/_dev/
+benchmarks/**/_release/
 
 **/*.rs.bk
 *.pdb
@@ -25,7 +26,6 @@ benchmarks/**/release/
 !.github/workflows/**
 
 # These are created by compiler test files sometimes, and can be ignored
-/dev
 /test.html
 /index.html
 
@@ -34,5 +34,5 @@ benchmarks/**/release/
 !tests/cases/**/golden/**
 
 # Integration fixture build outputs
-tests/cases/**/input/dev/
-tests/cases/**/input/release/
+tests/cases/**/input/_dev/
+tests/cases/**/input/_release/

@@ -1134,7 +1134,7 @@ impl EventGraph {
     }
 
     // Its counterpart is boracle/oracle/conflicts.rs:31 exercise_capabilities.
-    // Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
+    // Independence contract: boracle/oracle/mod.rs:5-6 and docs/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
     fn loan_live_at_event(
         &self,
         problem: &BorrowProblem,

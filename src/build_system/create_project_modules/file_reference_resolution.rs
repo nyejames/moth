@@ -55,6 +55,7 @@ enum PhysicalResolution {
     Missing {
         watch_path: PathBuf,
         canonical_ancestor: Option<PathBuf>,
+        missing_directory_prefix: Option<PathBuf>,
     },
     Invalid(PhysicalInvalidReason),
 }
@@ -156,6 +157,37 @@ impl<'a> FileReferenceResolver<'a> {
             });
         }
 
+        // Only directory components can be hidden; a final file name such as `_helper.moth`
+        // remains eligible. This lexical check keeps the authored span and adds no watcher edge
+        // for a hidden target that may not exist.
+        let enters_hidden_directory =
+            authored_components
+                .split_last()
+                .is_some_and(|(_file, directories)| {
+                    directories
+                        .iter()
+                        .any(|component| component.starts_with('_'))
+                });
+        if enters_hidden_directory {
+            return Ok(self.diagnostic_outcome(
+                source_file,
+                reference,
+                authored_path,
+                InvalidCompileTimePathReason::HiddenPath,
+            ));
+        }
+        if authored_components
+            .last()
+            .is_some_and(|name| name == crate::projects::settings::CONFIG_FILE_NAME)
+        {
+            return Ok(self.diagnostic_outcome(
+                source_file,
+                reference,
+                authored_path,
+                InvalidCompileTimePathReason::ReservedConfigFile,
+            ));
+        }
+
         let candidate = join_components(&root_directory, &authored_components);
         if self.lexically_escapes_module_boundary(consumer_module_id, &candidate) {
             return Ok(self.diagnostic_outcome(
@@ -178,6 +210,7 @@ impl<'a> FileReferenceResolver<'a> {
             PhysicalResolution::Missing {
                 watch_path,
                 canonical_ancestor,
+                missing_directory_prefix,
             } => {
                 let reason = canonical_ancestor.as_deref().is_some_and(|ancestor| {
                     self.canonical_ancestor_escapes_module_boundary(consumer_module_id, ancestor)
@@ -188,6 +221,34 @@ impl<'a> FileReferenceResolver<'a> {
                         reference,
                         authored_path,
                         InvalidCompileTimePathReason::EscapesModuleBoundary,
+                    ));
+                }
+                // A missing target behind a visible alias can still resolve under a hidden
+                // subtree. Diagnose it before recording a watch so excluded content gains no
+                // watcher edge.
+                let hidden_missing_target =
+                    watch_path.parent().is_some_and(|parent| {
+                        super::source_tree_index::path_has_hidden_component_below(
+                            parent,
+                            self.source_tree_index.entry_root(),
+                        )
+                    }) || canonical_ancestor.as_deref().is_some_and(|ancestor| {
+                        super::source_tree_index::path_has_hidden_component_below(
+                            ancestor,
+                            self.source_tree_index.entry_root(),
+                        )
+                    }) || missing_directory_prefix.as_deref().is_some_and(|prefix| {
+                        super::source_tree_index::path_has_hidden_component_below(
+                            prefix,
+                            self.source_tree_index.entry_root(),
+                        )
+                    });
+                if hidden_missing_target {
+                    return Ok(self.diagnostic_outcome(
+                        source_file,
+                        reference,
+                        authored_path,
+                        InvalidCompileTimePathReason::HiddenPath,
                     ));
                 }
                 self.resource_inputs.record_missing_target_watch(watch_path);
@@ -207,6 +268,22 @@ impl<'a> FileReferenceResolver<'a> {
                 ));
             }
         };
+
+        // Canonical directory ancestry catches a visible symlink alias whose physical target lies
+        // inside an excluded `_` subtree. The terminal file name is not a directory component.
+        if canonical.parent().is_some_and(|parent| {
+            super::source_tree_index::path_has_hidden_component_below(
+                parent,
+                self.source_tree_index.entry_root(),
+            )
+        }) {
+            return Ok(self.diagnostic_outcome(
+                source_file,
+                reference,
+                authored_path,
+                InvalidCompileTimePathReason::HiddenPath,
+            ));
+        }
 
         let target_parent = canonical.parent().unwrap_or(&root_directory);
         if self
@@ -459,6 +536,7 @@ fn resolve_physical_target_cached(
                     PhysicalResolution::Missing {
                         watch_path: missing.watch_path,
                         canonical_ancestor: missing.canonical_ancestor,
+                        missing_directory_prefix: missing.missing_directory_prefix,
                     }
                 }
             }
@@ -479,6 +557,9 @@ struct MissingTargetEvidence {
     watch_path: PathBuf,
     canonical_ancestor: Option<PathBuf>,
     non_directory_ancestor: bool,
+    /// The first missing component when further components follow it. This is a missing directory
+    /// prefix and must still participate in hidden-ancestry checks.
+    missing_directory_prefix: Option<PathBuf>,
 }
 
 /// Resolve a missing target component by component, following dangling symlinks lexically so
@@ -543,12 +624,38 @@ fn resolve_missing_target_evidence(
                                 ErrorKind::NotFound | ErrorKind::NotADirectory
                             ) =>
                         {
+                            // `next` is missing. If further components follow, the missing path
+                            // continues through directory components that do not exist yet. Keep
+                            // those directory spellings (excluding the terminal file name) so a
+                            // hidden component later in a dangling alias target is still found.
+                            let remaining_components = components.clone().collect::<Vec<_>>();
+                            let missing_directory_prefix = if remaining_components.is_empty() {
+                                None
+                            } else {
+                                let mut prefix = next.clone();
+                                for component in remaining_components
+                                    .iter()
+                                    .take(remaining_components.len().saturating_sub(1))
+                                {
+                                    match component {
+                                        std::path::Component::Normal(name) => prefix.push(name),
+                                        std::path::Component::ParentDir => {
+                                            prefix.pop();
+                                        }
+                                        std::path::Component::CurDir
+                                        | std::path::Component::RootDir
+                                        | std::path::Component::Prefix(_) => {}
+                                    }
+                                }
+                                Some(prefix)
+                            };
                             return Ok(MissingTargetEvidence {
                                 watch_path: next,
                                 non_directory_ancestor: fs::symlink_metadata(&current)
                                     .map(|metadata| !metadata.is_dir())
                                     .unwrap_or(false),
                                 canonical_ancestor: canonicalize_existing_path(&current)?,
+                                missing_directory_prefix,
                             });
                         }
                         Err(error) => {
@@ -570,6 +677,7 @@ fn resolve_missing_target_evidence(
             watch_path: pending.clone(),
             canonical_ancestor: canonicalize_existing_path(&pending)?,
             non_directory_ancestor: false,
+            missing_directory_prefix: None,
         });
     }
 }
@@ -836,6 +944,38 @@ impl<'a> SingleFileReferenceResolver<'a> {
             });
         }
 
+        let enters_hidden_directory =
+            authored_components
+                .split_last()
+                .is_some_and(|(_file, directories)| {
+                    directories
+                        .iter()
+                        .any(|component| component.starts_with('_'))
+                });
+        if enters_hidden_directory {
+            return Ok(SingleFileResolvedReference {
+                outcome: invalid_path_outcome(
+                    authored_path,
+                    InvalidCompileTimePathReason::HiddenPath,
+                    reference,
+                ),
+                ..result
+            });
+        }
+        if authored_components
+            .last()
+            .is_some_and(|name| name == crate::projects::settings::CONFIG_FILE_NAME)
+        {
+            return Ok(SingleFileResolvedReference {
+                outcome: invalid_path_outcome(
+                    authored_path,
+                    InvalidCompileTimePathReason::ReservedConfigFile,
+                    reference,
+                ),
+                ..result
+            });
+        }
+
         let candidate = join_components(&self.root_directory, &authored_components);
         let lexically_escapes = match candidate.parent() {
             Some(parent) => self.chain_escapes_module_boundary(parent)?,
@@ -865,6 +1005,7 @@ impl<'a> SingleFileReferenceResolver<'a> {
             PhysicalResolution::Missing {
                 watch_path,
                 canonical_ancestor,
+                missing_directory_prefix,
             } => {
                 let escapes = match canonical_ancestor.as_deref() {
                     Some(ancestor) => self.chain_escapes_module_boundary(ancestor)?,
@@ -875,6 +1016,33 @@ impl<'a> SingleFileReferenceResolver<'a> {
                         outcome: invalid_path_outcome(
                             authored_path,
                             InvalidCompileTimePathReason::EscapesModuleBoundary,
+                            reference,
+                        ),
+                        ..result
+                    });
+                }
+                let hidden_missing_target =
+                    watch_path.parent().is_some_and(|parent| {
+                        super::source_tree_index::path_has_hidden_component_below(
+                            parent,
+                            &self.containment_root,
+                        )
+                    }) || canonical_ancestor.as_deref().is_some_and(|ancestor| {
+                        super::source_tree_index::path_has_hidden_component_below(
+                            ancestor,
+                            &self.containment_root,
+                        )
+                    }) || missing_directory_prefix.as_deref().is_some_and(|prefix| {
+                        super::source_tree_index::path_has_hidden_component_below(
+                            prefix,
+                            &self.containment_root,
+                        )
+                    });
+                if hidden_missing_target {
+                    return Ok(SingleFileResolvedReference {
+                        outcome: invalid_path_outcome(
+                            authored_path,
+                            InvalidCompileTimePathReason::HiddenPath,
                             reference,
                         ),
                         ..result
@@ -901,6 +1069,22 @@ impl<'a> SingleFileReferenceResolver<'a> {
                 });
             }
         };
+
+        if canonical.parent().is_some_and(|parent| {
+            super::source_tree_index::path_has_hidden_component_below(
+                parent,
+                &self.containment_root,
+            )
+        }) {
+            return Ok(SingleFileResolvedReference {
+                outcome: invalid_path_outcome(
+                    authored_path,
+                    InvalidCompileTimePathReason::HiddenPath,
+                    reference,
+                ),
+                ..result
+            });
+        }
 
         if self.chain_escapes_module_boundary(&canonical)? {
             return Ok(SingleFileResolvedReference {

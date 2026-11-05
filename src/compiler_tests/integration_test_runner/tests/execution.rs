@@ -282,18 +282,19 @@ struct EntryFixture {
 impl EntryFixture {
     fn new(source: &str, directory_entry: bool) -> Self {
         let directory = tempfile::tempdir().expect("should create entry fixture");
-        fs::create_dir(directory.path().join("src")).expect("should create source directory");
+        let source_root = directory.path().join("src");
+        fs::create_dir(&source_root).expect("should create source directory");
         fs::write(
-            directory.path().join("config.moth"),
-            "project #= (name = \"entry_contract\", entry_root = \"src\")\nhtml #= ()\n",
+            source_root.join("config.moth"),
+            "project #= (name = \"entry_contract\")\nhtml #= ()\n",
         )
         .expect("should write directory config");
         // The existing runtime harness owns index.html plus root page.js/page.wasm.
         // @page is the single-file homepage convention; selection still dispatches by file path.
-        let root_source = directory.path().join("src/@page.moth");
+        let root_source = source_root.join("@page.moth");
         fs::write(&root_source, source).expect("should write authored root");
         let entry = if directory_entry {
-            directory.path().to_path_buf()
+            source_root
         } else {
             root_source.clone()
         };
@@ -314,9 +315,6 @@ impl EntryFixture {
         let mut config = Config::new(self.entry.clone());
         // This config-free compiler seam consumes settings rather than loading config.moth.
         config.project_name = "entry_contract".to_owned();
-        if self.entry.is_dir() {
-            config.entry_root = PathBuf::from("src");
-        }
 
         let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
         let result = compile_project_frontend(
@@ -346,9 +344,6 @@ impl EntryFixture {
     fn html_frontend(&self) -> ProjectFrontendCompilation {
         let mut config = Config::new(self.entry.clone());
         config.project_name = "entry_contract".to_owned();
-        if self.entry.is_dir() {
-            config.entry_root = PathBuf::from("src");
-        }
 
         let builder = HtmlProjectBuilder::new();
         let style_directives = StyleDirectiveRegistry::merged(&builder.frontend_style_directives())

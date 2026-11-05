@@ -1,5 +1,3 @@
 project #= (
-    name = "choice_missing_separator_rejected",
-    entry_root = "src",
-)
+    name = "choice_missing_separator_rejected")
 html #= ()

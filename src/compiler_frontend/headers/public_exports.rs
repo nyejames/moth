@@ -47,6 +47,7 @@ use crate::compiler_frontend::headers::types::{
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::project_globals::is_project_globals_dependency;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::{SourceDatabase, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternError, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -371,7 +372,7 @@ fn build_module_root_public_exports_pass1(
 ) -> PublicExportDataResult<FxHashMap<PathId, FxHashMap<StringId, SourceSpan>>> {
     let mut export_locations = FxHashMap::default();
     let mut module_root_boundaries =
-        build_module_root_boundaries(module_symbols, resolver, string_table, path_fork)?;
+        build_module_root_boundaries(resolver, string_table, path_fork)?;
     module_root_boundaries
         .sort_by_key(|boundary| std::cmp::Reverse(path_fork.depth(boundary.dependency_prefix)));
     module_symbols.module_root_boundaries = module_root_boundaries;
@@ -394,13 +395,14 @@ fn build_module_root_public_exports_pass1(
 
         let module_root_interned =
             intern_public_surface_path(&module_root, "Module root path", string_table, path_fork)?;
-        let is_module_root_file = resolver
-            .module_root_file_for_directory(&module_root)
-            .is_some_and(|root_file| canonical_path == root_file.as_path());
         let logical = module_symbols
             .source_path_for_header(header)
             .expect("header body range has no prepared source-path identity");
         let canonical = logical;
+        let is_module_root_file = module_symbols
+            .file_roles_by_source
+            .get(&logical)
+            .is_some_and(|role| role.is_module_root());
 
         module_symbols
             .file_module_membership
@@ -421,7 +423,7 @@ fn build_module_root_public_exports_pass1(
             )?;
             let exports = module_symbols
                 .module_root_public_exports
-                .entry(module_root_interned)
+                .entry(logical)
                 .or_default();
             exports.insert(PublicExportEntry {
                 export_name,
@@ -430,7 +432,7 @@ fn build_module_root_public_exports_pass1(
                 },
             });
             export_locations
-                .entry(module_root_interned)
+                .entry(logical)
                 .or_insert_with(FxHashMap::default)
                 .insert(export_name, name_span);
         }
@@ -445,8 +447,8 @@ fn build_module_root_public_exports_pass1(
 fn build_module_root_public_dependencies(
     module_symbols: &mut ModuleSymbols,
     export_locations: &FxHashMap<PathId, FxHashMap<StringId, SourceSpan>>,
-    resolver: &ProjectPathResolver,
-    source_files: &SourceDatabase,
+    _resolver: &ProjectPathResolver,
+    _source_files: &SourceDatabase,
     external_package_registry: &ExternalPackageRegistry,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
     external_dependency_resolution_table: &ExternalImportResolutionTable,
@@ -491,34 +493,14 @@ fn build_module_root_public_dependencies(
             ));
         }
 
-        let Some(canonical_export_path) = module_symbols
-            .source_record(&root_source, source_files)
-            .and_then(|record| record.canonical_os_path.as_deref())
-        else {
-            continue;
-        };
-        let Some(module_root) = resolver.module_root_for_file(canonical_export_path) else {
-            continue;
-        };
-        let Some(module_root_path) = resolver.module_root_file_for_directory(&module_root) else {
-            continue;
-        };
-
-        if module_root_path != canonical_export_path {
-            continue;
-        }
-
-        let module_root_interned =
-            intern_public_surface_path(&module_root, "Module root path", string_table, path_fork)?;
-
         let current_exports = module_symbols
             .module_root_public_exports
-            .get(&module_root_interned)
+            .get(&root_source)
             .cloned()
             .unwrap_or_default();
         let mut collector = PublicExportCollector::from_existing(
             &current_exports,
-            export_locations.get(&module_root_interned),
+            export_locations.get(&root_source),
         );
 
         for dependency in dependencies {
@@ -564,7 +546,7 @@ fn build_module_root_public_dependencies(
 
         module_symbols
             .module_root_public_exports
-            .insert(module_root_interned, collector.exports);
+            .insert(root_source, collector.exports);
     }
 
     Ok(())
@@ -1052,7 +1034,6 @@ fn build_module_root_membership(
 }
 
 fn build_module_root_boundaries(
-    module_symbols: &mut ModuleSymbols,
     resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -1063,33 +1044,34 @@ fn build_module_root_boundaries(
         let root_interned =
             intern_public_surface_path(module_root, "Module root path", string_table, path_fork)?;
 
-        let Some(root_file) = resolver.module_root_file_for_directory(module_root) else {
-            continue;
-        };
-        module_symbols
-            .module_root_public_exports
-            .entry(root_interned)
-            .or_default();
-        let root_file = resolver.logical_path_for_canonical_file(&root_file)?;
-        let root_file = intern_public_surface_path(
-            &root_file,
-            "Module root file logical path",
-            string_table,
-            path_fork,
-        )?;
-
-        if let Ok(relative) = module_root.strip_prefix(resolver.entry_root()) {
-            let prefix_interned = intern_public_surface_path(
-                relative,
-                "Module root relative prefix path",
+        for surface in [ModuleRootRole::Normal, ModuleRootRole::Support] {
+            let Some(root_file) =
+                resolver.module_root_file_for_directory_surface(module_root, surface)
+            else {
+                continue;
+            };
+            let root_file = resolver.logical_path_for_canonical_file(&root_file)?;
+            let root_file = intern_public_surface_path(
+                &root_file,
+                "Module root file logical path",
                 string_table,
                 path_fork,
             )?;
-            module_root_boundaries.push(ModuleRootBoundary {
-                dependency_prefix: prefix_interned,
-                module_root: root_interned,
-                root_file,
-            });
+
+            if let Ok(relative) = module_root.strip_prefix(resolver.entry_root()) {
+                let prefix_interned = intern_public_surface_path(
+                    relative,
+                    "Module root relative prefix path",
+                    string_table,
+                    path_fork,
+                )?;
+                module_root_boundaries.push(ModuleRootBoundary {
+                    dependency_prefix: prefix_interned,
+                    module_root: root_interned,
+                    root_file,
+                    surface,
+                });
+            }
         }
     }
 

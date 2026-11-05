@@ -57,8 +57,12 @@ enum NamespaceEntry {
     },
     /// An explicit provider-owned file in the same module, keyed by its path with extension.
     SameModuleProvider { source_index: SourceRecordIndex },
-    /// A child normal module or visible support package, resolved by boundary-local `ModuleId`.
-    CrossModule { target_module_id: ModuleId },
+    /// A child normal module or visible support package, resolved by boundary-local `ModuleId`
+    /// and the explicit surface selected for this consumer position.
+    CrossModule {
+        target_module_id: ModuleId,
+        surface: ModuleRootRole,
+    },
 }
 
 /// One boundary-aware namespace for one indexed module.
@@ -133,6 +137,7 @@ pub(crate) enum ResolvedDependency {
     /// A source file in another module in the active project or package boundary.
     CrossModule {
         provider_module_id: ModuleId,
+        provider_surface: ModuleRootRole,
         consumer_module_id: ModuleId,
         #[cfg(test)]
         root_file: PathBuf,
@@ -441,6 +446,15 @@ impl ModuleNamespaceSet {
             return Ok(package);
         }
 
+        // Package prefixes are validated independently and may contain underscore components, so
+        // classify packages before treating an intermediate component as a hidden source directory.
+        reject_hidden_directory_components(
+            dependency_path,
+            dependency_span,
+            string_table,
+            path_fork,
+        )?;
+
         if let Some(entry) = namespace.entries.get(&key) {
             return resolve_entry(
                 entry,
@@ -600,7 +614,17 @@ impl ModuleNamespaceSet {
             .flatten()
             .map(String::as_str);
         // Synthetic traversal belongs to the sole consumer in its one-node graph.
-        self.resolve_package_dependency(provider, ModuleId::from_index(0), local_keys, &key)
+        let package =
+            self.resolve_package_dependency(provider, ModuleId::from_index(0), local_keys, &key)?;
+        if package.is_none() {
+            reject_hidden_directory_components(
+                provider.path,
+                dependency_span,
+                string_table,
+                path_fork,
+            )?;
+        }
+        Ok(package)
     }
 
     fn resolve_package_dependency<'a>(
@@ -772,11 +796,18 @@ fn populate_same_module_entries(
         };
         let relative_path = owned_identity.relative_source_path();
 
-        let file_name = Path::new(relative_path)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("");
-        if file_name.starts_with('@') || file_name.starts_with('+') {
+        let is_root_surface = record
+            .logical_identity()
+            .module_origin()
+            .is_some_and(|origin| {
+                matches!(
+                    origin.role(),
+                    ModuleRootRole::Normal
+                        | ModuleRootRole::Support
+                        | ModuleRootRole::SyntheticProjectContext
+                )
+            });
+        if is_root_surface {
             continue;
         }
 
@@ -806,43 +837,9 @@ fn populate_project_cross_module_targets(
     project_module_graph: &ProjectModuleGraph,
     module_id: ModuleId,
 ) {
-    let owning_path = identities
-        .record(module_id)
-        .stable_origin()
-        .logical_module_path()
-        .to_owned();
-
-    for child_id in identities.direct_child_modules(module_id) {
-        if identities.record(*child_id).role() != ModuleRootRole::Normal {
-            continue;
-        }
-
-        if let Some(key) = relative_module_key(&owning_path, identities, *child_id) {
-            namespace.insert(
-                key,
-                NamespaceEntry::CrossModule {
-                    target_module_id: *child_id,
-                },
-            );
-        }
-    }
-
-    for support_id in identities.module_ids() {
-        if support_id == module_id {
-            continue;
-        }
-        if !project_module_graph.is_support_visible_to_consumer(support_id, module_id) {
-            continue;
-        }
-        if let Some(key) = support_package_key(identities, support_id) {
-            namespace.insert(
-                key,
-                NamespaceEntry::CrossModule {
-                    target_module_id: support_id,
-                },
-            );
-        }
-    }
+    populate_cross_module_targets(namespace, identities, module_id, |support_id| {
+        project_module_graph.is_support_visible_to_consumer(support_id, module_id)
+    });
 }
 
 /// Add cross-module target entries for one package module: direct child modules and visible
@@ -852,6 +849,18 @@ fn populate_package_cross_module_targets(
     identities: &ModuleIdentityTable,
     module_id: ModuleId,
 ) {
+    populate_cross_module_targets(namespace, identities, module_id, |support_id| {
+        is_support_visible_in_identity_table(identities, support_id, module_id)
+    });
+}
+
+/// Shared child/support namespace population for project and package boundary identity tables.
+fn populate_cross_module_targets(
+    namespace: &mut ModuleNamespace,
+    identities: &ModuleIdentityTable,
+    module_id: ModuleId,
+    is_support_visible: impl Fn(ModuleId) -> bool,
+) {
     let owning_path = identities
         .record(module_id)
         .stable_origin()
@@ -859,7 +868,7 @@ fn populate_package_cross_module_targets(
         .to_owned();
 
     for child_id in identities.direct_child_modules(module_id) {
-        if identities.record(*child_id).role() != ModuleRootRole::Normal {
+        if identities.record(*child_id).normal_root_file().is_none() {
             continue;
         }
 
@@ -868,31 +877,51 @@ fn populate_package_cross_module_targets(
                 key,
                 NamespaceEntry::CrossModule {
                     target_module_id: *child_id,
+                    surface: ModuleRootRole::Normal,
                 },
             );
         }
     }
 
     for support_id in identities.module_ids() {
+        // The shared visibility predicate excludes self, but keep this local guard so namespace
+        // construction can never expose a module's own support surface to itself.
         if support_id == module_id {
             continue;
         }
-        if !is_support_visible_in_identity_table(identities, support_id, module_id) {
+        if identities.record(support_id).support_root_file().is_none()
+            || !is_support_visible(support_id)
+        {
             continue;
         }
         if let Some(key) = support_package_key(identities, support_id) {
+            // The consumer imports a paired normal surface through its normal module path, even
+            // when that path passes through unrooted intermediate directories. Suppress the
+            // support key only when the same structural module already has a normal entry in
+            // this namespace. Key spelling cannot decide this: the support key is a basename.
+            let normal_surface_already_visible = namespace.entries.values().any(|entry| {
+                matches!(
+                    entry,
+                    NamespaceEntry::CrossModule {
+                        target_module_id,
+                        surface: ModuleRootRole::Normal,
+                    } if *target_module_id == support_id
+                )
+            });
+            if normal_surface_already_visible {
+                continue;
+            }
             namespace.insert(
                 key,
                 NamespaceEntry::CrossModule {
                     target_module_id: support_id,
+                    surface: ModuleRootRole::Support,
                 },
             );
         }
     }
 }
 
-/// Compute the extensionless module-relative dependency key for one target module, relative to the
-/// owning module's logical path.
 fn relative_module_key(
     owning_path: &str,
     identities: &ModuleIdentityTable,
@@ -970,15 +999,25 @@ fn resolve_entry(
                 consumer_module_id,
             })
         }
-        NamespaceEntry::CrossModule { target_module_id } => {
+        NamespaceEntry::CrossModule {
+            target_module_id,
+            surface,
+        } => {
             #[cfg(test)]
             let root_file = index
                 .module_identities()
                 .record(*target_module_id)
-                .root_file()
+                .root_file_for_surface(*surface)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "cross-module namespace selected missing {surface:?} surface for ModuleId {}",
+                        target_module_id.index()
+                    )
+                })
                 .to_path_buf();
             Ok(ResolvedDependency::CrossModule {
                 provider_module_id: *target_module_id,
+                provider_surface: *surface,
                 consumer_module_id,
                 #[cfg(test)]
                 root_file,
@@ -1043,6 +1082,37 @@ fn reject_invalid_path_components(
         .is_some_and(|component| component == "." || component == "..")
     {
         return Err(imports::bare_file_import(dependency_path, dependency_span));
+    }
+
+    Ok(())
+}
+
+/// Reject dependency paths that traverse a proven hidden source directory.
+///
+/// Only non-final components are proven directories: a component followed by another path
+/// component must contain that child. The final component may name `_helper.moth`, and a single
+/// `_private` is ambiguous without indexed directory facts, so neither is rejected merely for
+/// starting with `_`.
+fn reject_hidden_directory_components(
+    dependency_path: PathId,
+    dependency_span: Option<SourceSpan>,
+    string_table: &StringTable,
+    path_fork: &PathInternerFork,
+) -> Result<(), DiagnosticDraft> {
+    let mut scratch = Vec::new();
+    let components = path_fork.resolve_components(dependency_path, &mut scratch);
+    let Some((_final_component, directory_components)) = components.split_last() else {
+        return Ok(());
+    };
+    if directory_components
+        .iter()
+        .any(|component| string_table.resolve(*component).starts_with('_'))
+    {
+        return Err(imports::invalid_import_path(
+            dependency_path,
+            InvalidImportPathReason::HiddenDirectory,
+            dependency_span,
+        ));
     }
 
     Ok(())
@@ -1138,3 +1208,7 @@ fn find_module_bypass_prefix<'a>(
     }
     None
 }
+
+#[cfg(test)]
+#[path = "tests/module_namespace_tests.rs"]
+mod tests;

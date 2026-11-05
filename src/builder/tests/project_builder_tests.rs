@@ -21,13 +21,14 @@ use std::os::unix::ffi::OsStringExt;
 use std::path::Path;
 
 /// Declares only the mandatory `project` section because the test builder adds no config sections.
-const CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\n";
+const CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n)\n";
 
 /// The smallest page that compiles without diagnostics.
 const PAGE_SOURCE: &str = "#[:<h1>About</h1>]\n";
 
 /// Config that limits diagnostic discovery to one retained error per module.
-const MODULE_LIMIT_CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_module = 1,\n)\n";
+const MODULE_LIMIT_CONFIG_SOURCE: &str =
+    "project #= (\n    name = \"docs\",\n        max_errors_per_module = 1,\n)\n";
 
 /// Two independent ordinary bodies, so the first retained error ends discovery early.
 const TWO_FAILING_BODIES_PAGE_SOURCE: &str = "\
@@ -118,7 +119,7 @@ fn project_temp_dir() -> tempfile::TempDir {
 
 /// Writes a project whose `src/@page.moth` holds `page_source`.
 fn write_project(project_root: &Path, page_source: &str) {
-    let src = project_root.join("src");
+    let src = project_root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(project_root.join("config.moth"), CONFIG_SOURCE).expect("should write config");
     fs::write(src.join("@page.moth"), page_source).expect("should write @page.moth source");
@@ -203,7 +204,7 @@ fn source_diagnostics_return_compilation_error_without_building() {
 #[test]
 fn diagnosed_build_exposes_module_allowance_stop_through_public_sdk() {
     let temp_dir = project_temp_dir();
-    let src = temp_dir.path().join("src");
+    let src = temp_dir.path().to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(
         temp_dir.path().join("config.moth"),

@@ -1,5 +1,3 @@
 project #= (
-    name = "catch_recovery_then_type_mismatch_rejected",
-    entry_root = "src",
-)
+    name = "catch_recovery_then_type_mismatch_rejected")
 html #= ()

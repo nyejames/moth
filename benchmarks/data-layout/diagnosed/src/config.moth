@@ -1,0 +1,7 @@
+project #= (
+    name = "data_layout_diagnosed",
+)
+html #= (
+    dev_output = "_dev",
+    release_output = "_release",
+)

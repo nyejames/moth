@@ -548,3 +548,88 @@ fn synthetic_rejects_support_and_missing_symlink_boundaries_without_watches() {
     }
     assert!(resource_inputs.missing_watch_interests().is_empty());
 }
+
+#[cfg(unix)]
+#[test]
+fn underscore_files_resolve_but_hidden_directories_and_aliases_do_not() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().expect("test root should be created");
+    let root = fs::canonicalize(temp.path()).expect("test root should canonicalize");
+    fs::write(root.join("_logo.svg"), "resource").expect("underscore resource should exist");
+    fs::create_dir_all(root.join("_private")).expect("hidden directory should exist");
+    symlink(root.join("_private"), root.join("visible"))
+        .expect("visible alias to hidden directory should exist");
+    symlink(root.join("_missing"), root.join("dangling"))
+        .expect("dangling alias to a missing hidden directory should exist");
+    symlink(root.join("missing/_private"), root.join("deeper"))
+        .expect("dangling alias through a visible missing directory should exist");
+
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("mtf", SourceFileKind::MothTemplate);
+    let mut resource_inputs = ResourceInputRegistry::new();
+    let mut resolver =
+        SingleFileReferenceResolver::new(root.clone(), &source_file_kinds, &mut resource_inputs);
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut path_syntax = PathSyntaxTable::new();
+    let owner = root.join("main.moth");
+
+    let mut resolve = |authored: &str| {
+        let path = path_fork
+            .try_intern_portable_path(authored, &mut strings)
+            .expect("test path fits");
+        let path_syntax_id = path_syntax
+            .try_push_for_source(path, SourceId::COMPILATION_ROOT, LocalSpan::source_start())
+            .expect("test path syntax row should fit");
+        let reference = PreparedFileReference {
+            span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
+            source_file: SourceId::COMPILATION_ROOT,
+            path_syntax: path_syntax_id,
+            class: PreparedFileReferenceClass::ResourceFile,
+        };
+        resolver
+            .resolve(&owner, &path_syntax, &reference, &mut strings, &path_fork)
+            .expect("resource reference should resolve")
+    };
+
+    assert!(
+        matches!(
+            resolve("_logo.svg").outcome,
+            SingleFileReferenceOutcome::Resource { .. }
+        ),
+        "underscore-prefixed files remain valid resources"
+    );
+    assert!(
+        has_invalid_path_reason(
+            resolve("_private/logo.svg").outcome,
+            InvalidCompileTimePathCode::HiddenPath
+        ),
+        "hidden directories are rejected for resources"
+    );
+    assert!(
+        has_invalid_path_reason(
+            resolve("visible/missing.svg").outcome,
+            InvalidCompileTimePathCode::HiddenPath
+        ),
+        "a missing target behind an alias into a hidden directory is diagnosed as hidden"
+    );
+    assert!(
+        has_invalid_path_reason(
+            resolve("dangling/missing.svg").outcome,
+            InvalidCompileTimePathCode::HiddenPath
+        ),
+        "a dangling alias whose first missing component is a hidden directory is diagnosed as hidden"
+    );
+    assert!(
+        has_invalid_path_reason(
+            resolve("deeper/logo.svg").outcome,
+            InvalidCompileTimePathCode::HiddenPath
+        ),
+        "a hidden directory later in a dangling alias target is still diagnosed as hidden"
+    );
+    assert!(
+        resource_inputs.missing_watch_interests().is_empty(),
+        "excluded missing targets gain no watcher edge"
+    );
+}

@@ -1,0 +1,139 @@
+# Turning folders into a compiler graph
+
+A directory is a convenience for humans. It does not tell the compiler which files form one semantic unit, which root owns them or which module must compile before another can bind a dependency.
+
+Stage 0 answers those questions. It turns the greeting project's filesystem tree into a **canonical source graph**.
+
+## Nodes and edges
+
+A **graph** here means nodes plus directed edges with meaning.
+
+**Nodes** include modules, packages and other compilation units the build system recognises.
+
+**Edges** record relationships: this module depends on that provider, this package depends on that package.
+
+A **provider** supplies a public interface. A **consumer** binds against that interface after the provider succeeds.
+
+Not every `@` clause makes an edge between modules, though. In the running example `@page.moth` and `greeting.moth` share a directory, so they are one module and `@greeting` binds a sibling source file directly. A provider edge appears when a dependency resolves to a *different* module or package, and even then it names a relationship rather than copying `greet`'s body across. Think of a graft point, not a clone.
+
+[diagram:
+    [$insert("label"): A directory becomes one module, not one module per file]
+    [$insert("caption"): The root marks the boundary. Everything beside it in the same directory is owned source, which is why the walkthrough compiles one module rather than two.]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): One directory]
+            [$insert("title"): Project root rooted by @page.moth]
+            A directory forms at most one structural module. Its one normal root or one normal/support root pair defines one compilation and visibility unit.
+        ]
+
+        [$insert("details"):
+            [branch:
+                [$insert("label"): Owned by that root]
+                [lane:
+                [detail:
+                    [$insert("href"): ./]
+                    `@page.moth`, the root itself
+                ]
+                [detail:
+                    [$insert("href"): ./]
+                    `greeting.moth`, ordinary owned source
+                ]
+                ]
+            ]
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ../declarations-dependencies-and-ordering/]
+            [$insert("eyebrow"): Inside]
+            [$insert("title"): @greeting greet binds a sibling]
+            Same module, so no provider edge and no waiting. The clause resolves within one compilation.
+        ]
+    ]
+
+    [stage:
+        [node:
+            [$insert("href"): ./]
+            [$insert("eyebrow"): Across]
+            [$insert("title"): A real provider edge]
+            Only a dependency resolving to another module or package creates an edge that a consumer must wait on.
+        ]
+    ]
+]
+
+## Roots, packages and ownership
+
+Moth marks module roots in the filesystem on purpose.
+
+- **Normal roots** use names like `@page.moth`. They may hold declarations and dormant top-level runtime work; in the accepted HTML path, page fragments belong to a root with `$page`. Current Alpha still recognizes activity-based page output.
+- **Support roots** use names like `+helpers.moth`. They are scoped API-only support-package facades: declarations yes, implicit entry and page fragments no. Consumers see only the facade's `export:` surface and cannot reach private descendants.
+- The **project package facade** is another API-only role with project-wide assembly privilege owned by the build system.
+- Ordinary owned source files such as `greeting.moth` sit under a root's ownership without each file becoming its own root.
+
+**Source-backed packages** compile Moth source into ordinary module artefacts. They compile as separate package graphs with their own config, their own private `@project` and their own source index, and consumers bind the public facade rather than reaching inside. **Binding-backed packages** expose typed external interfaces without Moth module bodies. Both appear in the capability surface. Only source-backed modules produce HIR.
+
+Filesystem layout carries semantic constraints. That is the point. The graph should not invent a different topology than the tree authors can see.
+
+## Owned and semantic source sets
+
+Stage 0 distinguishes sets that newcomers often collapse.
+
+**OwnedSourceSet.** Files this module root owns on disk.
+
+**SemanticSourceSet.** Files that participate in semantic compilation for the command.
+
+**Check-only orphan units.** Files the tool may still parse for diagnostics even when they sit outside the semantic set for a build.
+
+Ownership does not inject disconnected declarations into a consumer. A file can be owned and still remain outside the semantic set for a given command. Dependency visibility and ownership are different axes.
+
+## Provider-first scheduling
+
+After the graph finalises, the build system schedules **compile waves**. Providers finish before consumers bind, root growth before branch binding.
+
+A module waits until every required provider interface exists. Binding-backed interfaces may appear earlier than source providers because they do not wait on Moth module compilation.
+
+One physical module compiles **once** per project or package compilation boundary. Entries later activate roots. They do not recompile the same module once per page.
+
+Scheduling is where the build system stops. When a module is ready it builds one compiler input and calls **one** compiler module compilation service, then handles the outcome: success, diagnosed or an internal compiler error. Binding, ordering, AST, HIR and borrow validation happen inside that call. The build system never runs those stages step by step from its own code.
+
+The greeting project is the simple case, and worth being precise about. `@page.moth` and `greeting.moth` live in the same directory, so they form one canonical module that compiles once with `greeting.moth` as owned source. Binding `@greeting greet` happens inside that single compilation. Provider-first waves matter when a dependency crosses a module or package boundary, which this example never does.
+
+## Deterministic identity
+
+Graphs need names that do not jitter when threads finish in a different order.
+
+Stage 0 and the compiler assign **stable identities** to sources, modules and later declarations. Exact Rust type names may change. The rule does not: identity must not depend on worker completion order, cosmetic filename suffixes for roots or source position alone.
+
+Determinism lets parallel compilation merge results in canonical order. Diagnostics and artefacts stay reproducible.
+
+## What can fail here
+
+- illegal root topology or path collisions
+- unsupported source kinds for the active builder
+- missing providers
+- dependency cycles
+- orphan source diagnostics
+
+## Why Moth does it this way
+
+**Alternative:** global search paths, nearest-match resolution or "scan the package folder and hope."
+
+**Choice:** structural roots, explicit package identity and canonical ownership.
+
+**Benefit:** graph scheduling and diagnostics share the same source facts. A missing provider is a graph fact, not a surprise during type checking.
+
+**Cost:** filesystem layout carries semantic constraints authors must learn.
+
+## Roadmap and current status
+
+- **Accepted design:** canonical graph, provider-first waves and immutable module compilation once per boundary.
+- **Current implementation:** canonical module compilation and scoped packages already landed. The progress matrix rows for project config and project-local packages carry the remaining partial coverage.
+- **Queued work:** `html-page-directives-and-runtime-title-plan.md` adds root-purpose validation and explicit page selection without changing the one-structural-module-per-directory graph.
+- **Deferred or outside scope:** old flat module handoff and default package-folder scanning as the primary model.
+
+## Exit state
+
+You leave with a canonical source graph, source sets and ordered compile waves. Next: how the compiler prepares each selected source file once, starting from characters.

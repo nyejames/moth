@@ -201,6 +201,7 @@ pub(in crate::compiler_frontend) fn build_direct_export_seed(
     let (export_bindings, export_diagnostic_provenance) = collect_free_export_bindings(
         source_module_origins,
         &active_origin,
+        active_root_file_id,
         sorted_headers,
         module_symbols,
         source_provider_dependencies,
@@ -208,7 +209,7 @@ pub(in crate::compiler_frontend) fn build_direct_export_seed(
         path_fork,
     )?;
     let public_nominal_type_origins = index_public_nominal_type_origins(
-        &active_origin,
+        source_module_origins,
         &export_bindings,
         sorted_headers,
         module_symbols,
@@ -217,6 +218,7 @@ pub(in crate::compiler_frontend) fn build_direct_export_seed(
     )?;
     let binding_exports = collect_binding_exports(
         &active_origin,
+        active_root_file_id,
         module_symbols,
         source_provider_dependencies,
         external_registry,
@@ -232,6 +234,7 @@ pub(in crate::compiler_frontend) fn build_direct_export_seed(
 
 fn collect_binding_exports<'a>(
     module_origin: &StableModuleOriginIdentity,
+    active_root_file_id: SourceId,
     module_symbols: &ModuleSymbols,
     source_provider_dependencies: &'a SourceProviderDependencySet<'a>,
     external_registry: &ExternalPackageRegistry,
@@ -254,16 +257,17 @@ fn collect_binding_exports<'a>(
         return Ok(Vec::new());
     }
 
-    let Some(active_module_root) = resolve_optional_active_module_root_membership(module_symbols)?
+    let Some(active_root_source) = module_symbols
+        .source_paths_by_source_id
+        .get(&active_root_file_id)
     else {
         return Ok(Vec::new());
     };
-    let active_root_source = resolve_active_root_source(module_symbols, active_module_root)?;
     let mut entries = Vec::new();
 
     if let Some(root_entries) = module_symbols
         .module_root_public_exports
-        .get(active_module_root)
+        .get(active_root_source)
     {
         entries.extend(root_entries);
     }
@@ -366,7 +370,9 @@ fn resolve_active_module_origin(
         .clone();
 
     for header in sorted_headers {
-        if !is_directly_defined_public_export(header) {
+        if !is_directly_defined_public_export(header)
+            || header.tokens.source() != active_root_file_id
+        {
             continue;
         }
 
@@ -405,7 +411,7 @@ fn resolve_active_module_origin(
 /// is defined in the same file as that type; this projection runs only on overall semantic success,
 /// so the rule already holds.
 fn index_public_nominal_type_origins(
-    module_origin: &StableModuleOriginIdentity,
+    source_module_origins: &SourceModuleOriginTable,
     export_bindings: &[ExportBinding],
     sorted_headers: &[Header],
     module_symbols: &ModuleSymbols,
@@ -434,7 +440,10 @@ fn index_public_nominal_type_origins(
             HeaderKind::Choice { .. } => OriginTypeCategory::Choice,
             _ => continue,
         };
-        let origin = OriginTypeId::new(module_origin.clone(), name.to_owned(), category);
+        let Some(header_origin) = source_module_origins.origin_for(header.tokens.source())? else {
+            continue;
+        };
+        let origin = OriginTypeId::new(header_origin.clone(), name.to_owned(), category);
         let is_exported_origin = export_bindings.iter().any(|binding| {
             matches!(binding.origin(), OriginDeclarationId::Type(exported) if exported == &origin)
         });
@@ -690,9 +699,14 @@ fn any_retained_public_export_targets_source_path(
 /// are joined here alongside directly-defined root-file exports. Each re-export's public name
 /// comes from the `module_root_public_exports` entry and its origin is derived from the target
 /// declaration's header through the `SourceModuleOriginTable`.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "export projection keeps origins, module identity, active root, sorted headers, symbols, provider context and identity tables separate"
+)]
 fn collect_free_export_bindings(
     source_module_origins: &SourceModuleOriginTable,
     module_origin: &StableModuleOriginIdentity,
+    active_root_file_id: SourceId,
     sorted_headers: &[Header],
     module_symbols: &ModuleSymbols,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
@@ -704,7 +718,9 @@ fn collect_free_export_bindings(
     let mut seen_public_names: FxHashSet<String> = FxHashSet::default();
 
     for header in sorted_headers {
-        if !is_directly_defined_public_export(header) {
+        if !is_directly_defined_public_export(header)
+            || header.tokens.source() != active_root_file_id
+        {
             continue;
         }
 
@@ -748,6 +764,7 @@ fn collect_free_export_bindings(
     let reexport_bindings = collect_reexport_bindings(
         source_module_origins,
         module_origin,
+        active_root_file_id,
         sorted_headers,
         module_symbols,
         source_provider_dependencies,
@@ -789,9 +806,14 @@ fn collect_free_export_bindings(
 /// Those declarations are not in the active root file, so `is_directly_defined_public_export`
 /// excludes them. The header-built public export maps already resolved the re-export target, so
 /// this function joins them into the export seed without a second source scan.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "re-export projection keeps origins, module identity, active root, headers, symbols, provider context and identity tables separate"
+)]
 fn collect_reexport_bindings(
     source_module_origins: &SourceModuleOriginTable,
     module_origin: &StableModuleOriginIdentity,
+    active_root_file_id: SourceId,
     sorted_headers: &[Header],
     module_symbols: &ModuleSymbols,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
@@ -801,7 +823,15 @@ fn collect_reexport_bindings(
     if module_symbols.file_module_membership.is_empty() {
         return Ok(Vec::new());
     }
-    let Some(active_module_root) = resolve_optional_active_module_root_membership(module_symbols)?
+    let Some(active_root_source) = module_symbols
+        .source_paths_by_source_id
+        .get(&active_root_file_id)
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(active_module_root) = module_symbols
+        .file_module_membership
+        .get(active_root_source)
     else {
         return Ok(Vec::new());
     };
@@ -828,7 +858,7 @@ fn collect_reexport_bindings(
     // interfaces are handled by the recursive closure step during publication.
     if let Some(entries) = module_symbols
         .module_root_public_exports
-        .get(active_module_root)
+        .get(active_root_source)
     {
         for entry in entries {
             collect_one_reexport_binding(&mut bindings, entry, &context)?;
@@ -851,25 +881,6 @@ struct ReexportBindingContext<'a> {
 struct ReexportBinding {
     binding: ExportBinding,
     provenance: Option<SourceSpan>,
-}
-
-fn resolve_active_root_source<'a>(
-    module_symbols: &'a ModuleSymbols,
-    active_module_root: &PathId,
-) -> Result<&'a PathId, InfrastructureFailure> {
-    module_symbols
-        .file_roles_by_source
-        .iter()
-        .find_map(|(source, role)| {
-            (role.is_active_module_root()
-                && module_symbols.file_module_membership.get(source) == Some(active_module_root))
-                .then_some(source)
-        })
-        .ok_or_else(|| {
-            InfrastructureFailure::internal(CompilerStage::AstConstruction,
-                "re-export binding construction: active module-root membership has no active root source",
-            )
-        })
 }
 
 fn resolve_optional_active_module_root_membership(
@@ -987,7 +998,10 @@ fn collect_one_reexport_binding<'a>(
     let Some(target_origin) = context.source_module_origins.origin_for(file_id)? else {
         return Ok(());
     };
-    if target_origin != context.module_origin {
+    // Helper declarations keep their role-neutral defining origin. Root-private declarations
+    // stay qualified to the active root, so a paired root cannot re-export the other surface's
+    // private declaration merely because both share package and logical path.
+    if !target_origin.is_same_structural_module(context.module_origin) {
         return Ok(());
     }
     let Some(name) = context
@@ -1005,7 +1019,7 @@ fn collect_one_reexport_binding<'a>(
     };
 
     // Determine the declaration category from the header kind and build the origin.
-    let origin = reexport_declaration_origin(header, context.module_origin, name)?;
+    let origin = reexport_declaration_origin(header, target_origin, name)?;
     let export_name = context.string_table.resolve(entry.export_name).to_owned();
 
     bindings.push(ReexportBinding {

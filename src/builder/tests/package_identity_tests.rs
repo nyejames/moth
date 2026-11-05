@@ -15,7 +15,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Declares only the mandatory `project` section because the test builder adds no config sections.
-const CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\n";
+const CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n)\n";
 
 /// The project's only page, importing `greet` from the `@ui` package.
 const PAGE_SOURCE: &str = "@ui greet\nmessage = greet()\n";
@@ -90,7 +90,7 @@ fn observe_package_identities(
 
 /// Writes a project whose only page imports `greet` from `@ui`.
 fn write_project(project_root: &Path) {
-    let src_dir = project_root.join("src");
+    let src_dir = project_root.to_path_buf();
     fs::create_dir_all(&src_dir).expect("should create source directory");
     fs::write(project_root.join("config.moth"), CONFIG_SOURCE).expect("should write config");
     fs::write(src_dir.join("@page.moth"), PAGE_SOURCE).expect("should write page");

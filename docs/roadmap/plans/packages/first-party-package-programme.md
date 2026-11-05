@@ -10,7 +10,7 @@ surface area. It also establishes package terminology, implementation boundaries
 and validation rules that keep later package work consistent.
 
 This is a coordinating implementation plan. It is not a package API authority. Accepted package
-semantics live under `docs/src/docs/packages/**` and in the relevant compiler or build-system
+semantics live under `docs/docs/packages/**` and in the relevant compiler or build-system
 authority. This file records sequencing, implementation knowledge and links to the living package
 plans under this directory.
 
@@ -77,12 +77,12 @@ Read these from the active worktree before changing package code:
 - `docs/compiler-design-overview.md`, especially binding-backed symbols, numeric ownership, HIR call targets, link facts and target-contract validation
 - `docs/build-system-design.md`, especially selected builder capabilities, package classification,
   Core and Builder package availability, exact semantic compatibility and external JavaScript emission
-- `docs/src/docs/packages/` and the canonical numeric/cast/Error references
-- `docs/src/docs/progress/@page.moth`
-- `docs/src/docs/progress/packages-and-builders/@page.moth`
-- `docs/src/developer-docs/style-guide/style-guide.mtf`
-- `docs/src/developer-docs/style-guide/testing.mtf`
-- `docs/src/developer-docs/style-guide/validation.mtf`
+- `docs/docs/packages/` and the canonical numeric/cast/Error references
+- `docs/docs/progress/@page.moth`
+- `docs/docs/progress/packages-and-builders/@page.moth`
+- `docs/developer-docs/style-guide/style-guide.mtf`
+- `docs/developer-docs/style-guide/testing.mtf`
+- `docs/developer-docs/style-guide/validation.mtf`
 - the project code-review guide supplied for package audits
 - `docs/roadmap/roadmap.md`
 - `index.md` as a locator only
@@ -484,7 +484,7 @@ plan.
 ### Documentation and tracking closeout
 
 - update canonical package docs for accepted behaviour
-- update `docs/src/docs/progress/packages-and-builders/@page.moth`
+- update `docs/docs/progress/packages-and-builders/@page.moth`
 - update the compiler progress matrix only for compiler or backend status
 - update this tracker
 - retain useful blockers and next extensions in the living package plan

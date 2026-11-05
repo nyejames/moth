@@ -4,16 +4,13 @@ version #= "1.0.0"
 -- Explicit key referencing earlier private keys
 project #= (
     name = site_name,
-    entry_root = "src",
     version = version,
     author = site_name,
-    license = version,
-)
+    license = version)
 
 html #= (
     dev_output = "dev",
     release_output = "release",
 
     -- Folded template scalar
-    html_lang = [: en],
-)
+    html_lang = [: en])

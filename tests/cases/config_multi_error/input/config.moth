@@ -1,10 +1,6 @@
 project #= (
-    name = "test_project",
-    entry_root = "src",
-)
+    name = "test_project")
 html #= ()
 project #= (
-    name = "pages_project",
-    entry_root = "pages",
-)
+    name = "pages_project")
 html #= ()

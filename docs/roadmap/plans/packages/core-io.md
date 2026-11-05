@@ -7,8 +7,8 @@ prelude. It is a host-capability facade: each operation describes what the progr
 environment, and the active backend chooses the most appropriate host facility to realise it. The
 package has Core origin, ExternalBinding backing and the bare `io` prelude alias.
 
-Canonical source semantics belong to `docs/src/docs/packages/core/io/io.mtf` and prelude policy
-belongs to `docs/src/docs/packages/core/prelude/prelude.mtf`. The queued title helper's capability
+Canonical source semantics belong to `docs/docs/packages/core/io/io.mtf` and prelude policy
+belongs to `docs/docs/packages/core/prelude/prelude.mtf`. The queued title helper's capability
 rules also appear in the HTML builder section of `docs/build-system-design.md`. This plan records
 the accepted scope rationale, implementation knowledge, audit findings and sequencing. It cannot
 accept public API or semantics.

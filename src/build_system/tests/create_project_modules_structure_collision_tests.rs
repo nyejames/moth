@@ -71,11 +71,10 @@ fn assert_reserved_project_dependency_failure(failure: PreparedFailure) {
 fn assert_claims_reserved_project_name(claim: impl FnOnce(&Path), reason: &str) {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
-    fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     claim(&root);
@@ -106,8 +105,7 @@ fn rejects_reserved_project_globals_module_folder_at_entry_root() {
     for folder in ["project", "Project"] {
         assert_claims_reserved_project_name(
             |root| {
-                fs::create_dir(root.join("src").join(folder))
-                    .expect("should create project module folder");
+                fs::create_dir(root.join(folder)).expect("should create project module folder");
             },
             "entry-root project folder must not claim @project",
         );
@@ -119,8 +117,7 @@ fn rejects_reserved_project_globals_source_file_at_entry_root() {
     for file in ["project.moth", "Project.moth", "PROJECT.mtf"] {
         assert_claims_reserved_project_name(
             |root| {
-                fs::write(root.join("src").join(file), "x ~= 1\n")
-                    .expect("should write reserved source file");
+                fs::write(root.join(file), "x ~= 1\n").expect("should write reserved source file");
             },
             "entry-root project source file must not claim @project",
         );
@@ -132,8 +129,7 @@ fn rejects_reserved_project_globals_module_root_file() {
     for file in ["@project.moth", "@Project.moth", "+Project.moth"] {
         assert_claims_reserved_project_name(
             |root| {
-                fs::write(root.join("src").join(file), "x ~= 1\n")
-                    .expect("should write reserved module root");
+                fs::write(root.join(file), "x ~= 1\n").expect("should write reserved module root");
             },
             "project module root must not create a real project module",
         );
@@ -160,7 +156,7 @@ fn rejects_nested_reserved_project_globals_dependency() {
     fs::create_dir_all(root.join("src")).expect("should create src");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -213,7 +209,7 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
     fs::create_dir_all(&package_root).expect("should create helper package");
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "#[:entry]\n").expect("should write project entry");
@@ -308,7 +304,7 @@ fn rejects_moth_file_and_folder_collision_in_same_directory() {
     fs::write(root.join("src/ui.moth"), "y ~= 2\n").expect("should write colliding file");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -346,7 +342,7 @@ fn rejects_template_file_and_folder_collision_in_same_directory() {
     fs::write(root.join("src/ui.mtf"), "template\n").expect("should write colliding file");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -382,7 +378,7 @@ fn allows_same_stem_in_different_directories() {
     fs::write(root.join("src/@page.moth"), "z ~= 3\n").expect("should write entry");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -414,7 +410,7 @@ fn rejects_collision_with_empty_folder() {
     fs::write(root.join("src/@page.moth"), "y ~= 2\n").expect("should write entry");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -452,7 +448,7 @@ fn js_file_with_same_stem_as_folder_does_not_trigger_collision() {
     fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -484,7 +480,7 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -538,8 +534,7 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
 
     let mut source_string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
-    let entry_root =
-        fs::canonicalize(resolve_project_entry_root(&config)).expect("entry root should resolve");
+    let entry_root = project_root.clone();
     let empty_providers = ExternalImportProviderRegistry::empty();
     let source_tree_index = super::source_tree_index::SourceTreeIndex::discover(
         entry_root,
@@ -605,7 +600,7 @@ fn explicit_moth_extension_still_reports_moth_import_0020() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -650,7 +645,7 @@ fn unsupported_moth_template_dependency_without_builder_support_reports_moth_imp
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -690,7 +685,7 @@ fn direct_moth_template_extension_dependency_reports_moth_import_0024() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -733,7 +728,7 @@ fn moth_template_files_are_reachable_without_dependency_scanning() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -778,7 +773,7 @@ fn reachable_moth_template_queues_same_directory_root_file() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -852,7 +847,7 @@ fn unreferenced_moth_template_file_under_entry_root_is_ignored() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -892,7 +887,7 @@ fn extensionless_moth_dependency_and_virtual_package_dependency_still_work() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -942,7 +937,7 @@ fn indexed_module_inventory_includes_referenced_markdown_without_scanning_its_bo
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -988,7 +983,7 @@ fn indexed_module_inventory_excludes_unrelated_module_root_from_markdown_owner()
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -1037,7 +1032,7 @@ fn indexed_module_inventory_ignores_unreferenced_markdown_file() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -1078,7 +1073,7 @@ fn indexed_module_inventory_rejects_direct_markdown_extension_dependency() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 
@@ -1136,7 +1131,7 @@ fn indexed_module_inventory_rejects_unsupported_markdown_dependency() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
 

@@ -1,1 +1,1 @@
-entry_root #= Error("src").message
+sample_key #= Error("src").message

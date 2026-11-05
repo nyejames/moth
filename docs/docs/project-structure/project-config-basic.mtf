@@ -1,0 +1,27 @@
+**Current support versus accepted design.** Today `config.moth` uses declaration-owned `#Config of T` inputs with parenthesised grouped `project` and `html` records. `$project` and `$html_builder` are accepted queued design. `moth new` does not yet emit them. See @../progress (Progress).
+
+`config.moth` at the selected project root is optional and controls build settings. It is one self-contained compile-time source file with no source dependencies. A nested `config.moth` is inert.
+
+### Accepted starter
+
+[codeblock, $code("moth"):
+    $project(
+        name = "my_site",
+    )
+
+    $html_builder
+]
+
+Version is optional. An omitted name uses the selected directory name and must be a valid Moth project identifier. There is no `entry_root`; the selected directory is the source root.
+
+### Current grouped config in brief
+
+[codeblock, $code("moth"):
+    project #= (
+        name = "my_site",
+    )
+
+    html #= ()
+]
+
+The `project` record may omit `name`, `version`, or both. The `html` section supplies the active builder settings and defaults to `_dev` and `_release` outputs. Retired flat keys and `entry_root` are rejected.

@@ -19,10 +19,10 @@ pub(crate) const DEV_OUTPUT_FIELD: &str = "dev_output";
 pub(crate) const RELEASE_OUTPUT_FIELD: &str = "release_output";
 
 /// Folder the development output root uses when a builder section omits it.
-pub(crate) const DEFAULT_DEV_OUTPUT: &str = "dev";
+pub(crate) const DEFAULT_DEV_OUTPUT: &str = "_dev";
 
 /// Folder the release output root uses when a builder section omits it.
-pub(crate) const DEFAULT_RELEASE_OUTPUT: &str = "release";
+pub(crate) const DEFAULT_RELEASE_OUTPUT: &str = "_release";
 
 /// Output roots that a builder section validated, with `None` where the section set none.
 ///

@@ -2,7 +2,7 @@
 
 This is the living implementation companion for Moth's production borrow checker and the operational follow-ups uncovered by Boracle. It owns current implementation status, accepted production implementation choices, observed defects, performance evidence and the ordered queue of next work. Keep it after individual fixes land. Update it whenever new Boracle evidence changes an accepted production decision or identifies a production issue.
 
-The accepted source language and memory semantics remain authoritative in `docs/src/developer-docs/memory-management/`, particularly `borrow-validation/borrow-validation.mtf`. `docs/compiler-design-overview.md` owns compiler stages and the solver-independent Stage 6 handoff. The permanent Boracle reference and operational-oracle documents own their respective semantics and limitations. This plan owns implementation strategy and live status, not a competing source-language contract or a second reference solver.
+The accepted source language and memory semantics remain authoritative in `docs/developer-docs/memory-management/`, particularly `borrow-validation/borrow-validation.mtf`. `docs/compiler-design-overview.md` owns compiler stages and the solver-independent Stage 6 handoff. The permanent Boracle reference and operational-oracle documents own their respective semantics and limitations. This plan owns implementation strategy and live status, not a competing source-language contract or a second reference solver.
 
 ## Current handoff - 2026-10-12
 

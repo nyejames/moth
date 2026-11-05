@@ -1,0 +1,10 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "shared",
+    "normal-message",
+    "normal",
+]

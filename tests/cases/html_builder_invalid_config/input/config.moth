@@ -1,6 +1,4 @@
 project #= (
-    name = "test_project",
-)
+    name = "test_project")
 html #= (
-    html_inject_core_css = "maybe",
-)
+    html_inject_core_css = "maybe")

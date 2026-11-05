@@ -94,7 +94,11 @@ pub fn parse_file_headers_with_table(
         owner.tokens_ref(),
         &path_syntax,
     );
-    let HeaderParseOptions { entry_file_id, .. } = options;
+    let HeaderParseOptions {
+        entry_file_id,
+        support_root_file_id,
+        ..
+    } = options;
 
     let is_entry_file = entry_file_id.map_or_else(
         || {
@@ -118,15 +122,18 @@ pub fn parse_file_headers_with_table(
         .and_then(|name| name.to_str())
         .is_some_and(file_name_is_config_file);
 
+    let is_support_root_file = support_root_file_id.is_some_and(|root| root == file_id);
     let file_role = if is_entry_file {
         options
             .entry_file_role
             .unwrap_or(match options.active_root_role {
                 ModuleRootRole::Normal => FileRole::ActiveModuleRoot,
-                ModuleRootRole::Support | ModuleRootRole::ProjectPackageFacade => {
-                    FileRole::ActiveApiOnlyModuleRoot
-                }
+                ModuleRootRole::Support
+                | ModuleRootRole::Shared
+                | ModuleRootRole::SyntheticProjectContext => FileRole::ActiveApiOnlyModuleRoot,
             })
+    } else if is_support_root_file {
+        FileRole::ActiveApiOnlyModuleRoot
     } else if is_module_root_file_by_name {
         FileRole::ImportedModuleRoot
     } else {

@@ -1,0 +1,290 @@
+# Compiler-facing language reference
+
+This index routes contributors to Moth's canonical source-language references.
+The unsuffixed `.mtf` files listed below own complete source syntax and
+observable semantics for their topics.
+
+## Authority model
+
+- Read every relevant unsuffixed file before writing Moth code or changing the
+  parser, semantic stages, diagnostics or lowering for that feature.
+- Paired `-basic.mtf` files teach a smaller truthful surface. They do not define
+  edge cases or replace the unsuffixed reference.
+- `@page.moth` files own introductions, navigation and website composition.
+- `docs/developer-docs/memory-management/**` owns the formal memory model.
+- `docs/compiler-design-overview.md` owns compiler-stage contracts.
+- `docs/build-system-design.md` owns project and build orchestration.
+- `docs/docs/progress/@page.moth` owns current implementation and backend
+  support.
+
+## Canonical focused references
+
+### Language basics
+
+- `docs/docs/language-overview/blocks-and-statements.mtf`
+- `docs/docs/language-overview/comments-and-naming.mtf`
+- `docs/docs/language-overview/core-values.mtf`
+- `docs/docs/language-overview/strings-and-characters.mtf`
+- `docs/docs/language-overview/mon-syntax.mtf`
+
+### Values and bindings
+
+- `docs/docs/bindings/bindings.mtf`
+- `docs/docs/bindings/mutable-bindings.mtf`
+- `docs/docs/bindings/shared-access.mtf`
+- `docs/docs/bindings/explicit-copies.mtf`
+- `docs/docs/bindings/shadowing.mtf`
+
+### Numbers
+
+- `docs/docs/numbers/numeric-types.mtf`
+- `docs/docs/numbers/numeric-literals.mtf`
+- `docs/docs/numbers/operators.mtf`
+- `docs/docs/numbers/checked-arithmetic.mtf`
+
+### Casts
+
+- `docs/docs/casts/cast-syntax.mtf`
+- `docs/docs/casts/cast-targets.mtf`
+- `docs/docs/casts/fallible-casts.mtf`
+- `docs/docs/casts/cast-evidence.mtf`
+
+### Functions
+
+- `docs/docs/functions/function-declarations.mtf`
+- `docs/docs/functions/parameters-and-defaults.mtf`
+- `docs/docs/functions/calls-and-access.mtf`
+- `docs/docs/functions/returns-and-multiple-values.mtf`
+
+### Branching
+
+- `docs/docs/branching/statement-if.mtf`
+- `docs/docs/branching/value-producing-if.mtf`
+- `docs/docs/branching/pattern-matching.mtf`
+- `docs/docs/branching/patterns-and-exhaustiveness.mtf`
+
+### Loops
+
+- `docs/docs/loops/conditional-loops.mtf`
+- `docs/docs/loops/collection-loops.mtf`
+- `docs/docs/loops/range-loops.mtf`
+- `docs/docs/loops/loop-control.mtf`
+
+### Structs
+
+- `docs/docs/structs/struct-declarations.mtf`
+- `docs/docs/structs/construction-and-fields.mtf`
+- `docs/docs/structs/anonymous-records.mtf`
+- `docs/docs/structs/receiver-methods.mtf`
+- `docs/docs/structs/mutable-receivers.mtf`
+
+### Choices
+
+- `docs/docs/choices/choice-declarations.mtf`
+- `docs/docs/choices/variant-construction.mtf`
+- `docs/docs/choices/payload-patterns.mtf`
+- `docs/docs/choices/choice-equality.mtf`
+
+### Errors, options and assertions
+
+- `docs/docs/errors/error-values.mtf`
+- `docs/docs/errors/error-returns.mtf`
+- `docs/docs/errors/propagation.mtf`
+- `docs/docs/errors/catch-and-recovery.mtf`
+- `docs/docs/errors/options.mtf`
+- `docs/docs/errors/assertions.mtf`
+
+### Collections and maps
+
+- `docs/docs/collections/collection-literals.mtf`
+- `docs/docs/collections/growable-collections.mtf`
+- `docs/docs/collections/fixed-collections.mtf`
+- `docs/docs/collections/collection-operations.mtf`
+- `docs/docs/collections/hash-maps.mtf`
+
+### Templates
+
+- `docs/docs/templates/template-basics.mtf`
+- `docs/docs/templates/template-directives.mtf`
+- `docs/docs/templates/template-slots.mtf`
+- `docs/docs/templates/child-wrappers.mtf`
+- `docs/docs/templates/template-control-flow.mtf`
+- `docs/docs/templates/markdown-formatting.mtf`
+
+### Directives
+
+- `docs/docs/directives/directives.mtf`
+
+Contributor routing for compiler and build handoffs lives in
+`docs/docs/directives/overview.mtf`. That file is not a public page import.
+Template-specific directive meanings stay in
+`docs/docs/templates/template-directives.mtf`. Exact `$project`, `$config`,
+`$html_builder` and `$page` signatures stay in the project-structure references.
+
+### Constants and compile-time behaviour
+
+
+- `docs/docs/constants/constant-bindings.mtf`
+- `docs/docs/constants/constant-folding.mtf`
+- `docs/docs/constants/const-records.mtf`
+- `docs/docs/constants/const-templates.mtf`
+
+### Resources and file values
+
+- `docs/docs/resources/file-paths.mtf`
+- `docs/docs/resources/file-values.mtf`
+
+### Aliases
+
+- `docs/docs/aliases/type-aliases.mtf`
+- `docs/docs/aliases/dependency-aliases.mtf`
+- `docs/docs/aliases/payload-capture-aliases.mtf`
+
+### Generics
+
+- `docs/docs/generics/generic-declarations.mtf`
+- `docs/docs/generics/type-application.mtf`
+- `docs/docs/generics/generic-inference.mtf`
+- `docs/docs/generics/generic-instances.mtf`
+- `docs/docs/generics/generic-limits.mtf`
+
+### Traits
+
+- `docs/docs/traits/trait-declarations.mtf`
+- `docs/docs/traits/trait-requirements.mtf`
+- `docs/docs/traits/conformance.mtf`
+- `docs/docs/traits/generic-trait-bounds.mtf`
+- `docs/docs/traits/trait-incompatibility.mtf`
+- `docs/docs/traits/core-cast-traits.mtf`
+- `docs/docs/traits/trait-design-scope.mtf`
+
+### Wiring
+
+- `docs/docs/wiring/wiring.mtf`
+
+This reference owns head-directed `of`, named-binding wires, contextual
+constructor routes, capability restrictions and the channel-construction
+boundary. Ordinary type, call, choice and memory contracts still apply outside
+its explicit parameter-context rules.
+
+### Project structure
+
+- `docs/docs/project-structure/project-layout.mtf`
+- `docs/docs/project-structure/project-config.mtf`
+- `docs/docs/project-structure/module-roots.mtf`
+- `docs/docs/project-structure/public-api.mtf`
+- `docs/docs/project-structure/entry-runtime-and-fragments.mtf`
+- `docs/docs/project-structure/html-routing-and-artifacts.mtf`
+- `docs/docs/project-structure/build-inputs.mtf`
+- `docs/docs/project-structure/entry-config.mtf`
+- `docs/docs/project-structure/project-package-facade.mtf`
+
+### Packages and dependencies
+
+- `docs/docs/packages/dependency-paths.mtf`
+- `docs/docs/packages/dependency-clauses.mtf`
+- `docs/docs/packages/module-visibility.mtf`
+- `docs/docs/packages/public-reexports.mtf`
+- `docs/docs/packages/project-local-packages.mtf`
+- `docs/docs/packages/package-origins-and-backing.mtf`
+- `docs/docs/packages/external-binding-contracts.mtf`
+
+### Moth template files
+
+- `docs/docs/moth-templates/moth-template-files.mtf`
+- `docs/docs/moth-templates/implicit-markdown.mtf`
+- `docs/docs/moth-templates/content-dependencies.mtf`
+- `docs/docs/moth-templates/template-scope.mtf`
+- `docs/docs/moth-templates/moth-template-limits.mtf`
+
+### Plain Markdown
+
+- `docs/docs/markdown/markdown-files.mtf`
+- `docs/docs/markdown/markdown-dependencies.mtf`
+- `docs/docs/markdown/rendering-contract.mtf`
+- `docs/docs/markdown/choosing-a-content-format.mtf`
+
+The public Wiring route pairs Basic teaching with the canonical unsuffixed
+reference at `docs/docs/wiring/wiring.mtf`. The reference owns Wire and Route
+semantics; the progress matrix owns their target support.
+
+## Public documentation
+
+`docs/docs/**` contains website pages, teaching references, examples and
+topic navigation.
+
+## Design scope
+
+The public Design Scope route forms the sole authority for accepted, open and
+excluded language boundaries:
+
+- `docs/docs/design-scope/design-principles.mtf`
+- `docs/docs/design-scope/deferred-and-outside-scope.mtf`
+- `docs/docs/design-scope/excluded-language-families.mtf`
+
+## Memory and lifetimes
+
+The public Memory route covers source-facing memory behaviour:
+
+- `docs/docs/memory/reference-semantics.mtf`
+- `docs/docs/memory/reference-semantics-basic.mtf`
+- `docs/docs/memory/copy-and-exclusive-access.mtf`
+- `docs/docs/memory/copy-and-exclusive-access-basic.mtf`
+- `docs/docs/memory/lifetimes-and-result-shapes.mtf`
+- `docs/docs/memory/lifetimes-and-result-shapes-basic.mtf`
+- `docs/docs/memory/automatic-cleanup-and-retained-edges.mtf`
+- `docs/docs/memory/automatic-cleanup-and-retained-edges-basic.mtf`
+- `docs/docs/memory/declared-regions.mtf`
+- `docs/docs/memory/declared-regions-basic.mtf`
+
+The formal memory model, borrow validation, lifetime-region analysis and
+backend lowering live under
+`docs/developer-docs/memory-management/**`.
+
+## Core packages
+
+Each Core package has a paired Advanced and Basic page:
+
+- `docs/docs/packages/core/io/io.mtf` / `io-basic.mtf`
+- `docs/docs/packages/core/math/math.mtf` / `math-basic.mtf`
+- `docs/docs/packages/core/text/text.mtf` / `text-basic.mtf`
+- `docs/docs/packages/core/random/random.mtf` / `random-basic.mtf`
+- `docs/docs/packages/core/time/time.mtf` / `time-basic.mtf`
+- `docs/docs/packages/core/collections/collections.mtf` / `collections-basic.mtf`
+- `docs/docs/packages/core/prelude/prelude.mtf` / `prelude-basic.mtf`
+
+## Builder packages
+
+Builder packages have paired Advanced and Basic pages:
+
+- `docs/docs/packages/builder/html/html-helpers.mtf` / `html-helpers-basic.mtf`
+- `docs/docs/packages/builder/canvas/canvas-drawing.mtf` / `canvas-drawing-basic.mtf`
+- `docs/docs/packages/builder/graphics/graphics.mtf` / `graphics-basic.mtf`
+- `docs/docs/packages/builder/site/site.mtf` / `site-basic.mtf`
+- `docs/docs/packages/builder/page/page.mtf` / `page-basic.mtf`
+
+## Compiler ownership
+
+`docs/compiler-design-overview.md` defines the compiler stages, semantic owners and cross-stage handoff for the language surface.
+
+For MON work, read `language-overview/mon-syntax.mtf`, `functions/calls-and-access.mtf`,
+`constants/const-records.mtf` and `structs/anonymous-records.mtf` under `docs/docs/`
+together with the durable literal-data format authority `docs/docs/mon/mon-format.mtf`
+(and teaching `mon-format-basic.mtf`). The shared notation does not merge call-slot validation, folded records
+and hidden runtime nominal types into one semantic representation. Moth MON source
+syntax allows ordinary expressions according to the receiving context; MON serialised
+data is self-contained literal data only, and a MON reader never evaluates Moth
+expressions, including foldable ones. The literal-data format and implemented
+Rust API/ownership contract are available at `moth_mon`, also deliberately
+re-exported as `moth::mon` from `src/lib.rs` with the same API and Rust types.
+The standalone owner is `crates/moth-mon/`. The service is executable from
+another Rust crate and returns owned values, but compiled Moth programs have no
+runtime codec support. Its exact public operations and types are documented in
+the standalone crate. `crates/moth-lexical/` owns shared identifier, reserved-word
+and numeric-text facts without compiler tokens, type lookup or arithmetic.
+Source call-argument and declaration parsers remain compiler-local. The real-source
+suite at `src/compiler_tests/mon_syntax_parity/` checks the common notation under
+equivalent exact receiving types.
+The codec does not imply Moth-native `$mon`, automatic schema extraction or a
+static project builder. Source `{=}`, Unicode escapes beyond the existing five
+and contextual `::Variant` construction remain named undelivered parity gaps.

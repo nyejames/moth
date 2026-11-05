@@ -173,7 +173,6 @@ impl BuilderSettings {
 pub struct Config {
     pub project_name: String,
     pub entry_dir: PathBuf,
-    pub entry_root: PathBuf,
     /// Per-loop expansion limit for compile-time template loops.
     pub template_const_loop_iteration_limit: usize,
     /// Primary errors retained per module before optional diagnostic recovery stops.
@@ -203,9 +202,6 @@ pub struct Config {
 
     /// Additional open `project` fields retained for later `@project` publication.
     pub(crate) extra_project_fields: Vec<ProjectMetadataField>,
-    /// Whether this config was loaded from an actual `config.moth` file. Synthetic single-file
-    /// defaults must not become fixed project providers for source build-config contracts.
-    pub(crate) project_config_loaded: bool,
     /// Declaration-owned and grouped-project input-resolution dependencies retained only until
     /// build-boundary provider projection.
     pub(crate) project_field_config_dependencies: Vec<FoldedConfigProjectFieldDependency>,
@@ -219,7 +215,6 @@ impl Config {
         Config {
             project_name: String::new(),
             entry_dir: user_specified_path,
-            entry_root: PathBuf::from(""),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             max_errors_per_module: Some(DEFAULT_MAX_ERRORS_PER_MODULE),
             max_errors_per_project: Some(DEFAULT_MAX_ERRORS_PER_PROJECT),
@@ -230,7 +225,6 @@ impl Config {
             output_roots: OutputRootSettings::default(),
             builder_settings: BuilderSettings::default(),
             extra_project_fields: Vec::new(),
-            project_config_loaded: false,
             project_field_config_dependencies: Vec::new(),
             config_resolution_records: Vec::new(),
         }
@@ -344,7 +338,6 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             entry_dir: PathBuf::new(),
-            entry_root: PathBuf::from("src"),
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             max_errors_per_module: Some(DEFAULT_MAX_ERRORS_PER_MODULE),
             max_errors_per_project: Some(DEFAULT_MAX_ERRORS_PER_PROJECT),
@@ -356,7 +349,6 @@ impl Default for Config {
             output_roots: OutputRootSettings::default(),
             builder_settings: BuilderSettings::default(),
             extra_project_fields: Vec::new(),
-            project_config_loaded: false,
             project_field_config_dependencies: Vec::new(),
             config_resolution_records: Vec::new(),
         }

@@ -65,8 +65,7 @@ fn warning_count(messages: &CompilationResult<()>) -> usize {
 }
 
 /// Default page-project config with no diagnostic-limit overrides.
-const DEFAULT_PAGE_CONFIG: &str =
-    "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n";
+const DEFAULT_PAGE_CONFIG: &str = "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n";
 
 /// Page config that disables both error-count limits through typed `I32?` constants.
 const UNLIMITED_PAGE_CONFIG: &str = "\
@@ -74,7 +73,6 @@ module_error_limit #I32? = none
 project_error_limit #I32? = none
 project #= (
     name = \"docs\",
-    entry_root = \"src\",
     max_errors_per_module = module_error_limit,
     max_errors_per_project = project_error_limit,
 )
@@ -233,52 +231,14 @@ if value is:
 
 #[cfg(unix)]
 #[test]
-fn check_rejects_config_filename_namesake_source_contract() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-    let source_root = root.join("src");
-    fs::create_dir_all(&source_root).expect("should create source root");
-    fs::write(
-        root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
-    )
-    .expect("should write config file");
-    fs::write(
-        source_root.join("@page.moth"),
-        "enabled #Config of Bool = true\n",
-    )
-    .expect("should write page source");
-    fs::write(
-        source_root.join("config.moth"),
-        "enabled #Config of Bool = false\n",
-    )
-    .expect("should write namesake source");
-
-    let outcome = execute_check(
-        root.to_str()
-            .expect("temporary project path should be valid UTF-8"),
-        &BuildConfigInputSet::new(),
-        &test_project_builder(),
-    );
-
-    assert!(
-        diagnostic_reports(&outcome.messages)
-            .iter_severity(DiagnosticSeverity::Error)
-            .any(|(_, view)| view.reason_key()
-                == Some("invalid_config.config_qualifier_invalid_placement"))
-    );
-}
-
-#[cfg(unix)]
-#[test]
 fn check_reports_missing_config_input_from_unselected_source() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
-    let source_root = root.join("src");
+    let source_root = root.to_path_buf();
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
     fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write page source");
@@ -306,11 +266,11 @@ fn check_reports_missing_config_input_from_unselected_source() {
 fn check_rejects_unselected_runtime_template_as_non_root_source() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
-    let source_root = root.join("src");
+    let source_root = root.to_path_buf();
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
     fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write page source");
@@ -335,11 +295,11 @@ fn check_rejects_unselected_runtime_template_as_non_root_source() {
 fn check_compiles_unselected_same_module_source_closure() {
     let _temp = tempfile::tempdir().expect("should create temporary project");
     let root = _temp.path().to_path_buf();
-    let source_root = root.join("src");
+    let source_root = root.to_path_buf();
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
     fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write page source");
@@ -405,11 +365,11 @@ fn config_ast_timers_use_dedicated_identities() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    let source_root = root.join("src");
+    let source_root = root.to_path_buf();
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
     fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write source file");
@@ -460,12 +420,12 @@ fn check_retains_source_package_warning() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let package = root.join("src/warnpkg");
-    let src = root.join("src");
+    let src = root.to_path_buf();
     fs::create_dir_all(&package).expect("should create package root");
     fs::create_dir_all(&src).expect("should create entry root");
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
@@ -546,7 +506,7 @@ result I32 = choose_generic(1)
         Some(
             root.canonicalize()
                 .expect("project root should canonicalize")
-                .join("src/@page.moth")
+                .join("@page.moth")
                 .as_path()
         )
     );
@@ -593,31 +553,28 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
             "invalid_config.invalid_output_folder.resolves_outside_project_root",
         ),
         (
-            "entry",
-            "src",
-            "invalid_config.invalid_output_folder.inside_or_equal_to_entry_root",
+            "project_root",
+            "self",
+            "invalid_config.invalid_output_folder.resolves_outside_project_root",
         ),
     ] {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
-        let source_root = root.join("src");
         let _temp1 = tempfile::tempdir().expect("should create temp dir");
         let outside = _temp1.path().to_path_buf();
-        fs::create_dir_all(&source_root).expect("should create source root");
         fs::create_dir_all(&outside).expect("should create outside root");
-        let output_root = root.join("dev");
-        if target_name == "src" {
-            symlink(&source_root, &output_root).expect("should create entry-root symlink");
+        let output_root = root.join("_dev");
+        if target_name == "self" {
+            symlink(&root, &output_root).expect("should create project-root symlink");
         } else {
             symlink(&outside, &output_root).expect("should create sibling symlink");
         }
         fs::write(
             root.join("config.moth"),
-            "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
+            "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
         )
         .expect("should write config");
-        fs::write(source_root.join("@page.moth"), "#[:<h1>Check</h1>]\n")
-            .expect("should write source");
+        fs::write(root.join("@page.moth"), "#[:<h1>Check</h1>]\n").expect("should write source");
 
         let outcome = execute_check(
             root.to_str()
@@ -631,7 +588,7 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
                 .any(|(_, view)| view.reason_key() == Some(expected_reason_key))
         );
         assert_path_missing(&outside.join("index.html"));
-        assert_path_missing(&source_root.join("index.html"));
+        assert_path_missing(&root.join("index.html"));
 
         fs::remove_dir_all(&outside).expect("should remove target root");
     }
@@ -644,7 +601,7 @@ type DiagnosticIdentityRow = (&'static str, Option<&'static str>, String, i32);
 fn write_page_project(_prefix: &str, source: &str) -> (tempfile::TempDir, PathBuf) {
     let temp = tempfile::tempdir().expect("should create temp dir");
     let root = temp.path().to_path_buf();
-    let src = root.join("src");
+    let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(root.join("config.moth"), DEFAULT_PAGE_CONFIG).expect("should write config");
     fs::write(src.join("@page.moth"), source).expect("should write @page.moth source");
@@ -657,7 +614,7 @@ fn write_page_project_with_module_limit(limit: &str, source: &str) -> (tempfile:
     fs::write(
         root.join("config.moth"),
         format!(
-            "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_module = {limit},\n)\nhtml #= ()\n"
+            "project #= (\n    name = \"docs\",\n        max_errors_per_module = {limit},\n)\nhtml #= ()\n"
         ),
     )
     .expect("should write limited config");
@@ -776,7 +733,7 @@ if value is:
         .collect();
     assert!(
         remaining.iter().any(|name| name == "config.moth")
-            && remaining.iter().any(|name| name == "src"),
+            && remaining.iter().any(|name| name == "@page.moth"),
         "check should leave the authored config and source tree, got {remaining:?}"
     );
     let check_warning_identity = diagnostic_identity_sequence(
@@ -1662,10 +1619,10 @@ warn || -> I32:
 fn eager_check_only_preparation_stops_at_stage0_before_the_project_cutoff() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let (_temp, root) = write_page_project("eager_preparation", "#[:site]\n");
-    let source_root = root.join("src");
+    let source_root = root.to_path_buf();
     fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n    max_errors_per_project = 1,\n    max_errors_per_module = 1,\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n        max_errors_per_project = 1,\n    max_errors_per_module = 1,\n)\nhtml #= ()\n",
     )
     .expect("should write two-limit config");
     fs::write(

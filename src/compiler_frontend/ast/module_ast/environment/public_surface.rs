@@ -46,17 +46,23 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         for header in sorted_headers {
             if is_public_export_trait_incompatibility_header(header) {
                 if let HeaderKind::TraitIncompatibility { incompatibility } = &header.kind {
-                    self.validate_public_trait_incompatibility_surface(
-                        incompatibility,
-                        &self.header_source_path(header),
-                        trait_environment,
-                        string_table,
-                    )?;
+                    for public_root_file in self.public_export_roots_for_header(header) {
+                        self.validate_public_trait_incompatibility_surface(
+                            incompatibility,
+                            &public_root_file,
+                            trait_environment,
+                            string_table,
+                        )?;
+                    }
                 }
                 continue;
             }
 
-            if !self.header_is_public_export_declaration(header) {
+            if !header.kind.is_authored_public_export_declaration() {
+                continue;
+            }
+            let public_roots = self.public_export_roots_for_header(header);
+            if public_roots.is_empty() {
                 continue;
             }
 
@@ -69,55 +75,28 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         "Public export header had no source-path name.",
                     )
                 })?;
-
-            match &header.kind {
-                HeaderKind::Function { .. } => {
-                    let Some(resolved_signature) = self
-                        .resolved_function_signatures_by_path
-                        .get(&header.declaration_path)
-                    else {
-                        continue;
-                    };
-                    self.validate_public_function_surface(
-                        exported_name,
-                        &resolved_signature.signature,
-                        &self.header_source_path(header),
-                        header_name_span(header),
-                        trait_environment,
-                    )?;
-                }
-
-                HeaderKind::Struct { .. } => {
-                    let Some(fields) = self
-                        .resolved_struct_fields_by_path
-                        .get(&header.declaration_path)
-                    else {
-                        continue;
-                    };
-
-                    for field in fields {
-                        self.validate_public_type_id(
+            for public_root_file in public_roots {
+                match &header.kind {
+                    HeaderKind::Function { .. } => {
+                        let Some(resolved_signature) = self
+                            .resolved_function_signatures_by_path
+                            .get(&header.declaration_path)
+                        else {
+                            continue;
+                        };
+                        self.validate_public_function_surface(
                             exported_name,
-                            field.type_id,
-                            &self.header_source_path(header),
-                            field.binding_span,
+                            &resolved_signature.signature,
+                            &public_root_file,
+                            header_name_span(header),
                             trait_environment,
                         )?;
                     }
-                }
 
-                HeaderKind::Choice { .. } => {
-                    let Some(variants) = self
-                        .choice_variant_shells_by_path
-                        .get(&header.declaration_path)
-                    else {
-                        continue;
-                    };
-
-                    for variant in variants {
-                        let crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayload::Record {
-                            fields,
-                        } = &variant.payload
+                    HeaderKind::Struct { .. } => {
+                        let Some(fields) = self
+                            .resolved_struct_fields_by_path
+                            .get(&header.declaration_path)
                         else {
                             continue;
                         };
@@ -126,53 +105,81 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             self.validate_public_type_id(
                                 exported_name,
                                 field.type_id,
-                                &self.header_source_path(header),
+                                &public_root_file,
                                 field.binding_span,
                                 trait_environment,
                             )?;
                         }
                     }
+
+                    HeaderKind::Choice { .. } => {
+                        let Some(variants) = self
+                            .choice_variant_shells_by_path
+                            .get(&header.declaration_path)
+                        else {
+                            continue;
+                        };
+
+                        for variant in variants {
+                            let crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayload::Record {
+                                fields,
+                            } = &variant.payload
+                            else {
+                                continue;
+                            };
+
+                            for field in fields {
+                                self.validate_public_type_id(
+                                    exported_name,
+                                    field.type_id,
+                                    &public_root_file,
+                                    field.binding_span,
+                                    trait_environment,
+                                )?;
+                            }
+                        }
+                    }
+
+                    HeaderKind::TypeAlias { .. } => {
+                        let Some(alias) = self
+                            .resolved_type_aliases_by_path
+                            .get(&header.declaration_path)
+                        else {
+                            continue;
+                        };
+
+                        self.validate_public_type_id(
+                            exported_name,
+                            alias.target_type_id,
+                            &public_root_file,
+                            header_name_span(header),
+                            trait_environment,
+                        )?;
+                    }
+
+                    HeaderKind::Constant { declaration, .. } => {
+                        let Some(resolved_declaration) =
+                            self.declaration_table.get_by_path(&header.declaration_path)
+                        else {
+                            continue;
+                        };
+
+                        self.validate_public_type_id(
+                            exported_name,
+                            resolved_declaration.type_id,
+                            &public_root_file,
+                            declaration.span,
+                            trait_environment,
+                        )?;
+                    }
+
+                    HeaderKind::Trait { .. } => {}
+
+                    HeaderKind::ConstTemplate { .. }
+                    | HeaderKind::StartFunction
+                    | HeaderKind::TraitConformance { .. }
+                    | HeaderKind::TraitIncompatibility { .. } => {}
                 }
-
-                HeaderKind::TypeAlias { .. } => {
-                    let Some(alias) = self
-                        .resolved_type_aliases_by_path
-                        .get(&header.declaration_path)
-                    else {
-                        continue;
-                    };
-
-                    self.validate_public_type_id(
-                        exported_name,
-                        alias.target_type_id,
-                        &self.header_source_path(header),
-                        header_name_span(header),
-                        trait_environment,
-                    )?;
-                }
-
-                HeaderKind::Constant { declaration, .. } => {
-                    let Some(resolved_declaration) =
-                        self.declaration_table.get_by_path(&header.declaration_path)
-                    else {
-                        continue;
-                    };
-
-                    self.validate_public_type_id(
-                        exported_name,
-                        resolved_declaration.type_id,
-                        &self.header_source_path(header),
-                        declaration.span,
-                        trait_environment,
-                    )?;
-                }
-
-                HeaderKind::Trait { .. } => {}
-
-                HeaderKind::ConstTemplate { .. }
-                | HeaderKind::StartFunction
-                | HeaderKind::TraitConformance { .. }
-                | HeaderKind::TraitIncompatibility { .. } => {}
             }
         }
 
@@ -387,14 +394,29 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             return true;
         }
 
-        if let Some(module_root) = self
+        let export_root_file = if self
             .module_symbols
-            .file_module_membership
-            .get(public_root_file)
+            .module_root_public_exports
+            .contains_key(public_root_file)
+        {
+            Some(*public_root_file)
+        } else {
+            self.module_symbols
+                .file_module_membership
+                .get(public_root_file)
+                .and_then(|module_root| {
+                    self.module_symbols
+                        .module_root_boundaries
+                        .iter()
+                        .find(|boundary| &boundary.module_root == module_root)
+                        .map(|boundary| boundary.root_file)
+                })
+        };
+        if let Some(export_root_file) = export_root_file
             && let Some(entries) = self
                 .module_symbols
                 .module_root_public_exports
-                .get(module_root)
+                .get(&export_root_file)
             && entries
                 .iter()
                 .any(|entry| entry.target.is_source_path(path))
@@ -405,24 +427,80 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         false
     }
 
-    /// Whether a header is a public authored declaration reachable from its module root.
+    /// Every module-root or package-root file that exports this header's declaration.
     ///
-    /// WHAT: the declaration kind must pass the shared `HeaderKind` gate, and the root that owns
-    ///       the declaring file must report the declaration as public, either directly or through
-    ///       a re-export.
-    /// WHY: a re-exported declaration is consumed through the root's public surface exactly like a
-    ///      direct export, so its private field, parameter, and requirement types must be checked
-    ///      too. Gating on the header's own file role and export mode skipped re-exports, which
-    ///      then failed later as an internal compiler error.
-    pub(in crate::compiler_frontend::ast) fn header_is_public_export_declaration(
+    /// WHAT: a root-file declaration has one exporting root. A shared helper can be absent from
+    ///       one paired surface and re-exported by the other, or by both; each exporting root owns
+    ///       a separate public nameability scope.
+    /// WHY: validating a helper once against the first boundary of its directory lets a support-only
+    ///      export skip public-surface validation, and lets a declaration exported by both surfaces
+    ///      be checked against only one surface's private names.
+    pub(in crate::compiler_frontend::ast) fn public_export_roots_for_header(
         &self,
         header: &Header,
-    ) -> bool {
-        header.kind.is_authored_public_export_declaration()
-            && self.source_path_is_public_from_root_file(
-                &header.declaration_path,
-                &self.header_source_path(header),
-            )
+    ) -> Vec<PathId> {
+        self.public_export_roots_for_path(&header.declaration_path, self.header_source_path(header))
+    }
+
+    /// Every root that exports one declaration from the given source file.
+    pub(in crate::compiler_frontend::ast) fn public_export_roots_for_path(
+        &self,
+        declaration_path: &PathId,
+        source_path: PathId,
+    ) -> Vec<PathId> {
+        let mut roots = Vec::new();
+
+        if self
+            .module_symbols
+            .module_root_public_exports
+            .get(&source_path)
+            .is_some_and(|entries| {
+                entries
+                    .iter()
+                    .any(|entry| entry.target.is_source_path(declaration_path))
+            })
+        {
+            roots.push(source_path);
+        }
+
+        if let Some(module_root) = self.module_symbols.file_module_membership.get(&source_path) {
+            for boundary in &self.module_symbols.module_root_boundaries {
+                if &boundary.module_root != module_root
+                    || self
+                        .module_symbols
+                        .module_root_public_exports
+                        .get(&boundary.root_file)
+                        .is_none_or(|entries| {
+                            !entries
+                                .iter()
+                                .any(|entry| entry.target.is_source_path(declaration_path))
+                        })
+                {
+                    continue;
+                }
+                roots.push(boundary.root_file);
+            }
+        }
+
+        if let Some(prefix) = self
+            .module_symbols
+            .file_package_membership
+            .get(&source_path)
+            && let Some(entries) = self
+                .module_symbols
+                .source_package_public_exports
+                .get(prefix)
+            && entries
+                .iter()
+                .any(|entry| entry.target.is_source_path(declaration_path))
+            && let Some(root_file) = self.module_symbols.source_package_root_files.get(prefix)
+        {
+            roots.push(*root_file);
+        }
+
+        roots.sort_unstable();
+        roots.dedup();
+        roots
     }
 
     /// Validate exported `TRAIT must not TRAIT` relations in a module-root public export.

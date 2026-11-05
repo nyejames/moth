@@ -63,7 +63,7 @@ fingerprint_roots = ["benchmarks/speed-test.moth"]
 fingerprint_excludes = []
 ```
 
-`id` gives the workload a stable authored identity. `entry` selects the file or project passed to the runner. `fingerprint_mode` selects how source identity is computed: `full_tree` uses one root equal to the entry, while `partitioned` uses disjoint strict-descendant roots under a directory entry. `fingerprint_roots` list every authored input boundary that affects compilation. `fingerprint_excludes` remove generated output trees inside those roots, such as `dev` and `release`.
+`id` gives the workload a stable authored identity. `entry` selects the file or project passed to the runner. `fingerprint_mode` selects how source identity is computed: `full_tree` uses one root equal to the entry, while `partitioned` uses disjoint strict-descendant roots under a directory entry. `fingerprint_roots` list every authored input boundary that affects compilation. `fingerprint_excludes` remove generated output trees inside those roots, such as `_dev` and `_release`.
 
 Directory-entry workloads declare `fingerprint_mode = "full_tree"` with the entry as the sole root, or `fingerprint_mode = "partitioned"` with disjoint roots under the entry. Schema 4 validates that full-tree roots equal the entry, partitioned roots are strict descendants, and no root or exclude overlaps another.
 
@@ -234,7 +234,7 @@ baselines, but don't replace these focused shapes.
 
 Keep selected-width narrow arithmetic and `F16` costs separate from equivalent wide-domain
 comparisons. Don't interpret added checks or per-operation rounding as inference overhead.
-The [numeric references](../docs/src/docs/numbers/numeric-literals.mtf) own the language
+The [numeric references](../docs/docs/numbers/numeric-literals.mtf) own the language
 contracts. Preserve original and migrated cohort identities when comparing historical results,
 including any width or cast adaptations. A source change doesn't establish a speedup.
 
@@ -293,7 +293,7 @@ Frontend cases call the production in-process API. The same executor checks type
 
 File-entry CLI cases run from isolated temporary directories under `target/benchmark-work/` so compiler output never writes into the tracked checkout. Directory-entry cases run from the repository root because their output folders are project-owned and excluded from workload fingerprints.
 
-Directory build workloads declare their generated output roots explicitly in the manifest, for example `generated_output_roots = ["dev", "release"]`. Roots are relative to the workload entry, must be strict descendants of it, must be absent when the run starts and must be covered by an explicit fingerprint exclude. They are cleanup authority only; xtask never parses `config.moth` to rediscover output settings.
+Directory build workloads declare their generated output roots explicitly in the manifest, for example `generated_output_roots = ["_dev", "_release"]`. Roots are relative to the workload entry, must be strict descendants of it, must be absent when the run starts and must be covered by an explicit fingerprint exclude. They are cleanup authority only; xtask never parses `config.moth` to rediscover output settings.
 
 Explicit finalisation removes only run-owned roots after measurement. Cleanup completes before repository verification and before any history or summary write. A root that already exists, a tracked root, a symlink replacement or a removal failure aborts persistence. `Drop` is best-effort emergency cleanup only and never defines success.
 
@@ -742,7 +742,7 @@ allocation, lookup, folding, import, and lowering pressure.
 - `data-layout/diagnosed/` and `data-layout/warning-heavy.moth`: the diagnostic data-layout suite
   (`just bench-data-layout`), an expected-error project and a warning-heavy file measured for
   diagnostic memory and timing, never correctness.
-- `docs`: the repository documentation project (`docs/config.moth`, `docs/src`), measured as a
+- `docs`: the repository documentation project (`docs/config.moth`, `docs/`), measured as a
   real multi-page site through `check` and the frontend profile.
 - `module-graph/`: small multi-file project with cross-file imports, constants and templates.
 - `import-fanout/`: multi-file project with repeated imports, aliases, wrapper declarations and cross-file constants for string-table interning and module-graph resolution.

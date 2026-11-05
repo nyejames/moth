@@ -39,6 +39,8 @@ pub(crate) struct PreparedModuleInput {
     /// Semantic compilation resolves both the active module origin and the entry file path from
     /// this identity, so neither travels as a loose argument.
     pub(crate) active_root_file_id: SourceId,
+    /// The paired support root, when the active root is the normal surface of a two-root module.
+    pub(crate) support_root_file_id: Option<SourceId>,
     /// The module's ordered candidate source IDs.
     ///
     /// Directory modules receive every owned compiler-semantic ID from Stage 0 ownership,

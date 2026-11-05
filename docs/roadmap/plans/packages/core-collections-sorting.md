@@ -66,18 +66,18 @@ Read these from the active worktree before implementation:
   borrow validation, link facts, target validation and backend handoff
 - `docs/build-system-design.md`, especially Core packages, mixed-target planning, physical variants,
   memory plans and page runtime memory
-- `docs/src/developer-docs/language/overview.mtf`
+- `docs/developer-docs/language/overview.mtf`
 - the canonical collection literal, fixed collection and collection operation references
 - the canonical call, parameter default, numeric operator and trait scope references
-- `docs/src/docs/packages/core/collections/collections.mtf`
-- `docs/src/developer-docs/memory-management/overview.mtf` and its routed access, retained-edge and
+- `docs/docs/packages/core/collections/collections.mtf`
+- `docs/developer-docs/memory-management/overview.mtf` and its routed access, retained-edge and
   backend-lowering references
-- `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf`
-- `docs/src/developer-docs/style-guide/style-guide.mtf`
-- `docs/src/developer-docs/style-guide/testing.mtf`
-- `docs/src/developer-docs/style-guide/validation.mtf`
-- `docs/src/docs/progress/@page.moth`
-- `docs/src/docs/progress/packages-and-builders/@page.moth`
+- `docs/docs/cheatsheet/moth-language-cheatsheet.mtf`
+- `docs/developer-docs/style-guide/style-guide.mtf`
+- `docs/developer-docs/style-guide/testing.mtf`
+- `docs/developer-docs/style-guide/validation.mtf`
+- `docs/docs/progress/@page.moth`
+- `docs/docs/progress/packages-and-builders/@page.moth`
 - `docs/roadmap/plans/packages/first-party-package-programme.md`
 - `docs/roadmap/roadmap.md`
 - `index.md` as a locator only
@@ -468,11 +468,11 @@ Re-anchor the plan after mixed JavaScript and Wasm work lands.
 Suggested searches:
 
 ```bash
-rg -n 'CollectionBuiltinOp|collection_builtin|@core/collections' src docs/src/docs
+rg -n 'CollectionBuiltinOp|collection_builtin|@core/collections' src docs/docs
 rg -n 'CollectionGet|CollectionSet|CollectionPush|CollectionRemove|CollectionLength' src
 rg -n 'NaturalOrder|ordering|comparison' src/compiler_frontend src/backends
 rg -n 'collection.*wasm|Wasm.*collection|fixed_collection' src/backends src/projects
-rg -n 'sortable collections|sort\(' docs/src/docs tests/cases
+rg -n 'sortable collections|sort\(' docs/docs tests/cases
 ```
 
 # Phase 1 - Add the policy type and source call contract

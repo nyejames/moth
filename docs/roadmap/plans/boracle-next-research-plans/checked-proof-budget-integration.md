@@ -6,8 +6,8 @@ This note is not an implementation plan and does not accept source syntax. It re
 
 Canonical proposal docs:
 
-- `docs/src/docs/design-scope/checked-proof-budget-blocks-proposal.mtf`
-- `docs/src/developer-docs/memory-management/checked-proof-budget-research/checked-proof-budget-research.mtf`
+- `docs/docs/design-scope/checked-proof-budget-blocks-proposal.mtf`
+- `docs/developer-docs/memory-management/checked-proof-budget-research/checked-proof-budget-research.mtf`
 
 ## Proposal boundary
 

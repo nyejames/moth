@@ -255,14 +255,14 @@ fn frontend_benchmark_retains_source_package_warning() {
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
     let root = temp_dir.path();
     let package = root.join("src/warnpkg");
-    let src = root.join("src");
+    let src = root.to_path_buf();
     let clean_package = root.join("src/cleanpkg");
     std::fs::create_dir_all(&clean_package).expect("should create clean package root");
     std::fs::create_dir_all(&package).expect("should create package root");
     std::fs::create_dir_all(&src).expect("should create entry root");
     std::fs::write(
         root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     std::fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
@@ -351,11 +351,11 @@ fn frontend_benchmark_fails_for_missing_file() {
 fn frontend_benchmark_converts_failed_directory_compilation() {
     let _guard = benchmark_test_guard();
     let temp_dir = tempfile::tempdir().expect("should create temp directory");
-    let source_root = temp_dir.path().join("src");
+    let source_root = temp_dir.path().to_path_buf();
     std::fs::create_dir_all(&source_root).expect("should create the configured entry root");
     std::fs::write(
         temp_dir.path().join("config.moth"),
-        "project #= (name = \"empty\", entry_root = \"src\")\nhtml #= ()\n",
+        "project #= (name = \"empty\")\nhtml #= ()\n",
     )
     .expect("should write the project config");
 

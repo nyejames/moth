@@ -18,14 +18,14 @@ architectural reviews or changes that cross ownership boundaries.
   instances and failure sections of the Lappet design. Verify APIs against the
   exact selected Wasmtime release, not upstream main.
 - **Host bindings, ABI and exported calls:** read the Lappet Rust bindings
-  section, `docs/src/developer-docs/project-builders/host-packages.mtf` and
-  `docs/src/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf`.
-  `docs/src/developer-docs/memory-management/native-host-abi/native-host-abi.mtf`
+  section, `docs/developer-docs/project-builders/host-packages.mtf` and
+  `docs/developer-docs/memory-management/runtime-and-backend-lowering/runtime-and-backend-lowering.mtf`.
+  `docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf`
   owns the physical boundary and `crates/lappet/docs/host-abi.md`
   owns Lappet's adapter, staging, resource-table and fault handling. Neither
   overrides compiler memory semantics.
 - **Native Core implementations:** read the relevant canonical Core package
-  reference under `docs/src/docs/packages/core/` and Lappet's official Core
+  reference under `docs/docs/packages/core/` and Lappet's official Core
   contract. Check browser/native parity and documented host capability limits.
 - **Package manager:** read `crates/lappet/docs/package-manager.md` and the
   relevant dependency declaration, catalog and graph sections of
@@ -35,15 +35,15 @@ architectural reviews or changes that cross ownership boundaries.
   the root `AGENTS.md` for both `docs/compiler-design-overview.md` and
   `docs/build-system-design.md`. Inspect the actual producer and consumer APIs.
 - **Wasm optimisation or benchmarks:** read
-  `docs/src/developer-docs/wasm-optimisation/wasm-optimisation.mtf`.
+  `docs/developer-docs/wasm-optimisation/wasm-optimisation.mtf`.
 - **Moth source and language semantics:** use
-  `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf` for orientation and
-  `docs/src/docs/progress/@page.moth` for implemented support. Read the relevant
+  `docs/docs/cheatsheet/moth-language-cheatsheet.mtf` for orientation and
+  `docs/docs/progress/@page.moth` for implemented support. Read the relevant
   canonical language references when correctness depends on exact semantics.
   The cheatsheet is not mandatory for Rust-only runtime or manager tasks.
 - **Tests and validation:** read the relevant sections of
-  `docs/src/developer-docs/style-guide/testing.mtf` and
-  `docs/src/developer-docs/style-guide/validation.mtf`.
+  `docs/developer-docs/style-guide/testing.mtf` and
+  `docs/developer-docs/style-guide/validation.mtf`.
 
 If a routed reference is absent or stale, report the drift and consult the
 current owner or version-pinned upstream source. Never invent a missing

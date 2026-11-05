@@ -177,7 +177,7 @@ Detailed well scoped tasks make better results.
 
 ## How this applies to Moth
 
-Moth is designed to give detailed, fast feedback for producing reliable code. Good languages for the future should be easy to review and strict about how the code is structured. See [the design principles doc](./docs/src/docs/design-scope/design-principles.mtf) for more info about how this directly related to using LLMs.
+Moth is designed to give detailed, fast feedback for producing reliable code. Good languages for the future should be easy to review and strict about how the code is structured. See [the design principles doc](./docs/docs/design-scope/design-principles.mtf) for more info about how this directly related to using LLMs.
 
 Ultilmately, this project wouldn't be alive without LLMs. There is absolutely no way I could sustain this project for this long on my own without getting them to do the dirty work. Even when I have to clean up its mess periodically. Building a compiler and build system is an insane task to do solo. This still consumes most of my time outside of my day job despite all these tools.
 

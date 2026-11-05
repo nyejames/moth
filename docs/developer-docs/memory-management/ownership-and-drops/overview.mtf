@@ -1,0 +1,27 @@
+# Affine ownership and drops
+
+Affine cleanup responsibility, the unified two-bit ABI and planned conditional discharge.
+
+## Contract
+
+- Input: validated HIR, borrow and last-use facts, validated lifetime facts and the selected memory plan
+- Output: encoded affine cleanup behaviour, handle-tag encoding and the planned `discharge_if_owned` sites the memory plan specifies
+- Decides: runtime realisation of the plan's affine-responsibility transitions, handle-tag encoding and unified ABI behaviour
+- Must not decide: source legality, lifetime topology, HIR shape, borrow facts, or the final affine cleanup decisions, which belong to `ValidatedMemoryPlan`
+- Invariant: cleanup responsibility is affine and never duplicates; collector-free, GC-native and debug paths preserve identical observable behavior
+
+Source legality and lifetime topology are already fixed before ownership lowering. `ValidatedMemoryPlan` owns the final discharge, destroy and bulk-reclaim decisions and lowering only encodes them; the current direct path from borrow-checker advisory drop sites to Wasm `DropIfOwned` is scaffolding to be replaced.
+
+## Main paths
+
+- `src/backends/wasm/hir_to_lir/ownership.rs`
+- `src/backends/wasm/lir/`
+- `src/backends/wasm/runtime/`
+
+## Read next
+
+- `docs/developer-docs/memory-management/ownership-and-drops/ownership-and-drops.mtf`
+- `docs/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
+- `docs/developer-docs/memory-management/borrow-validation/overview.mtf`
+- `docs/developer-docs/memory-management/retained-edge-counting/overview.mtf`
+- `docs/developer-docs/memory-management/runtime-and-backend-lowering/overview.mtf`

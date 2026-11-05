@@ -79,8 +79,9 @@ pub(super) use module_inventory::{
     ModuleCompilationSchedule, discover_all_modules_in_project_with_check_only,
 };
 
-pub(crate) use project_roots::resolve_project_entry_root;
 pub(crate) use source_loading::extract_source_code;
+#[cfg(test)]
+pub(crate) use source_tree_index::path_has_hidden_component_below;
 
 #[cfg(test)]
 pub(crate) use crate::projects::settings;
@@ -126,6 +127,14 @@ pub(crate) enum FrontendCompilationMode {
 impl FrontendCompilationMode {
     fn includes_check_only(self) -> bool {
         matches!(self, Self::Check)
+    }
+
+    /// Whether directory discovery must find an activatable normal root.
+    ///
+    /// `check` validates API-only and dormant-only trees; `build`/`dev` need an artefact or
+    /// runtime entry and keep the normal-root requirement.
+    fn requires_normal_entry(self) -> bool {
+        matches!(self, Self::Canonical)
     }
 }
 pub(crate) use compiled_boundary::ProjectFrontendCompilation;

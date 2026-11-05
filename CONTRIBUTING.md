@@ -12,8 +12,8 @@ This codebase uses AI in a measured capacity. See the [AI policy](./HUMANS.md) f
 
 ## Language and current support
 
-- [User-facing documentation](docs/src/docs/)
-- [Progress matrix](docs/src/docs/progress/@page.moth)
+- [User-facing documentation](docs/docs/)
+- [Progress matrix](docs/docs/progress/@page.moth)
 - [Roadmap](docs/roadmap/roadmap.md)
 
 ## Compiler and memory design
@@ -22,15 +22,15 @@ More technical details about the language, compiler and build system.
 
 - [Compiler design overview](docs/compiler-design-overview.md)
 - [Build system overview](docs/build-system-design.md)
-- [Memory-management overview](docs/src/developer-docs/memory-management/overview.mtf)
-- [Design scope](docs/src/docs/design-scope/)
+- [Memory-management overview](docs/developer-docs/memory-management/overview.mtf)
+- [Design scope](docs/docs/design-scope/)
 - [Repository index](index.md)
 
 ## Development standards
 
-- [Code style](docs/src/developer-docs/style-guide/style-guide.mtf)
-- [Testing standards](docs/src/developer-docs/style-guide/testing.mtf)
-- [Validation gates](docs/src/developer-docs/style-guide/validation.mtf)
+- [Code style](docs/developer-docs/style-guide/style-guide.mtf)
+- [Testing standards](docs/developer-docs/style-guide/testing.mtf)
+- [Validation gates](docs/developer-docs/style-guide/validation.mtf)
 - [Benchmark and profiling workflow](benchmarks/README.md)
 
 See the hosted docs site for the compiled versions of these mtf files.
@@ -43,7 +43,7 @@ selectors for compiler tests and checks.
 
 ## Testing
 
-The complete testing policy is in [testing.mtf](docs/src/developer-docs/style-guide/testing.mtf).
+The complete testing policy is in [testing.mtf](docs/developer-docs/style-guide/testing.mtf).
 
 Use focused tests while working on a feature branch, for example:
 
@@ -104,7 +104,7 @@ The first-party dependency gate checks Cargo metadata, including development
 and build edges: `moth-lexical` depends on no workspace package and `moth-mon`
 may depend only on `moth-lexical`, never `moth` or `xtask`.
 
-[validation.mtf](docs/src/developer-docs/style-guide/validation.mtf) owns exact gate scope,
+[validation.mtf](docs/developer-docs/style-guide/validation.mtf) owns exact gate scope,
 shared Cargo defaults, cache safety and feature coverage. `rust-toolchain.toml` pins the exact
 Rust release and `.node-version` pins the Node release used for validation; CI consumes both.
 Environment overrides remain available.

@@ -1,0 +1,4 @@
+@pkg value
+export:
+    support_value #= value
+;

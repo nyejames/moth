@@ -2,14 +2,11 @@ version #Config of String = "0.1.0"
 
 project #= (
     name = "html_project",
-    entry_root = "src",
     version = version,
     author = "",
     license = "MIT",
 )
 html #= (
-    dev_output = "dev",
-    release_output = "release",
     page_url_style = "trailing_slash",
     redirect_index_html = true,
     origin = "/moth",

@@ -1,7 +1,4 @@
 project #= (
-    name = "test_project",
-    entry_root = "src",
-)
+    name = "test_project")
 html #= (
-    origin = "/moth",
-)
+    origin = "/moth")

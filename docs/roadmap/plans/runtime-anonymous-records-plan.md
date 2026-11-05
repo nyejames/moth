@@ -38,9 +38,9 @@ merged capabilities are sufficient; unrelated later foundation polish adds no pr
 
 Read `AGENTS.md`, the full style guide, the language cheatsheet, both compiler/build architecture references and the complete testing guide. Follow the validation guide for each final gate.
 
-Read `docs/src/developer-docs/language/overview.mtf`, `docs/src/docs/language-overview/mon-syntax.mtf`, `docs/src/docs/structs/anonymous-records.mtf` and the routed const-record, struct, numeric, cast, function, collection and Design Scope references. Read `docs/src/developer-docs/memory-management/overview.mtf` and the routed reference/access, copy, borrow, lifetime/escape and backend contracts.
+Read `docs/developer-docs/language/overview.mtf`, `docs/docs/language-overview/mon-syntax.mtf`, `docs/docs/structs/anonymous-records.mtf` and the routed const-record, struct, numeric, cast, function, collection and Design Scope references. Read `docs/developer-docs/memory-management/overview.mtf` and the routed reference/access, copy, borrow, lifetime/escape and backend contracts.
 
-The accepted runtime contract is already published in `docs/src/docs/structs/anonymous-records.mtf`, with a Basic companion and a section on the Structs page. Those references own semantics and explicitly label runtime support as deferred. Contract publication is complete, not a task to repeat. The progress matrices continue to report actual support.
+The accepted runtime contract is already published in `docs/docs/structs/anonymous-records.mtf`, with a Basic companion and a section on the Structs page. Those references own semantics and explicitly label runtime support as deferred. Contract publication is complete, not a task to repeat. The progress matrices continue to report actual support.
 
 ## Published contract and implementation decisions
 

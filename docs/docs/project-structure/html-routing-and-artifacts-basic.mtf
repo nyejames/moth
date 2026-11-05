@@ -1,0 +1,34 @@
+**Current versus accepted.** Alpha emits HTML from root activity and expects a
+homepage at the selected project root. The accepted design keeps directory
+routes but requires explicit root-only `$page` pages and command-specific
+no-page rules.
+
+### Directory routes
+
+Routes come from directory position, not from the `@` filename:
+
+[codeblock, $code("text"):
+    @page.moth          -> index.html
+    about/@module.moth  -> about/index.html
+]
+
+The root filename is cosmetic. An ordinary file and `index.moth` have no page
+meaning.
+
+### Page and command rules
+
+After the cutover, a normal root needs an explicit page purpose:
+
+[codeblock, $code("moth"):
+    $page
+]
+
+`check` accepts a valid zero-page project but still rejects unpurposed
+runtime work. HTML `build` and `dev` need a page somewhere below the selected
+project root, not necessarily at its root. Single-file HTML output requires
+`$page` on its synthetic root. A metadata-only page still emits a complete
+document.
+
+The builder does not invent a homepage or scan arbitrary `.moth` files.
+Generated `_dev/` and `_release/` folders remain output, not source.
+

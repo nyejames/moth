@@ -10340,6 +10340,13 @@ contract = "language.dependencies.source_package_dotdot_rejected"
 role = "primary"
 
 [[case]]
+id = "source_package_facade_helper_reexport_success"
+path = "source_package_facade_helper_reexport_success"
+tags = ["integration", "dependencies", "visibility", "packages", "facade", "positive"]
+contract = "language.source_packages.helper_reexport_facade"
+role = "primary"
+
+[[case]]
 id = "source_package_facade"
 path = "source_package_facade"
 tags = ["integration", "source-packages", "facades", "dependencies"]
@@ -11633,6 +11640,90 @@ path = "direct_nested_support_root_dependency_rejected"
 tags = ["integration", "dependencies", "diagnostics", "special-files", "source-packages"]
 contract = "language.dependencies.direct_special_file_dependency_rejected"
 role = "boundary"
+
+[[case]]
+id = "paired_root_support_diagnostic_rejects_normal"
+path = "paired_root_support_diagnostic_rejects_normal"
+tags = ["integration", "modules", "visibility", "root-boundaries", "negative", "publication"]
+contract = "language.project_structure.paired_root_atomic_publication"
+role = "primary"
+
+[[case]]
+id = "paired_root_support_lateral_import_rejected"
+path = "paired_root_support_lateral_import_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "negative"]
+contract = "language.project_structure.support_surface_import_visibility"
+role = "primary"
+
+[[case]]
+id = "paired_root_support_helper_lateral_import_rejected"
+path = "paired_root_support_helper_lateral_import_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "negative"]
+contract = "language.project_structure.shared_helper_support_visibility"
+role = "primary"
+
+[[case]]
+id = "paired_support_helper_private_param_rejected"
+path = "paired_support_helper_private_param_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "public-api", "negative"]
+contract = "language.project_structure.paired_helper_public_surface_validation"
+role = "primary"
+
+[[case]]
+id = "paired_support_helper_normal_only_type_rejected"
+path = "paired_support_helper_normal_only_type_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "public-api", "negative"]
+contract = "language.project_structure.paired_helper_normal_only_type_validation"
+role = "primary"
+
+[[case]]
+id = "paired_helper_nested_support_import_success"
+path = "paired_helper_nested_support_import_success"
+tags = ["integration", "modules", "visibility", "root-boundaries", "positive"]
+contract = "language.project_structure.shared_helper_nested_support_visibility"
+role = "primary"
+
+[[case]]
+id = "paired_support_helper_receiver_private_bound_rejected"
+path = "paired_support_helper_receiver_private_bound_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "public-api", "generics", "negative"]
+contract = "language.project_structure.paired_helper_receiver_bound_validation"
+role = "primary"
+
+[[case]]
+id = "paired_support_generic_uses_support_declaration_success"
+path = "paired_support_generic_uses_support_declaration_success"
+tags = ["integration", "modules", "visibility", "root-boundaries", "generics", "positive"]
+contract = "language.project_structure.paired_support_generic_materialisation"
+role = "primary"
+
+[[case]]
+id = "paired_shared_template_root_constant_rejected"
+path = "paired_shared_template_root_constant_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "templates", "negative"]
+contract = "language.project_structure.paired_shared_template_isolation"
+role = "primary"
+
+[[case]]
+id = "paired_root_direct_exports_isolated"
+path = "paired_root_direct_exports_isolated"
+tags = ["integration", "modules", "visibility", "root-boundaries", "positive"]
+contract = "language.project_structure.paired_root_direct_exports"
+role = "primary"
+
+[[case]]
+id = "paired_root_shared_helper_success"
+path = "paired_root_shared_helper_success"
+tags = ["integration", "modules", "visibility", "root-boundaries", "positive"]
+contract = "language.project_structure.paired_root_shared_helper"
+role = "primary"
+
+[[case]]
+id = "module_helper_reexport_preserves_shared_origin"
+path = "module_helper_reexport_preserves_shared_origin"
+tags = ["integration", "dependencies", "visibility", "public-interface", "positive"]
+contract = "language.dependencies.same_module_helper_reexport"
+role = "primary"
 
 [[case]]
 id = "module_facade_unprefixed_type_export"

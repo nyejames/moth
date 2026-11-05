@@ -1,6 +1,6 @@
 //! Project root and path-resolver setup for Stage 0.
 //!
-//! WHAT: interprets config paths, canonicalizes the project/entry roots, indexes independently
+//! WHAT: interprets config paths, canonicalizes the project root, indexes independently
 //! registered source-backed package boundaries, constructs the shared `ProjectPathResolver`, and
 //! builds the canonical `ProjectModuleGraph` that owns entry classification and compile-wave
 //! scheduling for the rest of Stage 0.
@@ -13,11 +13,7 @@ use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::builder_surface::{SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
-use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, InvalidConfigReason, PreparedFailure,
-};
+use crate::compiler_frontend::compiler_messages::{CompilerStage, PreparedFailure};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -28,17 +24,10 @@ use std::path::PathBuf;
 
 use super::module_namespace::ModuleNamespaceSet;
 use super::project_module_graph::ProjectModuleGraph;
-use super::project_structure_diagnostics::{config_diagnostic, path_id};
 use super::source_package_discovery::build_source_package_boundary_indexes;
 use super::source_tree_index::{SourceTreeIndex, SourceTreeProjectContext};
 
-/// Canonical roots used to construct project-aware path resolution.
-pub(super) struct ProjectRootResolution {
-    pub(super) project_root: PathBuf,
-    pub(super) entry_root: PathBuf,
-}
-
-/// Canonical directory-project roots plus the canonical project module graph built from the
+/// Canonical directory-project root plus the canonical project module graph built from the
 /// single Stage 0 source-tree traversal.
 ///
 /// The `SourceTreeIndex` is retained beside the graph so later Stage 0 code can resolve `SourceId`s
@@ -78,8 +67,8 @@ pub(super) fn build_project_path_resolver(
 
 /// Build the canonical path resolver for a directory project.
 ///
-/// WHY: both `project_root` and `entry_root` must be canonicalized before path resolution; doing
-/// this in one owner keeps config interpretation out of later module inventory and frontend paths.
+/// WHY: the selected project directory is both the build root and the source tree; canonicalizing
+/// it in one owner keeps config interpretation out of later module inventory and frontend paths.
 pub(super) fn build_project_path_resolver_with_index(
     config: &Config,
     validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
@@ -89,7 +78,7 @@ pub(super) fn build_project_path_resolver_with_index(
     binding_packages: &ExternalPackageRegistry,
     string_table: &mut StringTable,
 ) -> Result<ProjectPathResolverSetup, PreparedFailure> {
-    let roots = resolve_project_roots(config, string_table)?;
+    let project_root = resolve_project_root(config)?;
 
     let source_package_boundary_indexes = build_source_package_boundary_indexes(
         builder_source_packages,
@@ -100,11 +89,10 @@ pub(super) fn build_project_path_resolver_with_index(
     let prepared_source_package_roots =
         source_package_boundary_indexes.prepared_source_package_roots();
 
-    let entry_root = roots.entry_root.clone();
     let source_tree_index = SourceTreeIndex::discover(
-        entry_root.clone(),
+        project_root.clone(),
         SourceTreeProjectContext {
-            project_root: &roots.project_root,
+            project_root: &project_root,
             validated_output_settings,
         },
         config,
@@ -115,8 +103,8 @@ pub(super) fn build_project_path_resolver_with_index(
     )?;
 
     let resolver = ProjectPathResolver::new_with_module_roots(
-        roots.project_root,
-        entry_root.clone(),
+        project_root.clone(),
+        project_root,
         prepared_source_package_roots,
         source_file_kinds,
         source_tree_index
@@ -145,67 +133,13 @@ pub(super) fn build_project_path_resolver_with_index(
     })
 }
 
-/// Resolve the directory configured as the project entry root.
-pub(crate) fn resolve_project_entry_root(config: &Config) -> PathBuf {
-    if config.entry_root.as_os_str().is_empty() {
-        return config.entry_dir.clone();
-    }
-
-    if config.entry_root.is_absolute() {
-        config.entry_root.clone()
-    } else {
-        config.entry_dir.join(&config.entry_root)
-    }
-}
-
-fn resolve_project_roots(
-    config: &Config,
-    string_table: &mut StringTable,
-) -> Result<ProjectRootResolution, PreparedFailure> {
-    let project_root = match fs::canonicalize(&config.entry_dir) {
-        Ok(path) => path,
-        Err(error) => {
-            return Err(PreparedFailure::Infrastructure(
-                InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &config.entry_dir, format!("Failed to canonicalize project root: {error}"))
-                .into(),
-            ));
-        }
-    };
-
-    let entry_root_path = resolve_project_entry_root(config);
-    if !entry_root_path.exists() {
-        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-        let diagnostic = config_diagnostic(
-            config,
-            "entry_root",
-            InvalidConfigReason::ConfiguredEntryRootMissing {
-                entry_root: path_id(&entry_root_path, &mut diagnostic_strings),
-            },
-            &mut diagnostic_strings,
-        );
-        let table = string_table.take_for_handoff();
-        return Err(PreparedFailure::Diagnosed(
-            PreparedDiagnosticBatch::capture_from_bag(
-                DiagnosticBag::from(diagnostic),
-                table,
-                None,
-                None,
-            ),
-        ));
-    }
-
-    let entry_root = match fs::canonicalize(&entry_root_path) {
-        Ok(path) => path,
-        Err(error) => {
-            return Err(PreparedFailure::Infrastructure(
-                InfrastructureFailure::filesystem(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, &entry_root_path, format!("Failed to canonicalize configured entry root: {error}"))
-                .into(),
-            ));
-        }
-    };
-
-    Ok(ProjectRootResolution {
-        project_root,
-        entry_root,
-    })
+fn resolve_project_root(config: &Config) -> Result<PathBuf, PreparedFailure> {
+    let project_root = fs::canonicalize(&config.entry_dir).map_err(|error| {
+        InfrastructureFailure::filesystem(
+            CompilerStage::ProjectBuildAssembly,
+            &config.entry_dir,
+            format!("Failed to canonicalize project root: {error}"),
+        )
+    })?;
+    Ok(project_root)
 }

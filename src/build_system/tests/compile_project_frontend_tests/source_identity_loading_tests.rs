@@ -1,3 +1,10 @@
+//! Compile-project frontend tests for source identity loading and boundary publication.
+//!
+//! WHAT: exercises directory and package boundary preparation where canonical source identity,
+//!      root surfaces and diagnostics must survive into frontend compilation.
+//! WHY: these cases assert cross-stage handoff facts rather than lexer or parser behavior, so
+//!      they live beside the frontend compilation fixtures instead of the Stage 0 discovery tests.
+
 use super::super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
 use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
@@ -88,7 +95,7 @@ fn registered_source_database_retains_exact_text_for_multiple_compiled_sources()
     fs::create_dir_all(dir.join("src/about")).expect("should create nested module");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"snapshot\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"snapshot\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     let root_source = "title String = \"home\"\n";
@@ -147,7 +154,7 @@ fn selected_preload_invalid_utf8_is_a_source_diagnostic() {
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"selected_failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"selected_failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     let selected_path = dir.join("src/@page.moth");
@@ -193,7 +200,7 @@ fn unselected_preload_read_failure_stays_inert() {
     fs::create_dir_all(dir.join("src")).expect("should create source root");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"unselected_failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"unselected_failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("src/@page.moth"), "title String = \"home\"\n")
@@ -261,7 +268,7 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
     fs::create_dir_all(dir.join("src")).expect("should create entry root");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(dir.join("src/@page.moth"), "value = 1\n").expect("should write project entry");
@@ -313,6 +320,78 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
     assert!(
         position.path.ends_with("+package.moth"),
         "self-dependency diagnostic should point to the facade source"
+    );
+}
+
+#[test]
+fn project_facade_rejects_own_project_globals_dependency_for_paired_root_surface() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temporary project");
+    let dir = _temp.path().to_path_buf();
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project entry");
+    fs::write(
+        dir.join("+package.moth"),
+        "SITE_TITLE #= \"Moth\"\n@project\n",
+    )
+    .expect("should write paired project facade");
+    fs::create_dir_all(dir.join("components")).expect("should create nested support directory");
+    fs::write(
+        dir.join("components/+ui.moth"),
+        "SITE_TITLE #= \"Moth\"\n@project\n",
+    )
+    .expect("should write unrelated nested support module");
+    fs::create_dir_all(dir.join("pages")).expect("should create nested normal directory");
+    fs::write(
+        dir.join("pages/@pages.moth"),
+        "SITE_TITLE #= \"Moth\"\n@project\n",
+    )
+    .expect("should write unrelated nested normal module");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let string_table = StringTable::new();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(string_table);
+    let result = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut warning_owner,
+    );
+    let reports = diagnosed_reports(&result);
+    assert_eq!(
+        reports.counts().errors,
+        1,
+        "only the paired facade should report an error; nested support and normal roots may use @project"
+    );
+    let matching = reports
+        .iter()
+        .filter(|(_, view)| {
+            view.descriptor().code == "MOTH-SYNTAX-0019"
+                && view.reason_key()
+                    == Some(
+                        "invalid_dependency_clause.project_globals_facade_dependency_not_allowed",
+                    )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        matching.len(),
+        1,
+        "only the paired project facade should reject its own @project dependency"
+    );
+    let (report, view) = matching[0];
+    let position = DiagnosticRenderContext::for_report(report)
+        .site_position(view.primary_site())
+        .expect("facade diagnostic should retain its authored source position");
+    assert!(
+        position.path.ends_with("+package.moth") && !position.path.ends_with("components/+ui.moth"),
+        "the paired facade diagnostic should point at the project root support root, not a nested support root"
     );
 }
 
@@ -908,9 +987,7 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
     fs::create_dir_all(dir_b.join("src")).expect("should create source root");
     fs::write(
         dir_b.join("config.moth"),
-        format!(
-            "project #= (\n    name = \"{project_b_name}\",\n    entry_root = \"src\",\n)\nhtml #= ()\n"
-        ),
+        format!("project #= (\n    name = \"{project_b_name}\",\n)\nhtml #= ()\n"),
     )
     .expect("should write config");
     fs::write(dir_b.join("src/@page.moth"), [b'o', b'k', 0xff, b'\n'])
@@ -920,9 +997,7 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
     fs::create_dir_all(dir_unrelated.join("src")).expect("should create unrelated source root");
     fs::write(
         dir_unrelated.join("config.moth"),
-        format!(
-            "project #= (\n    name = \"{unrelated_project_name}\",\n    entry_root = \"src\",\n)\nhtml #= ()\n"
-        ),
+        format!("project #= (\n    name = \"{unrelated_project_name}\",\n)\nhtml #= ()\n"),
     )
     .expect("should write unrelated config");
     fs::write(
@@ -1096,7 +1171,7 @@ fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
     fs::create_dir_all(dir.join("src/components")).expect("should create dependency module root");
     fs::write(
         dir.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     // The entry is HTML-selected by its authored root fragment and imports the public value.

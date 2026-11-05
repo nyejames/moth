@@ -58,7 +58,7 @@ impl Place {
 }
 
 // This shared structural trichotomy remains an input fact; the decision lanes are boracle/relations.rs:237 OriginOverlapDecision and boracle/oracle/conflicts.rs:23 DynamicOverlap.
-// Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
+// Independence contract: boracle/oracle/mod.rs:5-6 and docs/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 /// The initial place-overlap relation used by Boracle fixtures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PlaceOverlap {

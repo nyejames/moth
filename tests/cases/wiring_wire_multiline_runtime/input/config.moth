@@ -1,5 +1,3 @@
 project #= (
-    name = "wiring_wire_multiline_runtime",
-    entry_root = "src",
-)
+    name = "wiring_wire_multiline_runtime")
 html #= ()

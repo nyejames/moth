@@ -208,7 +208,7 @@ impl BackendBuilder for HtmlProjectBuilder {
             // projections from this same value — downstream code must not re-derive route semantics.
             let route = match derive_logical_html_path(
                 &module.metadata.entry_point,
-                entry_paths.resolved_entry_root.as_deref(),
+                entry_paths.resolved_source_root.as_deref(),
             ) {
                 Ok(route) => route,
                 Err(LogicalHtmlPathError::Infrastructure(error)) => return Err(error.into()),
@@ -522,7 +522,9 @@ impl HtmlProjectBuilder {
             .register_project_section(NamedConfigSectionSchema {
                 name: "html".into(),
                 schema: html_schema,
-                required: true,
+                // Directory compilation accepts missing or minimal config; an omitted section
+                // applies its schema defaults instead of requiring an authored record.
+                required: false,
             });
     }
 

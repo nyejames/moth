@@ -59,4 +59,6 @@ pub(crate) struct ModuleSemanticResult {
     /// have already joined through immutable completed interfaces, so the graph can publish this
     /// value directly after the deterministic string-then-path merge.
     pub(crate) public_interface: PublicSemanticInterface,
+    /// The paired support surface interface, when this structural module owns one.
+    pub(crate) support_public_interface: Option<PublicSemanticInterface>,
 }

@@ -29,9 +29,9 @@ lowering. The completed compact typed-expression and native result-channel found
 
 - `docs/compiler-design-overview.md` for HIR, borrow facts, target validation and per-function link facts
 - `docs/build-system-design.md` for HTML project builder, mixed-target planning, physical variants, runtime and memory, output ownership
-- `docs/src/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
-- `docs/src/docs/progress/@page.moth` for current support
-- `docs/src/developer-docs/wasm-optimisation/wasm-optimisation.mtf` for
+- `docs/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
+- `docs/docs/progress/@page.moth` for current support
+- `docs/developer-docs/wasm-optimisation/wasm-optimisation.mtf` for
   emission quality and compiler versus runtime optimisation ownership
 - canonical package/module references for the graph contract
 - canonical numeric and cast references for exact widths, bounded numeric inference, plain cast, Byte and Dec semantics

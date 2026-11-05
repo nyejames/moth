@@ -385,6 +385,7 @@ fn compile_fixture(
     let style_directives = StyleDirectiveRegistry::built_ins();
     let options = HeaderParseOptions {
         entry_file_id: Some(file_id_for("@page.moth")),
+        support_root_file_id: None,
         entry_file_role: None,
         active_root_role: ModuleRootRole::Normal,
     };
@@ -585,6 +586,7 @@ fn compile_fixture(
                 capacity_estimate: Default::default(),
                 resolved_file_references: resolved_references,
                 module_origin: Some(test_module_origin()),
+                public_source_trait_origins: Arc::default(),
                 build_config_values: Arc::new(Default::default()),
             },
             #[cfg(feature = "timers")]
@@ -737,6 +739,7 @@ fn resolve_file_value_fixture(
         ))),
         module_resources: Rc::clone(&module_resources),
         module_origin: Some(module_origin.clone()),
+        public_source_trait_origins: Arc::default(),
         frozen_identity_handle: FrozenIdentityHandle::new(),
     }))
     .with_declaring_file_id(source_file);

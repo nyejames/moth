@@ -372,6 +372,8 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             type_environment,
             resolved_public_type_roots,
             resolved_public_trait_roots,
+            support_public_type_roots,
+            support_public_trait_roots,
         } = self.environment;
 
         // Emission is complete, so the environment lookups `Rc` is the sole strong reference.
@@ -402,17 +404,29 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             }
         };
         let materialisation_context = if retain_materialisation_context {
+            let mut materialisation_public_trait_roots = resolved_public_trait_roots.clone();
+            if let Some(support_trait_roots) = support_public_trait_roots.as_ref() {
+                materialisation_public_trait_roots.extend(support_trait_roots.iter().cloned());
+            }
             let context = ModuleMaterialisationPreparationBuilder::from_environment(
                 ModuleMaterialisationEnvironmentInput {
                     lookups: &owned_lookups,
                     type_environment: &type_environment,
-                    public_trait_roots: &resolved_public_trait_roots,
+                    public_trait_roots: &materialisation_public_trait_roots,
                     default_const_templates_by_path: default_const_templates,
                     module_origin: self
                         .context
                         .file_value_resolution
                         .as_ref()
                         .and_then(|services| services.module_origin.clone()),
+                    public_source_trait_origins: self
+                        .context
+                        .file_value_resolution
+                        .as_ref()
+                        .map(|services| {
+                            std::sync::Arc::clone(&services.public_source_trait_origins)
+                        })
+                        .unwrap_or_default(),
                     stage0_resolution_facts: self
                         .context
                         .file_value_resolution
@@ -494,12 +508,28 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             .freeze(&mut emitted.ast)
             .map_err(|error| PreparedFailure::Infrastructure(error.into()))?;
 
+        let support_trait_environment = support_public_type_roots
+            .as_ref()
+            .map(|_| Rc::clone(&owned_lookups.trait_environment));
+        let support_trait_evidence_environment = support_public_type_roots
+            .as_ref()
+            .map(|_| Rc::clone(&owned_lookups.trait_evidence_environment));
         let public_interface_projection_input = AstPublicInterfaceProjectionInput {
             root_table: resolved_public_type_roots,
             trait_roots: resolved_public_trait_roots,
             trait_environment: Some(owned_lookups.trait_environment),
             trait_evidence_environment: Some(owned_lookups.trait_evidence_environment),
         };
+        let support_public_interface_projection_input =
+            match (support_public_type_roots, support_public_trait_roots) {
+                (Some(root_table), Some(trait_roots)) => Some(AstPublicInterfaceProjectionInput {
+                    root_table,
+                    trait_roots,
+                    trait_environment: support_trait_environment,
+                    trait_evidence_environment: support_trait_evidence_environment,
+                }),
+                _ => None,
+            };
         let module_resources = file_value_resolution
             .as_ref()
             .map(|services| Rc::clone(&services.module_resources));
@@ -522,6 +552,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             },
             module_resources,
             public_interface_projection_input,
+            support_public_interface_projection_input,
             materialisation_context,
             deferred_generic_requests: committed_generic_requests.executable,
             assertion_validation_generic_requests: committed_generic_requests.assertion_validation,

@@ -6,7 +6,7 @@
 `Duration`, `TimeMark`, `Timestamp` - and free functions over them, with Core origin, ExternalBinding
 backing and no prelude alias.
 
-Canonical source semantics belong to `docs/src/docs/packages/core/time/time.mtf` and the canonical
+Canonical source semantics belong to `docs/docs/packages/core/time/time.mtf` and the canonical
 numeric, `Error` and external-binding references. That reference now states the package's semantic
 contract, so this living plan records implementation strategy, the inherited defects the slice
 exposed but does not own, and coverage ownership. It cannot accept public API or semantics.

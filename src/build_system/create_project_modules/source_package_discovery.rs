@@ -56,11 +56,13 @@ impl SourcePackageBoundaryIndexes {
 
     /// Derive the resolver's narrow package-root view from indexed facts.
     ///
-    /// WHAT: projects each boundary index to its canonical root directory and unique normal-root
+    /// WHAT: projects each boundary index to its canonical root directory and selected public-root
     /// file, producing the immutable [`PreparedSourcePackageRoots`] contract that path
     /// resolution consumes. No `read_dir`, canonicalize or root-file discovery pass runs here;
     /// missing and multiple roots were already rejected as structured diagnostics during index
-    /// construction, so every successful index contributes one validated public surface.
+    /// construction, so every successful index contributes one validated public surface. A paired
+    /// or support-only package selects its support root; a normal-only package selects its normal
+    /// root.
     pub(crate) fn prepared_source_package_roots(&self) -> PreparedSourcePackageRoots {
         let mut entries = Vec::with_capacity(self.indexes.len());
 

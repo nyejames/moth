@@ -267,7 +267,7 @@ pub(crate) struct OriginUnknownEvidence {
 }
 
 // The counterparts are boracle/oracle/conflicts.rs:23 DynamicOverlap and problem/places.rs:64 PlaceOverlap.
-// Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
+// Independence contract: boracle/oracle/mod.rs:5-6 and docs/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
 /// Result of asking whether two origin sets can observe one source-semantic generation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum OriginOverlapDecision {

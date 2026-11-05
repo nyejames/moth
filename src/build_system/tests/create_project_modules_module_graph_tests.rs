@@ -97,7 +97,7 @@ fn same_module_dependency_creates_no_project_graph_edge() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     // The single entry module depends on a sibling file inside its own module root.
@@ -179,7 +179,7 @@ fn independent_no_edge_entries_are_grouped_in_one_ready_wave() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     // Two independent entry modules with no cross-module dependencies.
@@ -260,7 +260,7 @@ fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     // The consumer depends on its direct child twice, so the duplicate observation must be
@@ -490,8 +490,8 @@ fn discovered_module_origin_is_not_rederived_from_a_path_component() {
 fn build_source_origin_lookup_maps_each_owned_file_to_its_node_origin() {
     // Hidden invariant: the source-origin lookup is a direct projection of the central
     // `SourceTreeIndex` ownership through the graph's owned source IDs. Every owned source
-    // record's logical identity module origin must equal its containing graph node's stable
-    // origin, and no canonical path may appear twice.
+    // record's logical identity module origin must belong to its containing structural module,
+    // and no canonical path may appear twice.
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let (config, resolver, style_directives, _module_a_root, _module_b_root) =
@@ -513,10 +513,9 @@ fn build_source_origin_lookup_maps_each_owned_file_to_its_node_origin() {
             let lookup_origin = lookup
                 .get(record.canonical_path())
                 .expect("every owned source entry must be present in the lookup");
-            assert_eq!(
-                lookup_origin,
-                node.stable_origin(),
-                "an owned source entry's lookup origin must equal its containing node origin (path: {:?})",
+            assert!(
+                node.owns_origin(lookup_origin),
+                "an owned source entry's lookup origin must belong to its containing structural module (path: {:?})",
                 record.canonical_path().display(),
             );
         }
@@ -552,7 +551,7 @@ fn canonical_module_job_excludes_cross_module_donor_sources() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(
@@ -611,7 +610,7 @@ fn indexed_namespace_rejects_direct_entry_root_dependency() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@@page symbol\n#[:page]\n")
@@ -644,7 +643,7 @@ fn indexed_namespace_rejects_direct_nested_child_root_dependency() {
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
     fs::write(src.join("@page.moth"), "@child/@home symbol\n#[:page]\n")
@@ -675,11 +674,13 @@ fn provider_binding_index_rejects_duplicate_shell_edges() {
     let edges = vec![
         ResolvedDependencyEdge {
             provider_module_id: ModuleId::from_index(1),
+            provider_surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
             consumer_module_id: ModuleId::from_index(0),
             dependency_shell_id: shell,
         },
         ResolvedDependencyEdge {
             provider_module_id: ModuleId::from_index(2),
+            provider_surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
             consumer_module_id: ModuleId::from_index(0),
             dependency_shell_id: shell,
         },
@@ -700,6 +701,7 @@ fn source_package_dependency_index_rejects_cross_category_or_duplicate_shells() 
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
     let provider_edge = ResolvedDependencyEdge {
         provider_module_id: ModuleId::from_index(1),
+        provider_surface: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         consumer_module_id: ModuleId::from_index(0),
         dependency_shell_id: shell,
     };

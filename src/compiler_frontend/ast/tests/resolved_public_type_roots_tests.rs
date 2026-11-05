@@ -214,6 +214,11 @@ fn build_table(
     path_fork: &PathInternerFork,
 ) -> Result<ResolvedPublicTypeRootTable, InfrastructureFailure> {
     let declaration_table = TopLevelDeclarationTable::new(declarations, path_fork);
+    let active_root_file_id = headers
+        .iter()
+        .find(|header| header.file_role.is_active_module_root())
+        .map(|header| header.tokens.source())
+        .unwrap_or(crate::compiler_frontend::source::SourceId::COMPILATION_ROOT);
     build_resolved_public_type_roots(BuildResolvedPublicTypeRootsInput {
         sorted_headers: &headers,
         resolved_struct_fields_by_path: &struct_fields,
@@ -227,6 +232,7 @@ fn build_table(
         type_environment,
         string_table,
         reexport_target_paths: &FxHashSet::default(),
+        active_root_file_id,
     })
 }
 

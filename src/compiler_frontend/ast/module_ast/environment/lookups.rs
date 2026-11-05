@@ -139,4 +139,8 @@ pub(crate) struct AstModuleEnvironment {
     // can build trait surfaces without reconstructing trait semantics from HIR or source.
     // The type-root table stays type-only; trait-root facts live in their own owner.
     pub(crate) resolved_public_trait_roots: Vec<ResolvedPublicTraitRoot>,
+
+    /// The paired support surface projection input, when this module owns a support root.
+    pub(crate) support_public_type_roots: Option<ResolvedPublicTypeRootTable>,
+    pub(crate) support_public_trait_roots: Option<Vec<ResolvedPublicTraitRoot>>,
 }
