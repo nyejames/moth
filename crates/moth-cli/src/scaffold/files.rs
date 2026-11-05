@@ -4,12 +4,14 @@
 //! WHY: Separates IO side effects from command parsing and user prompting.
 
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::scaffold::{
     CreateProjectReport, prompt::Prompt, start_page_scaffolding, target::ResolvedProjectTarget,
 };
 use moth::projects::settings::CONFIG_FILE_NAME;
+use tempfile::NamedTempFile;
 
 const PAGE_FILE: &str = "@page.moth";
 const GITIGNORE_FILE: &str = ".gitignore";
@@ -64,6 +66,7 @@ pub(crate) fn run_preflight_checks(
     reject_unsupported_conflicts(&conflicts, ScaffoldEntryKind::Directory)?;
     reject_unsupported_conflicts(&conflicts, ScaffoldEntryKind::Other)?;
     reject_unsupported_gitignore(&target.project_dir)?;
+    validate_existing_gitignore(&target.project_dir)?;
 
     let conflict_names = conflicts
         .iter()
@@ -176,6 +179,30 @@ fn reject_unsupported_gitignore(project_dir: &Path) -> Result<(), String> {
     ))
 }
 
+/// Validate an existing regular `.gitignore` as UTF-8 before any scaffold writes.
+///
+/// WHY: a late UTF-8 or read failure would otherwise leave a partly written project even when the
+/// failure was present from the start. Preflight handles deterministic failures only; IO errors
+/// and concurrent modifications can still occur after writing begins.
+fn validate_existing_gitignore(project_dir: &Path) -> Result<(), String> {
+    let path = project_dir.join(GITIGNORE_FILE);
+    let Some(metadata) = entry_metadata(&path, GITIGNORE_FILE)? else {
+        return Ok(());
+    };
+    // `reject_unsupported_gitignore` already rejected every non-regular entry.
+    if ScaffoldEntryKind::from_metadata(&metadata) != ScaffoldEntryKind::RegularFile {
+        return Ok(());
+    }
+
+    fs::read_to_string(&path).map_err(|error| {
+        format!(
+            "Project creation failed while reading existing .gitignore: {error}. \
+             It must be readable UTF-8 text; no scaffold files were written."
+        )
+    })?;
+    Ok(())
+}
+
 fn entry_kind_noun(kind: ScaffoldEntryKind) -> &'static str {
     match kind {
         ScaffoldEntryKind::Symlink => "a symbolic link",
@@ -238,8 +265,6 @@ fn existing_scaffold_file_needs_force(relative: &str) -> String {
 /// `create_new` refuses an existing final entry, including a symlink introduced after the
 /// metadata preflight, so this creation path cannot silently reuse a path that appeared later.
 fn write_new_file(path: &Path, content: &str, relative: &str) -> Result<(), String> {
-    use std::io::Write as _;
-
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -247,6 +272,92 @@ fn write_new_file(path: &Path, content: &str, relative: &str) -> Result<(), Stri
         .map_err(|error| format!("Project creation failed while creating {relative}: {error}."))?;
     file.write_all(content.as_bytes())
         .map_err(|error| format!("Project creation failed while writing {relative}: {error}."))
+}
+
+/// Stage complete replacement bytes beside the destination and publish them by rename.
+///
+/// WHAT: replaces only an existing regular file whose final entry still has that kind.
+/// WHY: writing in place would truncate the original on failure and modify every other hard link
+/// to its inode. Renaming a completed same-directory file replaces the final directory entry
+/// without writing through the old inode or a final symlink.
+///
+/// This is per-file publication, not a transaction across config/page/.gitignore and not a
+/// power-loss durability guarantee. Last-writer-wins races and parent-path substitution require a
+/// different concurrency/security model.
+fn replace_existing_regular_file(path: &Path, content: &str, relative: &str) -> Result<(), String> {
+    replace_existing_regular_file_inner(path, content, relative, |staged| {
+        staged
+            .persist(path)
+            .map(|_| ())
+            .map_err(|error| error.error)
+    })
+}
+
+fn replace_existing_regular_file_inner(
+    path: &Path,
+    content: &str,
+    relative: &str,
+    publish: impl FnOnce(NamedTempFile) -> std::io::Result<()>,
+) -> Result<(), String> {
+    let Some(metadata) = entry_metadata(path, relative)? else {
+        return Err(format!(
+            "Project creation failed because {relative} disappeared before it could be replaced."
+        ));
+    };
+    let kind = ScaffoldEntryKind::from_metadata(&metadata);
+    if kind != ScaffoldEntryKind::RegularFile {
+        return Err(unsupported_scaffold_entry_error(relative, kind));
+    }
+
+    let parent = path.parent().ok_or_else(|| {
+        format!("Project creation failed because {relative} has no parent directory.")
+    })?;
+    let mut staged = NamedTempFile::new_in(parent).map_err(|error| {
+        format!(
+            "Project creation failed while staging a replacement for {relative}: {error}. \
+             The existing file was not replaced."
+        )
+    })?;
+    staged
+        .as_file_mut()
+        .write_all(content.as_bytes())
+        .map_err(|error| {
+            format!(
+                "Project creation failed while writing a staged replacement for {relative}: \
+                 {error}. The existing file was not replaced."
+            )
+        })?;
+    // Preserve ordinary permissions only; ownership, ACLs and extended attributes are not copied.
+    staged
+        .as_file()
+        .set_permissions(metadata.permissions())
+        .map_err(|error| {
+            format!(
+                "Project creation failed while setting permissions on a staged replacement for \
+                 {relative}: {error}. The existing file was not replaced."
+            )
+        })?;
+    publish(staged).map_err(|error| {
+        format!(
+            "Project creation failed while publishing the replacement for {relative}: {error}. \
+             The existing file was not replaced."
+        )
+    })?;
+    Ok(())
+}
+
+/// Exercise a publication failure after the staged file is complete.
+///
+/// The staging and permission paths are production code; only the final publish step is injected.
+#[cfg(test)]
+pub(super) fn replace_existing_regular_file_with_failed_publish_for_test(
+    path: &Path,
+    content: &str,
+    relative: &str,
+) -> Result<(), String> {
+    replace_existing_regular_file_inner(path, content, relative, |_staged| {
+        Err(std::io::Error::other("injected publish failure"))
+    })
 }
 
 /// Write the complete scaffold to disk.
@@ -276,11 +387,14 @@ pub(crate) fn write_scaffold(
     let mut created: Vec<PathBuf> = Vec::new();
     let mut replaced: Vec<PathBuf> = Vec::new();
 
-    // Helper to write a scaffold-owned file and track its disposition.
+    // Preflight handles deterministic failures. IO errors and concurrent modifications can still
+    // occur after writing begins; this command does not promise rollback across files.
     let mut write_scaffold_file = |relative: &str, content: &str| -> Result<(), String> {
         let path = project_dir.join(relative);
         let metadata = entry_metadata(&path, relative)?;
         let Some(metadata) = metadata else {
+            // create_new preserves the no-overwrite contract if a file appears after preflight.
+            // Do not silently use replacement for paths that were absent.
             write_new_file(&path, content, relative)?;
             created.push(PathBuf::from(relative));
             return Ok(());
@@ -294,16 +408,10 @@ pub(crate) fn write_scaffold(
             return Err(existing_scaffold_file_needs_force(relative));
         }
 
-        // Best-effort type guard only: a concurrent substitution after `entry_metadata` can still
-        // redirect this `fs::write`. The scaffold does not claim an atomic no-follow replacement
-        // for an existing regular file. Missing destinations use `create_new` above instead.
-        fs::write(&path, content).map_err(|e| {
-            format!(
-                "Project creation failed while writing {relative}: {e}.\n\
-                 Some scaffold directories may already have been created. \
-                 No existing files were overwritten unless --force was confirmed."
-            )
-        })?;
+        // --force permits replacing an existing regular scaffold file, not writing into its
+        // current inode. Keep this on the atomic replacement path to protect hard-linked files
+        // and retain the original contents if staging fails.
+        replace_existing_regular_file(&path, content, relative)?;
         replaced.push(PathBuf::from(relative));
         Ok(())
     };
@@ -314,7 +422,7 @@ pub(crate) fn write_scaffold(
     // 3. Starter page.
     write_scaffold_file(PAGE_FILE, start_page_scaffolding::page_template())?;
 
-    // 4. .gitignore (handled separately — never overwritten).
+    // 4. .gitignore (handled separately; --force never replaces it).
     let gitignore = handle_gitignore(project_dir, prompt)?;
 
     if let Some(path) = gitignore.created {
@@ -357,10 +465,7 @@ fn handle_gitignore(
                 GITIGNORE_FILE,
             )
             .map_err(|error| {
-                format!(
-                    "{error}\nSome scaffold directories may already have been created. \
-                     No existing files were overwritten unless --force was confirmed."
-                )
+                format!("{error}\nSome scaffold files may already have been written.")
             })?;
             return Ok(GitignoreResult {
                 created: Some(PathBuf::from(GITIGNORE_FILE)),
@@ -381,11 +486,10 @@ fn handle_gitignore(
     }
 
     // Existing .gitignore — check whether it already contains the Moth block.
-    let existing = fs::read_to_string(&gitignore_path).map_err(|e| {
+    let existing = fs::read_to_string(&gitignore_path).map_err(|error| {
         format!(
-            "Project creation failed while reading existing .gitignore: {e}.\n\
-             Some scaffold directories may already have been created. \
-             No existing files were overwritten unless --force was confirmed."
+            "Project creation failed while reading existing .gitignore: {error}.\n\
+             Some scaffold files may already have been written."
         )
     })?;
 
@@ -402,17 +506,36 @@ fn handle_gitignore(
         true,
     )?;
     if should_append {
-        // Recheck immediately before writing. This is a best-effort guard, not an atomic
-        // no-follow replacement; a concurrent substitution after the check can still redirect the
-        // append.
-        if let Some(metadata) = entry_metadata(&gitignore_path, GITIGNORE_FILE)? {
-            let kind = ScaffoldEntryKind::from_metadata(&metadata);
-            if kind != ScaffoldEntryKind::RegularFile {
-                return Err(unsupported_scaffold_entry_error(GITIGNORE_FILE, kind));
-            }
+        let Some(metadata) = entry_metadata(&gitignore_path, GITIGNORE_FILE)? else {
+            return Err(
+                "Project creation failed because .gitignore disappeared after the append was \
+                 confirmed.\nSome scaffold files may already have been written."
+                    .to_string(),
+            );
+        };
+        let kind = ScaffoldEntryKind::from_metadata(&metadata);
+        if kind != ScaffoldEntryKind::RegularFile {
+            return Err(unsupported_scaffold_entry_error(GITIGNORE_FILE, kind));
         }
 
-        let mut appended = existing;
+        // Re-read the current text before publishing the append so content changed while the user
+        // decided is not overwritten using an older snapshot. This narrows, but does not
+        // eliminate, concurrent-edit races.
+        let current = fs::read_to_string(&gitignore_path).map_err(|error| {
+            format!(
+                "Project creation failed while re-reading existing .gitignore: {error}.\n\
+                 Some scaffold files may already have been written."
+            )
+        })?;
+        if existing_contains_moth_output_block(&current) {
+            return Ok(GitignoreResult {
+                created: None,
+                updated: None,
+                skipped: Some(PathBuf::from(GITIGNORE_FILE)),
+            });
+        }
+
+        let mut appended = current;
         let block = moth_output_append_block(&appended);
         if !appended.ends_with('\n') {
             appended.push('\n');
@@ -421,13 +544,13 @@ fn handle_gitignore(
             appended.push('\n');
         }
         appended.push_str(&block);
-        fs::write(&gitignore_path, appended).map_err(|e| {
-            format!(
-                "Project creation failed while appending to .gitignore: {e}.\n\
-                 Some scaffold directories may already have been created. \
-                 No existing files were overwritten unless --force was confirmed."
-            )
-        })?;
+
+        // An append is prepared as complete replacement text and published by rename for the same
+        // reason as forced scaffold replacement. The append prompt does not authorize a
+        // truncate-on-write update.
+        replace_existing_regular_file(&gitignore_path, &appended, GITIGNORE_FILE).map_err(
+            |error| format!("{error}\nSome scaffold files may already have been written."),
+        )?;
         return Ok(GitignoreResult {
             created: None,
             updated: Some(PathBuf::from(GITIGNORE_FILE)),

@@ -34,6 +34,5 @@ lappet = { path = "../lappet" }
 moth = { path = "../.." }
 moth-lexical = { path = "../moth-lexical" }
 saying = "0.1.8"
-
-[dev-dependencies]
+# Scaffold replacement stages complete bytes beside the destination before publishing by rename.
 tempfile = "3"

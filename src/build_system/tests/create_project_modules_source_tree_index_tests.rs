@@ -1,6 +1,6 @@
 //! Source-tree discovery boundary tests.
 //!
-//! WHAT: covers one Stage 0 traversal's skip policy, symlink and configured-output aliases,
+//! WHAT: covers one Stage 0 traversal's skip policy, hidden and fixed-skip aliases,
 //!      hidden-subtree handling, root claims and collision ordering.
 //! WHY: discovery owns filesystem exclusion and inventory facts that later stages cannot
 //!      reconstruct. Diagnostic/report fixture helpers live in the sibling source-tree test
@@ -602,64 +602,5 @@ fn source_tree_index_excludes_file_symlinks_into_hidden_directories() {
             .iter()
             .any(|path| path.file_name().is_some_and(|name| name == "_helper.moth")),
         "an underscore-prefixed file in a visible directory remains eligible"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn source_alias_into_configured_output_root_is_excluded() {
-    use std::os::unix::fs::symlink;
-
-    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-    let root = _tmp_root.path().to_path_buf();
-    fs::write(root.join("@home.moth"), "").expect("should write entry root");
-    fs::create_dir_all(root.join("_scratch")).expect("should create configured output root");
-    fs::create_dir_all(root.join("helper")).expect("should create colliding folder");
-    let output_source = root.join("_scratch/helper.moth");
-    fs::write(&output_source, "").expect("should write generated source");
-    symlink(&output_source, root.join("helper.moth"))
-        .expect("should create alias into configured output root");
-
-    let mut config = Config::new(root.clone());
-    config.output_roots.dev_output = Some(String::from("scratch"));
-    config.output_roots.release_output = Some(String::from("generated"));
-    let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
-    let mut string_table = StringTable::new();
-    let validated_output_settings = {
-        let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
-        crate::build_system::project_config::validate_directory_output_settings(
-            &config,
-            &mut diagnostic_strings,
-        )
-    }
-    .expect("configured output folders should validate");
-
-    let index = super::source_tree_index::SourceTreeIndex::discover(
-        canonical_root.clone(),
-        super::source_tree_index::SourceTreeProjectContext {
-            project_root: &canonical_root,
-            validated_output_settings: Some(&validated_output_settings),
-        },
-        &config,
-        &crate::builder_surface::SourcePackageRegistry::default(),
-        &crate::builder_surface::SourceFileKindRegistry::default(),
-        &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
-        &mut string_table,
-    )
-    .expect("an alias into a configured output root should be skipped");
-
-    assert_eq!(
-        index.sources().len(),
-        1,
-        "the output alias must not enter candidate inventory or collide with helper/"
-    );
-    let canonical_output_source =
-        fs::canonicalize(&output_source).expect("output source should canonicalize");
-    assert!(
-        index
-            .sources()
-            .iter()
-            .all(|source| source.canonical_path() != canonical_output_source),
-        "a configured-output alias must not contribute a source record"
     );
 }

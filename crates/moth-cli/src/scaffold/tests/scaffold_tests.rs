@@ -8,8 +8,10 @@
 
 use crate::scaffold::files::{
     ScaffoldEntryKind, existing_contains_moth_output_block, find_scaffold_conflicts,
-    run_preflight_checks, write_scaffold,
+    replace_existing_regular_file_with_failed_publish_for_test, run_preflight_checks,
+    write_scaffold,
 };
+use crate::scaffold::prompt::Prompt;
 use crate::scaffold::prompt_tests::ScriptedPrompt;
 use crate::scaffold::start_page_scaffolding;
 use crate::scaffold::target::ResolvedProjectTarget;
@@ -34,6 +36,38 @@ fn named_target(
         project_dir,
         project_name: String::from(project_name),
         target_was_non_empty: non_empty,
+    }
+}
+
+/// Test prompt that mutates the filesystem on its first confirmation.
+///
+/// This deterministically stages a late `.gitignore` disappearance or replacement after the user
+/// has confirmed an append, without timing-dependent concurrency.
+struct MutatingConfirmPrompt {
+    mutation: Option<Box<dyn FnOnce()>>,
+    messages: Vec<String>,
+}
+
+impl MutatingConfirmPrompt {
+    fn new(mutation: impl FnOnce() + 'static) -> Self {
+        Self {
+            mutation: Some(Box::new(mutation)),
+            messages: Vec::new(),
+        }
+    }
+}
+
+impl Prompt for MutatingConfirmPrompt {
+    fn ask(&mut self, _message: &str) -> Result<String, String> {
+        Err("MutatingConfirmPrompt does not script open-ended prompts".to_string())
+    }
+
+    fn confirm(&mut self, message: &str, _default: bool) -> Result<bool, String> {
+        self.messages.push(message.to_owned());
+        if let Some(mutation) = self.mutation.take() {
+            mutation();
+        }
+        Ok(true)
     }
 }
 
@@ -298,7 +332,7 @@ fn preflight_rejects_gitignore_directory_before_writes() {
 }
 
 #[test]
-fn preflight_accepts_regular_gitignore_without_force_replacement() {
+fn preflight_treats_regular_gitignore_as_append_not_force_conflict() {
     let temp = tempfile::tempdir().unwrap();
     let project_dir = temp.path().to_path_buf();
     fs::write(project_dir.join(".gitignore"), b"custom\n").unwrap();
@@ -457,6 +491,51 @@ fn end_to_end_gitignore_symlink_blocks_before_scaffold_writes() {
     assert_eq!(fs::read(&outside).unwrap(), b"custom\n");
     assert!(!project_dir.join("config.moth").exists());
     assert!(!project_dir.join("@page.moth").exists());
+}
+
+#[test]
+fn end_to_end_non_utf8_gitignore_blocks_before_any_scaffold_writes() {
+    for force in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let project_dir = temp.path().to_path_buf();
+        let config = project_dir.join("config.moth");
+        let page = project_dir.join("@page.moth");
+        let gitignore = project_dir.join(".gitignore");
+        fs::write(&config, b"old config").unwrap();
+        fs::write(&page, b"old page").unwrap();
+        let invalid = [0xff, 0xfe, b'\n'];
+        fs::write(&gitignore, invalid).unwrap();
+
+        let options = NewHtmlProjectOptions {
+            raw_path: Some(project_dir.to_string_lossy().to_string()),
+            force,
+        };
+        let mut prompt = ScriptedPrompt::new(vec![String::from("1"), String::from("")]);
+
+        let error = create_html_project_template_with_prompt(options, &mut prompt).unwrap_err();
+        assert!(
+            error.contains(".gitignore") && error.contains("UTF-8"),
+            "force={force}: {error}"
+        );
+        assert!(
+            prompt.messages.iter().all(|message| {
+                !message.contains(".gitignore")
+                    && !message.contains("--force")
+                    && !message.contains("not empty")
+            }),
+            "force={force}: invalid .gitignore must fail before append, force or non-empty prompts: \
+             {:?}",
+            prompt.messages
+        );
+
+        assert_eq!(fs::read(&config).unwrap(), b"old config");
+        assert_eq!(fs::read(&page).unwrap(), b"old page");
+        assert_eq!(
+            fs::read(&gitignore).unwrap(),
+            invalid,
+            "invalid .gitignore bytes must stay byte-for-byte unchanged"
+        );
+    }
 }
 
 #[test]
@@ -742,6 +821,14 @@ fn force_replaces_scaffold_owned_files_only() {
     assert!(report.replaced.contains(&PathBuf::from("config.moth")));
     assert!(report.replaced.contains(&PathBuf::from("@page.moth")));
     assert_eq!(
+        fs::read_to_string(project_dir.join("config.moth")).unwrap(),
+        start_page_scaffolding::config_template("Test_Site").unwrap()
+    );
+    assert_eq!(
+        fs::read_to_string(project_dir.join("@page.moth")).unwrap(),
+        start_page_scaffolding::page_template()
+    );
+    assert_eq!(
         fs::read(project_dir.join("_dev/user-output.js")).unwrap(),
         b"old dev output"
     );
@@ -752,6 +839,164 @@ fn force_replaces_scaffold_owned_files_only() {
 
     let user_content = fs::read_to_string(project_dir.join("user-file.txt")).unwrap();
     assert_eq!(user_content, "keep me");
+}
+
+#[test]
+fn force_replacement_breaks_hard_links_without_touching_external_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().join("project");
+    fs::create_dir(&project_dir).unwrap();
+
+    let outside_config = temp.path().join("outside-config.moth");
+    let outside_page = temp.path().join("outside-page.moth");
+    fs::write(&outside_config, b"outside config").unwrap();
+    fs::write(&outside_page, b"outside page").unwrap();
+    fs::hard_link(&outside_config, project_dir.join("config.moth")).unwrap();
+    fs::hard_link(&outside_page, project_dir.join("@page.moth")).unwrap();
+
+    let target = named_target(project_dir.clone(), "Test_Site", true);
+    let mut prompt = ScriptedPrompt::new(vec![String::from("n")]);
+
+    let report = write_scaffold(&target, true, &mut prompt).unwrap();
+
+    assert!(report.replaced.contains(&PathBuf::from("config.moth")));
+    assert!(report.replaced.contains(&PathBuf::from("@page.moth")));
+    assert_eq!(
+        fs::read_to_string(project_dir.join("config.moth")).unwrap(),
+        start_page_scaffolding::config_template("Test_Site").unwrap()
+    );
+    assert_eq!(
+        fs::read_to_string(project_dir.join("@page.moth")).unwrap(),
+        start_page_scaffolding::page_template()
+    );
+    assert_eq!(
+        fs::read(&outside_config).unwrap(),
+        b"outside config",
+        "replacement must not write through the old hard-linked inode"
+    );
+    assert_eq!(
+        fs::read(&outside_page).unwrap(),
+        b"outside page",
+        "replacement must not write through the old hard-linked inode"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn atomic_replacement_preserves_ordinary_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().join("project");
+    fs::create_dir(&project_dir).unwrap();
+    fs::write(project_dir.join("config.moth"), b"old config").unwrap();
+    fs::write(project_dir.join(".gitignore"), b"custom\n").unwrap();
+    fs::set_permissions(
+        project_dir.join("config.moth"),
+        fs::Permissions::from_mode(0o640),
+    )
+    .unwrap();
+    fs::set_permissions(
+        project_dir.join(".gitignore"),
+        fs::Permissions::from_mode(0o604),
+    )
+    .unwrap();
+
+    let target = named_target(project_dir.clone(), "Test_Site", true);
+    let mut prompt = ScriptedPrompt::new(vec![String::from("y")]);
+    write_scaffold(&target, true, &mut prompt).unwrap();
+
+    for (relative, expected_mode) in [("config.moth", 0o640), (".gitignore", 0o604)] {
+        let mode = fs::metadata(project_dir.join(relative))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode, expected_mode,
+            "{relative} should retain its ordinary permission bits"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_staging_leaves_the_existing_file_and_no_temporary_file() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().join("project");
+    fs::create_dir(&project_dir).unwrap();
+    fs::write(project_dir.join("config.moth"), b"original").unwrap();
+    fs::set_permissions(&project_dir, fs::Permissions::from_mode(0o555)).unwrap();
+
+    // This covers temporary-file creation failure; the separately injected publication failure
+    // covers cleanup after a complete staged write. Root can create files in a read-only
+    // directory, so skip when the failure cannot be staged.
+    if tempfile::NamedTempFile::new_in(&project_dir).is_ok() {
+        fs::set_permissions(&project_dir, fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+
+    let target = named_target(project_dir.clone(), "Test_Site", true);
+    let mut prompt = ScriptedPrompt::new(Vec::new());
+    let result = write_scaffold(&target, true, &mut prompt);
+    fs::set_permissions(&project_dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let error = result.unwrap_err();
+    assert!(
+        error.contains("config.moth") && error.contains("staging"),
+        "{error}"
+    );
+    assert_eq!(
+        fs::read(project_dir.join("config.moth")).unwrap(),
+        b"original",
+        "a staging failure must not truncate the original file"
+    );
+    let entries = fs::read_dir(&project_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        entries,
+        vec![std::ffi::OsString::from("config.moth")],
+        "a failed staging attempt must not leave a temporary file"
+    );
+}
+
+#[test]
+fn failed_publication_after_staging_leaves_the_original_and_no_temporary_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().join("project");
+    fs::create_dir(&project_dir).unwrap();
+    let config = project_dir.join("config.moth");
+    fs::write(&config, b"original").unwrap();
+
+    let error = replace_existing_regular_file_with_failed_publish_for_test(
+        &config,
+        "replacement",
+        "config.moth",
+    )
+    .unwrap_err();
+
+    assert!(
+        error.contains("config.moth") && error.contains("publishing"),
+        "{error}"
+    );
+    assert_eq!(
+        fs::read(&config).unwrap(),
+        b"original",
+        "a publication failure must leave the original file intact"
+    );
+    let entries = fs::read_dir(&project_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        entries,
+        vec![std::ffi::OsString::from("config.moth")],
+        "the staged temporary file must be removed after publish failure"
+    );
 }
 
 #[test]
@@ -769,6 +1014,147 @@ fn gitignore_is_never_overwritten_even_with_force() {
     let content = fs::read_to_string(project_dir.join(".gitignore")).unwrap();
     assert_eq!(content, "custom\n");
     assert!(report.skipped.contains(&PathBuf::from(".gitignore")));
+}
+
+#[test]
+fn gitignore_append_breaks_hard_links_without_touching_the_external_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().join("project");
+    fs::create_dir(&project_dir).unwrap();
+    let outside = temp.path().join("outside.gitignore");
+    fs::write(&outside, b"node_modules/\n").unwrap();
+    fs::hard_link(&outside, project_dir.join(".gitignore")).unwrap();
+
+    let target = named_target(project_dir.clone(), "Test_Site", true);
+    let mut prompt = ScriptedPrompt::new(vec![String::from("y")]);
+
+    let report = write_scaffold(&target, false, &mut prompt).unwrap();
+
+    let updated = fs::read_to_string(project_dir.join(".gitignore")).unwrap();
+    assert!(updated.contains("node_modules/"));
+    assert!(updated.contains("# Moth generated output"));
+    assert!(updated.lines().any(|line| line.trim() == "/_dev"));
+    assert!(updated.lines().any(|line| line.trim() == "/_release"));
+    assert!(report.updated.contains(&PathBuf::from(".gitignore")));
+    assert_eq!(
+        fs::read(&outside).unwrap(),
+        b"node_modules/\n",
+        "the append must not write through the old hard-linked inode"
+    );
+}
+
+#[test]
+fn gitignore_disappearance_after_append_confirmation_is_not_recreated() {
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().join("project");
+    fs::create_dir(&project_dir).unwrap();
+    let gitignore = project_dir.join(".gitignore");
+    fs::write(&gitignore, b"custom\n").unwrap();
+
+    let removed = gitignore.clone();
+    let mut prompt = MutatingConfirmPrompt::new(move || fs::remove_file(&removed).unwrap());
+    let target = named_target(project_dir, "Test_Site", true);
+
+    let error = write_scaffold(&target, false, &mut prompt).unwrap_err();
+
+    assert!(
+        error.contains(".gitignore") && error.contains("disappeared"),
+        "{error}"
+    );
+    assert!(
+        !gitignore.exists(),
+        "a disappeared .gitignore must not be silently recreated"
+    );
+    assert_eq!(prompt.messages.len(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn gitignore_symlink_substitution_after_confirmation_does_not_write_the_target() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().join("project");
+    fs::create_dir(&project_dir).unwrap();
+    let gitignore = project_dir.join(".gitignore");
+    fs::write(&gitignore, b"custom\n").unwrap();
+    let outside = temp.path().join("outside.gitignore");
+    fs::write(&outside, b"outside\n").unwrap();
+
+    let replaced = gitignore.clone();
+    let target_path = outside.clone();
+    let mut prompt = MutatingConfirmPrompt::new(move || {
+        fs::remove_file(&replaced).unwrap();
+        symlink(&target_path, &replaced).unwrap();
+    });
+    let target = named_target(project_dir, "Test_Site", true);
+
+    let error = write_scaffold(&target, false, &mut prompt).unwrap_err();
+
+    assert!(
+        error.contains(".gitignore") && error.contains("symbolic link"),
+        "{error}"
+    );
+    assert_eq!(
+        fs::read(&outside).unwrap(),
+        b"outside\n",
+        "the late symlink target must not be written"
+    );
+    assert!(
+        fs::symlink_metadata(&gitignore)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the substituted symlink must remain in place after refusal"
+    );
+}
+
+#[test]
+fn gitignore_content_changed_after_confirmation_is_appended_from_the_latest_text() {
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().join("project");
+    fs::create_dir(&project_dir).unwrap();
+    let gitignore = project_dir.join(".gitignore");
+    fs::write(&gitignore, b"custom\n").unwrap();
+
+    let changed = gitignore.clone();
+    let mut prompt = MutatingConfirmPrompt::new(move || {
+        fs::write(&changed, b"custom\nlate-rule\n").unwrap();
+    });
+    let target = named_target(project_dir.clone(), "Test_Site", true);
+
+    let report = write_scaffold(&target, false, &mut prompt).unwrap();
+
+    let updated = fs::read_to_string(&gitignore).unwrap();
+    assert!(
+        updated.contains("late-rule"),
+        "the append must use the post-confirmation snapshot: {updated:?}"
+    );
+    assert!(updated.contains("# Moth generated output"));
+    assert!(updated.lines().any(|line| line.trim() == "/_dev"));
+    assert!(updated.lines().any(|line| line.trim() == "/_release"));
+    assert!(report.updated.contains(&PathBuf::from(".gitignore")));
+}
+
+#[test]
+fn gitignore_completed_after_confirmation_is_skipped_without_rewriting() {
+    let temp = tempfile::tempdir().unwrap();
+    let project_dir = temp.path().join("project");
+    fs::create_dir(&project_dir).unwrap();
+    let gitignore = project_dir.join(".gitignore");
+    fs::write(&gitignore, b"custom\n").unwrap();
+
+    let completed = gitignore.clone();
+    let mut prompt = MutatingConfirmPrompt::new(move || {
+        fs::write(&completed, b"/_dev\n/_release\n").unwrap();
+    });
+    let target = named_target(project_dir, "Test_Site", true);
+
+    let report = write_scaffold(&target, false, &mut prompt).unwrap();
+
+    assert_eq!(fs::read(&gitignore).unwrap(), b"/_dev\n/_release\n");
+    assert!(report.skipped.contains(&PathBuf::from(".gitignore")));
+    assert!(report.updated.is_empty());
 }
 
 #[test]

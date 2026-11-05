@@ -652,7 +652,6 @@ impl SourceTreeIndex {
                 // Symlinks, and entries whose type cannot be read, keep the `Path` queries, which
                 // follow the link to its target.
                 let listed_file_type = entry.file_type().ok();
-                let is_symlink = listed_file_type.is_some_and(|file_type| file_type.is_symlink());
                 let listed_type = listed_file_type.filter(|file_type| !file_type.is_symlink());
                 let is_dir = match listed_type {
                     Some(listed) => listed.is_dir(),
@@ -695,16 +694,22 @@ impl SourceTreeIndex {
                     None => path.is_file(),
                 };
                 if !is_file {
-                    // A dangling root-marker symlink is an authored root whose source is missing.
-                    // The kind checks cannot classify it, so canonicalization reports the broken
-                    // filesystem identity instead of silently dropping the required root.
-                    let dangling_root_marker = is_symlink
-                        && path
-                            .file_name()
-                            .and_then(|name| name.to_str())
-                            .is_some_and(file_name_is_module_root_file);
-                    if dangling_root_marker {
-                        canonicalize_source_path(&path)?;
+                    // Filesystem `is_file` and `is_dir` cannot classify sockets, pipes and other
+                    // non-regular entries. A reserved root-marker name in any existing form is an
+                    // authored root, so canonicalize it and reject it instead of silently dropping
+                    // the required root. A dangling marker symlink still fails canonicalization.
+                    let is_root_marker = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(file_name_is_module_root_file);
+                    if is_root_marker {
+                        let canonical_target = canonicalize_source_path(&path)?;
+                        return Err(module_root_not_regular_file_error(
+                            &directory,
+                            &path,
+                            &canonical_target,
+                            string_table,
+                        ));
                     }
                     continue;
                 }

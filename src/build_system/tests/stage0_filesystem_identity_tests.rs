@@ -1567,6 +1567,31 @@ mod module_identity_tests {
 
     #[cfg(unix)]
     #[test]
+    fn socket_named_like_module_root_is_rejected() {
+        use std::os::unix::net::UnixListener;
+
+        for marker_name in ["@page.moth", "+package.moth"] {
+            let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+            let root = _tmp_root.path().to_path_buf();
+            let src = root.join("src");
+            fs::create_dir_all(&src).expect("should create entry root");
+            let marker = src.join(marker_name);
+            let _listener =
+                UnixListener::bind(&marker).expect("should bind socket with a root-marker name");
+
+            let failure = discover_result(&root, "src")
+                .expect_err("a socket root marker must not silently disappear");
+            assert_not_regular_file_marker_rejected(
+                failure,
+                &marker,
+                &src,
+                &fs::canonicalize(&marker).expect("marker socket should canonicalize"),
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn ordinary_directory_symlink_remains_traversable() {
         use std::os::unix::fs::symlink;
 
