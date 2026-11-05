@@ -25,8 +25,8 @@ A practical acceptance example is a cross-module const function that constructs 
 
 - `docs/compiler-design-overview.md` owns stages, AST/HIR facts, cross-stage ownership and constant-value semantics.
 - `docs/build-system-design.md` owns module/package publication, project settings and scheduling.
-- Canonical unsuffixed language references under `docs/src/developer-docs/language/` and the associated public language references own final source syntax and semantics. Update them when implementation is delivered, not the progress matrix alone.
-- `docs/src/developer-docs/style-guide/style-guide.mtf`, `testing.mtf`, `validation.mtf` and `AGENTS.md` govern every slice.
+- Canonical unsuffixed language references under `docs/developer-docs/language/` and the associated public language references own final source syntax and semantics. Update them when implementation is delivered, not the progress matrix alone.
+- `docs/developer-docs/style-guide/style-guide.mtf`, `testing.mtf`, `validation.mtf` and `AGENTS.md` govern every slice.
 - This plan is implementation scheduling, not an override of those authorities. When an accepted contract below is missing from canonical documentation, the implementing slice must update that authority and then its tests.
 - Builder-defined top-level template slots, HTML component abstractions, generic const functions, runtime anonymous records and generic macros are not part of this plan.
 
@@ -208,7 +208,7 @@ Read the current main-derived branch before every slice. These are ownership lan
 
 ## Test ownership and acceptance matrix
 
-Follow `docs/src/developer-docs/style-guide/testing.mtf`. Add focused tests under owning subsystem `tests/` modules, end-to-end Moth language cases under `tests/cases/` and multi-module harness cases only where smaller tests cannot prove the boundary. Extend existing cases before creating new files. Every test must name a realistic regression and assert its relevant output or diagnostic contract.
+Follow `docs/developer-docs/style-guide/testing.mtf`. Add focused tests under owning subsystem `tests/` modules, end-to-end Moth language cases under `tests/cases/` and multi-module harness cases only where smaller tests cannot prove the boundary. Extend existing cases before creating new files. Every test must name a realistic regression and assert its relevant output or diagnostic contract.
 
 - **Syntax and type:** valid `#|`, ambiguity with `#=` and `|`, unsupported const method/generic/contract, imported/re-exported const kind and accurate source spans.
 - **Graph:** const-to-const same-file forward, const-to-later-constant, constant-to-later-const-function, direct constant forward rejection, transitive indirect forward allowance, direct/mutual recursion and mixed constant/function cycles.

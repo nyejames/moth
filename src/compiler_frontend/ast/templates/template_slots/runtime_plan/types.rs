@@ -22,13 +22,19 @@ pub struct RuntimeSlotSiteId(pub(crate) usize);
 
 /// Draft of a single contribution source while the runtime plan is being built.
 ///
-/// WHAT: Pairs the resolved source plan with its shape so the planner can
-/// accumulate contributions before assigning stable IDs.
+/// WHAT: Pairs the resolved source plan with its contribution shape and
+/// control-flow class so the planner can accumulate contributions before
+/// assigning stable IDs.
 ///
 /// WHY: Source IDs must be stable across the planning pass, so drafts are
 /// collected first and then converted into the final module-scoped TIR store.
+/// The facts are copied onto every marker the draft plants, so recursive
+/// structural named composition classifies the marker exactly as the authored
+/// contribution without a parallel side map.
 #[derive(Clone, Debug)]
 pub(super) struct RuntimeSlotContributionSourceDraft {
     pub(super) source: TemplateSlotContributionSourcePlan,
     pub(super) shape: ContributionShape,
+    /// Whether the source root emits only through template control flow.
+    pub(super) control_flow: bool,
 }

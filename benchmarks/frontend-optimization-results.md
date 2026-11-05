@@ -566,7 +566,7 @@ preparation, tokenization/header parsing, string-table merge/remap, and docs AST
 
 - `docs/compiler-design-overview.md` now records frontend arenas as stage/module-owned
   implementation details, with capacity estimates explicitly policy-only.
-- `docs/src/docs/progress/@page.moth` tracks "Frontend Arena + Semantic Invariant Optimisation" as
+- `docs/docs/progress/@page.moth` tracks "Frontend Arena + Semantic Invariant Optimisation" as
   `Partial`: scope-frame arenas, capacity estimates, external package clone reduction, and
   adversarial fixtures are implemented; deeper expression/template/HIR arenas remain deferred.
 - `benchmarks/README.md` records the five independent invocation protocol for optimization phase
@@ -3015,7 +3015,7 @@ and this report is modified by the census that would measure it.
 
 4584 files, 2,354,191 bytes total, median 77 bytes, p95 1,318 bytes, p99 9,002 bytes. The largest
 source is `benchmarks/nominal-scaling/nominal-scaling-320.moth` at 92,557 bytes, followed by
-`docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf` at 78,392 bytes.
+`docs/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf` at 78,392 bytes.
 
 | `LENGTH_BITS` | Inline start range | Sources at or over the limit |
 | ---: | ---: | ---: |

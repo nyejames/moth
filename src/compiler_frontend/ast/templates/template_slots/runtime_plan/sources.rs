@@ -15,7 +15,7 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrStore, TemplateSlotContributionSourcePlan, TirCopyState, TirSlotContributions,
     TirSlotSchema, classify_tir_contribution_node, copy_tir_subtree_with_active_slot_plan,
-    tir_node_is_const_evaluable_value,
+    tir_node_is_const_evaluable_value, tir_node_is_control_flow_root,
 };
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -104,6 +104,7 @@ pub(in crate::compiler_frontend::ast::templates) fn build_tir_native_contributio
             )?;
 
             let shape = classify_tir_contribution_node(store, *node_id)?;
+            let control_flow = tir_node_is_control_flow_root(store, render_root)?;
 
             sources.push(RuntimeSlotContributionSourceDraft {
                 source: TemplateSlotContributionSourcePlan {
@@ -114,6 +115,7 @@ pub(in crate::compiler_frontend::ast::templates) fn build_tir_native_contributio
                     span: source_span,
                 },
                 shape,
+                control_flow,
             });
         }
     }

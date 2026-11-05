@@ -13,7 +13,7 @@ The external review source-traced the language's outer-spacing rule for `=`, MON
 
 ## Authorities read
 
-`docs/roadmap/audit-guide.md`; `docs/roadmap/audit-kinds/correctness.md`; `docs/roadmap/audits/README.md`; `docs/roadmap/audit-log.md`; `docs/roadmap/open-audit-findings.md`; `docs/src/docs/numbers/operators.mtf` (outer spacing and `MOTH-SYNTAX-0031`); `docs/src/docs/mon/mon-format.mtf` (named and map entries); `docs/src/docs/language-overview/mon-syntax.mtf`; `docs/src/docs/choices/variant-construction.mtf`; and `docs/src/docs/choices/payload-patterns.mtf`.
+`docs/roadmap/audit-guide.md`; `docs/roadmap/audit-kinds/correctness.md`; `docs/roadmap/audits/README.md`; `docs/roadmap/audit-log.md`; `docs/roadmap/open-audit-findings.md`; `docs/docs/numbers/operators.mtf` (outer spacing and `MOTH-SYNTAX-0031`); `docs/docs/mon/mon-format.mtf` (named and map entries); `docs/docs/language-overview/mon-syntax.mtf`; `docs/docs/choices/variant-construction.mtf`; and `docs/docs/choices/payload-patterns.mtf`.
 
 ## Existing findings and active plans checked
 
@@ -28,7 +28,7 @@ The audit log and open-findings index were checked. AUD-0009 established the MON
 
 #### Evidence
 
-The documented source rule requires outer whitespace around assignment `=`, under `MOTH-SYNTAX-0031` (`docs/src/docs/numbers/operators.mtf:155-158`). The external review found MON's `try_named_label` and map-entry paths accepted compact forms such as `first=1`, `first =1`, `first= 1` and `{\"a\"=1}`. The prior 156-case parity matrix missed the boundary because its `none` spacing case still formed `first = 1`.
+The documented source rule requires outer whitespace around assignment `=`, under `MOTH-SYNTAX-0031` (`docs/docs/numbers/operators.mtf:155-158`). The external review found MON's `try_named_label` and map-entry paths accepted compact forms such as `first=1`, `first =1`, `first= 1` and `{\"a\"=1}`. The prior 156-case parity matrix missed the boundary because its `none` spacing case still formed `first = 1`.
 
 The follow-up source trace also found two bypasses of the same documented contract. When the next character after `=` was a line-break boundary, the lexer skipped the whole spacing check, so `(first=\\n1)` escaped the required whitespace before `=`. When a map key was followed by a `NEWLINE` token before `=`, the lexer also skipped the check, so `{\"a\"\\n=1}` and `{\"a\" -- c\\n=1}` escaped the required whitespace after `=`. A missing-right-hand-side boundary may exempt the right side only; it does not waive the left-side check. A `NEWLINE` before `=` supplies leading whitespace but does not waive a missing right-side gap.
 
@@ -52,7 +52,7 @@ Make the source lexer check the left side regardless of a missing-RHS boundary a
 
 #### Fix scope and preserved invariants
 
-Resolved in the closeout commit following `8b1229c11`. The source lexer now checks both spacing sides at the correct boundaries. MON's single `require_equals_spacing` check enforces the same rule for named and map entries while preserving the MON-specific missing-value cases. The closeout leaves `{=}`, writer output and source's documented missing-RHS behavior intact. MON acceptance tightening is recorded in `docs/src/docs/mon/mon-format.mtf` and `docs/src/docs/language-overview/mon-syntax.mtf`.
+Resolved in the closeout commit following `8b1229c11`. The source lexer now checks both spacing sides at the correct boundaries. MON's single `require_equals_spacing` check enforces the same rule for named and map entries while preserving the MON-specific missing-value cases. The closeout leaves `{=}`, writer output and source's documented missing-RHS behavior intact. MON acceptance tightening is recorded in `docs/docs/mon/mon-format.mtf` and `docs/docs/language-overview/mon-syntax.mtf`.
 
 #### Required validation
 

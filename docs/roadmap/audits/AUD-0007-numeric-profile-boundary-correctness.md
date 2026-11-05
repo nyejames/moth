@@ -37,7 +37,7 @@ Reproduce the complete file inventory with `git diff --name-status bf65cb05b4ecb
 
 ## Authorities read
 
-`docs/roadmap/plans/number_type_numeric_plan.md`; `docs/roadmap/plans/numerics-slice4c-audit.md` (original user-owned handoff); `docs/src/docs/progress/@page.moth`; `docs/src/docs/loops/range-loops.mtf`; `docs/src/docs/errors/error-values-basic.mtf`; `docs/roadmap/audit-guide.md`; `docs/roadmap/audit-kinds/correctness.md`; `docs/roadmap/audits/README.md`; repository instructions.
+`docs/roadmap/plans/number_type_numeric_plan.md`; `docs/roadmap/plans/numerics-slice4c-audit.md` (original user-owned handoff); `docs/docs/progress/@page.moth`; `docs/docs/loops/range-loops.mtf`; `docs/docs/errors/error-values-basic.mtf`; `docs/roadmap/audit-guide.md`; `docs/roadmap/audit-kinds/correctness.md`; `docs/roadmap/audits/README.md`; repository instructions.
 
 ## Existing findings and active plans checked
 
@@ -103,7 +103,7 @@ A range may need a checked update between iterations, but equal inclusive bounds
 
 #### Violated contract or cost
 
-`docs/src/docs/loops/range-loops.mtf:37,93-97` and the numeric plan's endpoint rule require the last valid inclusive endpoint to complete normally without an out-of-range sentinel.
+`docs/docs/loops/range-loops.mtf:37,93-97` and the numeric plan's endpoint rule require the last valid inclusive endpoint to complete normally without an out-of-range sentinel.
 
 #### Root owner
 
@@ -146,7 +146,7 @@ The successful-value external ABI gate does not validate compiler-owned Error pa
 
 #### Violated contract or cost
 
-The current `Error.code` field has type `Int` and the default profile rejects values above `2147483647` (`docs/src/docs/errors/error-values-basic.mtf:14-16`); foreign wrapper output bypasses that invariant.
+The current `Error.code` field has type `Int` and the default profile rejects values above `2147483647` (`docs/docs/errors/error-values-basic.mtf:14-16`); foreign wrapper output bypasses that invariant.
 
 #### Root owner
 

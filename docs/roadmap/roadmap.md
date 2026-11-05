@@ -29,7 +29,7 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Sequenced work
 
-- [Builder top level template slots and template directive changes](./plans/moth-builder-slots-and-template-directives-implementation-plan.md) **NEXT**
+- [Builder top level template slots and template directive changes](./plans/moth-builder-slots-and-template-directives-implementation-plan.md) **ACTIVE** on `builder-slots`.
 
 - [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: consume the shared MON argument owner, all fixed numeric input types and delivered destination-aware command literal materialisation for general directives, explicit $config contracts and strict $project/$html_builder configuration
 

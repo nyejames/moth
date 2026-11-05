@@ -3,6 +3,10 @@
 //! One cycle-guarded walk records unique schema targets and every placeholder
 //! occurrence. Schema discovery, placeholder collection and the structural
 //! slot-presence probe share this walk. It is not a generic TIR visitor.
+//!
+//! A placeholder's attached `$children(..)` wrappers contribute their named slots
+//! to the same schema: the wrapper application created for that placeholder's
+//! contributions is the occurrence that consumes them.
 
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::collections::BTreeSet;
@@ -169,6 +173,7 @@ fn collect_layout_from_root(
     let mut placeholders = Vec::new();
     let mut visiting_nodes = FxHashSet::default();
     let mut visiting_templates = FxHashSet::default();
+    let mut visited_wrappers = FxHashSet::default();
 
     collect_from_node(
         store,
@@ -177,6 +182,7 @@ fn collect_layout_from_root(
         &mut placeholders,
         &mut visiting_nodes,
         &mut visiting_templates,
+        &mut visited_wrappers,
     )?;
 
     Ok(TirSlotLayout {
@@ -192,6 +198,7 @@ fn collect_from_node(
     placeholders: &mut Vec<TirSlotPlaceholderRef>,
     visiting_nodes: &mut FxHashSet<TemplateIrNodeId>,
     visiting_templates: &mut FxHashSet<TemplateIrId>,
+    visited_wrappers: &mut FxHashSet<TemplateIrId>,
 ) -> Result<(), InfrastructureFailure> {
     if !visiting_nodes.insert(node_id) {
         return Err(layout_error(format!(
@@ -216,6 +223,7 @@ fn collect_from_node(
                     placeholders,
                     visiting_nodes,
                     visiting_templates,
+                    visited_wrappers,
                 )?;
             }
             Ok(())
@@ -223,6 +231,24 @@ fn collect_from_node(
 
         TemplateIrNodeKind::Slot { placeholder } => {
             schema.record_key(&placeholder.key);
+
+            // A wrapper set applied at this placeholder is part of the slot's receiving
+            // interface. Its named slots are addressable by the enclosing application and
+            // every wrapper occurrence replays the routed named content; its default and
+            // positional slots stay owned by the wrapper's own loose fill.
+            collect_wrapper_named_slots(
+                store,
+                placeholder.child_wrapper_set,
+                schema,
+                visited_wrappers,
+            )?;
+            collect_wrapper_named_slots(
+                store,
+                placeholder.applied_child_wrapper_set,
+                schema,
+                visited_wrappers,
+            )?;
+
             placeholders.push(TirSlotPlaceholderRef {
                 occurrence_id: placeholder.occurrence_id,
                 key: placeholder.key.clone(),
@@ -240,6 +266,7 @@ fn collect_from_node(
             schema,
             placeholders,
             visiting_templates,
+            visited_wrappers,
         ),
 
         TemplateIrNodeKind::Conditional { body, .. } => collect_from_node(
@@ -249,6 +276,7 @@ fn collect_from_node(
             placeholders,
             visiting_nodes,
             visiting_templates,
+            visited_wrappers,
         ),
 
         TemplateIrNodeKind::Loop {
@@ -263,6 +291,7 @@ fn collect_from_node(
                 placeholders,
                 visiting_nodes,
                 visiting_templates,
+                visited_wrappers,
             )?;
 
             if let Some(aggregate_wrapper_id) = aggregate_wrapper {
@@ -273,6 +302,7 @@ fn collect_from_node(
                     placeholders,
                     visiting_nodes,
                     visiting_templates,
+                    visited_wrappers,
                 )?;
             }
 
@@ -300,6 +330,7 @@ fn collect_from_child_template(
     schema: &mut TirSlotSchema,
     placeholders: &mut Vec<TirSlotPlaceholderRef>,
     visiting_templates: &mut FxHashSet<TemplateIrId>,
+    visited_wrappers: &mut FxHashSet<TemplateIrId>,
 ) -> Result<(), InfrastructureFailure> {
     let Some(child_template) = store.get_template(child_template_id) else {
         return Err(layout_error(format!(
@@ -329,6 +360,7 @@ fn collect_from_child_template(
         placeholders,
         &mut child_nodes,
         visiting_templates,
+        visited_wrappers,
     );
     visiting_templates.remove(&child_template_id);
     result
@@ -336,4 +368,150 @@ fn collect_from_child_template(
 
 fn layout_error(message: impl Into<Box<str>>) -> InfrastructureFailure {
     InfrastructureFailure::internal(CompilerStage::AstConstruction, message)
+}
+
+/// Records the named slot targets declared by a wrapper set attached to a placeholder.
+///
+/// WHAT: for every wrapper template in the set, adds the named slots reachable from
+///       that wrapper's tree, including named slots of wrappers attached to its own
+///       placeholders.
+/// WHY: routing accepts a name only when some receiving occurrence can consume it.
+///      The wrapper application created for this placeholder's contributions is that
+///      occurrence, so excluding its names would reject an insert the composition can
+///      deliver. Default and positional slots are deliberately excluded: the wrapper's
+///      loose fill already supplies them and the enclosing application cannot address
+///      them without duplicating child content.
+fn collect_wrapper_named_slots(
+    store: &TemplateIrStore,
+    wrapper_set_id: Option<TemplateWrapperSetId>,
+    schema: &mut TirSlotSchema,
+    visited_wrappers: &mut FxHashSet<TemplateIrId>,
+) -> Result<(), InfrastructureFailure> {
+    let Some(wrapper_set_id) = wrapper_set_id else {
+        return Ok(());
+    };
+    let wrapper_set = store.get_wrapper_set(wrapper_set_id).ok_or_else(|| {
+        layout_error(format!(
+            "TIR slot layout found a missing wrapper set {wrapper_set_id}."
+        ))
+    })?;
+
+    for wrapper in &wrapper_set.wrappers {
+        collect_wrapper_template_named_slots(store, wrapper.root, schema, visited_wrappers)?;
+    }
+
+    Ok(())
+}
+
+fn collect_wrapper_template_named_slots(
+    store: &TemplateIrStore,
+    wrapper_template_id: TemplateIrId,
+    schema: &mut TirSlotSchema,
+    visited_wrappers: &mut FxHashSet<TemplateIrId>,
+) -> Result<(), InfrastructureFailure> {
+    // A wrapper may contain another application of itself. Names are already known after the
+    // first visit, so re-entry is a repeat rather than a malformed tree.
+    if !visited_wrappers.insert(wrapper_template_id) {
+        return Ok(());
+    }
+
+    let Some(wrapper) = store.get_template(wrapper_template_id) else {
+        return Err(layout_error(format!(
+            "TIR slot layout found wrapper template {wrapper_template_id} missing from the store."
+        )));
+    };
+
+    let mut visiting_nodes = FxHashSet::default();
+    collect_named_slots_from_node(
+        store,
+        wrapper.root,
+        schema,
+        &mut visiting_nodes,
+        visited_wrappers,
+    )
+}
+
+fn collect_named_slots_from_node(
+    store: &TemplateIrStore,
+    node_id: TemplateIrNodeId,
+    schema: &mut TirSlotSchema,
+    visiting_nodes: &mut FxHashSet<TemplateIrNodeId>,
+    visited_wrappers: &mut FxHashSet<TemplateIrId>,
+) -> Result<(), InfrastructureFailure> {
+    if !visiting_nodes.insert(node_id) {
+        return Err(layout_error(format!(
+            "TIR slot layout encountered a node cycle at {node_id:?} while collecting wrapper named slots."
+        )));
+    }
+
+    let Some(node) = store.get_node(node_id) else {
+        visiting_nodes.remove(&node_id);
+        return Err(layout_error(format!(
+            "TIR slot layout requested missing node {node_id} while collecting wrapper named slots."
+        )));
+    };
+
+    let result = match &node.kind {
+        TemplateIrNodeKind::Sequence { children } => {
+            for child_id in children {
+                collect_named_slots_from_node(
+                    store,
+                    *child_id,
+                    schema,
+                    visiting_nodes,
+                    visited_wrappers,
+                )?;
+            }
+            Ok(())
+        }
+
+        TemplateIrNodeKind::Slot { placeholder } => {
+            if let SlotKey::Named(name) = &placeholder.key {
+                schema.named_slots.insert(*name);
+            }
+            collect_wrapper_named_slots(
+                store,
+                placeholder.child_wrapper_set,
+                schema,
+                visited_wrappers,
+            )?;
+            collect_wrapper_named_slots(
+                store,
+                placeholder.applied_child_wrapper_set,
+                schema,
+                visited_wrappers,
+            )
+        }
+
+        TemplateIrNodeKind::ChildTemplate { reference, .. } => {
+            collect_wrapper_template_named_slots(store, reference.root, schema, visited_wrappers)
+        }
+
+        TemplateIrNodeKind::Conditional { body, .. } => {
+            collect_named_slots_from_node(store, *body, schema, visiting_nodes, visited_wrappers)
+        }
+
+        TemplateIrNodeKind::Loop {
+            body,
+            aggregate_wrapper,
+            ..
+        } => {
+            collect_named_slots_from_node(store, *body, schema, visiting_nodes, visited_wrappers)?;
+            if let Some(aggregate_wrapper_id) = aggregate_wrapper {
+                collect_named_slots_from_node(
+                    store,
+                    *aggregate_wrapper_id,
+                    schema,
+                    visiting_nodes,
+                    visited_wrappers,
+                )?;
+            }
+            Ok(())
+        }
+
+        _ => Ok(()),
+    };
+
+    visiting_nodes.remove(&node_id);
+    result
 }

@@ -33,9 +33,11 @@ use crate::compiler_frontend::ast::templates::tir::expression_constness::{
     effective_branch_selector_for_view, effective_loop_header_for_view,
 };
 use crate::compiler_frontend::ast::templates::tir::ids::{
-    TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId,
+    TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId, TemplateWrapperSetId,
 };
-use crate::compiler_frontend::ast::templates::tir::node::{TemplateIr, TemplateIrNodeKind};
+use crate::compiler_frontend::ast::templates::tir::node::{
+    TemplateIr, TemplateIrNodeKind, TirSlotPlaceholder,
+};
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TirSlotResolutionKind, TirWrapperApplicationMode, TirWrapperContext,
 };
@@ -248,6 +250,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                         view,
                         wrapper_references,
                         child_handoff,
+                        runtime_slot_plan.or(active_slot_plan),
                     )?,
                 )
             }
@@ -420,6 +423,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                         view,
                         context,
                         child_handoff,
+                        active_slot_plan,
                     )
                 } else {
                     Ok(child_handoff)
@@ -515,7 +519,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 })
             }
 
-            TemplateIrNodeKind::RuntimeSlotContributionSource { plan, source } => {
+            TemplateIrNodeKind::RuntimeSlotContributionSource { plan, source, .. } => {
                 if Some(*plan) != active_slot_plan {
                     return Err(InfrastructureFailure::internal(
                         CompilerStage::AstConstruction,
@@ -546,7 +550,12 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 if let Some((fill_target_key, child_handoff)) = injection
                     && placeholder.key == *fill_target_key
                 {
-                    return Ok(child_handoff.clone());
+                    return self.apply_slot_wrapper_sets_to_injected_child(
+                        view,
+                        placeholder,
+                        child_handoff.clone(),
+                        active_slot_plan,
+                    );
                 }
 
                 if let Some(resolution) =
@@ -703,6 +712,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         view: &TirView<'_>,
         context: &TirWrapperContext,
         child_handoff: OwnedRuntimeTemplateNode,
+        active_slot_plan: Option<TemplateSlotPlanId>,
     ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
         if context.skip_parent_child_wrappers {
             return Ok(child_handoff);
@@ -727,6 +737,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 view,
                 &wrapper_set.wrappers,
                 child_handoff,
+                active_slot_plan,
             ),
 
             TirWrapperApplicationMode::IfChildEmits => self
@@ -734,6 +745,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                     view,
                     &wrapper_set.wrappers,
                     child_handoff,
+                    active_slot_plan,
                 ),
         }
     }
@@ -752,6 +764,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         view: &TirView<'_>,
         wrapper_references: &[TemplateWrapperReference],
         child_handoff: OwnedRuntimeTemplateNode,
+        active_slot_plan: Option<TemplateSlotPlanId>,
     ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
         let mut current = child_handoff;
         for wrapper_reference in wrapper_references.iter() {
@@ -759,9 +772,76 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 view,
                 *wrapper_reference,
                 current,
+                active_slot_plan,
             )?;
         }
         Ok(current)
+    }
+
+    /// Applies a slot occurrence's own `$children(..)` wrappers to injected child content.
+    ///
+    /// WHAT: wraps the injected child handoff in the slot's `child_wrapper_set`, then in
+    ///       its `applied_child_wrapper_set` unless the placeholder skips parent wrappers.
+    /// WHY: a wrapper template materialized with injection keeps its slot unresolved until
+    ///      handoff, so the wrappers stored on that slot are applied only here. Direct-child
+    ///      wrappers apply unconditionally because the enclosing conditional application
+    ///      already owns structural no-output through `IfChildEmits`.
+    fn apply_slot_wrapper_sets_to_injected_child(
+        &mut self,
+        view: &TirView<'_>,
+        placeholder: &TirSlotPlaceholder,
+        child_handoff: OwnedRuntimeTemplateNode,
+        active_slot_plan: Option<TemplateSlotPlanId>,
+    ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
+        let mut current = child_handoff;
+
+        if let Some(wrapper_set_id) = placeholder.child_wrapper_set {
+            current = self.apply_wrapper_set_to_injected_child(
+                view,
+                wrapper_set_id,
+                current,
+                active_slot_plan,
+            )?;
+        }
+
+        if !placeholder.skip_parent_child_wrappers
+            && let Some(wrapper_set_id) = placeholder.applied_child_wrapper_set
+        {
+            current = self.apply_wrapper_set_to_injected_child(
+                view,
+                wrapper_set_id,
+                current,
+                active_slot_plan,
+            )?;
+        }
+
+        Ok(current)
+    }
+
+    /// Materializes one slot-owned wrapper set around an injected child handoff.
+    fn apply_wrapper_set_to_injected_child(
+        &mut self,
+        view: &TirView<'_>,
+        wrapper_set_id: TemplateWrapperSetId,
+        child_handoff: OwnedRuntimeTemplateNode,
+        active_slot_plan: Option<TemplateSlotPlanId>,
+    ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
+        let wrapper_set = view
+            .store()
+            .get_wrapper_set(wrapper_set_id)
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "TIR HIR handoff: slot-owned wrapper set referenced by injected content is missing.",
+                )
+            })?;
+
+        self.apply_wrapper_templates_around_child_handoff(
+            view,
+            &wrapper_set.wrappers,
+            child_handoff,
+            active_slot_plan,
+        )
     }
 
     /// Builds one output-conditioned wrapper node for an inherited wrapper set.
@@ -780,6 +860,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         view: &TirView<'_>,
         wrapper_references: &[TemplateWrapperReference],
         child_handoff: OwnedRuntimeTemplateNode,
+        active_slot_plan: Option<TemplateSlotPlanId>,
     ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
         if wrapper_references.is_empty() {
             return Ok(child_handoff);
@@ -791,6 +872,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 view,
                 *wrapper_reference,
                 wrapper,
+                active_slot_plan,
             )?;
         }
 
@@ -813,16 +895,22 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         wrapper_root: TemplateIrNodeId,
         fill_target_key: Option<SlotKey>,
         child_handoff: OwnedRuntimeTemplateNode,
+        active_slot_plan: Option<TemplateSlotPlanId>,
     ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
         match fill_target_key {
             Some(fill_target_key) => materializer.materialize_node_with_injection(
                 view,
                 wrapper_root,
-                None,
+                active_slot_plan,
                 Some((&fill_target_key, &child_handoff)),
             ),
             None => {
-                let wrapper_content = materializer.materialize_node(view, wrapper_root, None)?;
+                let wrapper_content = materializer.materialize_node_with_injection(
+                    view,
+                    wrapper_root,
+                    active_slot_plan,
+                    None,
+                )?;
                 Ok(OwnedRuntimeTemplateNode::Sequence {
                     children: vec![wrapper_content, child_handoff],
                     span: None,
@@ -846,6 +934,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         view: &TirView<'_>,
         wrapper_reference: TemplateWrapperReference,
         child_handoff: OwnedRuntimeTemplateNode,
+        active_slot_plan: Option<TemplateSlotPlanId>,
     ) -> Result<OwnedRuntimeTemplateNode, InfrastructureFailure> {
         let wrapper_store = view.store();
 
@@ -879,6 +968,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
             wrapper_root,
             fill_target_key,
             child_handoff,
+            active_slot_plan,
         )
     }
 

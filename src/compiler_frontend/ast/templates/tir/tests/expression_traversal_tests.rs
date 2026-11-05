@@ -5,8 +5,9 @@
 //! payload must be discovered through that same store and its overlays.
 
 use super::super::expression_overlays::{
-    collect_effective_tir_expression_overlay_payloads, collect_tir_expression_overlay_payloads,
-    replace_expression_overlay_entries,
+    ReachableExpressionRoot, ReachableExpressionSiteCache,
+    collect_effective_tir_expression_overlay_payloads, collect_reachable_expression_sites,
+    collect_tir_expression_overlay_payloads, replace_expression_overlay_entries,
 };
 use super::super::expression_sites::{
     walk_expression_payloads_with_nested_tir_views, walk_tir_view_expression_payloads,
@@ -16,10 +17,12 @@ use super::super::node::{
     TemplateIr, TemplateIrNode, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
 };
 use super::super::overlays::{
-    TemplateViewContext, TirExpressionOverlay, TirSlotResolutionOverlayId,
-    TirWrapperContextOverlayId,
+    TemplateViewContext, TirExpressionOverlay, TirSlotResolutionOverlayId, TirWrapperContext,
+    TirWrapperContextOverlay, TirWrapperContextOverlayId,
 };
-use super::super::refs::{TemplateTirChildReference, TemplateTirReference};
+use super::super::refs::{
+    TemplateTirChildReference, TemplateTirReference, TemplateWrapperReference,
+};
 use super::super::slot_plan::{
     TemplateSlotContributionSourcePlan, TemplateSlotPlan, TemplateSlotSitePlan,
 };
@@ -1219,6 +1222,927 @@ fn range_loop_header_positions_are_visited_by_mutation_and_collected_by_site_id(
         &expressions,
         range.step.expect("range step should remain present")
     ));
+}
+
+// -------------------------
+//  Expression reachability caching coverage
+// -------------------------
+
+#[test]
+fn reachability_inherits_recorded_child_summary_for_enclosing_root() {
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+
+    let child_dynamic = dynamic_node(&mut store, &mut expressions, &mut const_values, 1);
+    let child_site = dynamic_site_id(&store, child_dynamic);
+    let child_template = push_template(&mut store, child_dynamic, TemplateType::String);
+
+    let parent_occurrence = store.next_child_template_occurrence_id();
+    let parent_child = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::ChildTemplate {
+            reference: TemplateTirChildReference::new(
+                child_template,
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            ),
+            occurrence_id: parent_occurrence,
+        },
+        None,
+    ));
+    let parent_dynamic = dynamic_node(&mut store, &mut expressions, &mut const_values, 2);
+    let parent_site = dynamic_site_id(&store, parent_dynamic);
+    let parent_root = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Sequence {
+            children: vec![parent_child, parent_dynamic],
+        },
+        None,
+    ));
+    let parent_template = push_template(&mut store, parent_root, TemplateType::String);
+
+    // The child root is recorded once by its own walk.
+    let cache = ReachableExpressionSiteCache::default();
+    let child_reach = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(child_template),
+        TemplateViewContext::default(),
+        &cache,
+    )
+    .expect("child reachability should collect");
+    assert!(child_reach.contains(&child_site));
+    assert_eq!(cache.cached_lookup_hits(), 0);
+
+    // The enclosing root inherits that summary at the child edge instead of
+    // walking the copied child tree again.
+    let parent_reach = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(parent_template),
+        TemplateViewContext::default(),
+        &cache,
+    )
+    .expect("parent reachability should collect");
+    assert!(parent_reach.contains(&parent_site));
+    assert!(parent_reach.contains(&child_site));
+    assert_eq!(
+        cache.cached_lookup_hits(),
+        1,
+        "the enclosing walk must inherit the recorded child summary"
+    );
+
+    // The cached result must remain exactly the uncached result.
+    let uncached_cache = ReachableExpressionSiteCache::default();
+    let uncached = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(parent_template),
+        TemplateViewContext::default(),
+        &uncached_cache,
+    )
+    .expect("uncached parent reachability should collect");
+    for site in [child_site, parent_site] {
+        assert_eq!(
+            uncached.contains(&site),
+            parent_reach.contains(&site),
+            "memoization must not change reachability"
+        );
+    }
+    assert_eq!(uncached_cache.cached_lookup_hits(), 0);
+}
+
+#[test]
+fn reachability_cache_is_keyed_by_reachability_context_dimensions() {
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+
+    let leaf_dynamic = dynamic_node(&mut store, &mut expressions, &mut const_values, 1);
+    let leaf_site = dynamic_site_id(&store, leaf_dynamic);
+    let leaf_template = push_template(&mut store, leaf_dynamic, TemplateType::String);
+
+    let leaf_occurrence = store.next_child_template_occurrence_id();
+    let child_root = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::ChildTemplate {
+            reference: TemplateTirChildReference::new(
+                leaf_template,
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            ),
+            occurrence_id: leaf_occurrence,
+        },
+        None,
+    ));
+    let child_template = push_template(&mut store, child_root, TemplateType::String);
+
+    let wrapper_one_dynamic = dynamic_node(&mut store, &mut expressions, &mut const_values, 2);
+    let wrapper_one_site = dynamic_site_id(&store, wrapper_one_dynamic);
+    let wrapper_one_template = push_template(&mut store, wrapper_one_dynamic, TemplateType::String);
+    let wrapper_one_set = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+        wrapper_one_template,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )]);
+
+    let wrapper_two_dynamic = dynamic_node(&mut store, &mut expressions, &mut const_values, 3);
+    let wrapper_two_site = dynamic_site_id(&store, wrapper_two_dynamic);
+    let wrapper_two_template = push_template(&mut store, wrapper_two_dynamic, TemplateType::String);
+    let wrapper_two_set = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+        wrapper_two_template,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )]);
+
+    let wrapper_overlay_one = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay {
+            contexts: vec![(
+                leaf_occurrence,
+                TirWrapperContext {
+                    inherited_wrapper_set: Some(wrapper_one_set),
+                    ..Default::default()
+                },
+            )],
+        })
+        .expect("first wrapper context overlay should allocate");
+    let wrapper_overlay_two = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay {
+            contexts: vec![(
+                leaf_occurrence,
+                TirWrapperContext {
+                    inherited_wrapper_set: Some(wrapper_two_set),
+                    ..Default::default()
+                },
+            )],
+        })
+        .expect("second wrapper context overlay should allocate");
+
+    let parent_one_occurrence = store.next_child_template_occurrence_id();
+    let parent_one_root = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::ChildTemplate {
+            reference: TemplateTirChildReference::new(
+                child_template,
+                TemplateTirPhase::Composed,
+                TemplateViewContext {
+                    expression_overlay: None,
+                    slot_resolution: None,
+                    wrapper_context: Some(wrapper_overlay_one),
+                },
+            ),
+            occurrence_id: parent_one_occurrence,
+        },
+        None,
+    ));
+    let parent_one = push_template(&mut store, parent_one_root, TemplateType::String);
+
+    let parent_two_occurrence = store.next_child_template_occurrence_id();
+    let parent_two_root = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::ChildTemplate {
+            reference: TemplateTirChildReference::new(
+                child_template,
+                TemplateTirPhase::Composed,
+                TemplateViewContext {
+                    expression_overlay: None,
+                    slot_resolution: None,
+                    wrapper_context: Some(wrapper_overlay_two),
+                },
+            ),
+            occurrence_id: parent_two_occurrence,
+        },
+        None,
+    ));
+    let parent_two = push_template(&mut store, parent_two_root, TemplateType::String);
+
+    let cache = ReachableExpressionSiteCache::default();
+    let child_context = TemplateViewContext {
+        expression_overlay: None,
+        slot_resolution: None,
+        wrapper_context: Some(wrapper_overlay_one),
+    };
+    let child_reach = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(child_template),
+        child_context,
+        &cache,
+    )
+    .expect("child reachability should collect");
+    assert!(child_reach.contains(&leaf_site));
+    assert!(child_reach.contains(&wrapper_one_site));
+    assert!(!child_reach.contains(&wrapper_two_site));
+
+    let parent_one_reach = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(parent_one),
+        TemplateViewContext::default(),
+        &cache,
+    )
+    .expect("first enclosing reachability should collect");
+    assert!(parent_one_reach.contains(&leaf_site));
+    assert!(parent_one_reach.contains(&wrapper_one_site));
+    assert!(!parent_one_reach.contains(&wrapper_two_site));
+    assert_eq!(cache.cached_lookup_hits(), 1);
+
+    // A different wrapper-context dimension is a different reachability key,
+    // so this walk must not inherit the first summary.
+    let parent_two_reach = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(parent_two),
+        TemplateViewContext::default(),
+        &cache,
+    )
+    .expect("second enclosing reachability should collect");
+    assert!(parent_two_reach.contains(&leaf_site));
+    assert!(parent_two_reach.contains(&wrapper_two_site));
+    assert!(!parent_two_reach.contains(&wrapper_one_site));
+    assert_eq!(
+        cache.cached_lookup_hits(),
+        1,
+        "a different reachability context must fall back to a structural walk"
+    );
+}
+
+#[test]
+fn reachability_omits_sites_owned_by_templates_published_in_the_copy_pass() {
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+
+    // A shared wrapper template predates the copy, so its site identity must
+    // survive even though the copied template now reaches it.
+    let wrapper_dynamic = dynamic_node(&mut store, &mut expressions, &mut const_values, 1);
+    let wrapper_site = dynamic_site_id(&store, wrapper_dynamic);
+    let wrapper_template = push_template(&mut store, wrapper_dynamic, TemplateType::String);
+    let wrapper_set = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+        wrapper_template,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )]);
+
+    // The copied template's own site was minted by the copy pass and therefore
+    // belongs to the fresh identity domain rather than the retained one.
+    let copied_dynamic = dynamic_node(&mut store, &mut expressions, &mut const_values, 2);
+    let copied_site = dynamic_site_id(&store, copied_dynamic);
+    let copied_template = push_template(&mut store, copied_dynamic, TemplateType::String);
+    store
+        .set_conditional_child_wrapper_set(copied_template, wrapper_set)
+        .expect("test wrapper set should attach");
+
+    let cache = ReachableExpressionSiteCache::default();
+    cache.register_copied_template(copied_template);
+    let reach = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(copied_template),
+        TemplateViewContext::default(),
+        &cache,
+    )
+    .expect("copied-root reachability should collect");
+
+    assert!(
+        reach.contains(&wrapper_site),
+        "a shared wrapper template's retained site must stay reachable"
+    );
+    assert!(
+        !reach.contains(&copied_site),
+        "a site minted by this copy pass is not a retained identity"
+    );
+}
+
+#[test]
+fn reachability_nested_copy_chain_inherits_retained_summaries() {
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+
+    // One shared wrapper predates the copy and remains reachable from every
+    // level, so every summary must carry its site exactly once.
+    let wrapper_dynamic = dynamic_node(&mut store, &mut expressions, &mut const_values, 1);
+    let wrapper_site = dynamic_site_id(&store, wrapper_dynamic);
+    let wrapper_template = push_template(&mut store, wrapper_dynamic, TemplateType::String);
+    let wrapper_set = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+        wrapper_template,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )]);
+
+    let inner_dynamic = dynamic_node(&mut store, &mut expressions, &mut const_values, 2);
+    let inner_site = dynamic_site_id(&store, inner_dynamic);
+    let inner_template = push_template(&mut store, inner_dynamic, TemplateType::String);
+    store
+        .set_conditional_child_wrapper_set(inner_template, wrapper_set)
+        .expect("inner wrapper set should attach");
+
+    let outer_occurrence = store.next_child_template_occurrence_id();
+    let outer_child = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::ChildTemplate {
+            reference: TemplateTirChildReference::new(
+                inner_template,
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            ),
+            occurrence_id: outer_occurrence,
+        },
+        None,
+    ));
+    let outer_dynamic = dynamic_node(&mut store, &mut expressions, &mut const_values, 3);
+    let outer_site = dynamic_site_id(&store, outer_dynamic);
+    let outer_root = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Sequence {
+            children: vec![outer_child, outer_dynamic],
+        },
+        None,
+    ));
+    let outer_template = push_template(&mut store, outer_root, TemplateType::String);
+
+    let cache = ReachableExpressionSiteCache::default();
+    cache.register_copied_template(inner_template);
+    cache.register_copied_template(outer_template);
+
+    let inner_reach = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(inner_template),
+        TemplateViewContext::default(),
+        &cache,
+    )
+    .expect("inner reachability should collect");
+    assert_eq!(
+        inner_reach.len(),
+        1,
+        "only the retained shared-wrapper site survives the inner copy"
+    );
+    assert!(inner_reach.contains(&wrapper_site));
+
+    let outer_reach = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(outer_template),
+        TemplateViewContext::default(),
+        &cache,
+    )
+    .expect("outer reachability should collect");
+    assert_eq!(
+        outer_reach.len(),
+        1,
+        "the enclosing copy inherits the retained summary instead of its fresh sites"
+    );
+    assert!(outer_reach.contains(&wrapper_site));
+    assert!(!outer_reach.contains(&inner_site));
+    assert!(!outer_reach.contains(&outer_site));
+    assert_eq!(
+        cache.cached_lookup_hits(),
+        1,
+        "the outer walk must not descend into the already-summarized inner root"
+    );
+}
+
+#[test]
+fn reachability_nested_copy_chain_shares_summaries_instead_of_flattening_sets() {
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+
+    const DEPTH: usize = 8;
+
+    // Every copied level retains one distinct wrapper template, so walking a
+    // level's union would cover sites `0..=level`. Flattening those unions into
+    // each cache entry would record sets of size `1..=DEPTH`.
+    let mut wrapper_sites = Vec::with_capacity(DEPTH);
+    let mut wrapper_sets = Vec::with_capacity(DEPTH);
+    for level in 0..DEPTH {
+        let wrapper_dynamic = dynamic_node(
+            &mut store,
+            &mut expressions,
+            &mut const_values,
+            i64::try_from(level).expect("test depth fits i64") + 1,
+        );
+        wrapper_sites.push(dynamic_site_id(&store, wrapper_dynamic));
+        let wrapper_template = push_template(&mut store, wrapper_dynamic, TemplateType::String);
+        wrapper_sets.push(
+            store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+                wrapper_template,
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            )]),
+        );
+    }
+
+    // Build innermost first so each enclosing template references the previous
+    // copied level, and register every level as published by the copy pass.
+    let mut level_templates = Vec::with_capacity(DEPTH);
+    for level in 0..DEPTH {
+        let root = if level == 0 {
+            dynamic_node(&mut store, &mut expressions, &mut const_values, 100)
+        } else {
+            let occurrence_id = store.next_child_template_occurrence_id();
+            store.push_node(TemplateIrNode::new(
+                TemplateIrNodeKind::ChildTemplate {
+                    reference: TemplateTirChildReference::new(
+                        level_templates[level - 1],
+                        TemplateTirPhase::Composed,
+                        TemplateViewContext::default(),
+                    ),
+                    occurrence_id,
+                },
+                None,
+            ))
+        };
+        let template = push_template(&mut store, root, TemplateType::String);
+        store
+            .set_conditional_child_wrapper_set(template, wrapper_sets[level])
+            .expect("test wrapper set should attach");
+        level_templates.push(template);
+    }
+
+    let cache = ReachableExpressionSiteCache::default();
+    for template in &level_templates {
+        cache.register_copied_template(*template);
+    }
+
+    for level in 0..DEPTH {
+        let reach = collect_reachable_expression_sites(
+            &store,
+            ReachableExpressionRoot::Template(level_templates[level]),
+            TemplateViewContext::default(),
+            &cache,
+        )
+        .expect("nested level reachability should collect");
+
+        assert_eq!(
+            reach.len(),
+            level + 1,
+            "level {level} must expose exactly its retained wrapper sites"
+        );
+        for (wrapper_level, wrapper_site) in wrapper_sites.iter().enumerate() {
+            assert_eq!(
+                reach.contains(wrapper_site),
+                wrapper_level <= level,
+                "level {level} reachability of wrapper site {wrapper_level}"
+            );
+        }
+    }
+
+    assert_eq!(
+        cache.directly_recorded_site_count(),
+        DEPTH,
+        "each level must store only its own retained site, not a flattened union"
+    );
+    assert_eq!(
+        cache.inherited_summary_count(),
+        DEPTH - 1,
+        "each enclosing level must share the previous summary by reference"
+    );
+    assert_eq!(
+        cache.coverage_range_count(),
+        DEPTH,
+        "each level must index its whole nested closure as one merged range"
+    );
+    assert_eq!(
+        cache.cached_lookup_hits(),
+        DEPTH - 1,
+        "each enclosing walk must inherit the child summary instead of re-walking"
+    );
+
+    // The outermost shared result must equal a cold walk of the same root.
+    let uncached_cache = ReachableExpressionSiteCache::default();
+    for template in &level_templates {
+        uncached_cache.register_copied_template(*template);
+    }
+    let uncached = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(level_templates[DEPTH - 1]),
+        TemplateViewContext::default(),
+        &uncached_cache,
+    )
+    .expect("cold nested reachability should collect");
+    assert_eq!(uncached.len(), DEPTH);
+    for wrapper_site in &wrapper_sites {
+        assert!(
+            uncached.contains(wrapper_site),
+            "cold nesting must reach every retained wrapper site"
+        );
+    }
+
+    // The production query returns only reached candidates, so an unreachable
+    // candidate must not leak into the overlay rebase's retained set.
+    let queried = uncached.retained_candidates([
+        wrapper_sites[0],
+        wrapper_sites[DEPTH - 1],
+        ExpressionSiteId::new(9_999),
+    ]);
+    assert_eq!(queried.len(), 2);
+    assert!(queried.contains(&wrapper_sites[0]));
+    assert!(queried.contains(&wrapper_sites[DEPTH - 1]));
+    assert!(!queried.contains(&ExpressionSiteId::new(9_999)));
+}
+
+#[test]
+fn retained_candidates_answers_absent_and_deep_sites_from_the_summary_index() {
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+
+    const DEPTH: usize = 16;
+
+    // Every copied level retains one distinct wrapper site and inherits the
+    // previous level's summary, so the outermost query covers `0..=DEPTH` sites
+    // while each summary records exactly one site of its own.
+    let mut wrapper_sites = Vec::with_capacity(DEPTH);
+    let mut wrapper_sets = Vec::with_capacity(DEPTH);
+    for level in 0..DEPTH {
+        let wrapper_dynamic = dynamic_node(
+            &mut store,
+            &mut expressions,
+            &mut const_values,
+            i64::try_from(level).expect("test depth fits i64") + 1,
+        );
+        wrapper_sites.push(dynamic_site_id(&store, wrapper_dynamic));
+        let wrapper_template = push_template(&mut store, wrapper_dynamic, TemplateType::String);
+        wrapper_sets.push(
+            store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+                wrapper_template,
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            )]),
+        );
+    }
+
+    let mut level_templates = Vec::with_capacity(DEPTH);
+    for level in 0..DEPTH {
+        let root = if level == 0 {
+            dynamic_node(&mut store, &mut expressions, &mut const_values, 100)
+        } else {
+            let occurrence_id = store.next_child_template_occurrence_id();
+            store.push_node(TemplateIrNode::new(
+                TemplateIrNodeKind::ChildTemplate {
+                    reference: TemplateTirChildReference::new(
+                        level_templates[level - 1],
+                        TemplateTirPhase::Composed,
+                        TemplateViewContext::default(),
+                    ),
+                    occurrence_id,
+                },
+                None,
+            ))
+        };
+        let template = push_template(&mut store, root, TemplateType::String);
+        store
+            .set_conditional_child_wrapper_set(template, wrapper_sets[level])
+            .expect("test wrapper set should attach");
+        level_templates.push(template);
+    }
+
+    let cache = ReachableExpressionSiteCache::default();
+    for template in &level_templates {
+        cache.register_copied_template(*template);
+    }
+
+    // Recording every level before the outer query makes each summary inherit
+    // the previous summary rather than re-walking it.
+    for level in 0..DEPTH - 1 {
+        collect_reachable_expression_sites(
+            &store,
+            ReachableExpressionRoot::Template(level_templates[level]),
+            TemplateViewContext::default(),
+            &cache,
+        )
+        .expect("inner level reachability should collect");
+    }
+    let outer = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(level_templates[DEPTH - 1]),
+        TemplateViewContext::default(),
+        &cache,
+    )
+    .expect("outer reachability should collect");
+
+    assert_eq!(
+        cache.coverage_range_count(),
+        DEPTH,
+        "a nested chain must keep one merged coverage range per summary"
+    );
+    assert_eq!(
+        cache.owned_site_count(),
+        DEPTH,
+        "each level must index only the site it recorded itself"
+    );
+
+    let absent = ExpressionSiteId::new(9_999);
+    let candidate_sites = [
+        wrapper_sites[0],
+        wrapper_sites[DEPTH / 2],
+        wrapper_sites[DEPTH - 1],
+        absent,
+    ];
+    let queried = outer.retained_candidates(candidate_sites);
+    assert_eq!(queried.len(), 3);
+    assert!(
+        queried.contains(&wrapper_sites[0]),
+        "deepest site must resolve"
+    );
+    assert!(queried.contains(&wrapper_sites[DEPTH / 2]));
+    assert!(queried.contains(&wrapper_sites[DEPTH - 1]));
+    assert!(!queried.contains(&absent), "absent site must not leak");
+    for site in candidate_sites {
+        assert_eq!(
+            queried.contains(&site),
+            outer.contains(&site),
+            "the summary index must agree with the descendant walk for {site}"
+        );
+    }
+}
+
+#[test]
+fn retained_candidates_respects_independent_contextual_scopes() {
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+
+    // Both parents inherit the same shared child summary. The child summary is
+    // therefore multi-parent, and the parents' own sites must stay out of each
+    // other's retained set.
+    let shared_dynamic = dynamic_node(&mut store, &mut expressions, &mut const_values, 1);
+    let shared_site = dynamic_site_id(&store, shared_dynamic);
+    let shared_template = push_template(&mut store, shared_dynamic, TemplateType::String);
+
+    let mut parent_templates = Vec::new();
+    let mut parent_sites = Vec::new();
+    for value in [2, 3] {
+        let child_occurrence = store.next_child_template_occurrence_id();
+        let child = store.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::ChildTemplate {
+                reference: TemplateTirChildReference::new(
+                    shared_template,
+                    TemplateTirPhase::Composed,
+                    TemplateViewContext::default(),
+                ),
+                occurrence_id: child_occurrence,
+            },
+            None,
+        ));
+        let own_dynamic = dynamic_node(&mut store, &mut expressions, &mut const_values, value);
+        parent_sites.push(dynamic_site_id(&store, own_dynamic));
+        let root = store.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::Sequence {
+                children: vec![child, own_dynamic],
+            },
+            None,
+        ));
+        parent_templates.push(push_template(&mut store, root, TemplateType::String));
+    }
+
+    let cache = ReachableExpressionSiteCache::default();
+    let shared = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(shared_template),
+        TemplateViewContext::default(),
+        &cache,
+    )
+    .expect("shared reachability should collect");
+    assert!(shared.contains(&shared_site));
+
+    let first = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(parent_templates[0]),
+        TemplateViewContext::default(),
+        &cache,
+    )
+    .expect("first parent reachability should collect");
+    let second = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(parent_templates[1]),
+        TemplateViewContext::default(),
+        &cache,
+    )
+    .expect("second parent reachability should collect");
+
+    assert_eq!(cache.cached_lookup_hits(), 2);
+    assert_eq!(
+        cache.coverage_range_count(),
+        4,
+        "the shared child plus first parent is one range; the second parent leaves a hole"
+    );
+
+    let first_retained = first.retained_candidates([shared_site, parent_sites[0], parent_sites[1]]);
+    assert_eq!(first_retained.len(), 2);
+    assert!(first_retained.contains(&shared_site));
+    assert!(first_retained.contains(&parent_sites[0]));
+    assert!(!first_retained.contains(&parent_sites[1]));
+
+    let second_retained =
+        second.retained_candidates([shared_site, parent_sites[0], parent_sites[1]]);
+    assert_eq!(second_retained.len(), 2);
+    assert!(second_retained.contains(&shared_site));
+    assert!(!second_retained.contains(&parent_sites[0]));
+    assert!(second_retained.contains(&parent_sites[1]));
+}
+
+#[test]
+fn retained_candidates_handles_sites_recorded_by_multiple_summaries() {
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+
+    // The shared template is never collected on its own, so both parents walk
+    // it directly and each records the same site in its own summary. The site
+    // therefore has two owner summaries.
+    let shared_dynamic = dynamic_node(&mut store, &mut expressions, &mut const_values, 1);
+    let shared_site = dynamic_site_id(&store, shared_dynamic);
+    let shared_template = push_template(&mut store, shared_dynamic, TemplateType::String);
+
+    let mut parent_templates = Vec::new();
+    for _ in 0..2 {
+        let occurrence_id = store.next_child_template_occurrence_id();
+        let root = store.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::ChildTemplate {
+                reference: TemplateTirChildReference::new(
+                    shared_template,
+                    TemplateTirPhase::Composed,
+                    TemplateViewContext::default(),
+                ),
+                occurrence_id,
+            },
+            None,
+        ));
+        parent_templates.push(push_template(&mut store, root, TemplateType::String));
+    }
+
+    // This root inherits only the first parent, so the shared site must resolve
+    // through the reachable owner even though the site has two owners.
+    let enclosing_occurrence = store.next_child_template_occurrence_id();
+    let enclosing_root = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::ChildTemplate {
+            reference: TemplateTirChildReference::new(
+                parent_templates[0],
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            ),
+            occurrence_id: enclosing_occurrence,
+        },
+        None,
+    ));
+    let enclosing_template = push_template(&mut store, enclosing_root, TemplateType::String);
+
+    let unrelated_dynamic = dynamic_node(&mut store, &mut expressions, &mut const_values, 2);
+    let unrelated_site = dynamic_site_id(&store, unrelated_dynamic);
+    let unrelated_template = push_template(&mut store, unrelated_dynamic, TemplateType::String);
+
+    let cache = ReachableExpressionSiteCache::default();
+    for template in [parent_templates[0], parent_templates[1], unrelated_template] {
+        let reach = collect_reachable_expression_sites(
+            &store,
+            ReachableExpressionRoot::Template(template),
+            TemplateViewContext::default(),
+            &cache,
+        )
+        .expect("template reachability should collect");
+        if template == unrelated_template {
+            assert!(reach.contains(&unrelated_site));
+        } else {
+            assert!(reach.contains(&shared_site));
+        }
+    }
+
+    let enclosing = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(enclosing_template),
+        TemplateViewContext::default(),
+        &cache,
+    )
+    .expect("enclosing reachability should collect");
+
+    assert_eq!(
+        cache.owned_site_count(),
+        2,
+        "the shared site must have one owner entry even with several owning summaries"
+    );
+    assert_eq!(
+        cache.coverage_range_count(),
+        5,
+        "both parents and the unrelated root are single ranges; the enclosing root leaves a hole"
+    );
+
+    let retained =
+        enclosing.retained_candidates([shared_site, unrelated_site, ExpressionSiteId::new(9_999)]);
+    assert_eq!(retained.len(), 1);
+    assert!(
+        retained.contains(&shared_site),
+        "the reachable owner must keep the multiply-recorded site"
+    );
+    assert!(
+        !retained.contains(&unrelated_site),
+        "an owner outside the coverage must not leak into the retained set"
+    );
+}
+
+#[test]
+fn retained_candidates_remains_exact_across_repeated_cyclic_summaries() {
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+
+    let site_node = dynamic_node(&mut store, &mut expressions, &mut const_values, 1);
+    let site = dynamic_site_id(&store, site_node);
+
+    // The template references its own future id, so a second collection must
+    // inherit the first summary instead of recursing through the cycle.
+    let cycle_template_id = TemplateIrId::new(store.template_count());
+    let occurrence_id = store.next_child_template_occurrence_id();
+    let cycle_reference = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::ChildTemplate {
+            reference: TemplateTirChildReference::new(
+                cycle_template_id,
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            ),
+            occurrence_id,
+        },
+        None,
+    ));
+    let root = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Sequence {
+            children: vec![site_node, cycle_reference],
+        },
+        None,
+    ));
+    let template = push_template(&mut store, root, TemplateType::String);
+    assert_eq!(template, cycle_template_id);
+
+    let cache = ReachableExpressionSiteCache::default();
+    let first = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(template),
+        TemplateViewContext::default(),
+        &cache,
+    )
+    .expect("cyclic reachability should collect");
+    assert_eq!(first.len(), 1);
+
+    let absent = ExpressionSiteId::new(9_999);
+    let first_retained = first.retained_candidates([site, absent]);
+    assert_eq!(first_retained.len(), 1);
+    assert!(first_retained.contains(&site));
+    assert!(!first_retained.contains(&absent));
+
+    let second = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(template),
+        TemplateViewContext::default(),
+        &cache,
+    )
+    .expect("repeated cyclic reachability should collect");
+    assert_eq!(
+        cache.cached_lookup_hits(),
+        1,
+        "the second walk must inherit the cyclic summary instead of descending"
+    );
+    assert_eq!(
+        cache.coverage_range_count(),
+        1,
+        "the repeated summary merges into one contiguous coverage range"
+    );
+
+    let second_retained = second.retained_candidates([site, absent]);
+    assert_eq!(second_retained.len(), 1);
+    assert!(second_retained.contains(&site));
+    assert!(!second_retained.contains(&absent));
+}
+
+#[test]
+fn reachability_cyclic_child_reference_terminates_with_shared_summaries() {
+    let mut store = TemplateIrStore::new();
+
+    // The template references its own future id, so the reachability walk must
+    // close the cycle through its visited-view guard instead of recursing.
+    let cycle_template_id = TemplateIrId::new(store.template_count());
+    let occurrence_id = store.next_child_template_occurrence_id();
+    let root = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::ChildTemplate {
+            reference: TemplateTirChildReference::new(
+                cycle_template_id,
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            ),
+            occurrence_id,
+        },
+        None,
+    ));
+    let template = push_template(&mut store, root, TemplateType::String);
+    assert_eq!(template, cycle_template_id);
+
+    let cache = ReachableExpressionSiteCache::default();
+    let reach = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(template),
+        TemplateViewContext::default(),
+        &cache,
+    )
+    .expect("cyclic reachability should collect without recursing");
+    assert_eq!(reach.len(), 0);
+
+    // The shared summary recorded for the cycle must not make a later walk or
+    // query recurse either.
+    let again = collect_reachable_expression_sites(
+        &store,
+        ReachableExpressionRoot::Template(template),
+        TemplateViewContext::default(),
+        &cache,
+    )
+    .expect("cyclic reachability should remain finite with a cached summary");
+    assert_eq!(again.len(), 0);
 }
 
 // -------------------------

@@ -20,7 +20,7 @@ init_docs_sidebar()!
 
     [highlight, $md: *This website was created using Moth!*]
 
-    The source code for this whole website can be found on @https://github.com/nyejames/moth/tree/main/docs/src (Github).
+    The source code for this whole website can be found on @https://github.com/nyejames/moth/tree/main/docs (Github).
 
 
     ## Documentation

@@ -1,0 +1,9 @@
+@row_helpers rows
+
+-- Regression: the $children wrapper declares a named `row_style` slot and a
+-- default child slot. The enclosing application supplies row_style; every
+-- direct child must render inside a <tr> whose opening tag carries it.
+[rows:
+    [$insert("row_style"):background: red;][:first]
+    [:second]
+]

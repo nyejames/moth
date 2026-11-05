@@ -1,0 +1,4 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<tr style=\"background: red;\">first</tr>\n<tr style=\"background: red;\">second</tr>"

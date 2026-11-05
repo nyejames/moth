@@ -19,6 +19,8 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
+use rustc_hash::FxHashMap;
+
 use super::helpers::{
     children_of_node, compose_wrapper_application, internal_infrastructure_failure,
     rebuild_root_sequence,
@@ -398,6 +400,7 @@ fn resolve_tir_chain_layer(
         layer.wrapper_reference,
         &layer.layout,
         resolved_fill_node_ids,
+        &FxHashMap::default(),
         original_span,
     )?;
 

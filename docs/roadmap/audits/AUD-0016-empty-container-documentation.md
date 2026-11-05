@@ -13,7 +13,7 @@ The external review compared the empty-container claim in the hash-map reference
 
 ## Authorities read
 
-`docs/roadmap/audit-guide.md`; `docs/roadmap/audit-kinds/documentation.md`; `docs/roadmap/audits/README.md`; `docs/roadmap/audit-log.md`; `docs/roadmap/open-audit-findings.md`; `docs/roadmap/roadmap.md:105-109` (accepted empty-container design); `docs/src/docs/progress/@page.moth` (current hash-map implementation status); `docs/src/docs/collections/hash-maps.mtf`; `docs/src/docs/collections/collection-literals.mtf`; `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf`; `docs/src/docs/reactivity/reactive-sources.mtf`; `docs/src/docs/mon/mon-format.mtf`; `docs/src/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`; and `docs/roadmap/audits/AUD-0010-mon-syntax-parity-tests.md`.
+`docs/roadmap/audit-guide.md`; `docs/roadmap/audit-kinds/documentation.md`; `docs/roadmap/audits/README.md`; `docs/roadmap/audit-log.md`; `docs/roadmap/open-audit-findings.md`; `docs/roadmap/roadmap.md:105-109` (accepted empty-container design); `docs/docs/progress/@page.moth` (current hash-map implementation status); `docs/docs/collections/hash-maps.mtf`; `docs/docs/collections/collection-literals.mtf`; `docs/docs/cheatsheet/moth-language-cheatsheet.mtf`; `docs/src/docs/reactivity/reactive-sources.mtf`; `docs/docs/mon/mon-format.mtf`; `docs/developer-docs/memory-management/retained-edge-counting/retained-edge-counting.mtf`; and `docs/roadmap/audits/AUD-0010-mon-syntax-parity-tests.md`.
 
 ## Existing findings and active plans checked
 
@@ -28,7 +28,7 @@ The audit log and open-findings index were checked. AUD-0010-F01 records an obse
 
 #### Evidence
 
-Before the correction, `docs/src/docs/collections/hash-maps.mtf` presented empty `{}` as a map when an explicit or contextual map type supplied a receiver. The roadmap's accepted design at `docs/roadmap/roadmap.md:105-109` is unambiguous: `{=}` is an empty map and `{}` remains a collection even at a map receiving context. The progress matrix separately records that the current compiler still types `{}` as a map from an explicit or immediate contextual map type, and marks the accepted `{=}` design as not implemented. Public explanation must not turn that current behavior into the accepted container-kind rule.
+Before the correction, `docs/docs/collections/hash-maps.mtf` presented empty `{}` as a map when an explicit or contextual map type supplied a receiver. The roadmap's accepted design at `docs/roadmap/roadmap.md:105-109` is unambiguous: `{=}` is an empty map and `{}` remains a collection even at a map receiving context. The progress matrix separately records that the current compiler still types `{}` as a map from an explicit or immediate contextual map type, and marks the accepted `{=}` design as not implemented. Public explanation must not turn that current behavior into the accepted container-kind rule.
 
 The observed `MapHolder(scores = {})` `MOTH-TYPE-0002` result in AUD-0010-F01 describes current compiler behavior; it does not show a violation of the accepted design. Under that design `{}` is a collection regardless of receiving context, while source `{=}` remains deferred.
 

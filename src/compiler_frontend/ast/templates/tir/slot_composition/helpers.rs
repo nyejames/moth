@@ -25,6 +25,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::template
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
+use rustc_hash::FxHashMap;
+
 use super::head_chain::HeadChainResolutionInputs;
 
 type SlotCompositionResult<T> = Result<T, TemplateError>;
@@ -225,21 +227,39 @@ pub(super) fn rebuild_root_sequence(
     )))
 }
 
+/// Composes one wrapper application from its routed fill and the receiving
+/// application's named contributions.
+///
+/// Named content is accepted only for names the wrapper itself declares, so a
+/// wrapper applied around routed content replays exactly the occurrences it owns.
+/// The receiving application's named content is also resolved into its
+/// direct-child wrapper overlay, because fixed direct children keep their
+/// occurrence-keyed wrapper context rather than passing through slot expansion.
 pub(super) fn compose_wrapper_application(
     store: &mut TemplateIrStore,
     inputs: &HeadChainResolutionInputs,
     wrapper_reference: TemplateWrapperReference,
     layout: &TirSlotLayout,
     fill_nodes: Vec<TemplateIrNodeId>,
+    named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
     fill_span: Option<SourceSpan>,
 ) -> SlotCompositionResult<TemplateTirChildReference> {
-    let routed = super::contributions::route_tir_fill_nodes_against_schema(
+    let mut routed = super::contributions::route_tir_fill_nodes_against_schema(
         store,
         &layout.schema,
         &fill_nodes,
         fill_span,
         inputs.string_table,
     )?;
+
+    // A wrapper applied around routed content replays the receiving application's named
+    // contributions at the wrapper's own named slots. Only names the wrapper declares are
+    // accepted so unrelated receiver names do not leak into this nested application.
+    for (name, nodes) in named_fill {
+        if layout.schema.named_slots.contains(name) {
+            routed.extend_named_nodes(*name, nodes.clone());
+        }
+    }
 
     let needs_runtime = inputs.allow_runtime_plans
         && tir_contributions_need_runtime(
@@ -251,20 +271,27 @@ pub(super) fn compose_wrapper_application(
             inputs.const_values,
             inputs.external_package_registry,
         )?;
-    let composed_template_id = if needs_runtime {
+    let (composed_template_id, composed_context) = if needs_runtime {
         let services = RuntimeSlotPlanningServices {
             string_table: inputs.string_table,
             external_package_registry: inputs.external_package_registry,
         };
-        materialize_tir_native_runtime_slot_plan(
+        let (runtime_template_id, rebased_context) = materialize_tir_native_runtime_slot_plan(
             store,
             inputs.expressions,
             inputs.const_values,
             wrapper_reference.root,
+            wrapper_reference.context,
             &layout.schema,
             &routed,
             &services,
-        )?
+        )?;
+
+        // The runtime plan replaced the receiver root with a scratch copy whose fixed direct
+        // children carry fresh occurrence identities, so its returned context is already
+        // rebased onto those identities and its direct-child wrapper sets carry the named
+        // contributions as plan source markers.
+        (runtime_template_id, rebased_context)
     } else {
         let expanded_root = super::schema::expand_tir_slot_placeholders_into(
             store,
@@ -274,8 +301,29 @@ pub(super) fn compose_wrapper_application(
             &routed,
             inputs.string_table,
         )?;
-        build_composed_wrapper_template(store, wrapper_reference.root, expanded_root)?
+
+        // Direct-child `$children(..)` wrappers are occurrence-keyed overlay state, so the
+        // receiver's named contributions must be resolved into that overlay here; expanding
+        // slot placeholders cannot reach a fixed child authored before the slot.
+        let composed_context = super::schema::fill_direct_child_wrapper_names_into(
+            store,
+            inputs.expressions,
+            inputs.const_values,
+            wrapper_reference.context,
+            &routed.named_nodes,
+            inputs.string_table,
+        )?;
+
+        (
+            build_composed_wrapper_template(store, wrapper_reference.root, expanded_root)?,
+            composed_context,
+        )
     };
 
-    Ok(wrapper_reference.into_composed_child_reference(composed_template_id))
+    Ok(TemplateWrapperReference::new(
+        wrapper_reference.root,
+        wrapper_reference.phase,
+        composed_context,
+    )
+    .into_composed_child_reference(composed_template_id))
 }

@@ -325,8 +325,14 @@ fn accumulate_nodes(
                 summary.record_runtime_slot_site();
             }
 
-            TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => {
+            TemplateIrNodeKind::RuntimeSlotContributionSource { control_flow, .. } => {
                 summary.record_runtime_slot_contribution_source();
+                // The marker replaces a control-flow contribution, so summaries of
+                // wrapper templates containing it must report conditional emission
+                // exactly as the authored root would.
+                if *control_flow {
+                    summary.record_control_flow();
+                }
             }
 
             TemplateIrNodeKind::AggregateOutput => {}

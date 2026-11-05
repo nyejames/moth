@@ -1,0 +1,4 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<b style=\"background: red;\">fixed</b><b style=\"background: red;\">contributed</b><b style=\"background: red;\">fixed</b><b style=\"background: red;\">shown</b><b style=\"background: red;\">fixed</b><b style=\"background: red;\">row-0row-1</b>"

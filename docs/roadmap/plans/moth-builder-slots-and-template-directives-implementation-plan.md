@@ -1,8 +1,9 @@
 # Builder slots and template directive redesign - implementation plan
 
-Status: Approved design, implementation not started
-Date: 5 November 2026
-Target: A new worktree and branch from current Moth main
+Status: Active on `builder-slots`
+Current slice: Phase 1 slot syntax and per-occurrence defaults
+Blockers: None identified
+Next action: Replace slot and insert syntax while preserving the admitted wrapper regressions.
 Scope: Core template syntax and composition, builder-defined top-level const slots, HTML metadata and stylesheet assembly
 
 ## Purpose
@@ -52,6 +53,20 @@ Also establish a compact baseline for `$fresh`, nested children, conditional no-
 - `tests/cases/template_control_flow_children_wrapper_skipped_when_no_output/`
 
 Capture current targeted test results and a clean performance baseline before code changes. Preserve the meaningful baseline assertions after migrating their source syntax. This is a **regression gate**, not a one-time exploratory test to delete after the rewrite.
+
+Baseline at `919ec4e50`: the enclosing application of the imported `rows` template owns
+`row_style`. The original-syntax `template_children_named_slot_wrapper_application` case
+failed with `MOTH-RULE-0052` at `@page.moth:7:5`; it must render exactly
+`<tr style="background: red;">first</tr>\n<tr style="background: red;">second</tr>`.
+The five existing wrapper cases listed above each passed before compiler changes.
+The named-slot test passes after correction, as do fixed-child and nested runtime cases.
+
+Non-recording baseline on unchanged compiler sources: `just bench-frontend-check`
+(76 cases, 10 iterations) and `just bench-check` (74 cases, 10 iterations) passed.
+The worktree was dirty with the admitted regression and documentation changes.
+Mean milliseconds: frontend template stress 23.300, frontend render-plan churn 21.243,
+CLI template stress 9.966, CLI render-plan churn 9.186, external-JS imports build 11.500,
+module-root stress build 12.004 and external-import churn build 15.809.
 
 ## 1. Accepted language surface
 
@@ -325,7 +340,7 @@ Gate: no surviving old public syntax, no duplicate semantic pipeline, no unrevie
 
 ## 6. Test matrix and realistic failure targets
 
-Use focused Rust unit tests for parser and representation invariants. Use real Moth integration cases for observable composition and HTML artefacts. Extend existing cases before adding new fixtures. Follow `docs/src/developer-docs/style-guide/testing.mtf`. Tests belong outside production files.
+Use focused Rust unit tests for parser and representation invariants. Use real Moth integration cases for observable composition and HTML artefacts. Extend existing cases before adding new fixtures. Follow `docs/developer-docs/style-guide/testing.mtf`. Tests belong outside production files.
 
 ### Slots and defaults
 
@@ -385,7 +400,7 @@ Follow up with an independent code-bloat review using `moth-code-review-guide.md
 
 ## 8. Validation and deliverables
 
-At each phase, run the targeted compiler/unit/integration owners. At broader checkpoints use `just validate`. For merge preparation run the full validation gate specified by the current `docs/src/developer-docs/style-guide/validation.mtf`. Use `just fmt-check`, compiler tests and selected `tests/cases` according to the repository's exact instructions. The Moth CLI is in the `moth-cli` crate, while library tests require the `moth` package. Run platform and backend variants supported by the current branch, without claiming unsupported Wasm or Windows coverage.
+At each phase, run the targeted compiler/unit/integration owners. At broader checkpoints use `just validate`. For merge preparation run the full validation gate specified by the current `docs/developer-docs/style-guide/validation.mtf`. Use `just fmt-check`, compiler tests and selected `tests/cases` according to the repository's exact instructions. The Moth CLI is in the `moth-cli` crate, while library tests require the `moth` package. Run platform and backend variants supported by the current branch, without claiming unsupported Wasm or Windows coverage.
 
 The implementation agent must deliver:
 

@@ -4,6 +4,7 @@
 //! WHY: finalization must not reconstruct a second disposition beside the
 //!      preparation owner.
 
+use super::super::attach_conditional_wrapper_set;
 use super::super::ids::{TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId, TemplateWrapperSetId};
 use super::super::preparation::{
     RuntimeTemplateReason, TemplatePreparation, TemplatePreparationMode,
@@ -15,7 +16,7 @@ use super::super::slot_plan::{
 };
 use super::super::store::{MalformedTirStore, TemplateIrStore, TemplateWrapperSet};
 use super::super::summary::TemplateIrSummary;
-use super::super::{TemplateTirPhase, TemplateViewContext, TirView};
+use super::super::{ContributionShape, TemplateTirPhase, TemplateViewContext, TirView};
 use super::builder::TemplateIrBuilder;
 use crate::compiler_frontend::ast::ast_nodes::LoopBindings;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
@@ -32,7 +33,9 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
 };
 use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotContributionSourceId;
 use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotSiteId;
-use crate::compiler_frontend::ast::templates::tir::node::{TemplateIr, TemplateIrNode};
+use crate::compiler_frontend::ast::templates::tir::node::{
+    TemplateIr, TemplateIrNode, TemplateIrNodeKind,
+};
 use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateTirReference, TemplateWrapperReference,
 };
@@ -1015,6 +1018,8 @@ fn preparation_rejects_contribution_marker_with_wrong_plan() {
         &mut store,
         other_plan,
         RuntimeSlotContributionSourceId(0),
+        ContributionShape::Other,
+        false,
         None,
     );
     MalformedTirStore::new(&mut store)
@@ -1051,6 +1056,8 @@ fn preparation_rejects_contribution_marker_outside_owning_plan() {
             &mut store,
             plan,
             RuntimeSlotContributionSourceId(0),
+            ContributionShape::Other,
+            false,
             None,
         )
     };
@@ -1067,6 +1074,211 @@ fn preparation_rejects_contribution_marker_outside_owning_plan() {
             None,
         )
     };
+
+    assert_preparation_authority_error(
+        prepare_slot_plan_view(&store, template_id),
+        "outside its owning plan",
+    );
+}
+
+/// Builds the shape runtime site planning produces when a control-flow
+/// contribution receives a conditional `$children` wrapper whose named slot
+/// replays a plan-qualified contribution marker.
+///
+/// The returned template owns the plan; its site render root is a child template
+/// carrying that conditional wrapper set.
+fn plan_with_marker_conditional_wrapper(
+    store: &mut TemplateIrStore,
+    string_table: &mut StringTable,
+    marker_plan: Option<TemplateSlotPlanId>,
+) -> TemplateIrId {
+    let source_text = {
+        let mut builder = TemplateIrBuilder::new(store);
+        builder.push_text_node(
+            string_table.intern("source"),
+            6,
+            TemplateSegmentOrigin::Body,
+            None,
+        )
+    };
+    let plan = store.push_slot_plan(TemplateSlotPlan {
+        contribution_sources: vec![empty_source_plan(
+            RuntimeSlotContributionSourceId(0),
+            source_text,
+        )],
+        slot_sites: Vec::new(),
+    });
+
+    let wrapper_marker = push_runtime_slot_contribution_source(
+        store,
+        marker_plan.unwrap_or(plan),
+        RuntimeSlotContributionSourceId(0),
+        ContributionShape::Other,
+        false,
+        None,
+    );
+    let wrapper_root = {
+        let mut builder = TemplateIrBuilder::new(store);
+        let text = builder.push_text_node(
+            string_table.intern("wrapper"),
+            7,
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        builder.push_sequence_node(vec![text, wrapper_marker], None)
+    };
+    let wrapper_template = store.push_template(TemplateIr::new(
+        wrapper_root,
+        Style::default(),
+        TemplateType::String,
+        TemplateIrSummary::default(),
+        None,
+    ));
+    let wrapper_set = store.push_wrapper_set(TemplateWrapperSet {
+        wrappers: vec![TemplateWrapperReference::new(
+            wrapper_template,
+            TemplateTirPhase::Composed,
+            TemplateViewContext::default(),
+        )],
+    });
+
+    let source_root = push_runtime_slot_contribution_source(
+        store,
+        plan,
+        RuntimeSlotContributionSourceId(0),
+        ContributionShape::Other,
+        false,
+        None,
+    );
+    let site_render_root = attach_conditional_wrapper_set(store, source_root, wrapper_set)
+        .expect("control-flow marker root should accept its conditional wrapper set");
+    MalformedTirStore::new(store).replace_slot_sites(
+        plan,
+        vec![site_plan(RuntimeSlotSiteId(0), site_render_root)],
+    );
+
+    let runtime_site = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::RuntimeSlotSite {
+            plan,
+            site: RuntimeSlotSiteId(0),
+        },
+        None,
+    ));
+    let template_id = store.push_template(TemplateIr::new(
+        runtime_site,
+        Style::default(),
+        TemplateType::StringFunction,
+        TemplateIrSummary::default(),
+        None,
+    ));
+    store
+        .attach_runtime_slot_plan(template_id, plan)
+        .expect("runtime slot plan should attach");
+    template_id
+}
+
+#[test]
+fn preparation_validates_plan_markers_inside_plan_conditional_wrapper_sets() {
+    let mut store = TemplateIrStore::new();
+    let mut string_table = StringTable::new();
+    let _path_fork = PathInternerFork::empty();
+    let template_id = plan_with_marker_conditional_wrapper(&mut store, &mut string_table, None);
+
+    let prepared = prepare_slot_plan_view(&store, template_id).expect(
+        "a conditional wrapper marker belongs to the plan that reaches it through its owning template",
+    );
+    assert!(
+        matches!(
+            prepared.outcome,
+            TemplatePreparationOutcome::Runtime(
+                RuntimeTemplateReason::RuntimeSlotPlan
+                    | RuntimeTemplateReason::WrapperApplication
+                    | RuntimeTemplateReason::RuntimeSlotSite
+            )
+        ),
+        "plan-qualified wrapper markers must stay runtime, got {:?}",
+        prepared.outcome
+    );
+    assert!(!prepared.facts.is_const_evaluable_shape);
+}
+
+#[test]
+fn preparation_rejects_foreign_plan_markers_inside_conditional_wrapper_sets() {
+    let mut store = TemplateIrStore::new();
+    let mut string_table = StringTable::new();
+    let _path_fork = PathInternerFork::empty();
+    let foreign_plan = store.push_slot_plan(TemplateSlotPlan {
+        contribution_sources: Vec::new(),
+        slot_sites: Vec::new(),
+    });
+    let template_id =
+        plan_with_marker_conditional_wrapper(&mut store, &mut string_table, Some(foreign_plan));
+
+    assert_preparation_authority_error(
+        prepare_slot_plan_view(&store, template_id),
+        "differs from the active plan",
+    );
+}
+
+#[test]
+fn preparation_rejects_plan_markers_in_wrapper_sets_outside_any_plan() {
+    let mut store = TemplateIrStore::new();
+    let mut string_table = StringTable::new();
+    let _path_fork = PathInternerFork::empty();
+    let plan = store.push_slot_plan(TemplateSlotPlan {
+        contribution_sources: Vec::new(),
+        slot_sites: Vec::new(),
+    });
+    let marker = push_runtime_slot_contribution_source(
+        &mut store,
+        plan,
+        RuntimeSlotContributionSourceId(0),
+        ContributionShape::Other,
+        false,
+        None,
+    );
+    let wrapper_root = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let text = builder.push_text_node(
+            string_table.intern("wrapper"),
+            7,
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        builder.push_sequence_node(vec![text, marker], None)
+    };
+    let wrapper_template = store.push_template(TemplateIr::new(
+        wrapper_root,
+        Style::default(),
+        TemplateType::String,
+        TemplateIrSummary::default(),
+        None,
+    ));
+    let wrapper_set = store.push_wrapper_set(TemplateWrapperSet {
+        wrappers: vec![TemplateWrapperReference::new(
+            wrapper_template,
+            TemplateTirPhase::Composed,
+            TemplateViewContext::default(),
+        )],
+    });
+    let template_id = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let root = builder.push_text_node(
+            string_table.intern("plain"),
+            5,
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            None,
+        )
+    };
+    MalformedTirStore::new(&mut store)
+        .set_conditional_child_wrapper_set(template_id, Some(wrapper_set));
 
     assert_preparation_authority_error(
         prepare_slot_plan_view(&store, template_id),
@@ -1092,6 +1304,8 @@ fn preparation_rejects_out_of_range_contribution_source() {
         &mut store,
         plan,
         RuntimeSlotContributionSourceId(1),
+        ContributionShape::Other,
+        false,
         None,
     );
     MalformedTirStore::new(&mut store)
@@ -1133,6 +1347,8 @@ fn preparation_rejects_source_identity_mismatch() {
         &mut store,
         plan,
         RuntimeSlotContributionSourceId(0),
+        ContributionShape::Other,
+        false,
         None,
     );
     MalformedTirStore::new(&mut store)
@@ -1173,6 +1389,8 @@ fn preparation_rejects_plan_a_source_inside_plan_b() {
         &mut store,
         plan_a,
         RuntimeSlotContributionSourceId(0),
+        ContributionShape::Other,
+        false,
         None,
     );
     let plan_b = store.push_slot_plan(TemplateSlotPlan {
@@ -1219,6 +1437,8 @@ fn preparation_keeps_nested_plans_with_local_source_zero_independent() {
             &mut store,
             inner_plan,
             RuntimeSlotContributionSourceId(0),
+            ContributionShape::Other,
+            false,
             None,
         );
         MalformedTirStore::new(&mut store)
@@ -1260,6 +1480,8 @@ fn preparation_keeps_nested_plans_with_local_source_zero_independent() {
         &mut store,
         outer_plan,
         RuntimeSlotContributionSourceId(0),
+        ContributionShape::Other,
+        false,
         None,
     );
     MalformedTirStore::new(&mut store).replace_slot_sites(

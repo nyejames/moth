@@ -80,6 +80,8 @@ fn contribution_source_marker_recompute_records_the_source_count() {
         &mut store,
         plan,
         RuntimeSlotContributionSourceId(0),
+        super::super::ContributionShape::Other,
+        false,
         None,
     );
     let sequence = store.push_node(TemplateIrNode::new(
@@ -93,6 +95,32 @@ fn contribution_source_marker_recompute_records_the_source_count() {
 
     assert_eq!(recomputed.runtime_slot_contribution_source_count, 1);
     assert_eq!(recomputed.runtime_slot_site_count, 0);
+    assert!(!recomputed.has_control_flow());
+}
+
+#[test]
+fn control_flow_contribution_marker_recompute_records_control_flow() {
+    let mut store = TemplateIrStore::new();
+    let plan = store.push_slot_plan(super::super::slot_plan::TemplateSlotPlan {
+        contribution_sources: vec![],
+        slot_sites: vec![],
+    });
+    let marker = push_runtime_slot_contribution_source(
+        &mut store,
+        plan,
+        RuntimeSlotContributionSourceId(0),
+        super::super::ContributionShape::Other,
+        true,
+        None,
+    );
+
+    let recomputed = summarize_existing_root(&store, marker).expect("a marker root has no cycle");
+
+    assert_eq!(recomputed.runtime_slot_contribution_source_count, 1);
+    assert!(
+        recomputed.has_control_flow(),
+        "a marker's summary must preserve the conditional emission class of its source"
+    );
 }
 
 #[test]

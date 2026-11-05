@@ -6133,6 +6133,27 @@ contract = "language.templates.children_wrapper_applied_once_on_runtime_if"
 role = "primary"
 
 [[case]]
+id = "template_children_named_slot_wrapper_application"
+path = "template_children_named_slot_wrapper_application"
+tags = ["integration","templates","slots"]
+contract = "language.templates.children_named_slot_wrapper_application"
+role = "primary"
+
+[[case]]
+id = "template_children_named_slot_wrapper_fixed_child"
+path = "template_children_named_slot_wrapper_fixed_child"
+tags = ["integration","templates","slots"]
+contract = "language.templates.children_named_slot_wrapper_fixed_direct_child"
+role = "primary"
+
+[[case]]
+id = "template_children_named_slot_wrapper_nested_fixed_child"
+path = "template_children_named_slot_wrapper_nested_fixed_child"
+tags = ["integration","templates","slots"]
+contract = "language.templates.children_named_slot_nested_wrapper_fixed_direct_child"
+role = "primary"
+
+[[case]]
 id = "template_children_wrapper_on_control_flow_body"
 path = "template_children_wrapper_on_control_flow_body"
 tags = ["integration","templates"]

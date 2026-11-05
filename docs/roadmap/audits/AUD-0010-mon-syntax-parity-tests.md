@@ -14,7 +14,7 @@ The parity fixture system and its source-observation helpers, especially `gaps.r
 
 ## Authorities read
 
-`docs/roadmap/audit-guide.md`; `docs/roadmap/audit-kinds/tests.md`; `docs/roadmap/audits/README.md`; `docs/roadmap/audit-log.md`; `docs/roadmap/open-audit-findings.md`; `docs/src/developer-docs/style-guide/testing.mtf` (including MON and shared lexical coverage); `docs/src/docs/language-overview/mon-syntax.mtf`; `docs/src/docs/mon/mon-format.mtf`; `docs/src/docs/collections/hash-maps.mtf`; `docs/src/docs/choices/variant-construction.mtf`; the compiler/build ownership contracts; the originating extraction plan; and the repository instructions.
+`docs/roadmap/audit-guide.md`; `docs/roadmap/audit-kinds/tests.md`; `docs/roadmap/audits/README.md`; `docs/roadmap/audit-log.md`; `docs/roadmap/open-audit-findings.md`; `docs/developer-docs/style-guide/testing.mtf` (including MON and shared lexical coverage); `docs/docs/language-overview/mon-syntax.mtf`; `docs/docs/mon/mon-format.mtf`; `docs/docs/collections/hash-maps.mtf`; `docs/docs/choices/variant-construction.mtf`; the compiler/build ownership contracts; the originating extraction plan; and the repository instructions.
 
 ## Existing findings and active plans checked
 

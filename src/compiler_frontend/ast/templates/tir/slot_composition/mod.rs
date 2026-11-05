@@ -24,4 +24,9 @@ pub(crate) use head_chain::compose_tir_head_chain_from_root;
 
 pub(crate) use contributions::TirSlotContributions;
 pub(crate) use helpers::stored_insert_contribution_templates;
-pub(crate) use schema::attach_conditional_wrapper_set;
+#[cfg(test)]
+pub(crate) use schema::fill_named_slot_placeholders_into;
+pub(crate) use schema::{
+    apply_slot_wrapper_sets_to_deferred_fill, attach_conditional_wrapper_set,
+    fill_direct_child_wrapper_names_into, fill_named_slots_in_wrapper_template,
+};

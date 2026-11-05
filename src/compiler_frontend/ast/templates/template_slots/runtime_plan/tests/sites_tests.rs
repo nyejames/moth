@@ -6,7 +6,11 @@
 //! WHY: these facts live in the TIR store and cannot be inspected from
 //!      rendered strings.
 
-use super::{RuntimeWrapperSitePlanBuilder, inject_runtime_slot_fill};
+use super::super::types::RuntimeSlotContributionSourceDraft;
+use super::{
+    RuntimeSlotFill, RuntimeSlotFillWrappers, RuntimeSlotInjection, RuntimeWrapperSitePlanBuilder,
+    inject_runtime_slot_fill, inject_runtime_slot_fill_with_slot_wrappers,
+};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
@@ -20,14 +24,16 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateWrapperReference,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    ExpressionSiteId, TemplateIr, TemplateIrBuilder, TemplateIrId, TemplateIrNode,
-    TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TemplateIrSummary, TemplateSlotPlan,
-    TemplateSlotPlanId, TemplateTirPhase, TemplateViewContext, TirCopyState,
+    ContributionShape, ExpressionSiteId, TemplateIr, TemplateIrBuilder, TemplateIrId,
+    TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TemplateIrSummary,
+    TemplateSlotContributionSourcePlan, TemplateSlotPlan, TemplateSlotPlanId, TemplateTirPhase,
+    TemplateViewContext, TemplateWrapperSetId, TirCopyState, TirSlotPlaceholder,
     TirSlotResolutionOverlay, TirView, TirWrapperApplicationMode, TirWrapperContext,
-    TirWrapperContextOverlay, push_runtime_slot_contribution_source,
+    TirWrapperContextOverlay, collect_tir_slot_layout_from_root,
+    push_runtime_slot_contribution_source,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn bool_expression(
@@ -73,7 +79,14 @@ fn push_slot_plan(store: &mut TemplateIrStore) -> TemplateSlotPlanId {
 }
 
 fn contribution_fill(store: &mut TemplateIrStore, plan: TemplateSlotPlanId) -> TemplateIrNodeId {
-    push_runtime_slot_contribution_source(store, plan, RuntimeSlotContributionSourceId(0), None)
+    push_runtime_slot_contribution_source(
+        store,
+        plan,
+        RuntimeSlotContributionSourceId(0),
+        ContributionShape::Other,
+        false,
+        None,
+    )
 }
 
 fn build_slot_text_wrapper(
@@ -143,6 +156,7 @@ fn node_contains_contribution(
         TemplateIrNodeKind::RuntimeSlotContributionSource {
             plan: marker_plan,
             source: RuntimeSlotContributionSourceId(0),
+            ..
         } => *marker_plan == plan,
         TemplateIrNodeKind::Sequence { children } => children
             .iter()
@@ -199,8 +213,7 @@ fn missing_same_store_child_template_is_an_authority_error() {
 
     let result = inject_runtime_slot_fill(
         child_node,
-        fill_root,
-        &SlotKey::Default,
+        &[(SlotKey::Default, fill_root)],
         &mut store,
         &mut copy_state,
     );
@@ -217,11 +230,17 @@ fn missing_structural_authority_propagates_through_runtime_slot_site_planner() {
     let mut store = TemplateIrStore::new();
     let mut copy_state = TirCopyState::new();
     let fill_root = contribution_fill(&mut store, TemplateSlotPlanId::new(0));
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
+    let string_table = StringTable::new();
     let mut planner = RuntimeWrapperSitePlanBuilder {
         sources: &[],
         slot_plan_id: TemplateSlotPlanId::new(0),
         store: &mut store,
         copy_state: &mut copy_state,
+        expressions: &expressions,
+        const_values: &const_values,
+        string_table: &string_table,
     };
 
     let result = planner.apply_wrapper_reference(
@@ -264,11 +283,16 @@ fn wrapper_application_clears_consumed_slot_resolution_context() {
     let plan = push_slot_plan(&mut store);
     let fill_root = contribution_fill(&mut store, plan);
     let mut copy_state = TirCopyState::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let mut planner = RuntimeWrapperSitePlanBuilder {
         sources: &[],
         slot_plan_id: plan,
         store: &mut store,
         copy_state: &mut copy_state,
+        expressions: &expressions,
+        const_values: &const_values,
+        string_table: &string_table,
     };
 
     let applied = planner
@@ -307,11 +331,16 @@ fn slotless_runtime_wrapper_preserves_complete_reference_identity() {
     let plan = push_slot_plan(&mut store);
     let fill_root = contribution_fill(&mut store, plan);
     let mut copy_state = TirCopyState::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let mut planner = RuntimeWrapperSitePlanBuilder {
         sources: &[],
         slot_plan_id: plan,
         store: &mut store,
         copy_state: &mut copy_state,
+        expressions: &expressions,
+        const_values: &const_values,
+        string_table: &string_table,
     };
 
     let applied = planner
@@ -408,11 +437,17 @@ fn versioned_wrapper_keeps_keyed_wrapper_context_on_nested_child() {
     let plan = push_slot_plan(&mut store);
     let fill_root = contribution_fill(&mut store, plan);
     let mut copy_state = TirCopyState::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
+    let string_table = StringTable::new();
     let mut planner = RuntimeWrapperSitePlanBuilder {
         sources: &[],
         slot_plan_id: plan,
         store: &mut store,
         copy_state: &mut copy_state,
+        expressions: &expressions,
+        const_values: &const_values,
+        string_table: &string_table,
     };
 
     let applied = planner
@@ -493,11 +528,15 @@ fn repeated_wrapper_applications_preserve_versioned_expression_site_ids() {
     let first_fill = contribution_fill(&mut store, plan);
     let second_fill = contribution_fill(&mut store, plan);
     let mut copy_state = TirCopyState::new();
+    let string_table = StringTable::new();
     let mut planner = RuntimeWrapperSitePlanBuilder {
         sources: &[],
         slot_plan_id: plan,
         store: &mut store,
         copy_state: &mut copy_state,
+        expressions: &expressions,
+        const_values: &values,
+        string_table: &string_table,
     };
 
     let first = planner
@@ -578,8 +617,7 @@ fn wrapper_fill_injects_through_conditional_loop_and_child() {
     let mut copy_state = TirCopyState::new();
     let injected_conditional = inject_runtime_slot_fill(
         conditional_root,
-        fill_root,
-        &SlotKey::Default,
+        &[(SlotKey::Default, fill_root)],
         &mut store,
         &mut copy_state,
     )
@@ -587,8 +625,7 @@ fn wrapper_fill_injects_through_conditional_loop_and_child() {
     .root;
     let injected_loop = inject_runtime_slot_fill(
         loop_root,
-        fill_root,
-        &SlotKey::Default,
+        &[(SlotKey::Default, fill_root)],
         &mut store,
         &mut copy_state,
     )
@@ -596,8 +633,7 @@ fn wrapper_fill_injects_through_conditional_loop_and_child() {
     .root;
     let injected_child = inject_runtime_slot_fill(
         child_node,
-        fill_root,
-        &SlotKey::Default,
+        &[(SlotKey::Default, fill_root)],
         &mut store,
         &mut copy_state,
     )
@@ -643,6 +679,156 @@ fn wrapper_fill_injects_through_conditional_loop_and_child() {
     }
 }
 
+/// Builds a wrapper root whose named slot owns a `$children(..)` wrapper set.
+fn build_named_slot_receiver_root(
+    store: &mut TemplateIrStore,
+    string_table: &mut StringTable,
+    name: StringId,
+) -> (TemplateIrNodeId, TemplateWrapperSetId) {
+    let child_wrapper = build_slot_text_wrapper(store, string_table, "<li>", "</li>");
+    let child_wrapper_set = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+        child_wrapper,
+        TemplateTirPhase::Parsed,
+        TemplateViewContext::default(),
+    )]);
+    let occurrence_id = store.next_slot_occurrence_id();
+    let root = {
+        let mut builder = TemplateIrBuilder::new(store);
+        builder.push_tir_slot_placeholder_node(
+            TirSlotPlaceholder::with_wrapper_sets(
+                SlotKey::Named(name),
+                occurrence_id,
+                None,
+                Some(child_wrapper_set),
+                false,
+            ),
+            None,
+        )
+    };
+    (root, child_wrapper_set)
+}
+
+/// Injects one named marker through the runtime slot-injection path.
+fn inject_named_marker(
+    store: &mut TemplateIrStore,
+    string_table: &mut StringTable,
+    shape: ContributionShape,
+    control_flow: bool,
+) -> (TemplateIrNodeId, TemplateSlotPlanId) {
+    let name = string_table.intern("body");
+    let (wrapper_root, _) = build_named_slot_receiver_root(store, string_table, name);
+    let plan = push_slot_plan(store);
+    let marker = push_runtime_slot_contribution_source(
+        store,
+        plan,
+        RuntimeSlotContributionSourceId(0),
+        shape,
+        control_flow,
+        None,
+    );
+    let named_fill = rustc_hash::FxHashMap::from_iter([(name, vec![marker])]);
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
+    let mut slot_fill_wrappers = RuntimeSlotFillWrappers {
+        slot_plan_id: plan,
+        sources: &[],
+        named_fill: &named_fill,
+        expressions: &expressions,
+        const_values: &const_values,
+        string_table,
+        resolved_wrapper_sets: Default::default(),
+    };
+    let injection = RuntimeSlotInjection {
+        key: SlotKey::Named(name),
+        fills: vec![RuntimeSlotFill::Named(marker)],
+    };
+    let mut copy_state = TirCopyState::new();
+    let injected = inject_runtime_slot_fill_with_slot_wrappers(
+        wrapper_root,
+        &[injection],
+        Some(&mut slot_fill_wrappers),
+        store,
+        &mut copy_state,
+    )
+    .expect("named marker injection should succeed");
+    assert!(injected.changed);
+
+    (injected.root, plan)
+}
+
+#[test]
+fn named_marker_injection_classifies_copied_marker_facts() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let shape = ContributionShape::Child {
+        skips_parent_child_wrappers: false,
+    };
+
+    let (injected_root, plan) = inject_named_marker(&mut store, &mut string_table, shape, false);
+
+    let wrapper_node = store
+        .get_node(injected_root)
+        .expect("injected root should exist");
+    let TemplateIrNodeKind::ChildTemplate { reference, .. } = &wrapper_node.kind else {
+        panic!("expected the receiving slot wrapper, got {wrapper_node:?}");
+    };
+    let wrapper_root = store
+        .get_template(reference.root)
+        .expect("derived named wrapper should exist")
+        .root;
+    assert!(
+        node_contains_contribution(wrapper_root, &store, plan),
+        "the copied marker must keep its source facts and render inside the slot wrapper"
+    );
+}
+
+#[test]
+fn named_fresh_marker_injection_skips_receiving_slot_wrappers() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let shape = ContributionShape::Child {
+        skips_parent_child_wrappers: true,
+    };
+
+    let (injected_root, _) = inject_named_marker(&mut store, &mut string_table, shape, false);
+
+    let node = store
+        .get_node(injected_root)
+        .expect("injected root should exist");
+    assert!(
+        matches!(
+            &node.kind,
+            TemplateIrNodeKind::RuntimeSlotContributionSource { .. }
+        ),
+        "a `$fresh` named marker must stay outside the receiving slot's child wrapper"
+    );
+}
+
+#[test]
+fn named_control_flow_marker_injection_attaches_conditional_wrapper() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let shape = ContributionShape::Child {
+        skips_parent_child_wrappers: false,
+    };
+
+    let (injected_root, _) = inject_named_marker(&mut store, &mut string_table, shape, true);
+
+    let wrapper_node = store
+        .get_node(injected_root)
+        .expect("injected root should exist");
+    let TemplateIrNodeKind::ChildTemplate { reference, .. } = &wrapper_node.kind else {
+        panic!("expected the conditional marker wrapper, got {wrapper_node:?}");
+    };
+    let wrapper_template = store
+        .get_template(reference.root)
+        .expect("conditional marker template should exist");
+    assert!(
+        wrapper_template.conditional_child_wrapper_set.is_some(),
+        "a copied control-flow marker must keep the conditional wrapper attached"
+    );
+}
+
 #[test]
 fn wrap_site_fill_applies_wrapper_set_innermost_to_outermost() {
     let mut string_table = StringTable::new();
@@ -665,11 +851,16 @@ fn wrap_site_fill_applies_wrapper_set_innermost_to_outermost() {
     let plan = push_slot_plan(&mut store);
     let fill_root = contribution_fill(&mut store, plan);
     let mut copy_state = TirCopyState::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let mut planner = RuntimeWrapperSitePlanBuilder {
         sources: &[],
         slot_plan_id: plan,
         store: &mut store,
         copy_state: &mut copy_state,
+        expressions: &expressions,
+        const_values: &const_values,
+        string_table: &string_table,
     };
 
     let wrapped = planner
@@ -678,4 +869,161 @@ fn wrap_site_fill_applies_wrapper_set_innermost_to_outermost() {
     let (outer_reference, outer_derived) = derived_wrapper_from_fill(&store, wrapped);
     assert_eq!(outer_reference.phase, TemplateTirPhase::Composed);
     assert!(node_contains_contribution(outer_derived.root, &store, plan));
+}
+
+/// Builds a wrapper template whose named slot is the plan's named target.
+///
+/// WHY: a wrapper set that declares the receiving application's named slot is the
+///      case where resolving the set against named markers derives a new template,
+///      so repeated resolution is observable in the published wrapper-set identity.
+fn build_named_slot_wrapper(
+    store: &mut TemplateIrStore,
+    string_table: &mut StringTable,
+    name: StringId,
+) -> TemplateIrId {
+    let mut builder = TemplateIrBuilder::new(store);
+    let open = builder.push_text_node(
+        string_table.intern("<li>"),
+        4,
+        TemplateSegmentOrigin::Body,
+        None,
+    );
+    let slot = builder.push_slot_node(SlotKey::Named(name), None);
+    let close = builder.push_text_node(
+        string_table.intern("</li>"),
+        5,
+        TemplateSegmentOrigin::Body,
+        None,
+    );
+    let root = builder.push_sequence_node(vec![open, slot, close], None);
+    builder.finish_template(
+        root,
+        Style::default(),
+        TemplateType::String,
+        TemplateIrSummary {
+            slot_count: 1,
+            ..TemplateIrSummary::empty()
+        },
+        None,
+    )
+}
+
+#[test]
+fn site_render_root_reuses_named_filled_conditional_wrapper_set() {
+    let mut string_table = StringTable::new();
+    let name = string_table.intern("body");
+    let mut store = TemplateIrStore::new();
+
+    let named_wrapper = build_named_slot_wrapper(&mut store, &mut string_table, name);
+    let child_wrapper_set = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+        named_wrapper,
+        TemplateTirPhase::Parsed,
+        TemplateViewContext::default(),
+    )]);
+
+    let occurrence_id = store.next_slot_occurrence_id();
+    let wrapper_root = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        builder.push_tir_slot_placeholder_node(
+            TirSlotPlaceholder::with_wrapper_sets(
+                SlotKey::Named(name),
+                occurrence_id,
+                None,
+                Some(child_wrapper_set),
+                false,
+            ),
+            None,
+        )
+    };
+
+    let layout = collect_tir_slot_layout_from_root(&store, wrapper_root)
+        .expect("the wrapper layout should collect");
+    let placeholder = layout
+        .placeholders
+        .into_iter()
+        .next()
+        .expect("the wrapper should declare one slot occurrence");
+
+    let plan = push_slot_plan(&mut store);
+    let render_root = contribution_fill(&mut store, plan);
+    let shape = ContributionShape::Child {
+        skips_parent_child_wrappers: false,
+    };
+    let sources = vec![
+        RuntimeSlotContributionSourceDraft {
+            source: TemplateSlotContributionSourcePlan {
+                source: RuntimeSlotContributionSourceId(0),
+                target: SlotKey::Named(name),
+                render_root,
+                renders_wrapper_unconditionally: false,
+                span: None,
+            },
+            shape,
+            control_flow: true,
+        },
+        RuntimeSlotContributionSourceDraft {
+            source: TemplateSlotContributionSourcePlan {
+                source: RuntimeSlotContributionSourceId(1),
+                target: SlotKey::Named(name),
+                render_root,
+                renders_wrapper_unconditionally: false,
+                span: None,
+            },
+            shape,
+            control_flow: true,
+        },
+    ];
+
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
+    let mut copy_state = TirCopyState::new();
+    let mut planner = RuntimeWrapperSitePlanBuilder {
+        sources: &sources,
+        slot_plan_id: plan,
+        store: &mut store,
+        copy_state: &mut copy_state,
+        expressions: &expressions,
+        const_values: &const_values,
+        string_table: &string_table,
+    };
+
+    let site_root = planner
+        .build_site_render_root(&placeholder, None)
+        .expect("the site render root should build");
+
+    let site_children = match &planner.store.get_node(site_root).expect("site root").kind {
+        TemplateIrNodeKind::Sequence { children } => children.clone(),
+        other => panic!("expected a sequence site root, got {other:?}"),
+    };
+    assert_eq!(
+        site_children.len(),
+        2,
+        "each sibling source must keep its own render root"
+    );
+
+    let published_store: &TemplateIrStore = &*planner.store;
+    let conditional_set = |node_id: TemplateIrNodeId| {
+        let TemplateIrNodeKind::ChildTemplate { reference, .. } = &published_store
+            .get_node(node_id)
+            .expect("contribution root should exist")
+            .kind
+        else {
+            panic!("expected a conditional contribution child, got {node_id:?}");
+        };
+        published_store
+            .get_template(reference.root)
+            .expect("the conditional contribution template should exist")
+            .conditional_child_wrapper_set
+    };
+    let first_set = conditional_set(site_children[0]);
+    let second_set = conditional_set(site_children[1]);
+
+    assert!(
+        first_set.is_some(),
+        "a control-flow source must carry the receiving slot's wrapper set"
+    );
+    assert_eq!(
+        first_set, second_set,
+        "sibling sources must share one named-filled wrapper set instead of publishing a copy each"
+    );
 }

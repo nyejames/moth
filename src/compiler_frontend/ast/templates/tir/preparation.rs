@@ -155,11 +155,17 @@ struct PreparationTraversalRole {
 }
 
 impl PreparationTraversalRole {
-    fn virtual_wrapper(in_aggregate_wrapper: bool) -> Self {
+    /// Wrapper trees keep the enclosing view's plan ownership.
+    ///
+    /// WHAT: marks the traversal as wrapper-virtual while inheriting the active slot plan.
+    /// WHY: runtime site planning fills conditional wrapper sets with plan-qualified
+    ///      contribution markers, so clearing the plan here would report those markers as
+    ///      appearing outside their owning plan. Ownership validation still applies: a
+    ///      wrapper set reached with no active plan must not contain markers.
+    fn virtual_wrapper(role: PreparationTraversalRole) -> Self {
         Self {
             virtual_wrapper: true,
-            in_aggregate_wrapper,
-            active_slot_plan: None,
+            ..role
         }
     }
 }
@@ -395,8 +401,9 @@ impl PreparationWalk<'_> {
 
             self.validate_template_identity(template_id, root, view)?;
             if let Some(wrapper_set_id) = conditional_child_wrapper_set {
-                let wrapper_facts =
-                    self.walk_wrapper_set(wrapper_set_id, view, role.in_aggregate_wrapper)?;
+                // The wrapper set keeps the caller's plan ownership because a conditional
+                // wrapper may replay plan-qualified markers created for the enclosing plan.
+                let wrapper_facts = self.walk_wrapper_set(wrapper_set_id, view, role)?;
                 if !wrapper_facts.foldable {
                     let reason = if wrapper_facts.contains_slot_insert {
                         RuntimeTemplateReason::SlotContribution
@@ -521,11 +528,7 @@ impl PreparationWalk<'_> {
                     if let Some(context) = view.effective_wrapper_context(*occurrence_id)?
                         && let Some(wrapper_set_ref) = context.inherited_wrapper_set
                     {
-                        let wrapper_facts = self.walk_wrapper_set(
-                            wrapper_set_ref,
-                            view,
-                            role.in_aggregate_wrapper,
-                        )?;
+                        let wrapper_facts = self.walk_wrapper_set(wrapper_set_ref, view, *role)?;
                         if !context.skip_parent_child_wrappers && !wrapper_facts.foldable {
                             let reason = if wrapper_facts.contains_slot_insert {
                                 RuntimeTemplateReason::SlotContribution
@@ -566,8 +569,7 @@ impl PreparationWalk<'_> {
                     .into_iter()
                     .flatten()
                     {
-                        let wrapper_facts =
-                            self.walk_wrapper_set(wrapper_set_id, view, role.in_aggregate_wrapper)?;
+                        let wrapper_facts = self.walk_wrapper_set(wrapper_set_id, view, *role)?;
                         if !wrapper_facts.foldable {
                             self.record_role_runtime(
                                 &mut facts,
@@ -732,7 +734,7 @@ impl PreparationWalk<'_> {
                     );
                     Ok(facts)
                 }
-                TemplateIrNodeKind::RuntimeSlotContributionSource { plan, source } => {
+                TemplateIrNodeKind::RuntimeSlotContributionSource { plan, source, .. } => {
                     self.validate_contribution_source_marker(*plan, *source, view, role)?;
                     let mut facts = PreparationFacts::default();
                     self.record_role_runtime(
@@ -970,7 +972,7 @@ impl PreparationWalk<'_> {
         &mut self,
         wrapper_set_id: TemplateWrapperSetId,
         view: &TirView<'_>,
-        in_aggregate_wrapper: bool,
+        role: PreparationTraversalRole,
     ) -> Result<WrapperSetFacts, TemplateError> {
         let wrapper_set = view
             .store()
@@ -986,7 +988,7 @@ impl PreparationWalk<'_> {
                 wrapper.root,
                 &wrapper_view,
                 &[],
-                PreparationTraversalRole::virtual_wrapper(in_aggregate_wrapper),
+                PreparationTraversalRole::virtual_wrapper(role),
             )?;
             facts.contains_slot_insert |= wrapper_facts.has_slot_insertions
                 || view

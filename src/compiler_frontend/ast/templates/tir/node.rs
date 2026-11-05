@@ -35,6 +35,7 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
 use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
 };
+use crate::compiler_frontend::ast::templates::tir::contribution_shape::ContributionShape;
 use crate::compiler_frontend::ast::templates::tir::ids::{
     ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId,
     TemplateSlotPlanId, TemplateWrapperSetId,
@@ -293,6 +294,24 @@ pub(crate) enum TemplateIrNodeKind {
     RuntimeSlotContributionSource {
         plan: TemplateSlotPlanId,
         source: RuntimeSlotContributionSourceId,
+
+        /// Authored contribution shape the marker replaced.
+        ///
+        /// WHAT: records whether the source is a child-template contribution and
+        /// whether it uses `$fresh`.
+        /// WHY: recursive structural named composition splices markers into
+        /// wrapper trees away from the source drafts, so the shared classifier
+        /// must recover the authored shape from the marker itself.
+        shape: ContributionShape,
+
+        /// Whether the source root emits only through template control flow.
+        ///
+        /// WHAT: lets the shared control-flow classifier answer for a marker
+        /// exactly as it answers for an authored conditional or loop root.
+        /// WHY: wrapper decisions for named markers happen during structural
+        /// composition, before the runtime source can be evaluated, and an empty
+        /// source must never emit its wrapper.
+        control_flow: bool,
     },
 
     /// Payload-free position of one numeric-dependent template position.

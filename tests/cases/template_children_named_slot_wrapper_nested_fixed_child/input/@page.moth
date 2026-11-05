@@ -1,0 +1,19 @@
+-- Regression: the receiver's `$children` wrapper argument is itself a nested
+-- `$children` receiver. The inner wrapper declares the named `row_style` slot,
+-- and the nested receiver owns a fixed direct child before its default slot.
+-- The enclosing application supplies row_style, so the fixed direct child must
+-- replay it for both the ordinary composed contribution and the deferred runtime
+-- conditional and loop wrappers. A false condition and a zero-iteration loop
+-- emit no wrapper, so no fixed child appears for them.
+identity |value I32| -> I32:
+    return value
+;
+
+rows = [$children([$children([$html:<b style="[$slot("row_style")]">[$slot]</b>]):[:fixed][$slot]]):[$slot]]
+
+show_condition = 1
+skip_condition = 2
+loop_limit = 2
+empty_limit = 0
+
+[rows:[$insert("row_style"):background: red;][:contributed][if identity(show_condition) < 2:[:shown]][if identity(skip_condition) < 2:[:hidden]][loop 0 to identity(loop_limit) |loop_item|:[:row-[loop_item]]][loop 0 to identity(empty_limit) |empty_item|:[:row-no-output]]]

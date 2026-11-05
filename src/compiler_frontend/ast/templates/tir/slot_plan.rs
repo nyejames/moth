@@ -13,6 +13,7 @@ use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
 };
+use crate::compiler_frontend::ast::templates::tir::contribution_shape::ContributionShape;
 use crate::compiler_frontend::ast::templates::tir::copy_state::TirCopyState;
 use crate::compiler_frontend::ast::templates::tir::ids::{TemplateIrNodeId, TemplateSlotPlanId};
 use crate::compiler_frontend::ast::templates::tir::node::{TemplateIrNode, TemplateIrNodeKind};
@@ -110,17 +111,28 @@ pub(super) fn convert_runtime_slot_site(
 /// Plants one plan-qualified contribution-source marker.
 ///
 /// WHAT: constructs the only TIR splice representation used by runtime slot
-///       site planning. The marker always carries the active slot plan.
+///       site planning. The marker always carries the active slot plan and the
+///       authored contribution facts it replaced.
 /// WHY: a marker without a plan cannot be checked against its owning source
-///      list, and nested plans may reuse the same local source index.
+///      list, and nested plans may reuse the same local source index. The shape
+///      and control-flow class travel on the marker because recursive named
+///      composition can splice it into wrappers long after the source drafts
+///      that knew the authored node are out of reach.
 pub(crate) fn push_runtime_slot_contribution_source(
     store: &mut TemplateIrStore,
     plan: TemplateSlotPlanId,
     source: RuntimeSlotContributionSourceId,
+    shape: ContributionShape,
+    control_flow: bool,
     span: Option<SourceSpan>,
 ) -> TemplateIrNodeId {
     store.push_node(TemplateIrNode::new(
-        TemplateIrNodeKind::RuntimeSlotContributionSource { plan, source },
+        TemplateIrNodeKind::RuntimeSlotContributionSource {
+            plan,
+            source,
+            shape,
+            control_flow,
+        },
         span,
     ))
 }
