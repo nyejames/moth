@@ -71,27 +71,27 @@ A missing provider and a missing symbol look alike in a terminal and belong to d
 A single global "parser error" funnel would throw away context. The type checker already knows the expected type. The borrow checker already knows the place. Let the owner who holds the fact build its typed diagnostic draft.
 
 [diagram:
-    [$insert("label"): Three failure lanes that never merge]
-    [$insert("caption"): The split is about who should act. One lane asks the author to change their code. One reports that the build could not run. One says the compiler broke and later results cannot be trusted.]
+    [$in label: Three failure lanes that never merge]
+    [$in caption: The split is about who should act. One lane asks the author to change their code. One reports that the build could not run. One says the compiler broke and later results cannot be trusted.]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Lane one]
-            [$insert("title"): DiagnosticDraft]
+            [$in href: ./]
+            [$in eyebrow: Lane one]
+            [$in title: DiagnosticDraft]
             Source, syntax, import, config, type, rule, borrow and target-contract problems. The author fixes these.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Rendered later, from the same event]
+                [$in label: Rendered later, from the same event]
                 [lane:
                 [detail:
-                    [$insert("href"): ../starting-a-build/]
+                    [$in href: ../starting-a-build/]
                     CLI output
                 ]
                 [detail:
-                    [$insert("href"): ../starting-a-build/]
+                    [$in href: ../starting-a-build/]
                     Dev server and tooling views
                 ]
                 ]
@@ -101,18 +101,18 @@ A single global "parser error" funnel would throw away context. The type checker
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Lane two]
-            [$insert("title"): InfrastructureFailure]
+            [$in href: ./]
+            [$in eyebrow: Lane two]
+            [$in title: InfrastructureFailure]
             Filesystem, tooling, provider, output and dev-server failures, plus internal failures not yet proven impossible. Nobody renames a variable to fix one of these.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Lane three]
-            [$insert("title"): compiler_bug!]
+            [$in href: ./]
+            [$in eyebrow: Lane three]
+            [$in title: compiler_bug!]
             Proven-impossible compiler states. The compiler panics with a structured `CompilerBugReport` naming the stage and invariant.
         ]
     ]

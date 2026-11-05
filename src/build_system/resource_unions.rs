@@ -244,6 +244,9 @@ fn append_public_const_template_slot(
     union: &mut ResourceOriginUnion,
     slot: &PublicConstTemplateSlot,
 ) {
+    if let Some(default) = &slot.default {
+        append_owned_folded_string(union, default);
+    }
     for wrapper in &slot.applied_child_wrappers {
         append_public_const_template(union, wrapper);
     }

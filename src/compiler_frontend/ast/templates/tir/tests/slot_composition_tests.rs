@@ -35,7 +35,7 @@ use super::support::{
     expand_tir_slot_placeholders, wrap_tir_node_in_wrapper_references, wrap_tir_node_in_wrappers,
 };
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstStringPiece, ConstStringValue, ConstValueStore,
+    ConstStringPiece, ConstStringValue, ConstValuePayload, ConstValueStore,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
@@ -55,6 +55,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::InvalidTemplateSlotView;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
 use crate::compiler_frontend::compiler_messages::{DiagnosticBag, InvalidTemplateSlotReason};
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -729,6 +730,234 @@ fn repeated_default_slots_are_valid_replay_sites() {
         placeholders
             .iter()
             .all(|placeholder| placeholder.key == SlotKey::Default)
+    );
+}
+
+#[test]
+fn expansion_keeps_defaulted_occurrence_without_routed_content() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let default = const_values
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Text(string_table.intern("fallback"))),
+            None,
+        )
+        .expect("test default inserts");
+
+    let (wrapper_id, root) = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let slot = builder.push_slot_node_with_default(SlotKey::Default, default, None);
+        let template_id = builder.finish_template(
+            slot,
+            Style::default(),
+            TemplateType::String,
+            slot_summary(1),
+            None,
+        );
+        (template_id, slot)
+    };
+
+    let expanded = expand_tir_slot_placeholders(
+        &mut store,
+        &expressions,
+        &const_values,
+        wrapper_id,
+        &TirSlotContributions::default(),
+        &string_table,
+    )
+    .expect("default-only expansion should succeed");
+
+    assert_eq!(
+        expanded, root,
+        "no routed contribution must leave the occurrence-owned default structural"
+    );
+    let layout = collect_tir_slot_layout(&store, wrapper_id)
+        .expect("defaulted occurrence remains in the layout");
+    assert_eq!(layout.placeholders.len(), 1);
+    assert_eq!(layout.placeholders[0].default, Some(default));
+}
+
+#[test]
+fn explicit_empty_contribution_replaces_occurrence_default() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let default = const_values
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Text(string_table.intern("fallback"))),
+            None,
+        )
+        .expect("test default inserts");
+
+    let (wrapper_id, root) = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let slot = builder.push_slot_node_with_default(SlotKey::Default, default, None);
+        let template_id = builder.finish_template(
+            slot,
+            Style::default(),
+            TemplateType::String,
+            slot_summary(1),
+            None,
+        );
+        (template_id, slot)
+    };
+    let empty_node = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Text {
+            text: string_table.intern(""),
+            byte_len: 0,
+            origin: TemplateSegmentOrigin::Body,
+        },
+        None,
+    ));
+    let routed = TirSlotContributions {
+        default_nodes: vec![empty_node],
+        ..TirSlotContributions::default()
+    };
+
+    let expanded = expand_tir_slot_placeholders(
+        &mut store,
+        &expressions,
+        &const_values,
+        wrapper_id,
+        &routed,
+        &string_table,
+    )
+    .expect("explicit empty contribution should expand");
+
+    assert_ne!(expanded, root);
+    let TemplateIrNodeKind::Sequence { children } =
+        &store.get_node(expanded).expect("expanded root exists").kind
+    else {
+        panic!("expanded occurrence must be a contribution sequence");
+    };
+    assert_eq!(
+        children,
+        &vec![empty_node],
+        "an explicitly empty routed contribution suppresses the default"
+    );
+}
+
+#[test]
+fn explicit_empty_named_contribution_replaces_occurrence_default() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let name = string_table.intern("title");
+    let default = const_values
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Text(
+                string_table.intern("Title fallback"),
+            )),
+            None,
+        )
+        .expect("test default inserts");
+
+    let (wrapper_id, root) = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let slot = builder.push_slot_node_with_default(SlotKey::Named(name), default, None);
+        let template_id = builder.finish_template(
+            slot,
+            Style::default(),
+            TemplateType::String,
+            slot_summary(1),
+            None,
+        );
+        (template_id, slot)
+    };
+
+    // `[$in title:]` routes the named target with no content. Presence must
+    // survive routing even though the node list is empty.
+    let mut routed = TirSlotContributions::default();
+    routed.extend_named_nodes(name, Vec::new());
+
+    let expanded = expand_tir_slot_placeholders(
+        &mut store,
+        &expressions,
+        &const_values,
+        wrapper_id,
+        &routed,
+        &string_table,
+    )
+    .expect("explicit empty named contribution should expand");
+
+    assert_ne!(
+        expanded, root,
+        "an explicitly empty named contribution must replace the named default"
+    );
+    let TemplateIrNodeKind::Sequence { children } =
+        &store.get_node(expanded).expect("expanded root exists").kind
+    else {
+        panic!("expanded named occurrence must be a contribution sequence");
+    };
+    assert!(
+        children.is_empty(),
+        "the named default must be suppressed by routed presence alone"
+    );
+}
+
+#[test]
+fn named_only_fill_of_explicit_empty_bucket_replaces_default() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let name = string_table.intern("title");
+    let default = const_values
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Text(
+                string_table.intern("Title fallback"),
+            )),
+            None,
+        )
+        .expect("test default inserts");
+
+    let wrapper_id = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let slot = builder.push_slot_node_with_default(SlotKey::Named(name), default, None);
+        builder.finish_template(
+            slot,
+            Style::default(),
+            TemplateType::String,
+            slot_summary(1),
+            None,
+        )
+    };
+
+    let named_fill: FxHashMap<StringId, Vec<TemplateIrNodeId>> =
+        [(name, Vec::new())].into_iter().collect();
+    let derived_id = fill_named_slot_placeholders_into(
+        &mut store,
+        &expressions,
+        &const_values,
+        wrapper_id,
+        &named_fill,
+        &string_table,
+    )
+    .expect("named-only fill should succeed")
+    .expect("an explicitly empty named bucket is a routed change");
+
+    let derived_root = store
+        .get_template(derived_id)
+        .expect("derived wrapper template exists")
+        .root;
+    let TemplateIrNodeKind::Sequence { children } = &store
+        .get_node(derived_root)
+        .expect("derived root exists")
+        .kind
+    else {
+        panic!("named-only replacement must produce a contribution sequence");
+    };
+    assert!(
+        children.is_empty(),
+        "named-only fill must suppress the default from an empty routed bucket"
     );
 }
 
@@ -1540,6 +1769,7 @@ fn expand_routes_each_slot_key_branch_to_its_contribution() {
         default_nodes: vec![default_node],
         named_nodes: [(name, vec![named_node])].into_iter().collect(),
         positional_nodes: [(0, vec![positional_node])].into_iter().collect(),
+        ..TirSlotContributions::default()
     };
 
     let expanded_root = expand_tir_slot_placeholders(
@@ -1609,6 +1839,7 @@ fn expansion_missing_wrapper_set_produces_internal_error() {
         SlotKey::Default,
         store.next_slot_occurrence_id(),
         None,
+        None,
         Some(TemplateWrapperSetId::new(0)),
         false,
     );
@@ -1654,6 +1885,7 @@ fn expansion_missing_conditional_wrapper_set_produces_internal_error() {
     let placeholder = TirSlotPlaceholder::with_wrapper_sets(
         SlotKey::Default,
         store.next_slot_occurrence_id(),
+        None,
         None,
         Some(TemplateWrapperSetId::new(0)),
         false,
@@ -2116,8 +2348,14 @@ fn conditional_with_slot_in_body_is_expanded() {
     let mut const_values = ConstValueStore::default();
 
     let occurrence_id = store.next_slot_occurrence_id();
-    let placeholder =
-        TirSlotPlaceholder::with_wrapper_sets(SlotKey::Default, occurrence_id, None, None, false);
+    let placeholder = TirSlotPlaceholder::with_wrapper_sets(
+        SlotKey::Default,
+        occurrence_id,
+        None,
+        None,
+        None,
+        false,
+    );
     let body_slot = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Slot { placeholder },
         None,
@@ -2336,8 +2574,14 @@ fn expand_preserves_non_slot_nodes() {
     ));
 
     let occurrence_id = store.next_slot_occurrence_id();
-    let placeholder =
-        TirSlotPlaceholder::with_wrapper_sets(SlotKey::Default, occurrence_id, None, None, false);
+    let placeholder = TirSlotPlaceholder::with_wrapper_sets(
+        SlotKey::Default,
+        occurrence_id,
+        None,
+        None,
+        None,
+        false,
+    );
     let slot_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Slot { placeholder },
         None,
@@ -3469,6 +3713,7 @@ fn build_named_slot_receiver_with_slot_wrappers(
                 SlotKey::Named(name),
                 occurrence_id,
                 None,
+                None,
                 Some(wrapper_set_id),
                 false,
             ),
@@ -3760,6 +4005,7 @@ fn sibling_control_flow_contributions_share_one_named_filled_wrapper_set() {
                 SlotKey::Named(name),
                 occurrence_id,
                 None,
+                None,
                 Some(child_wrapper_set),
                 false,
             ),
@@ -3918,6 +4164,7 @@ fn receiver_direct_child_wrapper_replays_named_contribution() {
             TirSlotPlaceholder::with_wrapper_sets(
                 SlotKey::Default,
                 slot_occurrence_id,
+                None,
                 None,
                 Some(wrapper_set_id),
                 false,
@@ -4119,6 +4366,7 @@ fn runtime_receiver_rebases_fixed_direct_child_wrapper_context_and_names() {
             TirSlotPlaceholder::with_wrapper_sets(
                 SlotKey::Default,
                 slot_occurrence_id,
+                None,
                 None,
                 Some(wrapper_set_id),
                 false,

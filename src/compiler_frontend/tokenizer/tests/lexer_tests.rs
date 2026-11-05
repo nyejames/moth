@@ -1869,9 +1869,9 @@ fn unknown_style_directives_fail_under_strict_registry() {
 }
 
 #[test]
-fn tokenizes_slot_and_insert_directives_inside_template_heads() {
+fn tokenizes_slot_and_in_directives_inside_template_heads() {
     let (file_tokens, string_table) =
-        tokenize_source("[wrapper: [$slot][$slot(\"style\")][$insert(\"style\"): blue]]");
+        tokenize_source("[wrapper: [$slot][$slot style][$in style: blue]]");
     let tokens = file_tokens.tokens.as_ref();
 
     let slot_directive_count = token_refs(tokens)
@@ -1880,13 +1880,15 @@ fn tokenizes_slot_and_insert_directives_inside_template_heads() {
                 && token_string_is(*token, &string_table, "slot")
         })
         .count();
-    let has_insert_directive = token_refs(tokens).any(|token| {
-        token.tag() == TokenTag::STYLE_DIRECTIVE && token_string_is(token, &string_table, "insert")
+    let has_in_directive = token_refs(tokens).any(|token| {
+        token.tag() == TokenTag::STYLE_DIRECTIVE && token_string_is(token, &string_table, "in")
     });
 
     assert_eq!(slot_directive_count, 2);
-    assert!(has_insert_directive);
-    assert!(token_refs(tokens).any(|token| token.tag() == TokenTag::STRING_SLICE_LITERAL));
+    assert!(has_in_directive);
+    assert!(token_refs(tokens).any(|token| {
+        token.tag() == TokenTag::SYMBOL && token_string_is(token, &string_table, "style")
+    }));
 }
 
 #[test]
@@ -2019,9 +2021,8 @@ fn html_template_body_tokenizes_attribute_brackets_using_normal_rules() {
 
 #[test]
 fn html_template_body_tokenizes_slot_templates_inside_quoted_attributes_with_normal_rules() {
-    let (file_tokens, string_table) = tokenize_html_source(
-        "[$html:\n<h1 style=\"font-size: 2em;[$slot(\"style\")]\">[$slot]</h1>\n]",
-    );
+    let (file_tokens, string_table) =
+        tokenize_html_source("[$html:\n<h1 style=\"font-size: 2em;[$slot style]\">[$slot]</h1>\n]");
     let tokens = file_tokens.tokens.as_ref();
 
     let template_heads = token_refs(tokens)

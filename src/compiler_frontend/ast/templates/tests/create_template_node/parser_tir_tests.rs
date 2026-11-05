@@ -636,7 +636,7 @@ fn parser_tir_records_named_slot_placeholder() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let (template, store) = parse_template(
-        "[: before [$slot(\"name\")] after]",
+        "[: before [$slot name] after]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -669,7 +669,7 @@ fn parser_tir_records_positional_slot_placeholder() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let (template, store) = parse_template(
-        "[: before [$slot(1)] after]",
+        "[: before [$slot 1] after]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -1576,7 +1576,7 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
         .expect("test path fits");
 
     let wrapper_file_tokens = template_tokens_from_source(
-        "[:\n    [$children([:H: [$slot]]):[$slot(1)]]\n    [$children([:R: [$slot]]):[$slot]]\n]",
+        "[:\n    [$children([:H: [$slot]]):[$slot 1]]\n    [$children([:R: [$slot]]):[$slot]]\n]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -1703,7 +1703,7 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
         .expect("test path fits");
 
     let wrapper_file_tokens = template_tokens_from_source(
-        "[$md:title[$slot(\"title\")]body[$slot]]",
+        "[$md:title[$slot title]body[$slot]]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -1740,7 +1740,7 @@ fn formatter_named_insert_installs_formatted_reference_and_preserves_routing() {
     );
 
     let insert_file_tokens = template_tokens_from_source(
-        "[$md, $insert(\"title\"):Heading]",
+        "[$md, $in title:Heading]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,

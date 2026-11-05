@@ -22,12 +22,13 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
 use crate::compiler_frontend::ast::templates::tir::{
     DerivedTemplateMetadata, TemplateIrId, TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind,
     TemplateIrStore, TemplateSlotPlanId, TemplateSlotSitePlan, TemplateWrapperSetId, TirCopyState,
-    TirSlotPlaceholderRef, TirSlotSchema, apply_slot_wrapper_sets_to_deferred_fill,
-    attach_conditional_wrapper_set, classify_tir_contribution_node, collect_tir_slot_layout,
-    collect_tir_slot_layout_from_root, conditional_wrapper_set_for_control_flow,
-    copy_tir_subtree_with_active_slot_plan, fill_direct_child_wrapper_names_into,
-    fill_named_slots_in_wrapper_template, push_runtime_slot_contribution_source,
-    tir_node_is_control_flow_root, wrap_tir_node_in_wrappers_into,
+    TirSlotPlaceholder, TirSlotPlaceholderRef, TirSlotSchema,
+    apply_slot_wrapper_sets_to_deferred_fill, attach_conditional_wrapper_set,
+    classify_tir_contribution_node, collect_tir_slot_layout, collect_tir_slot_layout_from_root,
+    conditional_wrapper_set_for_control_flow, copy_tir_subtree_with_active_slot_plan,
+    fill_direct_child_wrapper_names_into, fill_named_slots_in_wrapper_template,
+    push_runtime_slot_contribution_source, tir_node_is_control_flow_root,
+    wrap_tir_node_in_wrappers_into,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -36,45 +37,23 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 
 use rustc_hash::FxHashMap;
 
-pub(super) fn build_runtime_wrapper_site_plan(
-    wrapper_tir_root: TemplateIrNodeId,
-    sources: &[RuntimeSlotContributionSourceDraft],
-    slot_plan_id: TemplateSlotPlanId,
-    store: &mut TemplateIrStore,
-    copy_state: &mut TirCopyState,
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
-    string_table: &StringTable,
-) -> Result<Vec<TemplateSlotSitePlan>, TemplateError> {
-    RuntimeWrapperSitePlanBuilder {
-        sources,
-        slot_plan_id,
-        store,
-        copy_state,
-        expressions,
-        const_values,
-        string_table,
-    }
-    .build_slot_sites(wrapper_tir_root)
-}
-
 struct RuntimeSlotSiteDraft {
     site: RuntimeSlotSiteId,
     placeholder: TirSlotPlaceholderRef,
 }
 
-struct RuntimeWrapperSitePlanBuilder<'a> {
-    sources: &'a [RuntimeSlotContributionSourceDraft],
-    slot_plan_id: TemplateSlotPlanId,
-    store: &'a mut TemplateIrStore,
-    copy_state: &'a mut TirCopyState,
-    expressions: &'a AstExpressionBuilder,
-    const_values: &'a ConstValueStore,
-    string_table: &'a StringTable,
+pub(super) struct RuntimeWrapperSitePlanBuilder<'a> {
+    pub(super) sources: &'a [RuntimeSlotContributionSourceDraft],
+    pub(super) slot_plan_id: TemplateSlotPlanId,
+    pub(super) store: &'a mut TemplateIrStore,
+    pub(super) copy_state: &'a mut TirCopyState,
+    pub(super) expressions: &'a AstExpressionBuilder,
+    pub(super) const_values: &'a ConstValueStore,
+    pub(super) string_table: &'a StringTable,
 }
 
 impl RuntimeWrapperSitePlanBuilder<'_> {
-    fn build_slot_sites(
+    pub(super) fn build_slot_sites(
         mut self,
         wrapper_tir_root: TemplateIrNodeId,
     ) -> Result<Vec<TemplateSlotSitePlan>, TemplateError> {
@@ -164,6 +143,28 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
                 self.apply_site_wrappers(placeholder, &source, source_root)?
             };
             fill_roots.push(wrapped_root);
+        }
+
+        // Routing owns presence: a source of this key suppresses the fallback even when
+        // the source renders empty. Only an occurrence with no routed source carries
+        // its own default into the site tree.
+        if fill_roots.is_empty()
+            && let Some(default) = placeholder.default
+        {
+            let default_placeholder = TirSlotPlaceholder::with_wrapper_sets(
+                placeholder.key.clone(),
+                self.store.next_slot_occurrence_id(),
+                Some(default),
+                None,
+                None,
+                false,
+            );
+            fill_roots.push(self.store.push_node(TemplateIrNode::new(
+                TemplateIrNodeKind::Slot {
+                    placeholder: default_placeholder,
+                },
+                span,
+            )));
         }
 
         Ok(collapse_render_roots(fill_roots, span, self.store))
@@ -300,7 +301,7 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
         // The wrapper's own slot occurrences may declare `$children(..)` wrappers. A
         // site fill is already shape-gated by the site planner, but a named fill still
         // needs its authored facts, which its marker carries.
-        let mut slot_fill_wrappers = RuntimeSlotFillWrappers {
+        let slot_fill_wrappers = RuntimeSlotFillWrappers {
             slot_plan_id: self.slot_plan_id,
             sources: self.sources,
             named_fill: &named_fill,
@@ -312,7 +313,7 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
         let injected = inject_runtime_slot_fill_with_slot_wrappers(
             wrapper_root,
             &injections,
-            Some(&mut slot_fill_wrappers),
+            &mut Some(slot_fill_wrappers),
             self.store,
             self.copy_state,
         )?;
@@ -740,7 +741,13 @@ fn inject_runtime_slot_fill(
             fills: vec![RuntimeSlotFill::SiteGated(*root)],
         })
         .collect();
-    inject_runtime_slot_fill_with_slot_wrappers(wrapper_root, &injections, None, store, copy_state)
+    inject_runtime_slot_fill_with_slot_wrappers(
+        wrapper_root,
+        &injections,
+        &mut None,
+        store,
+        copy_state,
+    )
 }
 
 /// Injects slot fills and applies each receiving slot's own `$children(..)` wrappers.
@@ -758,7 +765,7 @@ fn inject_runtime_slot_fill(
 fn inject_runtime_slot_fill_with_slot_wrappers(
     wrapper_root: TemplateIrNodeId,
     injections: &[RuntimeSlotInjection],
-    mut slot_wrappers: Option<&mut RuntimeSlotFillWrappers<'_>>,
+    slot_wrappers: &mut Option<RuntimeSlotFillWrappers<'_>>,
     store: &mut TemplateIrStore,
     copy_state: &mut TirCopyState,
 ) -> Result<RuntimeSlotInjectionResult, TemplateError> {
@@ -776,6 +783,17 @@ fn inject_runtime_slot_fill_with_slot_wrappers(
                 .iter()
                 .find(|injection| injection.key == placeholder.key)
             else {
+                // Routing owns presence. An occurrence with no matching injection
+                // keeps its own fallback for handoff materialization. A matching
+                // injection, including an explicitly empty one, suppresses that
+                // fallback by replacing the occurrence with its fill roots.
+                if placeholder.default.is_some() {
+                    return Ok(RuntimeSlotInjectionResult {
+                        root: wrapper_root,
+                        changed: false,
+                    });
+                }
+
                 return Ok(RuntimeSlotInjectionResult {
                     root: empty_render_root(store, span),
                     changed: true,
@@ -791,7 +809,7 @@ fn inject_runtime_slot_fill_with_slot_wrappers(
                 let copied_fill =
                     copy_tir_subtree_with_active_slot_plan(source_root, None, store, copy_state)?;
                 let root = match fill {
-                    RuntimeSlotFill::SiteGated(_) => match slot_wrappers.as_deref() {
+                    RuntimeSlotFill::SiteGated(_) => match slot_wrappers.as_ref() {
                         Some(slot_wrappers) => apply_slot_wrapper_sets_to_deferred_fill(
                             store,
                             slot_wrappers.expressions,
@@ -803,7 +821,7 @@ fn inject_runtime_slot_fill_with_slot_wrappers(
                         )?,
                         None => copied_fill,
                     },
-                    RuntimeSlotFill::Named(_) => match slot_wrappers.as_deref_mut() {
+                    RuntimeSlotFill::Named(_) => match slot_wrappers.as_mut() {
                         Some(slot_wrappers) => apply_named_fill_wrapper_sets(
                             store,
                             slot_wrappers,
@@ -831,7 +849,7 @@ fn inject_runtime_slot_fill_with_slot_wrappers(
                 let injected_child = inject_runtime_slot_fill_with_slot_wrappers(
                     child_id,
                     injections,
-                    slot_wrappers.as_deref_mut(),
+                    slot_wrappers,
                     store,
                     copy_state,
                 )?;
@@ -874,7 +892,7 @@ fn inject_runtime_slot_fill_with_slot_wrappers(
             let injected = inject_runtime_slot_fill_with_slot_wrappers(
                 child_root,
                 injections,
-                slot_wrappers.as_deref_mut(),
+                slot_wrappers,
                 store,
                 copy_state,
             )?;
@@ -910,7 +928,7 @@ fn inject_runtime_slot_fill_with_slot_wrappers(
             let injected_body = inject_runtime_slot_fill_with_slot_wrappers(
                 body,
                 injections,
-                slot_wrappers.as_deref_mut(),
+                slot_wrappers,
                 store,
                 copy_state,
             )?;
@@ -946,7 +964,7 @@ fn inject_runtime_slot_fill_with_slot_wrappers(
             let injected_body = inject_runtime_slot_fill_with_slot_wrappers(
                 body,
                 injections,
-                slot_wrappers.as_deref_mut(),
+                slot_wrappers,
                 store,
                 copy_state,
             )?;
@@ -956,7 +974,7 @@ fn inject_runtime_slot_fill_with_slot_wrappers(
                     let injected_aggregate = inject_runtime_slot_fill_with_slot_wrappers(
                         wrapper_id,
                         injections,
-                        slot_wrappers.as_deref_mut(),
+                        slot_wrappers,
                         store,
                         copy_state,
                     )?;

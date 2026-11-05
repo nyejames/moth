@@ -333,6 +333,7 @@ fn collect_owned_node_string_slice_expressions(
             );
         }
         OwnedRuntimeTemplateNode::Text { .. }
+        | OwnedRuntimeTemplateNode::ConstantText { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }

@@ -31,9 +31,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):file-paths]
-        [$insert("title"):File paths]
-        [$insert("advanced"):[file_paths]]
+        [$in key:file-paths]
+        [$in title:File paths]
+        [$in advanced:[file_paths]]
 
         [file_paths_basic]
     ]
@@ -41,9 +41,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):file-values]
-        [$insert("title"):File values]
-        [$insert("advanced"):[file_values]]
+        [$in key:file-values]
+        [$in title:File values]
+        [$in advanced:[file_values]]
 
         [file_values_basic]
     ]
@@ -51,9 +51,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../packages/]
-        [$insert("previous_title"):Packages and dependencies]
-        [$insert("next_path"):../moth-templates/]
-        [$insert("next_title"):Moth template files]
+        [$in previous_path:../packages/]
+        [$in previous_title:Packages and dependencies]
+        [$in next_path:../moth-templates/]
+        [$in next_title:Moth template files]
     ]
 ]

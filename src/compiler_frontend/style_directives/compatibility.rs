@@ -14,7 +14,7 @@ pub struct TemplateHeadTag(u64);
 impl TemplateHeadTag {
     pub const MEANINGFUL_ITEM: Self = Self(1 << 0);
     pub const SLOT_DIRECTIVE: Self = Self(1 << 1);
-    pub const INSERT_DIRECTIVE: Self = Self(1 << 2);
+    pub const IN_DIRECTIVE: Self = Self(1 << 2);
     pub const COMMENT_DIRECTIVE: Self = Self(1 << 3);
     pub const FORMATTER_DIRECTIVE: Self = Self(1 << 4);
     pub const CHILDREN_DIRECTIVE: Self = Self(1 << 5);
@@ -49,7 +49,7 @@ const _: () = assert!(
     matches!(
         (TemplateHeadTag::MEANINGFUL_ITEM.0
             | TemplateHeadTag::SLOT_DIRECTIVE.0
-            | TemplateHeadTag::INSERT_DIRECTIVE.0
+            | TemplateHeadTag::IN_DIRECTIVE.0
             | TemplateHeadTag::COMMENT_DIRECTIVE.0
             | TemplateHeadTag::FORMATTER_DIRECTIVE.0
             | TemplateHeadTag::CHILDREN_DIRECTIVE.0

@@ -1,9 +1,9 @@
 # Builder slots and template directive redesign - implementation plan
 
 Status: Active on `builder-slots`
-Current slice: Phase 1 slot syntax and per-occurrence defaults
+Current slice: Phase 2 before/after wrappers
 Blockers: None identified
-Next action: Replace slot and insert syntax while preserving the admitted wrapper regressions.
+Next action: Replace `$children` with `$before` and `$after`, preserving the admitted wrapper regressions.
 Scope: Core template syntax and composition, builder-defined top-level const slots, HTML metadata and stylesheet assembly
 
 ## Purpose
@@ -396,7 +396,7 @@ Targets:
 - Preserve owner-local compact IDs, stable cross-module resource origins and use of existing source spans. Use shared references instead of cloning large structural Strings wherever ownership allows.
 - Keep user-authored invalid cases in diagnostic lanes, true internal authority failures in infrastructure lanes and actual impossible states as compiler bugs. Do not convert malformed source into panics.
 
-Follow up with an independent code-bloat review using `moth-code-review-guide.md`. In particular look for orphaned `$children` helpers, old directive-argument parsers, duplicate metadata models, unnecessary slot registry abstractions and benchmark-only shims. Remove redundant code rather than preserving a compatibility wrapper.
+Follow up with an independent code-bloat review using the plan-orchestrator skill's `code-review-guide.md`. In particular look for orphaned `$children` helpers, old directive-argument parsers, duplicate metadata models, unnecessary slot registry abstractions and benchmark-only shims. Remove redundant code rather than preserving a compatibility wrapper.
 
 ## 8. Validation and deliverables
 
@@ -426,7 +426,7 @@ These exclusions must remain visible in the roadmap where they affect unsettled 
 ## Acceptance checklist
 
 - [ ] Pre-refactor named-slot-inside-`$children` regression is installed, executed and retained through the migration.
-- [ ] `$slot`, `$in` and per-occurrence defaults match the approved syntax and routing behaviour.
+- [x] `$slot`, `$in` and per-occurrence defaults match the approved syntax and routing behaviour.
 - [ ] `$before`/`$after` accept constant wrappers with named slots, reject their default/positional slots and preserve `$fresh` and runtime no-output semantics.
 - [ ] Root named inserts route only when direct and const, with builder schema independence and accurate source provenance.
 - [ ] HTML metadata uses slots only, with existing fallbacks and escaping intact.

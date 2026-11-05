@@ -4,6 +4,7 @@
 //! Tests keep this facade so fixtures can push nodes without repeating store
 //! allocation details.
 
+use crate::compiler_frontend::ast::const_values::store::ConstValueId;
 use crate::compiler_frontend::ast::expressions::expression_store::ExprId;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
@@ -123,7 +124,25 @@ impl<'store> TemplateIrBuilder<'store> {
     ) -> TemplateIrNodeId {
         let occurrence_id = self.store.next_slot_occurrence_id();
         let placeholder =
-            TirSlotPlaceholder::with_wrapper_sets(key, occurrence_id, None, None, false);
+            TirSlotPlaceholder::with_wrapper_sets(key, occurrence_id, None, None, None, false);
+        self.push_tir_slot_placeholder_node(placeholder, span)
+    }
+
+    pub(crate) fn push_slot_node_with_default(
+        &mut self,
+        key: SlotKey,
+        default: ConstValueId,
+        span: Option<SourceSpan>,
+    ) -> TemplateIrNodeId {
+        let occurrence_id = self.store.next_slot_occurrence_id();
+        let placeholder = TirSlotPlaceholder::with_wrapper_sets(
+            key,
+            occurrence_id,
+            Some(default),
+            None,
+            None,
+            false,
+        );
         self.push_tir_slot_placeholder_node(placeholder, span)
     }
 

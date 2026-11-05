@@ -41,6 +41,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
+use crate::compiler_frontend::folded_value::resolve_const_string_value;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, add_ast_counter, increment_ast_counter,
 };
@@ -777,9 +778,11 @@ pub(super) fn fold_tir_node_into_buffer(
                 .into());
             }
 
-            if let Some(resolution) = fold_input
+            let resolution = fold_input
                 .view
-                .effective_slot_resolution(placeholder.occurrence_id)?
+                .effective_slot_resolution(placeholder.occurrence_id)?;
+
+            if let Some(resolution) = &resolution
                 && let TirSlotResolutionKind::Resolved { sources } = &resolution.kind
             {
                 for source in sources {
@@ -794,7 +797,22 @@ pub(super) fn fold_tir_node_into_buffer(
                 return Ok(());
             }
 
+            // Presence is routing-owned: any resolution entry, including an explicitly
+            // empty routed contribution, suppresses this occurrence's fallback. Only an
+            // occurrence with no routing presence falls back to its own constant String.
+            if resolution.is_none()
+                && let Some(default) = placeholder.default
+            {
+                let (value, provenance) =
+                    resolve_const_string_value(&*fold_context.const_values, default)?;
+                output_state.provenance.merge(&provenance);
+                output_state.append_emission_value(value, fold_context.string_table);
+                output_state.emitted_output = true;
+            }
+
             if fold_input.projection_enabled {
+                // The public projection retains the occurrence and its default, so a
+                // rebuilt template can still fall back after composition.
                 output_state.append_slot(placeholder.occurrence_id);
                 output_state.emitted_output = true;
             }

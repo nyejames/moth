@@ -25,7 +25,7 @@ use crate::compiler_frontend::ast::templates::tir::preparation::{
 };
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::folded_value::{
-    OwnedFoldedString, owned_folded_string_from_const_string,
+    OwnedFoldedString, owned_folded_string_from_const_string, owned_folded_string_from_const_value,
 };
 
 use crate::compiler_frontend::ast::templates::tir::collect_tir_slot_schema;
@@ -560,14 +560,34 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
 
                 if let Some(resolution) =
                     view.effective_slot_resolution(placeholder.occurrence_id)?
-                    && let TirSlotResolutionKind::Resolved { sources } = &resolution.kind
                 {
-                    return self.materialize_resolved_slot_sources(
-                        view,
-                        sources,
-                        node.span,
-                        active_slot_plan,
-                    );
+                    if let TirSlotResolutionKind::Resolved { sources } = &resolution.kind {
+                        return self.materialize_resolved_slot_sources(
+                            view,
+                            sources,
+                            node.span,
+                            active_slot_plan,
+                        );
+                    }
+
+                    // `Missing` records routed presence with no content, so it suppresses
+                    // the occurrence default exactly like an explicitly empty source.
+                    return Ok(OwnedRuntimeTemplateNode::Slot { span: node.span });
+                }
+
+                if let Some(default) = placeholder.default {
+                    let text = owned_folded_string_from_const_value(
+                        self.const_values,
+                        default,
+                        self.module_resources,
+                        self.string_table,
+                    )?;
+
+                    // A selected fallback is authored output even when it is empty or
+                    // whitespace-only. Keep that provenance distinct from ordinary
+                    // template text so HIR output classification and conditioned
+                    // wrappers match constant composition.
+                    return Ok(OwnedRuntimeTemplateNode::ConstantText { text });
                 }
 
                 Ok(OwnedRuntimeTemplateNode::Slot { span: node.span })

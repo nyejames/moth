@@ -374,8 +374,14 @@ fn overlay_allocation_rejects_duplicate_and_out_of_range_keys() {
 fn slot_placeholder_lookup_uses_the_store_not_raw_vectors() {
     let mut store = TemplateIrStore::new();
     let occurrence = store.next_slot_occurrence_id();
-    let placeholder =
-        TirSlotPlaceholder::with_wrapper_sets(SlotKey::Default, occurrence, None, None, false);
+    let placeholder = TirSlotPlaceholder::with_wrapper_sets(
+        SlotKey::Default,
+        occurrence,
+        None,
+        None,
+        None,
+        false,
+    );
     store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Slot { placeholder },
         None,
@@ -497,6 +503,7 @@ fn conversion_failure_leaves_reserved_plan_invisible() {
                 occurrence,
                 None,
                 None,
+                None,
                 false,
             ),
         },
@@ -518,7 +525,14 @@ fn active_slot_conversion_publishes_derived_child_and_rewrites_reference() {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let occurrence = builder.store.next_slot_occurrence_id();
         let slot = builder.push_tir_slot_placeholder_node(
-            TirSlotPlaceholder::with_wrapper_sets(SlotKey::Default, occurrence, None, None, false),
+            TirSlotPlaceholder::with_wrapper_sets(
+                SlotKey::Default,
+                occurrence,
+                None,
+                None,
+                None,
+                false,
+            ),
             span,
         );
         let root = builder.push_sequence_node(vec![slot], span);

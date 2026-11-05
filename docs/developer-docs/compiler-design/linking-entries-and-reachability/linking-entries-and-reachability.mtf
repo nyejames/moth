@@ -28,27 +28,27 @@ Support roots and the project package facade have no implicit entry.
 In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `greeting.moth` is an ordinary source file inside that same directory-scoped module, not a separate module with a root of its own. Binding `greet` runs no page-level statements, because only an activated entry root runs root work.
 
 [diagram:
-    [$insert("label"): Compiling is not activating]
-    [$insert("caption"): Every module goes through the full frontend. Only the entry decides which dormant root work ever wakes up.]
+    [$in label: Compiling is not activating]
+    [$in caption: Every module goes through the full frontend. Only the entry decides which dormant root work ever wakes up.]
 
     [stage:
         [node:
-            [$insert("href"): ../module-artefacts-and-reuse/]
-            [$insert("eyebrow"): Compiled]
-            [$insert("title"): Every module in the graph]
+            [$in href: ../module-artefacts-and-reuse/]
+            [$in eyebrow: Compiled]
+            [$in title: Every module in the graph]
             Parsed, type-checked, lowered and borrow-validated. Dormant top-level work included.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): All still asleep]
+                [$in label: All still asleep]
                 [lane:
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     `@page.moth` and its owned sources
                 ]
                 [detail:
-                    [$insert("href"): ../project-graphs-and-modules/]
+                    [$in href: ../project-graphs-and-modules/]
                     Support roots and package facades
                 ]
                 ]
@@ -58,18 +58,18 @@ In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `gr
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Selected]
-            [$insert("title"): One entry picks a root]
+            [$in href: ./]
+            [$in eyebrow: Selected]
+            [$in title: One entry picks a root]
             Entry assembly activates that root's implicit entry, exactly once.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ../target-planning-and-validation/]
-            [$insert("eyebrow"): Reachable]
-            [$insert("title"): The function union]
+            [$in href: ../target-planning-and-validation/]
+            [$in eyebrow: Reachable]
+            [$in title: The function union]
             Walk call edges from the activated entry. Everything else stays compiled but unemitted.
         ]
     ]

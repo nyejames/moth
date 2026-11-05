@@ -440,7 +440,7 @@ fn children_rewrites_nested_empty_argument_error() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = template_tokens_from_source(
-        "[$children([$slot()]): body]",
+        "[$children([$md()]): body]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -467,7 +467,7 @@ fn children_rewrites_nested_empty_argument_error() {
         &mut string_table,
         &mut path_fork,
     )
-    .expect_err("nested empty $slot arguments should fail the $children argument");
+    .expect_err("nested empty directive arguments should fail the $children argument");
     let error = expect_template_diagnostic(error);
     let facts = error
         .first()

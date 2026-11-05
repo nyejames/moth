@@ -21,7 +21,7 @@ use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counte
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::helpers::{
     children_of_node, extra_loose_content_without_default_slot_error,
@@ -43,25 +43,46 @@ pub(crate) struct TirSlotContributions {
     pub(crate) default_nodes: Vec<TemplateIrNodeId>,
     pub(crate) named_nodes: FxHashMap<StringId, Vec<TemplateIrNodeId>>,
     pub(crate) positional_nodes: FxHashMap<usize, Vec<TemplateIrNodeId>>,
+    /// Targets that received an explicit routing decision, even when the routed
+    /// content was empty.
+    ///
+    /// WHAT: records slot presence independently of the contribution node list.
+    /// WHY: an explicitly empty contribution (`[$in title:]`) still suppresses the
+    ///      occurrence default, but an empty node list alone cannot distinguish that
+    ///      from an unrouted slot.
+    pub(crate) routed_targets: FxHashSet<SlotKey>,
 }
 
 impl TirSlotContributions {
     /// Appends routed nodes to the default-slot bucket.
     pub(crate) fn extend_default_nodes(&mut self, nodes: Vec<TemplateIrNodeId>) {
+        self.routed_targets.insert(SlotKey::Default);
         self.default_nodes.extend(nodes);
     }
 
     /// Appends routed nodes to one named-slot bucket.
     pub(crate) fn extend_named_nodes(&mut self, name: StringId, nodes: Vec<TemplateIrNodeId>) {
+        self.routed_targets.insert(SlotKey::Named(name));
         self.named_nodes.entry(name).or_default().extend(nodes);
     }
 
     /// Appends routed nodes to one positional-slot bucket.
     pub(crate) fn extend_positional_nodes(&mut self, index: usize, nodes: Vec<TemplateIrNodeId>) {
+        self.routed_targets.insert(SlotKey::Positional(index));
         self.positional_nodes
             .entry(index)
             .or_default()
             .extend(nodes);
+    }
+
+    /// Returns whether routing decided this slot key, even when the decision was empty.
+    ///
+    /// WHAT: reports presence independently of rendered content.
+    /// WHY: occurrence defaults fall back only when the slot was never routed. Callers
+    ///      must not infer presence from a nonempty node list, because an explicit empty
+    ///      contribution is still a routed contribution.
+    pub(crate) fn slot_has_routed_presence(&self, key: &SlotKey) -> bool {
+        self.routed_targets.contains(key) || !self.nodes_for_slot(key).is_empty()
     }
 
     /// Returns the routed node IDs for a given slot key.
@@ -70,6 +91,10 @@ impl TirSlotContributions {
     ///       the slot received no contributions.
     /// WHY: callers (placeholder expansion, runtime plan building) need a
     ///      uniform view of every slot's content, including empty slots.
+    ///
+    /// An empty slice does not prove the slot was unrouted. Callers deciding
+    /// whether an occurrence default falls back must ask
+    /// [`Self::slot_has_routed_presence`] instead.
     pub(crate) fn nodes_for_slot(&self, key: &SlotKey) -> &[TemplateIrNodeId] {
         match key {
             SlotKey::Default => &self.default_nodes,

@@ -1511,8 +1511,8 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
         src.join("@page.moth"),
         r#"@html canvas, get_canvas_context
 #[canvas:
-  [$insert("id"):unused_canvas]
-  [$insert("style"):
+  [$in id:unused_canvas]
+  [$in style:
     width: 320px;
     height: 180px;
   ]

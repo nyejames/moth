@@ -474,7 +474,7 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
              @wrappers draw\n\
              #[p, center: source-package-wrapper]\n\
              #[canvas:\n\
-                 [$insert(\"id\"):game_canvas]\n\
+                 [$in id:game_canvas]\n\
              ]\n\
              result = draw(\"game_canvas\")!\n\
              [:[result]]\n",

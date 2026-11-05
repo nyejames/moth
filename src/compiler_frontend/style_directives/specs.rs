@@ -16,13 +16,27 @@ use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 /// the name from here so they cannot drift apart.
 pub(crate) const DOC_DIRECTIVE_NAME: &str = "doc";
 
+/// The core `$slot` directive name.
+///
+/// The symbol immediately after it names a slot in the receiving template's schema, not a
+/// lexical value. Header-stage initializer scans read the name from here so they do not
+/// record slot targets as constant references.
+pub(crate) const SLOT_DIRECTIVE_NAME: &str = "slot";
+
+/// The core `$in` directive name.
+///
+/// Its required symbol target is a slot identity, not a lexical value. Header-stage
+/// initializer scans read the name from here so they do not record insert targets as
+/// constant references.
+pub(crate) const INSERT_DIRECTIVE_NAME: &str = "in";
+
 /// Core language directive behavior handled directly by compiler-owned template parsing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CoreStyleDirectiveKind {
     Children,
     Fresh,
     Slot,
-    Insert,
+    In,
     Note,
     Todo,
     Doc,

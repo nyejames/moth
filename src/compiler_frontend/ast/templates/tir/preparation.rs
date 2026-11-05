@@ -607,7 +607,12 @@ impl PreparationWalk<'_> {
                             role,
                             RuntimeTemplateReason::SlotWrapperApplication,
                         );
-                    } else if !role.virtual_wrapper && slot_resolution_overlay_absent {
+                    } else if !role.virtual_wrapper
+                        && slot_resolution_overlay_absent
+                        && placeholder.default.is_none()
+                    {
+                        // A defaulted occurrence with no routing overlay is a foldable
+                        // compile-time fallback, not unresolved runtime work.
                         self.record_role_runtime(
                             &mut facts,
                             role,

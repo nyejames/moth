@@ -434,6 +434,7 @@ define_stable_reason_keys! {
         &InvalidTemplateDirectiveCode::UnexpectedArguments => "invalid_template_directive.unexpected_arguments",
         &InvalidTemplateDirectiveCode::EmptyArguments => "invalid_template_directive.empty_arguments",
         &InvalidTemplateDirectiveCode::InvalidSlotTarget => "invalid_template_directive.invalid_slot_target",
+        &InvalidTemplateDirectiveCode::InvalidSlotDefault => "invalid_template_directive.invalid_slot_default",
         &InvalidTemplateDirectiveCode::InvalidInsertTarget => "invalid_template_directive.invalid_insert_target",
         &InvalidTemplateDirectiveCode::InvalidChildrenArgument => "invalid_template_directive.invalid_children_argument",
     },

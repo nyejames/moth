@@ -41,44 +41,44 @@ The three commands also differ in how far they run:
 - **`check`** casts the widest net, taking in every discovered module plus check-only orphans and package surfaces. It plans and validates all the way through the `ValidatedMemoryPlan`, then stops before lowering or writing anything.
 
 [diagram:
-    [$insert("label"): What is already decided before config.moth opens]
-    [$insert("caption"): Each step narrows what the project is allowed to be. By the time any page source is read, the set of legal source kinds, packages and targets is already fixed.]
+    [$in label: What is already decided before config.moth opens]
+    [$in caption: Each step narrows what the project is allowed to be. By the time any page source is read, the set of legal source kinds, packages and targets is already fixed.]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): First]
-            [$insert("title"): The command]
+            [$in href: ./]
+            [$in eyebrow: First]
+            [$in title: The command]
             `build`, `dev` or `check` picks the artefact builder, the build profile, tooling overlays, explicit inputs and target intent.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Second]
-            [$insert("title"): The capability surface]
+            [$in href: ./]
+            [$in eyebrow: Second]
+            [$in title: The capability surface]
             The selected builder publishes what this project may use.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Published before any source is read]
+                [$in label: Published before any source is read]
                 [lane:
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     Config schemas
                 ]
                 [detail:
-                    [$insert("href"): ../project-graphs-and-modules/]
+                    [$in href: ../project-graphs-and-modules/]
                     Available packages
                 ]
                 [detail:
-                    [$insert("href"): ../tokenization/]
+                    [$in href: ../tokenization/]
                     Supported source kinds
                 ]
                 [detail:
-                    [$insert("href"): ../target-planning-and-validation/]
+                    [$in href: ../target-planning-and-validation/]
                     Target affinity metadata
                 ]
                 ]
@@ -88,18 +88,18 @@ The three commands also differ in how far they run:
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Third]
-            [$insert("title"): Bootstrap facts]
+            [$in href: ./]
+            [$in eyebrow: Third]
+            [$in title: Bootstrap facts]
             Only now does `config.moth` compile through the single config service, producing folded project and builder facts plus separate bootstrap input-contract results.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ../project-graphs-and-modules/]
-            [$insert("eyebrow"): Then]
-            [$insert("title"): Stage 0 discovery]
+            [$in href: ../project-graphs-and-modules/]
+            [$in eyebrow: Then]
+            [$in title: Stage 0 discovery]
             With a project it can name, the build system finally goes looking for source.
         ]
     ]

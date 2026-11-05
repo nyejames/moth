@@ -37,9 +37,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):numeric-types]
-        [$insert("title"):Numeric types]
-        [$insert("advanced"):[numeric_types]]
+        [$in key:numeric-types]
+        [$in title:Numeric types]
+        [$in advanced:[numeric_types]]
 
         [numeric_types_basic]
     ]
@@ -47,9 +47,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):numeric-literals]
-        [$insert("title"):Numeric literals]
-        [$insert("advanced"):[numeric_literals]]
+        [$in key:numeric-literals]
+        [$in title:Numeric literals]
+        [$in advanced:[numeric_literals]]
 
         [numeric_literals_basic]
     ]
@@ -57,9 +57,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):operators]
-        [$insert("title"):Operators]
-        [$insert("advanced"):[operators]]
+        [$in key:operators]
+        [$in title:Operators]
+        [$in advanced:[operators]]
 
         [operators_basic]
     ]
@@ -67,9 +67,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):checked-arithmetic]
-        [$insert("title"):Checked arithmetic]
-        [$insert("advanced"):[checked_arithmetic]]
+        [$in key:checked-arithmetic]
+        [$in title:Checked arithmetic]
+        [$in advanced:[checked_arithmetic]]
 
         [checked_arithmetic_basic]
     ]
@@ -77,9 +77,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../bindings/]
-        [$insert("previous_title"):Values and bindings]
-        [$insert("next_path"):../casts/]
-        [$insert("next_title"):Casts]
+        [$in previous_path:../bindings/]
+        [$in previous_title:Values and bindings]
+        [$in next_path:../casts/]
+        [$in next_title:Casts]
     ]
 ]

@@ -280,6 +280,34 @@ impl<'a> HirBuilder<'a> {
                 Ok(RuntimeTemplateEmission::Output)
             }
 
+            OwnedRuntimeTemplateNode::ConstantText { text } => {
+                // A selected authored constant is output by identity, not by its
+                // characters. Empty and whitespace-only fallbacks still mark the
+                // parent as emitted so an output-conditioned wrapper renders.
+                let Some(text_value) = text.clone().into_text() else {
+                    return self.append_structural_text_node_to_accumulator(
+                        text,
+                        append_context,
+                        span_ref,
+                    );
+                };
+
+                if !text_value.is_empty() {
+                    self.append_text_to_accumulator(
+                        text_value,
+                        append_context.target_accumulator,
+                        span_ref,
+                    )?;
+                }
+
+                self.mark_owned_runtime_template_output_if_needed(
+                    RuntimeTemplateEmission::Output,
+                    append_context,
+                    span_ref,
+                )?;
+                Ok(RuntimeTemplateEmission::Output)
+            }
+
             OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
                 let emission = self.append_expression_to_accumulator(
                     append_context.anchor.bind(*expression)?,

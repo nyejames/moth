@@ -3,7 +3,7 @@
 //! WHAT: consumes the finalized AST-owned handoff and lowers it with
 //! ordinary string accumulators.
 //! WHY: HIR should execute owned runtime slot-application metadata without
-//! holding raw TIR IDs or rediscovering source-level `$slot` / `$insert(...)`
+//! holding raw TIR IDs or rediscovering source-level `$slot` / `$in name: ...`
 //! semantics.
 
 use crate::compiler_frontend::ast::const_values::store::{
@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     ExpressionOperationView, ExpressionView,
 };
 use crate::compiler_frontend::ast::templates::{
-    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource,
+    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource, OwnedRuntimeSlotSite,
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -116,6 +116,7 @@ impl<'a> HirBuilder<'a> {
                 anchor,
                 &self.module_const_values,
                 self.string_table,
+                None,
             );
             let accumulator = self.initialize_runtime_template_accumulator(span_ref)?;
             let emitted_output = if guarantees_output {
@@ -143,14 +144,16 @@ impl<'a> HirBuilder<'a> {
         anchor: ExpressionView<'_>,
         span_ref: &Option<SourceSpan>,
     ) -> Result<Option<LocalId>, HirConstructionFailure> {
-        // Wrapper-owned output, such as a list shell, survives when conditional
-        // children contribute nothing; conditional sources keep their emission tracking.
+        // Wrapper-owned output, such as a list shell or an unresolved slot
+        // occurrence's constant fallback, survives when conditional children
+        // contribute nothing; conditional sources keep their emission tracking.
         let mut renders_wrapper_unconditionally = handoff.contribution_sources.is_empty()
             || owned_runtime_template_node_guarantees_output(
                 &handoff.wrapper,
                 anchor,
                 &self.module_const_values,
                 self.string_table,
+                Some(handoff.slot_sites.as_slice()),
             );
 
         // Reuse the per-source proof gathered during local initialization. Only
@@ -376,10 +379,17 @@ fn owned_runtime_template_node_guarantees_output(
     anchor: ExpressionView<'_>,
     const_values: &ConstValueStore,
     string_table: &StringTable,
+    slot_sites: Option<&[OwnedRuntimeSlotSite]>,
 ) -> bool {
     match node {
         OwnedRuntimeTemplateNode::Sequence { children, .. } => children.iter().any(|child| {
-            owned_runtime_template_node_guarantees_output(child, anchor, const_values, string_table)
+            owned_runtime_template_node_guarantees_output(
+                child,
+                anchor,
+                const_values,
+                string_table,
+                slot_sites,
+            )
         }),
 
         OwnedRuntimeTemplateNode::Text { text, .. } => match text {
@@ -390,6 +400,8 @@ fn owned_runtime_template_node_guarantees_output(
             }),
         },
 
+        OwnedRuntimeTemplateNode::ConstantText { .. } => true,
+
         OwnedRuntimeTemplateNode::AggregateOutput => true,
 
         OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
@@ -397,11 +409,17 @@ fn owned_runtime_template_node_guarantees_output(
             let expression = anchor
                 .bind(*expression)
                 .expect("validated runtime handoff leaf");
-            dynamic_expression_guarantees_output(expression, const_values, string_table)
+            dynamic_expression_guarantees_output(expression, const_values, string_table, slot_sites)
         }
 
         OwnedRuntimeTemplateNode::ChildTemplate { template, .. } => {
-            runtime_template_handoff_guarantees_output(template, anchor, const_values, string_table)
+            runtime_template_handoff_guarantees_output(
+                template,
+                anchor,
+                const_values,
+                string_table,
+                slot_sites,
+            )
         }
 
         // Runtime template control flow can structurally produce no output
@@ -412,8 +430,25 @@ fn owned_runtime_template_node_guarantees_output(
         | OwnedRuntimeTemplateNode::Loop { .. }
         | OwnedRuntimeTemplateNode::ConditionalWrapper { .. } => false,
 
-        OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
-        | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
+        // A slot site answers for its resolved render root, not for the slot
+        // mechanism. An occurrence that still carries its own constant default
+        // guarantees that fallback output even when every routed contribution is
+        // conditional and currently empty. A site whose root is a contribution
+        // marker or conditional wrapper keeps the no-output guarantee false.
+        OwnedRuntimeTemplateNode::RuntimeSlotSite { site, .. } => slot_sites
+            .and_then(|sites| sites.get(site.0))
+            .filter(|stored| stored.site == *site)
+            .is_some_and(|stored| {
+                owned_runtime_template_node_guarantees_output(
+                    &stored.render_root,
+                    anchor,
+                    const_values,
+                    string_table,
+                    slot_sites,
+                )
+            }),
+
+        OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => false,
     }
 }
@@ -422,6 +457,7 @@ fn dynamic_expression_guarantees_output(
     expression: ExpressionView<'_>,
     const_values: &ConstValueStore,
     string_table: &StringTable,
+    slot_sites: Option<&[OwnedRuntimeSlotSite]>,
 ) -> bool {
     match expression.operation() {
         ExpressionOperationView::Constant(id) => match const_values.payload(id) {
@@ -437,6 +473,7 @@ fn dynamic_expression_guarantees_output(
                 expression,
                 const_values,
                 string_table,
+                slot_sites,
             )
         }
         ExpressionOperationView::RuntimeSlotApplication(handoff) => {
@@ -445,10 +482,11 @@ fn dynamic_expression_guarantees_output(
                 expression,
                 const_values,
                 string_table,
+                Some(handoff.slot_sites.as_slice()),
             )
         }
         ExpressionOperationView::Coerce { value, .. } => {
-            dynamic_expression_guarantees_output(value, const_values, string_table)
+            dynamic_expression_guarantees_output(value, const_values, string_table, slot_sites)
         }
         _ => true,
     }
@@ -459,17 +497,23 @@ fn runtime_template_handoff_guarantees_output(
     anchor: ExpressionView<'_>,
     const_values: &ConstValueStore,
     string_table: &StringTable,
+    slot_sites: Option<&[OwnedRuntimeSlotSite]>,
 ) -> bool {
     match &handoff.body {
-        OwnedRuntimeTemplateBody::Render(node) => {
-            owned_runtime_template_node_guarantees_output(node, anchor, const_values, string_table)
-        }
+        OwnedRuntimeTemplateBody::Render(node) => owned_runtime_template_node_guarantees_output(
+            node,
+            anchor,
+            const_values,
+            string_table,
+            slot_sites,
+        ),
         OwnedRuntimeTemplateBody::RuntimeSlotApplication(handoff) => {
             owned_runtime_template_node_guarantees_output(
                 &handoff.wrapper,
                 anchor,
                 const_values,
                 string_table,
+                Some(handoff.slot_sites.as_slice()),
             )
         }
     }

@@ -90,7 +90,7 @@ fn collect_and_strip_comment_templates_for_tests_with_store(
 #[test]
 fn standalone_insert_helper_value_is_rejected_after_composition() {
     let source = r#"
-value = [$insert("style"): color: red;]
+value = [$in style: color: red;]
 "#;
 
     let failure = parse_single_file_ast_diagnostic(source);

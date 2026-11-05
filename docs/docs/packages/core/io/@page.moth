@@ -25,9 +25,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):console-and-input]
-        [$insert("title"):Console and input]
-        [$insert("advanced"):[io_advanced]]
+        [$in key:console-and-input]
+        [$in title:Console and input]
+        [$in advanced:[io_advanced]]
 
         [io_basic]
     ]
@@ -35,9 +35,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../prelude/]
-        [$insert("previous_title"):Prelude policy]
-        [$insert("next_path"):../collections/]
-        [$insert("next_title"):Core collections]
+        [$in previous_path:../prelude/]
+        [$in previous_title:Prelude policy]
+        [$in next_path:../collections/]
+        [$in next_title:Core collections]
     ]
 ]

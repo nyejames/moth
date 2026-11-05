@@ -854,22 +854,22 @@ Formatters apply to their own templates, and incompatible formatters can't share
 
 [codeblock, $code("moth"):
     card #= [:
-        <h1>[$slot("title")]</h1>
+        <h1>[$slot title]</h1>
         <section>[$slot]</section>
     ]
     [card:
-        [$insert("title"): Welcome]
+        [$in title: Welcome]
         Hello, [name].
     ]
 
-    image #= [: <img src="[$slot(1)]" alt="[$slot]">]
+    image #= [: <img src="[$slot 1]" alt="[$slot]">]
     [image, "logo.png": Moth logo]
 
     list #= [$children([:<li>[$slot]</li>]): <ul>[$slot]</ul>]
     [list: [: one] [$fresh: [: two]]]
 ]
 
-Named `$slot` values receive matching `$insert` content. Numbered slots consume head contributions in order. `$slot` receives the remainder.
+Named `$slot` values receive matching `$in` content. Numbered slots consume head contributions in order. `$slot` receives the remainder.
 Missing slots render empty, repeated slots reuse content and unassigned content is an error.
 `$children` wraps direct children. `$fresh` skips one parent wrapper.
 

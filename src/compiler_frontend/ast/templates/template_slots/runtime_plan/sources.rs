@@ -13,8 +13,9 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateIrStore, TemplateSlotContributionSourcePlan, TirCopyState, TirSlotContributions,
-    TirSlotSchema, classify_tir_contribution_node, copy_tir_subtree_with_active_slot_plan,
+    ContributionShape, TemplateIrNode, TemplateIrNodeKind, TemplateIrStore,
+    TemplateSlotContributionSourcePlan, TirCopyState, TirSlotContributions, TirSlotSchema,
+    classify_tir_contribution_node, copy_tir_subtree_with_active_slot_plan,
     tir_node_is_const_evaluable_value, tir_node_is_control_flow_root,
 };
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -57,7 +58,10 @@ pub(in crate::compiler_frontend::ast::templates) fn tir_contributions_need_runti
 ///
 /// WHAT: iterates slot keys in schema order (default, positional ascending,
 ///       named by resolved spelling) and creates one source draft per routed
-///       TIR node. Each node is deep-copied with no active slot plan so nested
+///       TIR node. A target that routing decided with empty content still gets
+///       one neutral empty-sequence presence source, so site planning and named
+///       marker propagation suppress the occurrence default instead of falling
+///       back. Each node is deep-copied with no active slot plan so nested
 ///       child templates and insert contributions become independent render
 ///       roots that the HIR can materialize separately.
 /// WHY: the TIR-native head-chain composition path starts from already-routed
@@ -76,7 +80,38 @@ pub(in crate::compiler_frontend::ast::templates) fn build_tir_native_contributio
     let mut sources = Vec::new();
 
     for target in schema.ordered_slot_keys(services.string_table) {
-        for node_id in contributions.nodes_for_slot(&target) {
+        let target_nodes = contributions.nodes_for_slot(&target);
+
+        // Routing presence is independent of content. An explicitly empty
+        // contribution (`[$in title:]`) has no authored nodes, but the runtime
+        // plan still needs one source for the target so site planning and named
+        // marker propagation suppress the occurrence default instead of falling
+        // back. An empty sequence is the neutral render root for that presence.
+        if target_nodes.is_empty() {
+            if contributions.slot_has_routed_presence(&target) {
+                let render_root = store.push_node(TemplateIrNode::new(
+                    TemplateIrNodeKind::Sequence {
+                        children: Vec::new(),
+                    },
+                    None,
+                ));
+                let id = RuntimeSlotContributionSourceId(sources.len());
+                sources.push(RuntimeSlotContributionSourceDraft {
+                    source: TemplateSlotContributionSourcePlan {
+                        source: id,
+                        target: target.clone(),
+                        render_root,
+                        renders_wrapper_unconditionally: true,
+                        span: None,
+                    },
+                    shape: ContributionShape::Other,
+                    control_flow: false,
+                });
+            }
+            continue;
+        }
+
+        for node_id in target_nodes {
             let id = RuntimeSlotContributionSourceId(sources.len());
             let source_span = store
                 .get_node(*node_id)
@@ -122,3 +157,7 @@ pub(in crate::compiler_frontend::ast::templates) fn build_tir_native_contributio
 
     Ok(sources)
 }
+
+#[cfg(test)]
+#[path = "tests/sources_tests.rs"]
+mod sources_tests;

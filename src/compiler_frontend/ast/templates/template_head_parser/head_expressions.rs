@@ -177,7 +177,7 @@ pub(super) fn handle_template_value_in_template_head(
     }
 
     let child_reference = &value.tir_reference;
-    // `$insert("name")` helpers are slot contributions, not ordinary child
+    // `$in name: ...` helpers are slot contributions, not ordinary child
     // template output. Recording them as `InsertContribution` nodes lets
     // TIR-native slot routing bucket them by the helper's target slot key
     // rather than treating them as loose fill content.

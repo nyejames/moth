@@ -26,31 +26,31 @@ Those files hold characters on disk. They do not yet hold a typed call graph, a 
 Think of a seed and a plant. The seed holds a plan. The same plan can grow under different conditions into different adult forms. Source meaning is the plan. Target code is the plant in a particular climate: browser JavaScript, Wasm, an HTML shell. Compilers live in that gap.
 
 [diagram:
-    [$insert("label"): One source meaning grown into several target forms]
-    [$insert("caption"): The plan is authored once. Each target grows it into a different adult form without changing what the program means.]
+    [$in label: One source meaning grown into several target forms]
+    [$in caption: The plan is authored once. Each target grows it into a different adult form without changing what the program means.]
 
     [stage:
         [node:
-            [$insert("href"): ../ast-semantics-and-types/]
-            [$insert("eyebrow"): Source meaning]
-            [$insert("title"): The plan]
+            [$in href: ../ast-semantics-and-types/]
+            [$in eyebrow: Source meaning]
+            [$in title: The plan]
             `greet` takes a visitor name and returns a greeting. One set of rules, checked once.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Grown forms]
+                [$in label: Grown forms]
                 [fanout:
                 [detail:
-                    [$insert("href"): ../backend-lowering/]
+                    [$in href: ../backend-lowering/]
                     JavaScript for browser work
                 ]
                 [detail:
-                    [$insert("href"): ../backend-lowering/]
+                    [$in href: ../backend-lowering/]
                     WebAssembly for neutral compute
                 ]
                 [detail:
-                    [$insert("href"): ../html-assembly-and-output/]
+                    [$in href: ../html-assembly-and-output/]
                     HTML the browser displays
                 ]
                 ]
@@ -88,41 +88,41 @@ The **backend** faces a concrete target. It lowers validated meaning into JavaSc
 Moth's compiler library holds frontend and analysis stages. The project tool and builders sit around that library. Stage 0 graph construction belongs to the build system, even when people call the whole CLI "the compiler."
 
 [diagram:
-    [$insert("label"): Which part of Moth owns which job]
-    [$insert("caption"): Four owners, four questions. The build system asks which files matter, the frontend asks what they mean, analysis asks whether that meaning is safe and the backend asks how to say it in a target language.]
+    [$in label: Which part of Moth owns which job]
+    [$in caption: Four owners, four questions. The build system asks which files matter, the frontend asks what they mean, analysis asks whether that meaning is safe and the backend asks how to say it in a target language.]
 
     [stage:
         [node:
-            [$insert("href"): ../starting-a-build/]
-            [$insert("eyebrow"): Build system]
-            [$insert("title"): Which files, in which order?]
+            [$in href: ../starting-a-build/]
+            [$in eyebrow: Build system]
+            [$in title: Which files, in which order?]
             Chooses the command, bootstraps project config through the compiler service and builds the source graph.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ../ast-semantics-and-types/]
-            [$insert("eyebrow"): Frontend]
-            [$insert("title"): What does this source mean?]
+            [$in href: ../ast-semantics-and-types/]
+            [$in eyebrow: Frontend]
+            [$in title: What does this source mean?]
             Tokenises, binds names, checks types and records source meaning.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ../borrow-validation-and-drops/]
-            [$insert("eyebrow"): Analysis]
-            [$insert("title"): Is that meaning legal?]
+            [$in href: ../borrow-validation-and-drops/]
+            [$in eyebrow: Analysis]
+            [$in title: Is that meaning legal?]
             Proves access safety, lifetimes, reachability and target capability.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ../backend-lowering/]
-            [$insert("eyebrow"): Backend]
-            [$insert("title"): How do we say it in the target?]
+            [$in href: ../backend-lowering/]
+            [$in eyebrow: Backend]
+            [$in title: How do we say it in the target?]
             Lowers validated meaning into JavaScript, Wasm and glue. It never reopens source.
         ]
     ]

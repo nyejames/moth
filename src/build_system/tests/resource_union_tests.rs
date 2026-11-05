@@ -13,7 +13,8 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
-    OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedValue,
+    OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplate, PublicConstTemplateKind,
+    PublicConstTemplatePiece, PublicConstTemplateSlot, PublicFoldedValue, PublicTemplateSlotKey,
 };
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::{HirReachability, ReachableResourceUse};
@@ -34,6 +35,7 @@ use crate::compiler_frontend::semantic_identity::{
     StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -146,6 +148,39 @@ fn site_root_piece_is_not_a_resource_union_member() {
     );
 
     assert_eq!(union.origins(), &[live]);
+}
+
+#[test]
+fn occurrence_default_resource_is_selected_from_a_public_const_template() {
+    let default_resource = origin("assets/default.svg");
+    let template = PublicConstTemplate {
+        kind: PublicConstTemplateKind::Wrapper,
+        pieces: vec![PublicConstTemplatePiece::Slot(PublicConstTemplateSlot {
+            key: PublicTemplateSlotKey::Default,
+            default: Some(OwnedFoldedString::Pieces(vec![
+                OwnedFoldedStringPiece::Resource(default_resource.clone()),
+            ])),
+            default_provenance: SyntheticInterfaceProvenance::empty(),
+            applied_child_wrappers: Vec::new(),
+            child_wrappers: Vec::new(),
+            skip_parent_child_wrappers: false,
+        })],
+        conditional_child_wrappers: Vec::new(),
+    };
+    let mut union = ResourceOriginUnion::new();
+    append_public_folded_value(
+        &mut union,
+        &PublicFoldedValue::ConstTemplate {
+            template,
+            folded: None,
+        },
+    );
+
+    assert_eq!(
+        union.origins(),
+        &[default_resource],
+        "a resource used only by an occurrence fallback must stay live"
+    );
 }
 
 #[test]

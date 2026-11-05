@@ -1,8 +1,8 @@
 card = [:
     <section>
-        <h1>[$slot("title")]</h1>
+        <h1>[$slot title]</h1>
         <div>[$slot]</div>
-        <aside>[$slot("aside")]</aside>
+        <aside>[$slot aside]</aside>
     </section>
 ]
 
@@ -11,7 +11,7 @@ maybe_title String? = "Priya"
 body = "runtime body"
 
 rendered = [card:
-    [$insert("title"):
+    [$in title:
         [if maybe_title is |title|:
             Hello [title]
         ]

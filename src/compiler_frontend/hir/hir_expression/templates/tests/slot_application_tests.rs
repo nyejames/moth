@@ -1,18 +1,20 @@
 //! Guaranteed-output classification tests for the runtime slot-application walker.
 //!
-//! WHAT: pins guaranteed output for structural text pieces and ensures visible bodies under
-//!       conditional control flow do not inherit that guarantee.
-//! WHY: these classifications control slot-wrapper output tracking, so both piece-bearing text
-//!       and lazy no-output paths need focused coverage.
+//! WHAT: pins guaranteed output for structural text pieces, resolved slot
+//!       sites and wrapper bodies under conditional control flow.
+//! WHY: these classifications control slot-wrapper output tracking, so both
+//!       fallback-bearing sites and lazy no-output paths need focused coverage.
 
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
 };
-use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotContributionSourceId;
+use crate::compiler_frontend::ast::templates::template_slots::{
+    RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
+};
 use crate::compiler_frontend::ast::templates::{
-    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource,
+    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource, OwnedRuntimeSlotSite,
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
@@ -48,6 +50,12 @@ fn piece_bearing_text_node(pieces: Vec<OwnedFoldedStringPiece>) -> OwnedRuntimeT
 
 fn plain_text_node(text: &str) -> OwnedRuntimeTemplateNode {
     OwnedRuntimeTemplateNode::Text {
+        text: OwnedFoldedString::Text(text.to_owned()),
+    }
+}
+
+fn constant_text_node(text: &str) -> OwnedRuntimeTemplateNode {
+    OwnedRuntimeTemplateNode::ConstantText {
         text: OwnedFoldedString::Text(text.to_owned()),
     }
 }
@@ -95,7 +103,8 @@ fn text_node_with_a_resource_piece_guarantees_output() {
             &node,
             expressions.view(anchor).unwrap(),
             &const_values,
-            &string_table
+            &string_table,
+            None,
         ),
         "a resource piece renders a URL once the build assigns contexts, so the node must keep the wrapper's unconditional-output guarantee"
     );
@@ -115,10 +124,31 @@ fn text_node_with_a_site_root_piece_guarantees_output() {
             &node,
             expressions.view(anchor).unwrap(),
             &const_values,
-            &string_table
+            &string_table,
+            None,
         ),
         "a site-root piece guarantees output even when every literal piece is blank"
     );
+}
+
+#[test]
+fn authored_constant_text_guarantees_output_regardless_of_characters() {
+    let string_table = StringTable::new();
+    let (expressions, const_values, anchor) = expression_fixture();
+
+    for text in ["", " \n\t"] {
+        let node = constant_text_node(text);
+        assert!(
+            super::owned_runtime_template_node_guarantees_output(
+                &node,
+                expressions.view(anchor).unwrap(),
+                &const_values,
+                &string_table,
+                None,
+            ),
+            "a selected authored fallback is output by identity, including {text:?}"
+        );
+    }
 }
 
 #[test]
@@ -131,7 +161,8 @@ fn plain_text_and_all_text_pieces_keep_the_trimming_classification() {
             &plain_text_node("hello"),
             expressions.view(anchor).unwrap(),
             &const_values,
-            &string_table
+            &string_table,
+            None,
         ),
         "nonempty plain text keeps its guarantee"
     );
@@ -141,7 +172,8 @@ fn plain_text_and_all_text_pieces_keep_the_trimming_classification() {
             &plain_text_node(""),
             expressions.view(anchor).unwrap(),
             &const_values,
-            &string_table
+            &string_table,
+            None,
         ),
         "empty plain text still produces no output"
     );
@@ -151,7 +183,8 @@ fn plain_text_and_all_text_pieces_keep_the_trimming_classification() {
             &plain_text_node("   "),
             expressions.view(anchor).unwrap(),
             &const_values,
-            &string_table
+            &string_table,
+            None,
         ),
         "blank plain text still produces no output"
     );
@@ -161,7 +194,8 @@ fn plain_text_and_all_text_pieces_keep_the_trimming_classification() {
             &piece_bearing_text_node(vec![OwnedFoldedStringPiece::Text("hello".to_owned())]),
             expressions.view(anchor).unwrap(),
             &const_values,
-            &string_table
+            &string_table,
+            None,
         ),
         "an all-text piece list with literal runs keeps the same guarantee as plain text"
     );
@@ -174,7 +208,8 @@ fn plain_text_and_all_text_pieces_keep_the_trimming_classification() {
             ]),
             expressions.view(anchor).unwrap(),
             &const_values,
-            &string_table
+            &string_table,
+            None,
         ),
         "an all-text piece list of blank runs still produces no output"
     );
@@ -187,7 +222,8 @@ fn plain_text_and_all_text_pieces_keep_the_trimming_classification() {
             ]),
             expressions.view(anchor).unwrap(),
             &const_values,
-            &string_table
+            &string_table,
+            None,
         ),
         "an all-text piece list with one nonempty run keeps its guarantee"
     );
@@ -208,13 +244,15 @@ fn false_conditional_body_does_not_guarantee_output() {
         &body,
         expressions.view(anchor).unwrap(),
         &const_values,
-        &string_table
+        &string_table,
+        None,
     ));
     assert!(!super::owned_runtime_template_node_guarantees_output(
         &node,
         expressions.view(anchor).unwrap(),
         &const_values,
-        &string_table
+        &string_table,
+        None,
     ));
 }
 
@@ -234,14 +272,73 @@ fn false_conditional_loop_body_does_not_guarantee_output() {
         &body,
         expressions.view(anchor).unwrap(),
         &const_values,
-        &string_table
+        &string_table,
+        None,
     ));
     assert!(!super::owned_runtime_template_node_guarantees_output(
         &node,
         expressions.view(anchor).unwrap(),
         &const_values,
-        &string_table
+        &string_table,
+        None,
     ));
+}
+
+#[test]
+fn unresolved_default_slot_site_guarantees_its_fallback_output() {
+    let string_table = StringTable::new();
+    let (expressions, const_values, anchor) = expression_fixture();
+    let site = RuntimeSlotSiteId(0);
+    let wrapper = OwnedRuntimeTemplateNode::Sequence {
+        children: vec![OwnedRuntimeTemplateNode::RuntimeSlotSite { site, span: None }],
+        span: None,
+    };
+    let slot_sites = vec![OwnedRuntimeSlotSite {
+        site,
+        render_root: constant_text_node("fallback"),
+        span: None,
+    }];
+
+    assert!(
+        super::owned_runtime_template_node_guarantees_output(
+            &wrapper,
+            expressions.view(anchor).unwrap(),
+            &const_values,
+            &string_table,
+            Some(slot_sites.as_slice())
+        ),
+        "an unresolved slot occurrence that carries a constant fallback guarantees that output"
+    );
+}
+
+#[test]
+fn routed_contribution_slot_site_stays_unproven() {
+    let string_table = StringTable::new();
+    let (expressions, const_values, anchor) = expression_fixture();
+    let site = RuntimeSlotSiteId(0);
+    let wrapper = OwnedRuntimeTemplateNode::Sequence {
+        children: vec![OwnedRuntimeTemplateNode::RuntimeSlotSite { site, span: None }],
+        span: None,
+    };
+    let slot_sites = vec![OwnedRuntimeSlotSite {
+        site,
+        render_root: OwnedRuntimeTemplateNode::RuntimeSlotContributionSource {
+            source: RuntimeSlotContributionSourceId(0),
+            span: None,
+        },
+        span: None,
+    }];
+
+    assert!(
+        !super::owned_runtime_template_node_guarantees_output(
+            &wrapper,
+            expressions.view(anchor).unwrap(),
+            &const_values,
+            &string_table,
+            Some(slot_sites.as_slice())
+        ),
+        "a routed contribution stays conditional even when its wrapper has a resolved site"
+    );
 }
 
 #[test]
@@ -262,13 +359,15 @@ fn nested_slot_application_body_uses_wrapper_output_proof() {
         &child,
         expressions.view(anchor).unwrap(),
         &const_values,
-        &string_table
+        &string_table,
+        None,
     ));
     assert!(super::runtime_template_handoff_guarantees_output(
         &template,
         expressions.view(anchor).unwrap(),
         &const_values,
-        &string_table
+        &string_table,
+        None,
     ));
 }
 
@@ -299,7 +398,8 @@ fn nested_slot_application_expression_uses_wrapper_dynamic_output_proof() {
     assert!(super::dynamic_expression_guarantees_output(
         expressions.view(expression).unwrap(),
         &const_values,
-        &string_table
+        &string_table,
+        None,
     ));
 }
 
@@ -332,18 +432,21 @@ fn nested_slot_application_with_output_free_wrapper_stays_unproven() {
             &child,
             expressions.view(anchor).unwrap(),
             &const_values,
-            &string_table
+            &string_table,
+            None,
         ));
         assert!(!super::runtime_template_handoff_guarantees_output(
             &template,
             expressions.view(anchor).unwrap(),
             &const_values,
-            &string_table
+            &string_table,
+            None,
         ));
         assert!(!super::dynamic_expression_guarantees_output(
             expressions.view(expression).unwrap(),
             &const_values,
-            &string_table
+            &string_table,
+            None,
         ));
     }
 }

@@ -20,24 +20,24 @@ t_10 #= [: [t_9] j10 ]
 shell #= [:
     <!doctype html>
     <html>
-    <head><title>[$slot("title")]</title><style>[$slot("style")]</style></head>
+    <head><title>[$slot title]</title><style>[$slot style]</style></head>
     <body>[$slot]</body>
     </html>
 ]
 
-style_insert #= [$insert("style"):
+style_insert #= [$in style:
     body { font-family: system-ui; }
     .line { padding: 0.25rem; }
 ]
 
-title_insert #= [$insert("title"): [page_title]]
+title_insert #= [$in title: [page_title]]
 
 -- Positional-slot churn.
 row_template #= [:
     <div class="row">
-        <span>[$slot(1)]</span>
-        <span>[$slot(2)]</span>
-        <span>[$slot(3)]</span>
+        <span>[$slot 1]</span>
+        <span>[$slot 2]</span>
+        <span>[$slot 3]</span>
         <span>[$slot]</span>
     </div>
 ]
@@ -59,13 +59,13 @@ wrap_code #= [$children([:<code class="code">[$slot]</code>]):
 replay_box #= [:
     <div class="replay">
         <span>[$slot]</span>
-        <span>[$slot("body")]</span>
-        <span>[$slot("body")]</span>
-        <span>[$slot("body")]</span>
+        <span>[$slot body]</span>
+        <span>[$slot body]</span>
+        <span>[$slot body]</span>
     </div>
 ]
 
-replay_content #= [$insert("body"): repeated]
+replay_content #= [$in body: repeated]
 
 -- Runtime template construction.
 build_lines |count I32| -> String:

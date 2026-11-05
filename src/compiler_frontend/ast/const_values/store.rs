@@ -820,7 +820,7 @@ impl ConstValueStore {
 
     /// Attach one use's occurrence provenance to a shared constant. Stages a copy only when the
     /// occurrence adds members, so the stored value itself is never mutated.
-    fn with_occurrence_provenance(
+    pub(crate) fn with_occurrence_provenance(
         &mut self,
         expression: ExpressionView<'_>,
         id: ConstValueId,

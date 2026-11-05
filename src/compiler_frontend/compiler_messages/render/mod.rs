@@ -449,17 +449,26 @@ pub(crate) fn invalid_template_directive_message(
         InvalidTemplateDirectiveReason::DirectiveNotAllowedHere => {
             format!("Template directive '{name}' is not allowed here.")
         }
-        InvalidTemplateDirectiveReason::UnexpectedArguments => {
-            format!("`${name}` does not take arguments. Write `${name}:` instead.")
-        }
+        InvalidTemplateDirectiveReason::UnexpectedArguments => match name {
+            "slot" => {
+                "`$slot` uses a bare name or positive position, not parentheses.\n                 Use `$slot`, `$slot title`, or `$slot 1`.".to_owned()
+            }
+            "in" => {
+                "`$in` uses a bare slot name, not parentheses.\n                 Use `$in title: ...`.".to_owned()
+            }
+            _ => format!("`${name}` does not take arguments. Write `${name}:` instead."),
+        },
         InvalidTemplateDirectiveReason::EmptyArguments => {
             format!("`${name}()` has empty parentheses. Remove the parentheses or provide an argument.")
         }
         InvalidTemplateDirectiveReason::InvalidSlotTarget => {
-            "`$slot` accepts no argument, a string name, or a positive whole-number position.\n                 Use `$slot`, `$slot(\"title\")`, or `$slot(1)`.".to_owned()
+            "`$slot` accepts no target, a name, or a positive whole-number position.\n                 Use `$slot`, `$slot title`, or `$slot 1`.".to_owned()
+        }
+        InvalidTemplateDirectiveReason::InvalidSlotDefault => {
+            "A `$slot` default must be a compile-time `String` value.\n                 Use `$slot title = \"Untitled\"`.".to_owned()
         }
         InvalidTemplateDirectiveReason::InvalidInsertTarget => {
-            "`$insert(...)` requires a string slot name.\n                 Use `$insert(\"title\")`.".to_owned()
+            "`$in` requires a slot name.\n                 Use `$in title: ...`.".to_owned()
         }
         InvalidTemplateDirectiveReason::InvalidChildrenArgument => {
             "`$children(...)` requires one wrapper template or string argument.\n                 Example: `$children([:<li>[$slot]</li>])`.".to_owned()
@@ -479,7 +488,7 @@ pub(crate) fn render_invalid_template_directive(
     let reason = facts.reason.to_reason(facts.detail);
     let guidance = if facts.reason == InvalidTemplateDirectiveCode::UnknownDirective {
         vec![
-            "Known template directives include `$md`, `$raw`, `$children`, `$slot`, `$insert`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, and `$doc`.".to_owned(),
+            "Known template directives include `$md`, `$raw`, `$children`, `$slot`, `$in`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, and `$doc`.".to_owned(),
         ]
     } else {
         Vec::new()

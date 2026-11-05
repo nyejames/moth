@@ -1,5 +1,5 @@
 wrapper #= [:
-Positional 1: [$slot(1)]
+Positional 1: [$slot 1]
 Default: [$slot]
 ]
 

@@ -4,12 +4,12 @@ Slots let one template receive content from another.
 
 [codeblock, $code("moth"):
     card = [:
-        <h1>[$slot("title")]</h1>
+        <h1>[$slot title]</h1>
         <section>[$slot]</section>
     ]
 
     [card:
-        [$insert("title"): Hello]
+        [$in title: Hello]
         Body content
     ]
 ]
@@ -18,13 +18,19 @@ The default and named forms are:
 
 [codeblock, $code("moth"):
     [$slot]                 -- default slot
-    [$slot("name")]         -- named slot
-    [$insert("name"): ...]  -- contribution to named slot
+    [$slot name]            -- named slot
+    [$in name: ...]         -- contribution to named slot
 ]
 
 The default slot is declared with dollar-slot. A named slot is declared with
-dollar-slot and a string name. A named insert contributes with dollar-insert
+dollar-slot and a bare name. A named insert contributes with dollar-in
 and the same name.
+
+A slot occurrence can provide a compile-time String default, such as
+`[$slot title = "Untitled"]` or `[$slot 1 = "Fallback"]`. Each occurrence
+uses its own default only when no contribution is routed to that slot.
+An explicitly empty contribution still suppresses the default. Multiple
+named contributions concatenate in source order.
 
 ### Positional slots
 
@@ -32,7 +38,7 @@ Positive integer slots receive loose head contributions.
 
 [codeblock, $code("moth"):
     image = [:
-        <img src="[$slot(1)]" alt="[$slot]">
+        <img src="[$slot 1]" alt="[$slot]">
     ]
 
     [image, "logo.png": Site logo]
@@ -47,7 +53,7 @@ The remaining loose body content fills the default slot.
 - Loose contributions fill positional slots in ascending numeric order.
 - Remaining loose contributions go to the default slot when one exists.
 - Loose content that cannot be assigned is an error when no default slot exists.
-- Missing slots render as empty strings.
+- An unfilled slot without a default renders as an empty string.
 - Repeated slots replay the same contribution.
 - Named inserts target only their named slot.
 - One application may combine named, positional and default contributions.
@@ -59,10 +65,10 @@ through an immediate parent:
 
 [codeblock, $code("moth"):
     card = [:
-        <h1>[$slot("title")]</h1>
+        <h1>[$slot title]</h1>
         [$slot]
     ]
-    stored_title #= [$insert("title"): Stored title]
+    stored_title #= [$in title: Stored title]
     rendered #= [card: [stored_title] Body]
 ]
 

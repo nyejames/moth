@@ -31,9 +31,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../core/]
-        [$insert("previous_title"):Core packages]
-        [$insert("next_path"):../../memory/]
-        [$insert("next_title"):Memory and lifetimes]
+        [$in previous_path:../core/]
+        [$in previous_title:Core packages]
+        [$in next_path:../../memory/]
+        [$in next_title:Memory and lifetimes]
     ]
 ]

@@ -17,27 +17,27 @@ A **provider** supplies a public interface. A **consumer** binds against that in
 Not every `@` clause makes an edge between modules, though. In the running example `@page.moth` and `greeting.moth` share a directory, so they are one module and `@greeting` binds a sibling source file directly. A provider edge appears when a dependency resolves to a *different* module or package, and even then it names a relationship rather than copying `greet`'s body across. Think of a graft point, not a clone.
 
 [diagram:
-    [$insert("label"): A directory becomes one module, not one module per file]
-    [$insert("caption"): The root marks the boundary. Everything beside it in the same directory is owned source, which is why the walkthrough compiles one module rather than two.]
+    [$in label: A directory becomes one module, not one module per file]
+    [$in caption: The root marks the boundary. Everything beside it in the same directory is owned source, which is why the walkthrough compiles one module rather than two.]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): One directory]
-            [$insert("title"): Project root rooted by @page.moth]
+            [$in href: ./]
+            [$in eyebrow: One directory]
+            [$in title: Project root rooted by @page.moth]
             A directory forms at most one structural module. Its one normal root or one normal/support root pair defines one compilation and visibility unit.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Owned by that root]
+                [$in label: Owned by that root]
                 [lane:
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     `@page.moth`, the root itself
                 ]
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     `greeting.moth`, ordinary owned source
                 ]
                 ]
@@ -47,18 +47,18 @@ Not every `@` clause makes an edge between modules, though. In the running examp
 
     [stage:
         [node:
-            [$insert("href"): ../declarations-dependencies-and-ordering/]
-            [$insert("eyebrow"): Inside]
-            [$insert("title"): @greeting greet binds a sibling]
+            [$in href: ../declarations-dependencies-and-ordering/]
+            [$in eyebrow: Inside]
+            [$in title: @greeting greet binds a sibling]
             Same module, so no provider edge and no waiting. The clause resolves within one compilation.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Across]
-            [$insert("title"): A real provider edge]
+            [$in href: ./]
+            [$in eyebrow: Across]
+            [$in title: A real provider edge]
             Only a dependency resolving to another module or package creates an edge that a consumer must wait on.
         ]
     ]

@@ -7015,6 +7015,48 @@ contract = "language.templates.stored_named_insert_acceptance"
 role = "primary"
 
 [[case]]
+id = "template_slot_defaults_per_occurrence_const"
+path = "template_slot_defaults_per_occurrence_const"
+tags = ["integration", "templates", "slots", "const-folding"]
+contract = "language.templates.slot_defaults_per_occurrence_const"
+role = "primary"
+
+[[case]]
+id = "template_slot_defaults_multiple_named_inserts"
+path = "template_slot_defaults_multiple_named_inserts"
+tags = ["integration", "templates", "slots", "const-folding"]
+contract = "language.templates.slot_defaults_multiple_named_inserts"
+role = "primary"
+
+[[case]]
+id = "template_slot_defaults_runtime_application"
+path = "template_slot_defaults_runtime_application"
+tags = ["integration", "templates", "slots", "runtime"]
+contract = "language.templates.slot_defaults_runtime_application"
+role = "primary"
+
+[[case]]
+id = "template_slot_defaults_stored_insert"
+path = "template_slot_defaults_stored_insert"
+tags = ["integration", "templates", "slots", "const-folding"]
+contract = "language.templates.slot_defaults_stored_insert"
+role = "primary"
+
+[[case]]
+id = "template_slot_defaults_imported_wrapper"
+path = "template_slot_defaults_imported_wrapper"
+tags = ["integration", "templates", "slots", "imports"]
+contract = "language.templates.slot_defaults_imported_wrapper"
+role = "primary"
+
+[[case]]
+id = "template_slot_default_structural_resource"
+path = "template_slot_default_structural_resource"
+tags = ["integration", "templates", "slots", "resources"]
+contract = "language.templates.slot_default_structural_resource"
+role = "primary"
+
+[[case]]
 id = "template_named_slots_ignore_surrounding_whitespace"
 path = "template_named_slots_ignore_surrounding_whitespace"
 tags = ["integration", "templates", "slots", "whitespace"]

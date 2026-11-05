@@ -25,6 +25,7 @@
 //! TIR types and the production route are implemented directly without a
 //! feature flag.
 
+use crate::compiler_frontend::ast::const_values::store::ConstValueId;
 use crate::compiler_frontend::ast::expressions::expression_store::ExprId;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
@@ -444,6 +445,16 @@ pub(crate) struct TirSlotPlaceholder {
     /// Stable occurrence ID for this slot placeholder.
     pub(crate) occurrence_id: SlotOccurrenceId,
 
+    /// Compile-time `String` fallback authored on this exact occurrence.
+    ///
+    /// WHAT: keeps the module-local constant ID while the module's constant store is
+    /// alive. Composition and folding fall back to this value only when no routed
+    /// contribution reaches the occurrence; public projection lowers it to an owned
+    /// stable folded string before the store is released.
+    /// WHY: defaults belong to occurrences, not slot keys. Repeated occurrences of one
+    /// key may carry different fallbacks, so the value cannot live on `TirSlotSchema`.
+    pub(crate) default: Option<ConstValueId>,
+
     /// Wrappers already applied around this slot's fallback content.
     ///
     /// WHAT: references a `TemplateWrapperSet` that was already resolved and
@@ -475,6 +486,7 @@ impl TirSlotPlaceholder {
     pub(crate) fn with_wrapper_sets(
         key: SlotKey,
         occurrence_id: SlotOccurrenceId,
+        default: Option<ConstValueId>,
         applied_child_wrapper_set: Option<TemplateWrapperSetId>,
         child_wrapper_set: Option<TemplateWrapperSetId>,
         skip_parent_child_wrappers: bool,
@@ -482,6 +494,7 @@ impl TirSlotPlaceholder {
         Self {
             key,
             occurrence_id,
+            default,
             applied_child_wrapper_set,
             child_wrapper_set,
             skip_parent_child_wrappers,

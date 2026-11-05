@@ -19,7 +19,6 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
-use crate::compiler_frontend::ast::const_values::store::{ConstStringValue, ConstValuePayload};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::CallAccessMode;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
@@ -28,14 +27,10 @@ use crate::compiler_frontend::ast::expressions::call_arguments::{
     parse_call_arguments_with_receiving_context,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
-use crate::compiler_frontend::ast::expressions::expression_store::{
-    ExprId, ExpressionOperationView,
-};
+use crate::compiler_frontend::ast::expressions::expression_store::ExprId;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     templates, token_lexical,
@@ -47,7 +42,6 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
-use moth_lexical::numeric::fixed_scalar::{FixedScalarClass, FixedScalarValue};
 
 /// Typed result shared by directive-argument parsing helpers.
 type DirectiveArgsResult<T> = Result<T, TemplateError>;
@@ -363,188 +357,6 @@ pub(crate) fn parse_required_parenthesized_expression(
         string_table,
         path_fork,
     )
-}
-
-// ----------------------------------------------------------------------------
-// Slot-target argument parsers (moved from template_slots.rs)
-// ----------------------------------------------------------------------------
-
-/// Parses the optional argument to `$slot`: default (no parens), named string,
-/// or positive positional integer.
-///
-/// The caller stays on the directive token. The shared owner consumes the
-/// opening and closing parentheses, so a successful return leaves the cursor
-/// on the token after `)`.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "optional slot targets keep the directive name and parser borrows as separate inputs"
-)]
-pub(crate) fn parse_optional_slot_target_argument(
-    directive_name: StringId,
-    token_stream: &mut AstCursor,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    expression_builder: &mut AstExpressionBuilder,
-    const_values: &mut ConstValueStore,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> DirectiveArgsResult<SlotKey> {
-    if !directive_has_arguments(token_stream) {
-        return Ok(SlotKey::Default);
-    }
-
-    let expression = parse_single_directive_argument(
-        directive_name,
-        token_stream,
-        context,
-        type_interner,
-        expression_builder,
-        const_values,
-        string_table,
-        path_fork,
-    )
-    .map_err(|error| {
-        error.into_template_error(
-            directive_name,
-            InvalidTemplateDirectiveReason::EmptyArguments,
-        )
-    })?;
-
-    let expression = expression_builder.view(expression)?;
-    let payload = match expression.operation() {
-        ExpressionOperationView::Constant(value) => {
-            Some(const_values.payload(value).ok_or_else(|| {
-                InfrastructureFailure::internal(
-                    CompilerStage::AstConstruction,
-                    "template expression references an absent constant value",
-                )
-            })?)
-        }
-        _ => None,
-    };
-    match payload {
-        Some(ConstValuePayload::String(ConstStringValue::Text(name))) => Ok(SlotKey::Named(*name)),
-        Some(ConstValuePayload::FixedScalar(value)) => match fixed_slot_position(*value) {
-            Some(position) => Ok(SlotKey::Positional(position)),
-            None => Err(with_current_token_span(
-                token_stream,
-                templates::invalid_template_directive(
-                    Some(directive_name),
-                    InvalidTemplateDirectiveReason::InvalidSlotTarget,
-                    expression.span(),
-                ),
-            )
-            .into()),
-        },
-        _ => Err(with_current_token_span(
-            token_stream,
-            templates::invalid_template_directive(
-                Some(directive_name),
-                InvalidTemplateDirectiveReason::InvalidSlotTarget,
-                expression.span(),
-            ),
-        )
-        .into()),
-    }
-}
-
-/// Converts one positional slot-target literal into its positive position.
-///
-/// WHY: positions are authored as exact fixed-integer literals, so any integer width is
-///      accepted while binary floats, `Byte` and non-positive values keep the ordinary
-///      slot-target diagnostic.
-fn fixed_slot_position(value: FixedScalarValue) -> Option<usize> {
-    let position = match value.scalar().class() {
-        FixedScalarClass::SignedInteger => i128::from(value.as_i64()?),
-        FixedScalarClass::UnsignedInteger => i128::from(value.as_u64()?),
-        FixedScalarClass::BinaryFloat | FixedScalarClass::Octet => return None,
-    };
-    usize::try_from(position)
-        .ok()
-        .filter(|position| *position > 0)
-}
-
-/// Parses the required named target argument to `$insert("name")`.
-///
-/// The caller stays on the directive token. The shared owner consumes the
-/// opening and closing parentheses, so a successful return leaves the cursor
-/// on the token after `)`.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "required slot names keep the directive name and parser borrows as separate inputs"
-)]
-pub(crate) fn parse_required_slot_name_argument(
-    directive_name: StringId,
-    token_stream: &mut AstCursor,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    expression_builder: &mut AstExpressionBuilder,
-    const_values: &mut ConstValueStore,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> DirectiveArgsResult<StringId> {
-    if !directive_has_arguments(token_stream) {
-        let found = token_stream
-            .current_diagnostic_token(string_table)
-            .map_err(|error| {
-                InfrastructureFailure::malformed_token_projection(
-                    "template insert opening-paren diagnostic",
-                    error,
-                )
-            })?
-            .or_else(|| Some(DiagnosticToken::from_static_tag(token_stream.current_tag())));
-        return Err(with_current_token_span(
-            token_stream,
-            token_lexical::expected_token_from_projections(
-                DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS),
-                found,
-                None,
-            ),
-        )
-        .into());
-    }
-
-    let expression = parse_single_directive_argument(
-        directive_name,
-        token_stream,
-        context,
-        type_interner,
-        expression_builder,
-        const_values,
-        string_table,
-        path_fork,
-    )
-    .map_err(|error| {
-        error.into_template_error(
-            directive_name,
-            InvalidTemplateDirectiveReason::EmptyArguments,
-        )
-    })?;
-
-    let expression = expression_builder.view(expression)?;
-    let payload = match expression.operation() {
-        ExpressionOperationView::Constant(value) => {
-            Some(const_values.payload(value).ok_or_else(|| {
-                InfrastructureFailure::internal(
-                    CompilerStage::AstConstruction,
-                    "template expression references an absent constant value",
-                )
-            })?)
-        }
-        _ => None,
-    };
-    match payload {
-        Some(ConstValuePayload::String(ConstStringValue::Text(name))) => Ok(*name),
-        _ => Err(with_current_token_span(
-            token_stream,
-            templates::invalid_template_directive(
-                Some(directive_name),
-                InvalidTemplateDirectiveReason::InvalidInsertTarget,
-                expression.span(),
-            ),
-        )
-        .into()),
-    }
 }
 
 /// Attach the authored span of the token that owns a directive syntax diagnostic.

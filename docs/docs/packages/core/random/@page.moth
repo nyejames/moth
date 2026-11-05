@@ -25,9 +25,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):random-helpers]
-        [$insert("title"):Random helpers]
-        [$insert("advanced"):[random_advanced]]
+        [$in key:random-helpers]
+        [$in title:Random helpers]
+        [$in advanced:[random_advanced]]
 
         [random_basic]
     ]
@@ -35,9 +35,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../text/]
-        [$insert("previous_title"):Core text]
-        [$insert("next_path"):../time/]
-        [$insert("next_title"):Core time]
+        [$in previous_path:../text/]
+        [$in previous_title:Core text]
+        [$in next_path:../time/]
+        [$in next_title:Core time]
     ]
 ]

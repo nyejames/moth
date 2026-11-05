@@ -25,9 +25,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):collection-methods]
-        [$insert("title"):Collection methods]
-        [$insert("advanced"):[collections_advanced]]
+        [$in key:collection-methods]
+        [$in title:Collection methods]
+        [$in advanced:[collections_advanced]]
 
         [collections_basic]
     ]
@@ -35,9 +35,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../io/]
-        [$insert("previous_title"):Core IO]
-        [$insert("next_path"):../math/]
-        [$insert("next_title"):Core math]
+        [$in previous_path:../io/]
+        [$in previous_title:Core IO]
+        [$in next_path:../math/]
+        [$in next_title:Core math]
     ]
 ]

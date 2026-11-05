@@ -454,7 +454,7 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager_next:
-        [$insert("next_path"):../language-overview/]
-        [$insert("next_title"):Language basics]
+        [$in next_path:../language-overview/]
+        [$in next_title:Language basics]
     ]
 ]

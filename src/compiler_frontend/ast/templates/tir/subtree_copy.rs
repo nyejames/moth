@@ -770,7 +770,7 @@ fn copy_tir_node_with_active_slot_plan(
                     // The copy's own selector row (pattern) and fragment record register in the
                     // replication call below, so the copy completes into its own conditional.
                     let copied_selector_site = remap_expression_site_id(store);
-                    if let Some(identity_remap) = identity_remap.as_deref_mut() {
+                    if let Some(identity_remap) = identity_remap {
                         identity_remap
                             .record_expression_site(selector_site_id, copied_selector_site);
                     }
@@ -824,7 +824,7 @@ fn copy_retained_control_flow_body(
                 active_slot_plan,
                 store,
                 copy_state,
-                identity_remap.as_deref_mut(),
+                identity_remap,
             )?;
             Some(RetainedControlFlowRenderUnit::Loop {
                 aggregate_wrapper: copied_aggregate_wrapper,
@@ -908,7 +908,7 @@ fn copy_tir_template_with_active_slot_plan(
         new_root,
         crate::compiler_frontend::ast::templates::tir::DerivedTemplateMetadata::preserve_source(),
     )?;
-    if let Some(identity_remap) = identity_remap.as_deref_mut() {
+    if let Some(identity_remap) = identity_remap {
         identity_remap
             .reachability
             .register_copied_template(template_id);
@@ -963,7 +963,7 @@ fn remap_loop_header_expression_sites(
                 iterable: copied_iterable,
                 step: step.map(|source_step| {
                     let copied_step = remap_expression_site_id(store);
-                    if let Some(identity_remap) = identity_remap.as_deref_mut() {
+                    if let Some(identity_remap) = identity_remap {
                         identity_remap.record_expression_site(source_step, copied_step);
                     }
                     copied_step

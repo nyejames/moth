@@ -27,53 +27,53 @@ The builder consumes explicit inputs such as:
 If a fact is missing, an upstream owner failed. The builder should not open `greeting.moth` to peek at source again.
 
 [diagram:
-    [$insert("label"): Everything converges, nothing is rediscovered]
-    [$insert("caption"): Harvest time. Every input arrived as a record from an owner upstream, which is why the builder never has to open a source file.]
+    [$in label: Everything converges, nothing is rediscovered]
+    [$in caption: Harvest time. Every input arrived as a record from an owner upstream, which is why the builder never has to open a source file.]
 
     [stage:
         [node:
-            [$insert("href"): ../linking-entries-and-reachability/]
-            [$insert("eyebrow"): From the compiler]
-            [$insert("title"): Semantic records]
+            [$in href: ../linking-entries-and-reachability/]
+            [$in eyebrow: From the compiler]
+            [$in title: Semantic records]
             Entry assembly, activated root metadata, folded fragments with insertion indexes and reachable resource uses.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ../backend-lowering/]
-            [$insert("eyebrow"): From the backends]
-            [$insert("title"): Emitted code]
+            [$in href: ../backend-lowering/]
+            [$in eyebrow: From the backends]
+            [$in title: Emitted code]
             JavaScript, Wasm and physical variants, runtime helpers, shared runtime modules, external glue and import maps.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Builder]
-            [$insert("title"): One document and one output plan]
+            [$in href: ./]
+            [$in eyebrow: Builder]
+            [$in title: One document and one output plan]
             Placement, conflict resolution and URL contexts settle here. This is the only stage that makes physical decisions.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Written under one owned root]
+                [$in label: Written under one owned root]
                 [fanout:
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     HTML document
                 ]
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     JavaScript and Wasm
                 ]
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     Runtime assets
                 ]
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     Output manifest
                 ]
                 ]
@@ -121,41 +121,41 @@ Manifests remember what this builder produced. Incremental builds compare record
 ## Writing and ownership
 
 [diagram:
-    [$insert("label"): Nobody writes a file until the whole set is agreed]
-    [$insert("caption"): Backends hand over records rather than writing directly, so conflicts surface before any byte lands and cleanup knows exactly what it owns.]
+    [$in label: Nobody writes a file until the whole set is agreed]
+    [$in caption: Backends hand over records rather than writing directly, so conflicts surface before any byte lands and cleanup knows exactly what it owns.]
 
     [stage:
         [node:
-            [$insert("href"): ../backend-lowering/]
-            [$insert("eyebrow"): Backends]
-            [$insert("title"): Emit records]
+            [$in href: ../backend-lowering/]
+            [$in eyebrow: Backends]
+            [$in title: Emit records]
             Each backend describes what it produced. None of them opens an output directory of its own.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Build system]
-            [$insert("title"): Validate the whole set]
+            [$in href: ./]
+            [$in eyebrow: Build system]
+            [$in title: Validate the whole set]
             Every declared path is checked together. A conflicting manifest is rejected here, before writing rather than after.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Build system]
-            [$insert("title"): Write and record]
+            [$in href: ./]
+            [$in eyebrow: Build system]
+            [$in title: Write and record]
             Unchanged bytes are skipped. Everything written is recorded in the manifest.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Cleanup, keyed by builder and profile]
+                [$in label: Cleanup, keyed by builder and profile]
                 [lane:
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     A debug build never tidies up after a release build
                 ]
                 ]

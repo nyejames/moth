@@ -15,7 +15,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::{
     families::{templates, token_lexical},
 };
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
-use crate::compiler_frontend::style_directives::DOC_DIRECTIVE_NAME;
+use crate::compiler_frontend::style_directives::{
+    DOC_DIRECTIVE_NAME, INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME,
+};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRangeError, TokenRef, TokenTag,
@@ -64,12 +66,14 @@ impl InitializerReference {
 /// Scan short-lived scanned facts for symbol-shaped references.
 ///
 /// WHAT: produces `InitializerReference` hints for every bare symbol that is not a
-/// dot/namespace accessor, an assignment target, or preceded by a dot/double-colon.
+/// dot/namespace accessor, an assignment target, preceded by a dot/double-colon, or a direct
+/// `$slot`/`$in` target.
 /// WHY: indexed callers read on demand from slices or canonical stores without projecting
 /// a per-query window first; the scan touches only its window.
 pub(crate) fn collect_scanned_symbol_references(
     tokens: TokenFactView<'_>,
     source_id: SourceId,
+    string_table: &StringTable,
 ) -> Vec<InitializerReference> {
     let mut references = Vec::new();
     let mut in_config_qualifier = false;
@@ -95,6 +99,10 @@ pub(crate) fn collect_scanned_symbol_references(
             .and_then(|i| tokens.get(i))
             .map(|t| t.tag);
         if previous == Some(TokenTag::DOT) || previous == Some(TokenTag::DOUBLE_COLON) {
+            continue;
+        }
+
+        if is_static_slot_target(tokens, index, string_table) {
             continue;
         }
 
@@ -145,6 +153,40 @@ pub(crate) fn collect_scanned_symbol_references(
     }
 
     references
+}
+
+/// Whether the symbol at `index` is the static target name immediately after `$slot` or `$in`.
+///
+/// WHY: slot and insert target names live in the receiving template's slot schema, not in
+/// lexical value scope, so a constant with the same spelling is not a reference here. Only the
+/// target is skipped: default expressions and insert values continue through ordinary scanning.
+fn is_static_slot_target(
+    tokens: TokenFactView<'_>,
+    index: usize,
+    string_table: &StringTable,
+) -> bool {
+    let mut previous_index = index;
+
+    while let Some(candidate) = previous_index.checked_sub(1) {
+        previous_index = candidate;
+        let Some(token) = tokens.get(candidate) else {
+            return false;
+        };
+
+        match token.tag {
+            // The AST slot parser skips authored newlines before the target.
+            TokenTag::NEWLINE => continue,
+            TokenTag::STYLE_DIRECTIVE => {
+                return tokens.style_directive_name(candidate).is_some_and(|name| {
+                    let name = string_table.resolve(name);
+                    name == SLOT_DIRECTIVE_NAME || name == INSERT_DIRECTIVE_NAME
+                });
+            }
+            _ => return false,
+        }
+    }
+
+    false
 }
 
 /// One short-lived scanned token fact for tag-based shared scanners.
@@ -245,6 +287,23 @@ impl<'a> TokenFactView<'a> {
             path_syntax_id: shape.path_syntax_id(),
             span,
         })
+    }
+
+    /// The interned `$directive` name when the token at `index` is a style directive.
+    ///
+    /// WHY: directive identity is a token payload rather than a symbol, so reference scanning
+    /// needs one checked payload read to recognise directives whose next symbol is not a value.
+    fn style_directive_name(self, index: usize) -> Option<StringId> {
+        let Self::Canonical { tokens, start, end } = self;
+        let absolute = start.checked_add(index)?;
+        if absolute >= end {
+            return None;
+        }
+        let shape = tokens.shapes().get(absolute).copied()?;
+        if shape.tag() != TokenTag::STYLE_DIRECTIVE {
+            return None;
+        }
+        shape.string_id()
     }
 }
 
@@ -994,7 +1053,10 @@ pub(crate) fn collect_declaration_initializer_range(
                         format!("declaration initializer reference view was invalid: {error:?}",),
                     ))
                 })?;
-            return Ok((range, collect_scanned_symbol_references(facts, source_id)));
+            return Ok((
+                range,
+                collect_scanned_symbol_references(facts, source_id, string_table),
+            ));
         }
 
         if current_tag == TokenTag::EOF && (!at_top_level || inside_record_region) {
@@ -1179,7 +1241,10 @@ pub(crate) fn collect_declaration_initializer_range(
             format!("declaration initializer reference view was invalid at stream end: {error:?}",),
         ))
     })?;
-    Ok((range, collect_scanned_symbol_references(facts, source_id)))
+    Ok((
+        range,
+        collect_scanned_symbol_references(facts, source_id, string_table),
+    ))
 }
 
 fn classify_canonical_pipe(

@@ -38,9 +38,9 @@ callee bodies or the whole program.
 
 #[section:
     [doc_level:
-        [$insert("key"):generic-declarations]
-        [$insert("title"):Generic declarations]
-        [$insert("advanced"):[generic_declarations]]
+        [$in key:generic-declarations]
+        [$in title:Generic declarations]
+        [$in advanced:[generic_declarations]]
 
         [generic_declarations_basic]
     ]
@@ -48,9 +48,9 @@ callee bodies or the whole program.
 
 #[section:
     [doc_level:
-        [$insert("key"):type-application]
-        [$insert("title"):Type application]
-        [$insert("advanced"):[type_application]]
+        [$in key:type-application]
+        [$in title:Type application]
+        [$in advanced:[type_application]]
 
         [type_application_basic]
     ]
@@ -58,9 +58,9 @@ callee bodies or the whole program.
 
 #[section:
     [doc_level:
-        [$insert("key"):generic-inference]
-        [$insert("title"):Generic inference]
-        [$insert("advanced"):[generic_inference]]
+        [$in key:generic-inference]
+        [$in title:Generic inference]
+        [$in advanced:[generic_inference]]
 
         [generic_inference_basic]
     ]
@@ -68,9 +68,9 @@ callee bodies or the whole program.
 
 #[section:
     [doc_level:
-        [$insert("key"):generic-instances]
-        [$insert("title"):Generic instances]
-        [$insert("advanced"):[generic_instances]]
+        [$in key:generic-instances]
+        [$in title:Generic instances]
+        [$in advanced:[generic_instances]]
 
         [generic_instances_basic]
     ]
@@ -78,9 +78,9 @@ callee bodies or the whole program.
 
 #[section:
     [doc_level:
-        [$insert("key"):generic-limits]
-        [$insert("title"):Generic limits]
-        [$insert("advanced"):[generic_limits]]
+        [$in key:generic-limits]
+        [$in title:Generic limits]
+        [$in advanced:[generic_limits]]
 
         [generic_limits_basic]
     ]
@@ -88,9 +88,9 @@ callee bodies or the whole program.
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../aliases/]
-        [$insert("previous_title"):Aliases]
-        [$insert("next_path"):../traits/]
-        [$insert("next_title"):Traits]
+        [$in previous_path:../aliases/]
+        [$in previous_title:Aliases]
+        [$in next_path:../traits/]
+        [$in next_title:Traits]
     ]
 ]

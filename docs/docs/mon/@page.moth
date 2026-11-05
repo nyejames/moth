@@ -91,9 +91,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):mon-format]
-        [$insert("title"):MON format]
-        [$insert("advanced"):[mon_format]]
+        [$in key:mon-format]
+        [$in title:MON format]
+        [$in advanced:[mon_format]]
 
         [mon_format_basic]
     ]

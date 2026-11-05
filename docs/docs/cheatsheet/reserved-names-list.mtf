@@ -38,7 +38,7 @@ The `@project` dependency root is reserved for project globals.
 - `$children` - wrap each direct child.
 - `$fresh` - bypass the parent's child wrapper.
 - `$slot` - declare a template slot.
-- `$insert` - contribute content to a named slot.
+- `$in` - contribute content to a named slot.
 - `$note`, `$todo` - discard template comments.
 - `$doc` - mark documentation content.
 - `$raw` - preserve unformatted template content.

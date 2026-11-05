@@ -34,9 +34,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):constant-bindings]
-        [$insert("title"):Constant bindings]
-        [$insert("advanced"):[constant_bindings]]
+        [$in key:constant-bindings]
+        [$in title:Constant bindings]
+        [$in advanced:[constant_bindings]]
 
         [constant_bindings_basic]
     ]
@@ -44,9 +44,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):constant-folding]
-        [$insert("title"):Constant folding]
-        [$insert("advanced"):[constant_folding]]
+        [$in key:constant-folding]
+        [$in title:Constant folding]
+        [$in advanced:[constant_folding]]
 
         [constant_folding_basic]
     ]
@@ -54,9 +54,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):const-records]
-        [$insert("title"):Const records]
-        [$insert("advanced"):[const_records]]
+        [$in key:const-records]
+        [$in title:Const records]
+        [$in advanced:[const_records]]
 
         [const_records_basic]
     ]
@@ -64,9 +64,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):const-templates]
-        [$insert("title"):Const templates]
-        [$insert("advanced"):[const_templates]]
+        [$in key:const-templates]
+        [$in title:Const templates]
+        [$in advanced:[const_templates]]
 
         [const_templates_basic]
     ]
@@ -74,9 +74,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../templates/]
-        [$insert("previous_title"):Templates]
-        [$insert("next_path"):../aliases/]
-        [$insert("next_title"):Aliases]
+        [$in previous_path:../templates/]
+        [$in previous_title:Templates]
+        [$in next_path:../aliases/]
+        [$in next_title:Aliases]
     ]
 ]

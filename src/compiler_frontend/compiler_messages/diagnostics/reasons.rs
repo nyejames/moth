@@ -886,9 +886,11 @@ pub enum InvalidTemplateDirectiveReason {
     UnexpectedArguments,
     /// Directive parentheses are empty.
     EmptyArguments,
-    /// `$slot` received an invalid target argument.
+    /// `$slot` received an invalid target declaration.
     InvalidSlotTarget,
-    /// `$insert` received an invalid slot name argument.
+    /// `$slot ... = ...` received a default that is not a compile-time `String`.
+    InvalidSlotDefault,
+    /// `$in` received an invalid slot name declaration.
     InvalidInsertTarget,
     /// `$children` received an invalid wrapper argument.
     InvalidChildrenArgument,

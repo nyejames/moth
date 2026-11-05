@@ -182,7 +182,7 @@ fn folding_nested_wrapper_constant_with_unfilled_named_slots_renders_empty_strin
         .expect("test path fits");
 
     let wrapper_file_tokens = template_tokens_from_source(
-        "[:<link rel=\"icon\" href=\"[$slot(\"favicon\")]\"><style>[$slot(\"css\")]</style>]",
+        "[:<link rel=\"icon\" href=\"[$slot favicon]\"><style>[$slot css]</style>]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -264,7 +264,7 @@ fn folding_nested_wrapper_constant_with_unfilled_named_slots_renders_empty_strin
     assert!(rendered.contains("rel=\"icon\""));
     assert!(rendered.contains("href=\"\""));
     assert!(rendered.contains("<style></style>"));
-    assert!(!rendered.contains("$slot("));
+    assert!(!rendered.contains("$slot"));
 }
 
 #[test]
@@ -587,5 +587,5 @@ fn default_slot_is_recorded_in_tir_and_const() {
 
 #[test]
 fn named_slot_is_recorded_in_tir_and_const() {
-    assert_slot_is_tir_only_and_const("[: before [$slot(\"name\")] after]", "named");
+    assert_slot_is_tir_only_and_const("[: before [$slot name] after]", "named");
 }

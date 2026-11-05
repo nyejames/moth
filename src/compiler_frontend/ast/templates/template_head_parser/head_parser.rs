@@ -932,7 +932,7 @@ pub fn parse_template_head(
                         )
                     })?;
                 // Template directives share the `$name` token shape with style directives.
-                // Parse `$slot` / `$insert` first, then fall back to style handling.
+                // Parse `$slot` / `$in` first, then fall back to style handling.
                 let directive_span = token_stream.current_span();
                 head_state.has_explicit_template_directive = true;
                 let directive_name = string_table.resolve(directive).to_owned();
@@ -954,7 +954,6 @@ pub fn parse_template_head(
                     directive_span,
                 )?;
 
-                let slot_insert_had_arguments = directive_has_arguments(token_stream);
                 let handled_slot_insert = maybe_parse_slot_or_insert_helper_directive(
                     &spec.kind,
                     token_stream,
@@ -968,7 +967,9 @@ pub fn parse_template_head(
                 )?;
 
                 if handled_slot_insert {
-                    defer_comma_advance = slot_insert_had_arguments;
+                    // Slot declarations consume their directive token and any
+                    // target or default, so the loop must not advance again.
+                    defer_comma_advance = true;
                     apply_head_compatibility(
                         &mut head_state,
                         &spec.head_compatibility,
@@ -1154,7 +1155,7 @@ fn parse_style_directive_from_spec(
     clippy::too_many_arguments,
     reason = "value mode and closing-parenthesis policy are extra inputs beside the parser borrows"
 )]
-fn parse_head_expression(
+pub(super) fn parse_head_expression(
     token_stream: &mut AstCursor<'_>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -1167,7 +1168,7 @@ fn parse_head_expression(
 ) -> Result<OwnedExpr, ExpressionParseError> {
     let mut inferred = ExpectedType::Infer;
     let mut cast_target_context = CastTargetContext::None;
-    let input = ExpressionParseInput::ordinary(
+    parse_head_expression_with_resources(
         ExpressionParseResources {
             token_stream,
             scope_context: context,
@@ -1179,6 +1180,40 @@ fn parse_head_expression(
             expression_builder,
             const_values,
             path_fork,
+        },
+        consume_closing_parenthesis,
+    )
+}
+
+/// Parses a head expression with the caller's receiving context, if any.
+pub(super) fn parse_head_expression_with_resources(
+    resources: ExpressionParseResources<'_, '_, '_>,
+    consume_closing_parenthesis: bool,
+) -> Result<OwnedExpr, ExpressionParseError> {
+    let ExpressionParseResources {
+        token_stream,
+        scope_context: context,
+        type_interner,
+        expression_builder,
+        const_values,
+        expected_type,
+        cast_target_context,
+        value_mode,
+        string_table,
+        path_fork,
+    } = resources;
+    let input = ExpressionParseInput::ordinary(
+        ExpressionParseResources {
+            token_stream,
+            scope_context: context,
+            type_interner,
+            expression_builder: &mut *expression_builder,
+            const_values: &mut *const_values,
+            expected_type,
+            cast_target_context,
+            value_mode,
+            string_table,
+            path_fork: &mut *path_fork,
         },
         consume_closing_parenthesis,
     )

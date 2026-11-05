@@ -9,8 +9,8 @@ use crate::compiler_frontend::style_directives::compatibility::{
     TemplateHeadCompatibility, TemplateHeadTag,
 };
 use crate::compiler_frontend::style_directives::specs::{
-    CoreStyleDirectiveKind, DOC_DIRECTIVE_NAME, StyleDirectiveEffects, StyleDirectiveHandlerSpec,
-    StyleDirectiveSpec,
+    CoreStyleDirectiveKind, DOC_DIRECTIVE_NAME, INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME,
+    StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveSpec,
 };
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 
@@ -40,7 +40,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
             CoreStyleDirectiveKind::Fresh,
         ),
         StyleDirectiveSpec::core(
-            "slot",
+            SLOT_DIRECTIVE_NAME,
             TemplateBodyMode::Normal,
             TemplateHeadCompatibility {
                 presence_tags: TemplateHeadTag::MEANINGFUL_ITEM | TemplateHeadTag::SLOT_DIRECTIVE,
@@ -51,13 +51,13 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
             CoreStyleDirectiveKind::Slot,
         ),
         StyleDirectiveSpec::core(
-            "insert",
+            INSERT_DIRECTIVE_NAME,
             TemplateBodyMode::Normal,
             TemplateHeadCompatibility::blocks_same(
-                TemplateHeadTag::INSERT_DIRECTIVE,
+                TemplateHeadTag::IN_DIRECTIVE,
                 TemplateHeadConflictReason::DuplicateExclusiveDirective,
             ),
-            CoreStyleDirectiveKind::Insert,
+            CoreStyleDirectiveKind::In,
         ),
         StyleDirectiveSpec::core(
             "note",

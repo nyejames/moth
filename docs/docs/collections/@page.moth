@@ -37,9 +37,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):collection-literals]
-        [$insert("title"):Collection literals]
-        [$insert("advanced"):[collection_literals]]
+        [$in key:collection-literals]
+        [$in title:Collection literals]
+        [$in advanced:[collection_literals]]
 
         [collection_literals_basic]
     ]
@@ -47,9 +47,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):growable-collections]
-        [$insert("title"):Growable collections]
-        [$insert("advanced"):[growable_collections]]
+        [$in key:growable-collections]
+        [$in title:Growable collections]
+        [$in advanced:[growable_collections]]
 
         [growable_collections_basic]
     ]
@@ -57,9 +57,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):fixed-collections]
-        [$insert("title"):Fixed collections]
-        [$insert("advanced"):[fixed_collections]]
+        [$in key:fixed-collections]
+        [$in title:Fixed collections]
+        [$in advanced:[fixed_collections]]
 
         [fixed_collections_basic]
     ]
@@ -67,9 +67,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):collection-operations]
-        [$insert("title"):Collection operations]
-        [$insert("advanced"):[collection_operations]]
+        [$in key:collection-operations]
+        [$in title:Collection operations]
+        [$in advanced:[collection_operations]]
 
         [collection_operations_basic]
     ]
@@ -77,9 +77,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):hash-maps]
-        [$insert("title"):Hash maps]
-        [$insert("advanced"):[hash_maps]]
+        [$in key:hash-maps]
+        [$in title:Hash maps]
+        [$in advanced:[hash_maps]]
 
         [hash_maps_basic]
     ]
@@ -87,9 +87,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../errors/]
-        [$insert("previous_title"):Errors, options and assertions]
-        [$insert("next_path"):../templates/]
-        [$insert("next_title"):Templates]
+        [$in previous_path:../errors/]
+        [$in previous_title:Errors, options and assertions]
+        [$in next_path:../templates/]
+        [$in next_title:Templates]
     ]
 ]

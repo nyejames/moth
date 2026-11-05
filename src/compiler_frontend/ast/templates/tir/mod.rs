@@ -154,7 +154,6 @@ pub(crate) use contribution_shape::{
     ContributionShape, classify_tir_contribution_node, tir_node_is_control_flow_root,
 };
 
-#[cfg(test)]
 pub(crate) use node::TirSlotPlaceholder;
 pub(crate) use slot_layout::{
     TirSlotPlaceholderRef, TirSlotSchema, collect_tir_slot_layout,

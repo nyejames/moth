@@ -46,36 +46,36 @@ Exact view identity includes root, phase and value context. Structural walks fol
 Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
 
 [diagram:
-    [$insert("label"): TIR lives and dies inside AST]
-    [$insert("caption"): Template structure gets a real home for exactly as long as the checker needs it, then leaves nothing behind for later stages to misread.]
+    [$in label: TIR lives and dies inside AST]
+    [$in caption: Template structure gets a real home for exactly as long as the checker needs it, then leaves nothing behind for later stages to misread.]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Built]
-            [$insert("title"): Structure captured as TIR]
+            [$in href: ./]
+            [$in eyebrow: Built]
+            [$in title: Structure captured as TIR]
             Wrappers, slots, child values, conditional selector/body pairs, loop header/body pairs and placement order stay structured rather than becoming flattened text.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Classified]
-            [$insert("title"): prepare_tir_view classifies the value]
+            [$in href: ./]
+            [$in eyebrow: Classified]
+            [$in title: prepare_tir_view classifies the value]
             One owner decides whether the whole value is foldable, runtime or a helper, so finalisation never re-litigates it.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Two exits]
+                [$in label: Two exits]
                 [fanout:
                 [detail:
-                    [$insert("href"): ../html-assembly-and-output/]
+                    [$in href: ../html-assembly-and-output/]
                     Static pieces fold to strings with insertion indexes
                 ]
                 [detail:
-                    [$insert("href"): ../hir/]
+                    [$in href: ../hir/]
                     Dynamic pieces become neutral runtime handoff data
                 ]
                 ]
@@ -85,9 +85,9 @@ Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
 
     [stage:
         [node:
-            [$insert("href"): ../hir/]
-            [$insert("eyebrow"): Gone]
-            [$insert("title"): The TIR store drops]
+            [$in href: ../hir/]
+            [$in eyebrow: Gone]
+            [$in title: The TIR store drops]
             No TIR identity survives the completed AST. HIR sees ordinary strings and lazy runtime control flow.
         ]
     ]

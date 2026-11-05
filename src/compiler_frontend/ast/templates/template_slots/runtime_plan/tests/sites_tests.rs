@@ -11,7 +11,9 @@ use super::{
     RuntimeSlotFill, RuntimeSlotFillWrappers, RuntimeSlotInjection, RuntimeWrapperSitePlanBuilder,
     inject_runtime_slot_fill, inject_runtime_slot_fill_with_slot_wrappers,
 };
-use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringValue, ConstValuePayload, ConstValueStore,
+};
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::TemplateSegmentOrigin;
@@ -33,6 +35,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     push_runtime_slot_contribution_source,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -120,6 +123,139 @@ fn build_slot_text_wrapper(
         },
         None,
     )
+}
+
+#[test]
+fn slot_site_without_routed_source_carries_occurrence_default() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let default = const_values
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Text(string_table.intern("fallback"))),
+            None,
+        )
+        .expect("test default inserts");
+
+    let wrapper_id = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let slot = builder.push_slot_node_with_default(SlotKey::Default, default, None);
+        builder.finish_template(
+            slot,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::empty(),
+            None,
+        )
+    };
+    let wrapper_root = store
+        .get_template(wrapper_id)
+        .expect("wrapper template exists")
+        .root;
+    let plan = push_slot_plan(&mut store);
+    let mut copy_state = TirCopyState::new();
+    let sites = RuntimeWrapperSitePlanBuilder {
+        sources: &[],
+        slot_plan_id: plan,
+        store: &mut store,
+        copy_state: &mut copy_state,
+        expressions: &expressions,
+        const_values: &const_values,
+        string_table: &string_table,
+    }
+    .build_slot_sites(wrapper_root)
+    .expect("default-only wrapper should plan its site");
+
+    assert_eq!(sites.len(), 1);
+    match &store
+        .get_node(sites[0].render_root)
+        .expect("site render root exists")
+        .kind
+    {
+        TemplateIrNodeKind::Slot { placeholder } => {
+            assert_eq!(placeholder.key, SlotKey::Default);
+            assert_eq!(
+                placeholder.default,
+                Some(default),
+                "the site root must retain this occurrence's own fallback"
+            );
+        }
+        _ => panic!("an unrouted default site must carry its occurrence fallback"),
+    }
+}
+
+#[test]
+fn routed_source_suppresses_slot_site_default() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let default = const_values
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Text(string_table.intern("fallback"))),
+            None,
+        )
+        .expect("test default inserts");
+
+    let wrapper_id = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let slot = builder.push_slot_node_with_default(SlotKey::Default, default, None);
+        builder.finish_template(
+            slot,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::empty(),
+            None,
+        )
+    };
+    let wrapper_root = store
+        .get_template(wrapper_id)
+        .expect("wrapper template exists")
+        .root;
+    let plan = push_slot_plan(&mut store);
+    let source_root = contribution_fill(&mut store, plan);
+    let sources = vec![RuntimeSlotContributionSourceDraft {
+        source: TemplateSlotContributionSourcePlan {
+            source: RuntimeSlotContributionSourceId(0),
+            target: SlotKey::Default,
+            render_root: source_root,
+            renders_wrapper_unconditionally: false,
+            span: None,
+        },
+        shape: ContributionShape::Other,
+        control_flow: false,
+    }];
+    let mut copy_state = TirCopyState::new();
+    let sites = RuntimeWrapperSitePlanBuilder {
+        sources: &sources,
+        slot_plan_id: plan,
+        store: &mut store,
+        copy_state: &mut copy_state,
+        expressions: &expressions,
+        const_values: &const_values,
+        string_table: &string_table,
+    }
+    .build_slot_sites(wrapper_root)
+    .expect("routed wrapper should plan its site");
+
+    assert_eq!(sites.len(), 1);
+    assert!(
+        node_contains_contribution(sites[0].render_root, &store, plan),
+        "a routed source must replace the occurrence default even when it emits empty"
+    );
+    assert!(
+        !matches!(
+            store
+                .get_node(sites[0].render_root)
+                .expect("site render root exists")
+                .kind,
+            TemplateIrNodeKind::Slot { .. }
+        ),
+        "the default fallback must not survive a routed contribution"
+    );
 }
 
 fn build_plain_text_wrapper(
@@ -699,6 +835,7 @@ fn build_named_slot_receiver_root(
                 SlotKey::Named(name),
                 occurrence_id,
                 None,
+                None,
                 Some(child_wrapper_set),
                 false,
             ),
@@ -729,7 +866,7 @@ fn inject_named_marker(
     let named_fill = rustc_hash::FxHashMap::from_iter([(name, vec![marker])]);
     let expressions = AstExpressionBuilder::new().unwrap();
     let const_values = ConstValueStore::default();
-    let mut slot_fill_wrappers = RuntimeSlotFillWrappers {
+    let slot_fill_wrappers = RuntimeSlotFillWrappers {
         slot_plan_id: plan,
         sources: &[],
         named_fill: &named_fill,
@@ -746,7 +883,7 @@ fn inject_named_marker(
     let injected = inject_runtime_slot_fill_with_slot_wrappers(
         wrapper_root,
         &[injection],
-        Some(&mut slot_fill_wrappers),
+        &mut Some(slot_fill_wrappers),
         store,
         &mut copy_state,
     )
@@ -928,6 +1065,7 @@ fn site_render_root_reuses_named_filled_conditional_wrapper_set() {
             TirSlotPlaceholder::with_wrapper_sets(
                 SlotKey::Named(name),
                 occurrence_id,
+                None,
                 None,
                 Some(child_wrapper_set),
                 false,

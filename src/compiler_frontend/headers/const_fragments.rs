@@ -20,6 +20,7 @@ use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanJoinError,
 };
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
 };
@@ -145,7 +146,8 @@ pub(super) fn create_top_level_const_template(
             ))
         })?
         .source_span();
-    let condition_references = collect_template_if_condition_references(template_facts, file_id);
+    let condition_references =
+        collect_template_if_condition_references(template_facts, file_id, context.string_table);
 
     let full_name = context
         .path_fork
@@ -266,6 +268,7 @@ pub(super) fn create_top_level_const_template(
 fn collect_template_if_condition_references(
     tokens: TokenFactView<'_>,
     source_id: SourceId,
+    string_table: &StringTable,
 ) -> Vec<InitializerReference> {
     let mut references = Vec::new();
     let mut index = 0;
@@ -280,7 +283,11 @@ fn collect_template_if_condition_references(
             };
             let condition_end = find_template_if_condition_end(tokens, condition_start);
             if let Some(condition) = tokens.subrange(condition_start, condition_end) {
-                references.extend(collect_scanned_symbol_references(condition, source_id));
+                references.extend(collect_scanned_symbol_references(
+                    condition,
+                    source_id,
+                    string_table,
+                ));
             }
             index = condition_end;
             continue;

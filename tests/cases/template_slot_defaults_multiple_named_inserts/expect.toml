@@ -1,0 +1,4 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "ordered=title=A-B-|subtitle=S-|body=Body fallback|emptied=title=|subtitle=Subtitle fallback|body=Body fallback|bare=title=|subtitle=Subtitle fallback|body=Body fallback"

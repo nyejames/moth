@@ -534,6 +534,7 @@ impl TemplateIrStore {
         TirSlotPlaceholder::with_wrapper_sets(
             placeholder.key.to_owned(),
             occurrence_id,
+            placeholder.default,
             applied_child_wrapper_set,
             child_wrapper_set,
             placeholder.skip_parent_child_wrappers,

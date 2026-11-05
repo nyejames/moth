@@ -2,12 +2,12 @@ A slot is a place where another template supplies content.
 
 [codeblock, $code("moth"):
     card = [:
-        <h1>[$slot("title")]</h1>
+        <h1>[$slot title]</h1>
         <section>[$slot]</section>
     ]
 
     [card:
-        [$insert("title"): Welcome]
+        [$in title: Welcome]
         This is the card body.
     ]
 ]

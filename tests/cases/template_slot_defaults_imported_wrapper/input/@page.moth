@@ -1,0 +1,5 @@
+@helpers/cards card
+
+plain #= [card]
+filled #= [card:[$in title:Local title]]
+[:plain=[plain]|filled=[filled]]

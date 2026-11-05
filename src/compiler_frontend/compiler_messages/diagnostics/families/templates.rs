@@ -63,6 +63,7 @@ unit_code! {
         InvalidSlotTarget = 7,
         InvalidInsertTarget = 8,
         InvalidChildrenArgument = 9,
+        InvalidSlotDefault = 10,
     }
 }
 
@@ -86,6 +87,7 @@ impl InvalidTemplateDirectiveCode {
             }
             InvalidTemplateDirectiveReason::EmptyArguments => (Self::EmptyArguments, None),
             InvalidTemplateDirectiveReason::InvalidSlotTarget => (Self::InvalidSlotTarget, None),
+            InvalidTemplateDirectiveReason::InvalidSlotDefault => (Self::InvalidSlotDefault, None),
             InvalidTemplateDirectiveReason::InvalidInsertTarget => {
                 (Self::InvalidInsertTarget, None)
             }
@@ -106,6 +108,7 @@ impl InvalidTemplateDirectiveCode {
             Self::UnexpectedArguments => InvalidTemplateDirectiveReason::UnexpectedArguments,
             Self::EmptyArguments => InvalidTemplateDirectiveReason::EmptyArguments,
             Self::InvalidSlotTarget => InvalidTemplateDirectiveReason::InvalidSlotTarget,
+            Self::InvalidSlotDefault => InvalidTemplateDirectiveReason::InvalidSlotDefault,
             Self::InvalidInsertTarget => InvalidTemplateDirectiveReason::InvalidInsertTarget,
             Self::InvalidChildrenArgument => {
                 InvalidTemplateDirectiveReason::InvalidChildrenArgument

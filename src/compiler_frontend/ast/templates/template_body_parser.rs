@@ -564,14 +564,14 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
 
             TemplateType::String | TemplateType::StringFunction | TemplateType::SlotInsert(_) => {}
 
-            TemplateType::SlotDefinition(slot_key) => {
+            TemplateType::SlotDefinition(slot_declaration) => {
                 let inherited_direct_child_wrappers = match input.inherited_wrappers {
                     InheritedChildWrapperPolicy::Apply => self.direct_child_wrappers.to_owned(),
                     InheritedChildWrapperPolicy::Skip => Vec::new(),
                 };
 
                 let slot_placeholder = SlotPlaceholder::with_wrappers(
-                    slot_key.to_owned(),
+                    slot_declaration.to_owned(),
                     inherited_direct_child_wrappers,
                     input.build_state.child_wrappers.to_owned(),
                     input.build_state.style.skip_parent_child_wrappers,

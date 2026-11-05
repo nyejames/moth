@@ -31,7 +31,9 @@ use crate::compiler_frontend::ast::templates::tir::fold::{
     fold_prepared_const_template_pattern, fold_prepared_template,
 };
 use crate::compiler_frontend::ast::templates::tir::node::{TemplateIrNode, TemplateIrNodeKind};
-use crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext;
+use crate::compiler_frontend::ast::templates::tir::overlays::{
+    TemplateViewContext, TirSlotResolution, TirSlotResolutionOverlay,
+};
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
@@ -204,6 +206,21 @@ fn structural_string_expression(
         .constant(value, builtin_type_ids::STRING, None, value_mode)
         .expect("test structural string constructs")
         .id()
+}
+
+/// One plain compile-time String constant, matching the parser-validated slot default.
+fn string_constant(
+    constants: &mut ConstValueStore,
+    string_table: &mut StringTable,
+    text: &str,
+) -> crate::compiler_frontend::ast::const_values::store::ConstValueId {
+    constants
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Text(string_table.intern(text))),
+            None,
+        )
+        .expect("test slot default string inserts")
 }
 
 fn emission_to_string(emission: TemplateEmission, string_table: &StringTable) -> String {
@@ -491,6 +508,258 @@ fn const_template_projection_preserves_structured_slot_order() -> Result<(), Tem
         ]
     );
 
+    Ok(())
+}
+
+#[test]
+fn const_template_projection_retains_per_occurrence_defaults() -> Result<(), TemplateError> {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let name = string_table.intern("title");
+    let first_default = string_constant(&mut const_values, &mut string_table, "first");
+    let second_default = string_constant(&mut const_values, &mut string_table, "second");
+
+    let (template_id, first_occurrence, second_occurrence) = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let first_slot =
+            builder.push_slot_node_with_default(SlotKey::Named(name), first_default, None);
+        let second_slot =
+            builder.push_slot_node_with_default(SlotKey::Named(name), second_default, None);
+        let root = builder.push_sequence_node(vec![first_slot, second_slot], None);
+        let template_id = builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            None,
+        );
+        drop(builder);
+        let occurrence = |node_id| match store.get_node(node_id).expect("slot exists") {
+            TemplateIrNode {
+                kind: TemplateIrNodeKind::Slot { placeholder },
+                ..
+            } => placeholder.occurrence_id,
+            _ => panic!("expected a slot node"),
+        };
+        (template_id, occurrence(first_slot), occurrence(second_slot))
+    };
+
+    let view = TirView::with_minimum_phase(
+        &store,
+        template_id,
+        TemplateTirPhase::Composed,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )?;
+    let prepared = prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::ConstRequired,
+        None,
+    )?;
+    assert!(
+        matches!(prepared.outcome, TemplatePreparationOutcome::Foldable),
+        "occurrence-owned defaults must not force unresolved runtime work"
+    );
+
+    let mut fold_context =
+        build_test_fold_context(&mut string_table, &mut expressions, &mut const_values);
+    let pattern = fold_prepared_const_template_pattern(prepared, view, &mut fold_context)?;
+
+    assert_eq!(
+        pattern.pieces,
+        vec![
+            FoldedConstTemplatePiece::Slot(first_occurrence),
+            FoldedConstTemplatePiece::Slot(second_occurrence),
+        ],
+        "the public projection must retain both occurrences and their defaults"
+    );
+    assert_eq!(
+        emission_to_string(pattern.emission, &string_table),
+        "firstsecond",
+        "each occurrence falls back to its own authored String"
+    );
+    assert_eq!(
+        store
+            .slot_placeholder(first_occurrence)
+            .expect("first occurrence exists")
+            .default,
+        Some(first_default)
+    );
+    assert_eq!(
+        store
+            .slot_placeholder(second_occurrence)
+            .expect("second occurrence exists")
+            .default,
+        Some(second_default)
+    );
+    Ok(())
+}
+
+#[test]
+fn routed_empty_source_suppresses_occurrence_default() -> Result<(), TemplateError> {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let fallback = string_constant(&mut const_values, &mut string_table, "fallback");
+    let empty = string_table.intern("");
+
+    let (template_id, source_id, occurrence) = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let slot = builder.push_slot_node_with_default(SlotKey::Default, fallback, None);
+        let template_id = builder.finish_template(
+            slot,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            None,
+        );
+        let source_text = builder.push_text_node(empty, 0, TemplateSegmentOrigin::Body, None);
+        let source_id = builder.finish_template(
+            source_text,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            None,
+        );
+        drop(builder);
+        let occurrence = match store.get_node(slot).expect("slot exists") {
+            TemplateIrNode {
+                kind: TemplateIrNodeKind::Slot { placeholder },
+                ..
+            } => placeholder.occurrence_id,
+            _ => panic!("expected a slot node"),
+        };
+        (template_id, source_id, occurrence)
+    };
+
+    let overlay = store
+        .allocate_slot_resolution_overlay(TirSlotResolutionOverlay {
+            resolutions: vec![(
+                occurrence,
+                TirSlotResolution::resolved(SlotKey::Default, vec![source_id]),
+            )],
+        })
+        .expect("test slot resolution overlay allocates");
+    let context = TemplateViewContext {
+        slot_resolution: Some(overlay),
+        ..TemplateViewContext::default()
+    };
+    let view = TirView::with_minimum_phase(
+        &store,
+        template_id,
+        TemplateTirPhase::Composed,
+        TemplateTirPhase::Composed,
+        context,
+    )?;
+    let prepared = prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::ConstRequired,
+        None,
+    )?;
+    let mut fold_context =
+        build_test_fold_context(&mut string_table, &mut expressions, &mut const_values);
+    let pattern = fold_prepared_const_template_pattern(prepared, view, &mut fold_context)?;
+
+    assert_eq!(
+        pattern.pieces,
+        Vec::<FoldedConstTemplatePiece>::new(),
+        "routed sources replace the occurrence rather than retaining it"
+    );
+    assert_eq!(
+        emission_to_string(pattern.emission, &string_table),
+        "",
+        "an explicitly routed empty source suppresses the authored fallback"
+    );
+    Ok(())
+}
+
+#[test]
+fn occurrence_default_preserves_structural_pieces_in_projection() -> Result<(), TemplateError> {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let resource_origin = StableResourceOriginId::module_owned(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("slot-default-test"),
+            "pages".to_owned(),
+            ModuleRootRole::Normal,
+        ),
+        PortableResourcePath::from_relative_logical_path(Path::new("assets/logo.svg"))
+            .expect("test resource path should be portable"),
+    );
+    let mut resource_table = ModuleResourceTable::new();
+    let resource = resource_table.intern_origin(resource_origin, None);
+    let default = const_values
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Pieces(vec![
+                ConstStringPiece::Resource(resource),
+                ConstStringPiece::SiteRoot,
+            ])),
+            None,
+        )
+        .expect("structural default inserts");
+
+    let (template_id, occurrence) = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let slot = builder.push_slot_node_with_default(SlotKey::Default, default, None);
+        let template_id = builder.finish_template(
+            slot,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            None,
+        );
+        drop(builder);
+        let occurrence = match store.get_node(slot).expect("slot exists") {
+            TemplateIrNode {
+                kind: TemplateIrNodeKind::Slot { placeholder },
+                ..
+            } => placeholder.occurrence_id,
+            _ => panic!("expected a slot node"),
+        };
+        (template_id, occurrence)
+    };
+
+    let view = TirView::with_minimum_phase(
+        &store,
+        template_id,
+        TemplateTirPhase::Composed,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )?;
+    let prepared = prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::ConstRequired,
+        None,
+    )?;
+    let mut fold_context =
+        build_test_fold_context(&mut string_table, &mut expressions, &mut const_values);
+    let pattern = fold_prepared_const_template_pattern(prepared, view, &mut fold_context)?;
+
+    assert_eq!(
+        pattern.pieces,
+        vec![FoldedConstTemplatePiece::Slot(occurrence)],
+        "structural defaults stay owned by their occurrence in the projection"
+    );
+    assert_eq!(
+        pattern.emission,
+        TemplateEmission::Output(ConstStringValue::Pieces(vec![
+            ConstStringPiece::Resource(resource),
+            ConstStringPiece::SiteRoot,
+        ])),
+        "the fallback emission must preserve resource and site-root identity"
+    );
     Ok(())
 }
 

@@ -28,9 +28,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):directive-pages]
-        [$insert("title"):Directives]
-        [$insert("advanced"):[directives]]
+        [$in key:directive-pages]
+        [$in title:Directives]
+        [$in advanced:[directives]]
 
         [directives_basic]
     ]
@@ -38,9 +38,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../templates/]
-        [$insert("previous_title"):Templates]
-        [$insert("next_path"):../project-structure/]
-        [$insert("next_title"):Project structure]
+        [$in previous_path:../templates/]
+        [$in previous_title:Templates]
+        [$in next_path:../project-structure/]
+        [$in next_title:Project structure]
     ]
 ]

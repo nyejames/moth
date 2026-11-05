@@ -648,7 +648,7 @@ impl Template {
             .into());
         }
 
-        // A compile-time template has no parent template to receive an escaped `$insert(...)`
+        // A compile-time template has no parent template to receive an escaped `$in name: ...`
         // helper. Head-chain composition already ran, so a surviving contribution cannot be
         // routed and the constant would otherwise fail later as a generic non-foldable value.
         if matches!(preparation_mode, TemplatePreparationMode::ConstRequired)

@@ -35,9 +35,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):conditional-loops]
-        [$insert("title"):Conditional loops]
-        [$insert("advanced"):[conditional_loops]]
+        [$in key:conditional-loops]
+        [$in title:Conditional loops]
+        [$in advanced:[conditional_loops]]
 
         [conditional_loops_basic]
     ]
@@ -45,9 +45,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):collection-loops]
-        [$insert("title"):Collection loops]
-        [$insert("advanced"):[collection_loops]]
+        [$in key:collection-loops]
+        [$in title:Collection loops]
+        [$in advanced:[collection_loops]]
 
         [collection_loops_basic]
     ]
@@ -55,9 +55,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):range-loops]
-        [$insert("title"):Range loops]
-        [$insert("advanced"):[range_loops]]
+        [$in key:range-loops]
+        [$in title:Range loops]
+        [$in advanced:[range_loops]]
 
         [range_loops_basic]
     ]
@@ -65,9 +65,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):loop-control]
-        [$insert("title"):Loop control]
-        [$insert("advanced"):[loop_control]]
+        [$in key:loop-control]
+        [$in title:Loop control]
+        [$in advanced:[loop_control]]
 
         [loop_control_basic]
     ]
@@ -75,9 +75,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../branching/]
-        [$insert("previous_title"):Branching]
-        [$insert("next_path"):../structs/]
-        [$insert("next_title"):Structs]
+        [$in previous_path:../branching/]
+        [$in previous_title:Branching]
+        [$in next_path:../structs/]
+        [$in next_title:Structs]
     ]
 ]

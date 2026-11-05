@@ -24,9 +24,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):site]
-        [$insert("title"):Static site URLs]
-        [$insert("advanced"):[site_advanced]]
+        [$in key:site]
+        [$in title:Static site URLs]
+        [$in advanced:[site_advanced]]
 
         [site_basic]
     ]
@@ -34,9 +34,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../graphics/]
-        [$insert("previous_title"):@web/graphics]
-        [$insert("next_path"):../page/]
-        [$insert("next_title"):@web/page]
+        [$in previous_path:../graphics/]
+        [$in previous_title:@web/graphics]
+        [$in next_path:../page/]
+        [$in next_title:@web/page]
     ]
 ]

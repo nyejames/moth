@@ -475,14 +475,14 @@ export:
     doc_level #= [$html:
         <fieldset class="doc-level">
             <legend class="visually-hidden">
-                Choose the explanation level: [$slot("title")]
+                Choose the explanation level: [$slot title]
             </legend>
 
             <input
                 class="doc-level__input doc-level__input--basic"
                 type="radio"
-                name="[$slot("key")]-level"
-                id="[$slot("key")]-basic"
+                name="[$slot key]-level"
+                id="[$slot key]-basic"
                 value="basic"
                 checked
             >
@@ -490,27 +490,27 @@ export:
             <input
                 class="doc-level__input doc-level__input--advanced"
                 type="radio"
-                name="[$slot("key")]-level"
-                id="[$slot("key")]-advanced"
+                name="[$slot key]-level"
+                id="[$slot key]-advanced"
                 value="advanced"
             >
 
             <header class="doc-level__header">
-                <h2 class="doc-level__title" id="[$slot("key")]">
-                    [$slot("title")]
+                <h2 class="doc-level__title" id="[$slot key]">
+                    [$slot title]
                 </h2>
 
                 <div class="doc-level__switch">
                     <label
                         class="doc-level__option doc-level__option--basic"
-                        for="[$slot("key")]-basic"
+                        for="[$slot key]-basic"
                     >
                         Basic
                     </label>
 
                     <label
                         class="doc-level__option doc-level__option--advanced"
-                        for="[$slot("key")]-advanced"
+                        for="[$slot key]-advanced"
                     >
                         Advanced
                     </label>
@@ -522,7 +522,7 @@ export:
             </div>
 
             <div class="doc-level__panel doc-level__panel--advanced">
-                [$slot("advanced")]
+                [$slot advanced]
             </div>
         </fieldset>
     ]
@@ -531,20 +531,20 @@ export:
         <nav class="doc-pager" aria-label="Language documentation">
             <a
                 class="doc-pager__link doc-pager__link--previous"
-                href="[$slot("previous_path")]"
+                href="[$slot previous_path]"
                 rel="prev"
             >
                 <span class="doc-pager__direction">← Previous</span>
-                <span class="doc-pager__title">[$slot("previous_title")]</span>
+                <span class="doc-pager__title">[$slot previous_title]</span>
             </a>
 
             <a
                 class="doc-pager__link doc-pager__link--next"
-                href="[$slot("next_path")]"
+                href="[$slot next_path]"
                 rel="next"
             >
                 <span class="doc-pager__direction">Next →</span>
-                <span class="doc-pager__title">[$slot("next_title")]</span>
+                <span class="doc-pager__title">[$slot next_title]</span>
             </a>
 
             [$slot]
@@ -555,11 +555,11 @@ export:
         <nav class="doc-pager doc-pager--single" aria-label="Language documentation">
             <a
                 class="doc-pager__link doc-pager__link--previous"
-                href="[$slot("previous_path")]"
+                href="[$slot previous_path]"
                 rel="prev"
             >
                 <span class="doc-pager__direction">← Previous</span>
-                <span class="doc-pager__title">[$slot("previous_title")]</span>
+                <span class="doc-pager__title">[$slot previous_title]</span>
             </a>
 
             [$slot]
@@ -570,11 +570,11 @@ export:
         <nav class="doc-pager doc-pager--single" aria-label="Language documentation">
             <a
                 class="doc-pager__link doc-pager__link--next"
-                href="[$slot("next_path")]"
+                href="[$slot next_path]"
                 rel="next"
             >
                 <span class="doc-pager__direction">Next →</span>
-                <span class="doc-pager__title">[$slot("next_title")]</span>
+                <span class="doc-pager__title">[$slot next_title]</span>
             </a>
 
             [$slot]
@@ -599,7 +599,7 @@ export:
 
             [$note: The first row is styled differently to indicate that it is a header row.]
             <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
-                [$slot(1)]
+                [$slot 1]
             </tr>
 
             [$note: Each remaining row is styled with a dotted border to separate the rows visually.]
@@ -611,7 +611,7 @@ export:
     ]
 
     data #= [$html:
-        [$children([$html: <td style="padding: 0.1em 0.5em; [$slot("style")]">[$slot]</td>]):
+        [$children([$html: <td style="padding: 0.1em 0.5em; [$slot style]">[$slot]</td>]):
             [$slot]
         ]
     ]
@@ -626,5 +626,5 @@ export:
         ">[$slot]</pre>
     ]
 
-    title #= [$html: <h1 style="font-size: 2em;[$slot("style")]">[$slot]</h1>]
+    title #= [$html: <h1 style="font-size: 2em;[$slot style]">[$slot]</h1>]
 ;

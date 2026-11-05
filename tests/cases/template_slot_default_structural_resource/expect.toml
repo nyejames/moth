@@ -1,0 +1,8 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "image=./assets/icon.svg|alt=Asset fallback"
+
+[[backends.html.artifact_assertions]]
+path = "assets/icon.svg"
+kind = "binary"

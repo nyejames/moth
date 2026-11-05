@@ -28,7 +28,7 @@ Directive availability comes from one merged registry:
 
 - declares a default, named or positional slot
 
-`$insert(...)`:
+`$in name`:
 
 - contributes content to a named slot
 
@@ -126,14 +126,14 @@ the compiler rejects a second formatter, including a repeat of the same one:
     io.line([$md, $raw: Hello])
 ]
 
-`$insert(...)` can sit beside other items, but it can appear only once per
+`$in name` can sit beside other items, but it can appear only once per
 head. Each insert sends its body to one named slot, so use one insert template
 for each slot you fill:
 
 [codeblock, $code("moth"):
     [card:
-        [$insert("title"): Hello]
-        [$insert("footer"): Goodbye]
+        [$in title: Hello]
+        [$in footer: Goodbye]
         Body content
     ]
 ]

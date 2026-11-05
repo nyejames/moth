@@ -34,9 +34,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):wiring-introduction]
-        [$insert("title"):Introduction and detailed reference]
-        [$insert("advanced"):[wiring]]
+        [$in key:wiring-introduction]
+        [$in title:Introduction and detailed reference]
+        [$in advanced:[wiring]]
 
         [introduction_basic]
     ]
@@ -44,9 +44,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):wiring-wires]
-        [$insert("title"):Wires]
-        [$insert("advanced"):See the Wires section of the detailed Wiring reference above.]
+        [$in key:wiring-wires]
+        [$in title:Wires]
+        [$in advanced:See the Wires section of the detailed Wiring reference above.]
 
         [wires_basic]
     ]
@@ -54,9 +54,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):wiring-routes]
-        [$insert("title"):Routes]
-        [$insert("advanced"):See the Constructor routes section of the detailed Wiring reference above.]
+        [$in key:wiring-routes]
+        [$in title:Routes]
+        [$in advanced:See the Constructor routes section of the detailed Wiring reference above.]
 
         [routes_basic]
     ]
@@ -64,9 +64,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):wiring-scope-and-future]
-        [$insert("title"):Scope and future channels]
-        [$insert("advanced"):See Capability positions and lifetimes and Future channel boundary in the detailed Wiring reference above.]
+        [$in key:wiring-scope-and-future]
+        [$in title:Scope and future channels]
+        [$in advanced:See Capability positions and lifetimes and Future channel boundary in the detailed Wiring reference above.]
 
         [scope_and_future_basic]
     ]
@@ -74,9 +74,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../traits/]
-        [$insert("previous_title"):Traits]
-        [$insert("next_path"):../memory/]
-        [$insert("next_title"):Memory and lifetimes]
+        [$in previous_path:../traits/]
+        [$in previous_title:Traits]
+        [$in next_path:../memory/]
+        [$in next_title:Memory and lifetimes]
     ]
 ]

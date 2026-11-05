@@ -51,6 +51,7 @@ use crate::compiler_frontend::single_source_compilation::{
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::routing::{PageUrlStyle, parse_html_site_config};
 use crate::projects::settings::Config;
@@ -1502,6 +1503,8 @@ fn rejects_unresolved_project_template_metadata() {
             kind: PublicConstTemplateKind::Wrapper,
             pieces: vec![PublicConstTemplatePiece::Slot(PublicConstTemplateSlot {
                 key: PublicTemplateSlotKey::Named("title".to_owned()),
+                default: None,
+                default_provenance: SyntheticInterfaceProvenance::empty(),
                 applied_child_wrappers: Vec::new(),
                 child_wrappers: Vec::new(),
                 skip_parent_child_wrappers: false,

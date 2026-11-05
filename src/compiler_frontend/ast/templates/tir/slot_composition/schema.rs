@@ -103,13 +103,22 @@ pub(crate) fn expand_tir_slot_placeholders_into(
     routed_contributions: &TirSlotContributions,
     string_table: &StringTable,
 ) -> SlotSchemaResult<TemplateIrNodeId> {
-    expand_wrapper_template_into(
+    let Some(template) = store.get_template(wrapper_template_id) else {
+        return Err(internal_infrastructure_failure(
+            "TIR slot expansion: wrapper template ID was not present in the store.",
+        ));
+    };
+    let root = template.root;
+    let mut named_filled_wrapper_sets = NamedFilledWrapperSetCache::default();
+
+    expand_tir_slot_placeholders_from_node(
         store,
         expressions,
         const_values,
-        wrapper_template_id,
+        root,
         routed_contributions,
         &routed_contributions.named_nodes,
+        &mut named_filled_wrapper_sets,
         SlotExpansionScope::All,
         string_table,
     )
@@ -157,37 +166,6 @@ pub(crate) fn fill_named_slot_placeholders_into(
         wrapper_template_id,
         expanded_root,
     )?))
-}
-
-fn expand_wrapper_template_into(
-    store: &mut TemplateIrStore,
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
-    wrapper_template_id: TemplateIrId,
-    routed_contributions: &TirSlotContributions,
-    named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
-    scope: SlotExpansionScope,
-    string_table: &StringTable,
-) -> SlotSchemaResult<TemplateIrNodeId> {
-    let Some(template) = store.get_template(wrapper_template_id) else {
-        return Err(internal_infrastructure_failure(
-            "TIR slot expansion: wrapper template ID was not present in the store.",
-        ));
-    };
-    let root = template.root;
-    let mut named_filled_wrapper_sets = NamedFilledWrapperSetCache::default();
-
-    expand_tir_slot_placeholders_from_node(
-        store,
-        expressions,
-        const_values,
-        root,
-        routed_contributions,
-        named_fill,
-        &mut named_filled_wrapper_sets,
-        scope,
-        string_table,
-    )
 }
 
 /// Recursively walks TIR nodes and produces a new TIR tree with slots expanded.
@@ -272,8 +250,13 @@ fn expand_tir_slot_placeholders_from_node(
         TemplateIrNodeKind::Slot { placeholder } => {
             // Named-only expansion leaves the wrapper's own loose insertion point and
             // positional occurrences untouched for the later wrapper application.
-            let contribution_nodes = match scope {
-                SlotExpansionScope::All => routed_contributions.nodes_for_slot(&placeholder.key),
+            // Routing owns presence, not content: an explicit empty contribution
+            // suppresses the occurrence default even though it contributes no nodes.
+            let (contribution_nodes, has_routed_presence) = match scope {
+                SlotExpansionScope::All => (
+                    routed_contributions.nodes_for_slot(&placeholder.key),
+                    routed_contributions.slot_has_routed_presence(&placeholder.key),
+                ),
                 SlotExpansionScope::NamedOnly => {
                     let SlotKey::Named(name) = &placeholder.key else {
                         return Ok(node_id);
@@ -281,10 +264,7 @@ fn expand_tir_slot_placeholders_from_node(
                     let Some(nodes) = named_fill.get(name) else {
                         return Ok(node_id);
                     };
-                    if nodes.is_empty() {
-                        return Ok(node_id);
-                    }
-                    nodes.as_slice()
+                    (nodes.as_slice(), true)
                 }
             };
 
@@ -333,6 +313,16 @@ fn expand_tir_slot_placeholders_from_node(
                 };
 
                 wrapped_nodes.push(current_node_id);
+            }
+
+            // A defaulted occurrence with no routed contribution keeps its structural
+            // node so the fallback remains occurrence-owned until the final fold or
+            // handoff. An occurrence whose slot was routed but received empty content
+            // still expands to an empty sequence, suppressing the fallback. An
+            // occurrence without a default also expands to an empty sequence,
+            // preserving the established unresolved-slot removal.
+            if wrapped_nodes.is_empty() && placeholder.default.is_some() && !has_routed_presence {
+                return Ok(node_id);
             }
 
             // Repeated slot placeholders replay the same contribution nodes.
@@ -824,6 +814,7 @@ fn fill_slot_wrapper_sets_from_node(
             let filled_placeholder = TirSlotPlaceholder::with_wrapper_sets(
                 placeholder.key,
                 placeholder.occurrence_id,
+                placeholder.default,
                 filled_applied,
                 filled_child,
                 placeholder.skip_parent_child_wrappers,

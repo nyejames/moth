@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 
 use rustc_hash::FxHashSet;
 
+use crate::compiler_frontend::ast::const_values::store::ConstValueId;
 use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::tir::ids::{
     SlotOccurrenceId, TemplateIrId, TemplateIrNodeId, TemplateWrapperSetId,
@@ -119,6 +120,9 @@ pub(crate) struct TirSlotPlaceholderRef {
     )]
     pub(crate) occurrence_id: SlotOccurrenceId,
     pub(crate) key: SlotKey,
+    /// Occurrence-owned compile-time fallback. Runtime site planning materialises it
+    /// only when no routed contribution source targets this occurrence.
+    pub(crate) default: Option<ConstValueId>,
     pub(crate) child_wrapper_set: Option<TemplateWrapperSetId>,
     pub(crate) applied_child_wrapper_set: Option<TemplateWrapperSetId>,
     pub(crate) skip_parent_child_wrappers: bool,
@@ -252,6 +256,7 @@ fn collect_from_node(
             placeholders.push(TirSlotPlaceholderRef {
                 occurrence_id: placeholder.occurrence_id,
                 key: placeholder.key.clone(),
+                default: placeholder.default,
                 child_wrapper_set: placeholder.child_wrapper_set,
                 applied_child_wrapper_set: placeholder.applied_child_wrapper_set,
                 skip_parent_child_wrappers: placeholder.skip_parent_child_wrappers,

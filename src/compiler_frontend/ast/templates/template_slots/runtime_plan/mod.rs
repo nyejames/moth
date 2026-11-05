@@ -107,16 +107,16 @@ pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runti
         &mut copy_state,
     )?;
 
-    let slot_sites = sites::build_runtime_wrapper_site_plan(
-        scratch_tir_root,
-        &sources,
+    let slot_sites = sites::RuntimeWrapperSitePlanBuilder {
+        sources: &sources,
         slot_plan_id,
         store,
-        &mut copy_state,
+        copy_state: &mut copy_state,
         expressions,
         const_values,
-        services.string_table,
-    )?;
+        string_table: services.string_table,
+    }
+    .build_slot_sites(scratch_tir_root)?;
 
     // Fixed direct children keep their wrapper context outside the plan's slot-site
     // roots, so named contributions have to reach those inherited wrapper sets
@@ -164,7 +164,8 @@ pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runti
 
 /// Resolves named contribution markers into the receiver's direct-child wrapper sets.
 ///
-/// WHAT: builds one plan source marker per named routed contribution, then rewrites the
+/// WHAT: builds one plan source marker per named routed contribution, including
+///       a routed target whose content is explicitly empty, then rewrites the
 ///       occurrence-keyed wrapper overlay so every inherited `$children(..)` wrapper
 ///       replays those markers at its own declared named slots.
 /// WHY: inherited wrappers around fixed direct children are materialized outside the

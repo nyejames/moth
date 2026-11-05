@@ -78,12 +78,12 @@ angle #= PI / 4.0
 -- Template helpers
 slot_shell #= [:
     <section>
-        <h1>[$slot("title")]</h1>
+        <h1>[$slot title]</h1>
         <div>[$slot]</div>
     </section>
 ]
 
-title_insert #= [$insert("title"): Kitchen Sink]
+title_insert #= [$in title: Kitchen Sink]
 
 status_badge |status Status| -> String:
     if status is:

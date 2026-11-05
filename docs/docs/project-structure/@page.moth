@@ -45,9 +45,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):project-layout]
-        [$insert("title"):Project layout]
-        [$insert("advanced"):[project_layout]]
+        [$in key:project-layout]
+        [$in title:Project layout]
+        [$in advanced:[project_layout]]
 
         [project_layout_basic]
     ]
@@ -55,9 +55,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):project-config]
-        [$insert("title"):Project config]
-        [$insert("advanced"):[project_config]]
+        [$in key:project-config]
+        [$in title:Project config]
+        [$in advanced:[project_config]]
 
         [project_config_basic]
     ]
@@ -65,9 +65,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):module-roots]
-        [$insert("title"):Module roots]
-        [$insert("advanced"):[module_roots]]
+        [$in key:module-roots]
+        [$in title:Module roots]
+        [$in advanced:[module_roots]]
 
         [module_roots_basic]
     ]
@@ -75,9 +75,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):public-api]
-        [$insert("title"):Public API]
-        [$insert("advanced"):[public_api]]
+        [$in key:public-api]
+        [$in title:Public API]
+        [$in advanced:[public_api]]
 
         [public_api_basic]
     ]
@@ -85,9 +85,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):entry-runtime-and-fragments]
-        [$insert("title"):Active-root runtime and fragments]
-        [$insert("advanced"):[entry_runtime_and_fragments]]
+        [$in key:entry-runtime-and-fragments]
+        [$in title:Active-root runtime and fragments]
+        [$in advanced:[entry_runtime_and_fragments]]
 
         [entry_runtime_and_fragments_basic]
     ]
@@ -95,9 +95,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):html-routing-and-artifacts]
-        [$insert("title"):HTML routing and artefacts]
-        [$insert("advanced"):[html_routing_and_artifacts]]
+        [$in key:html-routing-and-artifacts]
+        [$in title:HTML routing and artefacts]
+        [$in advanced:[html_routing_and_artifacts]]
 
         [html_routing_and_artifacts_basic]
     ]
@@ -105,9 +105,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):build-inputs]
-        [$insert("title"):Build configuration values]
-        [$insert("advanced"):[build_inputs]]
+        [$in key:build-inputs]
+        [$in title:Build configuration values]
+        [$in advanced:[build_inputs]]
 
         [build_inputs_basic]
     ]
@@ -115,9 +115,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):entry-config]
-        [$insert("title"):Entry metadata and page directives]
-        [$insert("advanced"):[entry_config]]
+        [$in key:entry-config]
+        [$in title:Entry metadata and page directives]
+        [$in advanced:[entry_config]]
 
         [entry_config_basic]
     ]
@@ -125,9 +125,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):project-package-facade]
-        [$insert("title"):Project package facade]
-        [$insert("advanced"):[project_package_facade]]
+        [$in key:project-package-facade]
+        [$in title:Project package facade]
+        [$in advanced:[project_package_facade]]
 
         [project_package_facade_basic]
     ]
@@ -135,9 +135,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../memory/]
-        [$insert("previous_title"):Memory and lifetimes]
-        [$insert("next_path"):../packages/]
-        [$insert("next_title"):Packages and dependencies]
+        [$in previous_path:../memory/]
+        [$in previous_title:Memory and lifetimes]
+        [$in next_path:../packages/]
+        [$in next_title:Packages and dependencies]
     ]
 ]

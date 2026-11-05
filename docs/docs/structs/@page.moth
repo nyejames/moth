@@ -39,9 +39,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):struct-declarations]
-        [$insert("title"):Struct declarations]
-        [$insert("advanced"):[struct_declarations]]
+        [$in key:struct-declarations]
+        [$in title:Struct declarations]
+        [$in advanced:[struct_declarations]]
 
         [struct_declarations_basic]
     ]
@@ -49,9 +49,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):construction-and-fields]
-        [$insert("title"):Construction and fields]
-        [$insert("advanced"):[construction_and_fields]]
+        [$in key:construction-and-fields]
+        [$in title:Construction and fields]
+        [$in advanced:[construction_and_fields]]
 
         [construction_and_fields_basic]
     ]
@@ -59,9 +59,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):anonymous-records]
-        [$insert("title"):Runtime anonymous records]
-        [$insert("advanced"):[anonymous_records]]
+        [$in key:anonymous-records]
+        [$in title:Runtime anonymous records]
+        [$in advanced:[anonymous_records]]
 
         [anonymous_records_basic]
     ]
@@ -69,9 +69,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):receiver-methods]
-        [$insert("title"):Receiver methods]
-        [$insert("advanced"):[receiver_methods]]
+        [$in key:receiver-methods]
+        [$in title:Receiver methods]
+        [$in advanced:[receiver_methods]]
 
         [receiver_methods_basic]
     ]
@@ -79,9 +79,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):mutable-receivers]
-        [$insert("title"):Mutable receivers]
-        [$insert("advanced"):[mutable_receivers]]
+        [$in key:mutable-receivers]
+        [$in title:Mutable receivers]
+        [$in advanced:[mutable_receivers]]
 
         [mutable_receivers_basic]
     ]
@@ -89,9 +89,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../loops/]
-        [$insert("previous_title"):Loops]
-        [$insert("next_path"):../choices/]
-        [$insert("next_title"):Choices]
+        [$in previous_path:../loops/]
+        [$in previous_title:Loops]
+        [$in next_path:../choices/]
+        [$in next_title:Choices]
     ]
 ]

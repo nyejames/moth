@@ -34,9 +34,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):markdown-files]
-        [$insert("title"):Markdown files]
-        [$insert("advanced"):[markdown_files]]
+        [$in key:markdown-files]
+        [$in title:Markdown files]
+        [$in advanced:[markdown_files]]
 
         [markdown_files_basic]
     ]
@@ -44,9 +44,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):markdown-dependencies]
-        [$insert("title"):Markdown dependencies]
-        [$insert("advanced"):[markdown_dependencies]]
+        [$in key:markdown-dependencies]
+        [$in title:Markdown dependencies]
+        [$in advanced:[markdown_dependencies]]
 
         [markdown_dependencies_basic]
     ]
@@ -54,9 +54,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):rendering-contract]
-        [$insert("title"):Rendering contract]
-        [$insert("advanced"):[rendering_contract]]
+        [$in key:rendering-contract]
+        [$in title:Rendering contract]
+        [$in advanced:[rendering_contract]]
 
         [rendering_contract_basic]
     ]
@@ -64,9 +64,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):choosing-a-content-format]
-        [$insert("title"):Choosing a content format]
-        [$insert("advanced"):[choosing_a_content_format]]
+        [$in key:choosing-a-content-format]
+        [$in title:Choosing a content format]
+        [$in advanced:[choosing_a_content_format]]
 
         [choosing_a_content_format_basic]
     ]
@@ -74,9 +74,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../moth-templates/]
-        [$insert("previous_title"):Moth template files]
-        [$insert("next_path"):../design-scope/]
-        [$insert("next_title"):Design scope]
+        [$in previous_path:../moth-templates/]
+        [$in previous_title:Moth template files]
+        [$in next_path:../design-scope/]
+        [$in next_title:Design scope]
     ]
 ]

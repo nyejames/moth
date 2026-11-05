@@ -15,23 +15,23 @@ Moth's access rule in plain form:
 Two overlapping exclusive accesses conflict for the same reason as the mixed case. Neither writer can rely on what it just wrote.
 
 [diagram:
-    [$insert("label"): Which overlaps are allowed]
-    [$insert("caption"): The rule only bites when two accesses overlap in time on places that can touch the same storage. Disjoint places never conflict, no matter how alarming the code looks.]
+    [$in label: Which overlaps are allowed]
+    [$in caption: The rule only bites when two accesses overlap in time on places that can touch the same storage. Disjoint places never conflict, no matter how alarming the code looks.]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Allowed]
-            [$insert("title"): Shared with shared]
+            [$in href: ./]
+            [$in eyebrow: Allowed]
+            [$in title: Shared with shared]
             Any number of readers may overlap. Nobody's assumptions can go stale because nobody is writing.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Also allowed]
+                [$in label: Also allowed]
                 [lane:
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     Any accesses at all on places that cannot overlap the same storage
                 ]
                 ]
@@ -41,18 +41,18 @@ Two overlapping exclusive accesses conflict for the same reason as the mixed cas
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Rejected]
-            [$insert("title"): Shared with exclusive]
+            [$in href: ./]
+            [$in eyebrow: Rejected]
+            [$in title: Shared with exclusive]
             The writer can invalidate what every reader already believes. Caught at compile time.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Rejected]
-            [$insert("title"): Exclusive with exclusive]
+            [$in href: ./]
+            [$in eyebrow: Rejected]
+            [$in title: Exclusive with exclusive]
             Two writers, no way for either to trust its own last write.
         ]
     ]
@@ -146,41 +146,41 @@ Assignment through a mutable alias writes through to the referent. It must not s
 ## Handoff to lifetime validation
 
 [diagram:
-    [$insert("label"): Three owners, one chain of proof]
-    [$insert("caption"): Each owner answers one question and hands the answer on. No stage revisits a decision an earlier one already made, which is what keeps the guarantee the same on every backend.]
+    [$in label: Three owners, one chain of proof]
+    [$in caption: Each owner answers one question and hands the answer on. No stage revisits a decision an earlier one already made, which is what keeps the guarantee the same on every backend.]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Proves access]
-            [$insert("title"): Borrow validation]
+            [$in href: ./]
+            [$in eyebrow: Proves access]
+            [$in title: Borrow validation]
             May the program read and write these places? When is each value last used? Which affine transfers are eligible?
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ../memory-management-and-gc/]
-            [$insert("eyebrow"): Proves topology]
-            [$insert("title"): Lifetime and retained-edge analysis]
+            [$in href: ../memory-management-and-gc/]
+            [$in eyebrow: Proves topology]
+            [$in title: Lifetime and retained-edge analysis]
             Who owns each allocation family, what outlives what and where can cleanup legally happen?
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ../memory-management-and-gc/]
-            [$insert("eyebrow"): Chooses]
-            [$insert("title"): The memory planner]
+            [$in href: ../memory-management-and-gc/]
+            [$in eyebrow: Chooses]
+            [$in title: The memory planner]
             Which physical representation realises that legal program? It decides cleanup, reclassification and REC selection.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ../backend-lowering/]
-            [$insert("eyebrow"): Encodes]
-            [$insert("title"): Backend lowering]
+            [$in href: ../backend-lowering/]
+            [$in eyebrow: Encodes]
+            [$in title: Backend lowering]
             Emit exactly what the plan says. No inference, no second opinion.
         ]
     ]

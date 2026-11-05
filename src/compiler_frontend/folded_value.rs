@@ -12,7 +12,8 @@
 //! enum or duplicate conversion implementation at either boundary.
 
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstStringPiece, ConstStringValue, ConstValueId, ConstValueStore, ConstValueVisit,
+    ConstStringPiece, ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore,
+    ConstValueVisit,
 };
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, CanonicalTypeProjectionContext, ExportedGenericParameterIdentity,
@@ -308,6 +309,27 @@ pub(crate) enum PublicTemplateSlotKey {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct PublicConstTemplateSlot {
     pub(crate) key: PublicTemplateSlotKey,
+    /// Occurrence-owned compile-time fallback in the portable owned string vocabulary.
+    ///
+    /// WHAT: retains the exact text or structural resource pieces without a donor-local
+    /// `ConstValueId`. `Some` of an empty string is an authored empty fallback; `None` is an
+    /// occurrence with no fallback.
+    /// WHY: imported and rebuilt templates must fall back to the author's value when the
+    /// receiving composition routes no contribution to this occurrence.
+    pub(crate) default: Option<OwnedFoldedString>,
+    /// Synthetic-interface provenance of the constant [`PublicConstTemplateSlot::default`] was
+    /// resolved from.
+    ///
+    /// WHAT: the canonical union of every `ConstValueMetadata` provenance in the resolved
+    /// constant chain (the fallback itself and any transparent coercion wrappers), captured
+    /// while the donor constant store is available. Empty means the fallback is portable. The
+    /// invariant is empty when `default` is `None`; a present default may still have empty
+    /// provenance.
+    /// WHY: the public projection cannot export a donor-local `ConstValueId`, and rebuilding
+    /// the fallback in a consumer creates a fresh local constant. Carrying the stable member
+    /// identities lets that rebuilt constant retain the donor's dependency set instead of
+    /// starting empty.
+    pub(crate) default_provenance: SyntheticInterfaceProvenance,
     pub(crate) applied_child_wrappers: Vec<PublicConstTemplate>,
     pub(crate) child_wrappers: Vec<PublicConstTemplate>,
     pub(crate) skip_parent_child_wrappers: bool,
@@ -400,6 +422,81 @@ pub(crate) fn owned_folded_string_from_store_string(
             owned_folded_string_from_const_string(value, resources, string_table)
         }
     }
+}
+
+/// Resolve one compile-time `String` constant through transparent coercion wrappers.
+///
+/// WHAT: returns the underlying text/pieces and the synthetic-interface provenance of
+/// every wrapper visited on the way. Slot defaults are validated as constant `String`s
+/// when authored, but the stored value may still be wrapped by coercion nodes.
+/// WHY: const-template projection, compile-time folding and runtime handoff must read
+/// the same resolved fallback and keep authored provenance without exposing a local
+/// `ConstValueId` across a module boundary.
+pub(crate) fn resolve_const_string_value(
+    const_values: &ConstValueStore,
+    value_id: ConstValueId,
+) -> Result<(&ConstStringValue, SyntheticInterfaceProvenance), InfrastructureFailure> {
+    let mut provenance = SyntheticInterfaceProvenance::empty();
+    let mut current = value_id;
+
+    loop {
+        let metadata = const_values.metadata(current).ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::ConstantEvaluation,
+                "constant String resolution reached a value outside its content owner.",
+            )
+        })?;
+        provenance.merge(&metadata.synthetic_interface_provenance);
+
+        match const_values.payload(current) {
+            Some(ConstValuePayload::String(value)) => return Ok((value, provenance)),
+            Some(ConstValuePayload::Coerced(inner)) => current = *inner,
+            _ => {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ConstantEvaluation,
+                    "validated compile-time String resolved to a non-String constant payload.",
+                ));
+            }
+        }
+    }
+}
+
+/// Own one compile-time `String` constant for the runtime template handoff.
+///
+/// WHAT: resolves coercion wrappers and projects the resulting text/pieces through the
+/// shared owned string vocabulary, preserving structural resource identity while discarding
+/// provenance that the rendered runtime node does not consume.
+/// WHY: the runtime handoff reads a local `ConstValueId` fallback after folding; public
+/// const-template projection instead retains provenance through
+/// [`PublicConstTemplateSlot::default_provenance`] because a rebuilt default becomes a fresh
+/// local constant whose metadata must keep it.
+pub(crate) fn owned_folded_string_from_const_value(
+    const_values: &ConstValueStore,
+    value_id: ConstValueId,
+    resources: Option<&ModuleResourceTable>,
+    string_table: &StringTable,
+) -> Result<OwnedFoldedString, InfrastructureFailure> {
+    let (value, _) = resolve_const_string_value(const_values, value_id)?;
+    owned_folded_string_from_store_string(value, resources, string_table)
+}
+
+/// Project one occurrence-owned compile-time `String` fallback into the public slot vocabulary.
+///
+/// WHAT: resolves transparent coercion wrappers and returns the owned value together with the
+/// provenance of every resolved node.
+/// WHY: [`PublicConstTemplateSlot`] pairs the value with its provenance, so its single projection
+/// site must capture both from the same resolved constant rather than re-resolving the fallback.
+pub(crate) fn project_const_template_default(
+    const_values: &ConstValueStore,
+    value_id: ConstValueId,
+    resources: Option<&ModuleResourceTable>,
+    string_table: &StringTable,
+) -> Result<(OwnedFoldedString, SyntheticInterfaceProvenance), InfrastructureFailure> {
+    let (value, provenance) = resolve_const_string_value(const_values, value_id)?;
+    Ok((
+        owned_folded_string_from_store_string(value, resources, string_table)?,
+        provenance,
+    ))
 }
 
 /// Convert one module-store value to the owned public folded-value vocabulary.

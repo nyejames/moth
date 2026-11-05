@@ -4,7 +4,6 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-SYNTAX-0021"]
-message_contains = ["insert"]
 
 [backends.html_wasm]
 mode = "failure"

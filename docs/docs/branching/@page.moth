@@ -34,9 +34,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):statement-if]
-        [$insert("title"):Statement if]
-        [$insert("advanced"):[statement_if]]
+        [$in key:statement-if]
+        [$in title:Statement if]
+        [$in advanced:[statement_if]]
 
         [statement_if_basic]
     ]
@@ -44,9 +44,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):value-producing-if]
-        [$insert("title"):Value-producing if]
-        [$insert("advanced"):[value_producing_if]]
+        [$in key:value-producing-if]
+        [$in title:Value-producing if]
+        [$in advanced:[value_producing_if]]
 
         [value_producing_if_basic]
     ]
@@ -54,9 +54,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):pattern-matching]
-        [$insert("title"):Pattern matching]
-        [$insert("advanced"):[pattern_matching]]
+        [$in key:pattern-matching]
+        [$in title:Pattern matching]
+        [$in advanced:[pattern_matching]]
 
         [pattern_matching_basic]
     ]
@@ -64,9 +64,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):patterns-and-exhaustiveness]
-        [$insert("title"):Patterns and exhaustiveness]
-        [$insert("advanced"):[patterns_and_exhaustiveness]]
+        [$in key:patterns-and-exhaustiveness]
+        [$in title:Patterns and exhaustiveness]
+        [$in advanced:[patterns_and_exhaustiveness]]
 
         [patterns_and_exhaustiveness_basic]
     ]
@@ -74,9 +74,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../functions/]
-        [$insert("previous_title"):Functions]
-        [$insert("next_path"):../loops/]
-        [$insert("next_title"):Loops]
+        [$in previous_path:../functions/]
+        [$in previous_title:Functions]
+        [$in next_path:../loops/]
+        [$in next_title:Loops]
     ]
 ]

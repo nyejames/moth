@@ -26,9 +26,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):prelude-surface]
-        [$insert("title"):Prelude surface]
-        [$insert("advanced"):[prelude_advanced]]
+        [$in key:prelude-surface]
+        [$in title:Prelude surface]
+        [$in advanced:[prelude_advanced]]
 
         [prelude_basic]
     ]
@@ -36,9 +36,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../]
-        [$insert("previous_title"):Core packages]
-        [$insert("next_path"):../io/]
-        [$insert("next_title"):Core IO]
+        [$in previous_path:../]
+        [$in previous_title:Core packages]
+        [$in next_path:../io/]
+        [$in next_title:Core IO]
     ]
 ]

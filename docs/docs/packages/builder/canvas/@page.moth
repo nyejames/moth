@@ -25,9 +25,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):canvas-drawing]
-        [$insert("title"):Canvas drawing]
-        [$insert("advanced"):[canvas_advanced]]
+        [$in key:canvas-drawing]
+        [$in title:Canvas drawing]
+        [$in advanced:[canvas_advanced]]
 
         [canvas_basic]
     ]
@@ -35,9 +35,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../html/]
-        [$insert("previous_title"):@html]
-        [$insert("next_path"):../graphics/]
-        [$insert("next_title"):@web/graphics]
+        [$in previous_path:../html/]
+        [$in previous_title:@html]
+        [$in next_path:../graphics/]
+        [$in next_title:@web/graphics]
     ]
 ]

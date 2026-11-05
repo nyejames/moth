@@ -131,7 +131,7 @@ fn docs_style_table_and_data_declarations(
     .expect("docs-style header row wrapper should parse");
 
     let table_file_tokens = template_tokens_from_source(
-        "[:\n    <table style=\"[$slot(\"style\") ]\">\n        <tr style=\"background-color: hsla(107, 100%, 36%, 0.23);\">\n            [$slot(1)]\n        </tr>\n        [$children([:<tr style=\"border-bottom: 1px dotted grey;\">[$slot]</tr>]):\n            [$slot]\n        ]\n    </table>\n]",
+        "[:\n    <table style=\"[$slot style ]\">\n        <tr style=\"background-color: hsla(107, 100%, 36%, 0.23);\">\n            [$slot 1]\n        </tr>\n        [$children([:<tr style=\"border-bottom: 1px dotted grey;\">[$slot]</tr>]):\n            [$slot]\n        ]\n    </table>\n]",
         string_table,
         span_builder,
         path_fork,

@@ -657,8 +657,8 @@ fn lowers_module_constants_into_hir_const_pool() {
 #[test]
 fn excludes_real_slot_insert_helpers_from_hir_but_keeps_wrapper_constants_visible() {
     let source = r#"
-layout #= [:<h1>[$slot("title")]</h1><p>[$slot]</p>]
-stored_title #= [$insert("title"): Stored title]
+layout #= [:<h1>[$slot title]</h1><p>[$slot]</p>]
+stored_title #= [$in title: Stored title]
 rendered #= [layout: [stored_title] Body]
 "#;
     let (ast, mut parsed_path_fork, mut string_table) = parse_single_file_ast(source);

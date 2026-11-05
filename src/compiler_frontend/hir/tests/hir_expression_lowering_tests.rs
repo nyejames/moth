@@ -29,7 +29,7 @@ use crate::compiler_frontend::ast::expressions::failure_facts::FailureDispositio
 use crate::compiler_frontend::ast::statements::fallible_handling::wrap_catch_expression;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::ProducedValues;
-use crate::compiler_frontend::ast::templates::template::{SlotKey, TemplateType};
+use crate::compiler_frontend::ast::templates::template::{SlotDeclaration, SlotKey, TemplateType};
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
 };
@@ -520,7 +520,7 @@ fn escaped_slot_definition_helpers_fail_when_they_reach_hir_runtime_lowering() {
     let mut expressions = AstExpressionBuilder::new().unwrap();
     let (helper, _helper_registry) = raw_template_expression_for_hir_invariant(
         &mut expressions,
-        TemplateType::SlotDefinition(SlotKey::named(body_slot)),
+        TemplateType::SlotDefinition(SlotDeclaration::new(SlotKey::named(body_slot), None)),
         span,
         ValueMode::ImmutableOwned,
     );

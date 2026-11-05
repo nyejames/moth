@@ -4,6 +4,6 @@
 -- default child slot. The enclosing application supplies row_style; every
 -- direct child must render inside a <tr> whose opening tag carries it.
 [rows:
-    [$insert("row_style"):background: red;][:first]
+    [$in row_style:background: red;][:first]
     [:second]
 ]

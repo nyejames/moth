@@ -38,32 +38,32 @@ Header processing keeps four edge families distinct. Mixing them is a reliable w
 A dependency-bound declaration is never a node in the consumer's local declaration graph. Copying provider declarations into each consumer would destroy identity and explode work.
 
 [diagram:
-    [$insert("label"): Four kinds of edge, four owners]
-    [$insert("caption"): One authored path has exactly one role. When a design discussion gets confusing, it is usually because two of these four are being called the same thing.]
+    [$in label: Four kinds of edge, four owners]
+    [$in caption: One authored path has exactly one role. When a design discussion gets confusing, it is usually because two of these four are being called the same thing.]
 
     [stage:
         [node:
-            [$insert("href"): ../project-graphs-and-modules/]
-            [$insert("eyebrow"): Stage 0]
-            [$insert("title"): Structural references]
+            [$in href: ../project-graphs-and-modules/]
+            [$in eyebrow: Stage 0]
+            [$in title: Structural references]
             Provider references ask which module must exist first. File references ask which file on disk a path points at.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ../ast-semantics-and-types/]
-            [$insert("eyebrow"): Visibility and AST]
-            [$insert("title"): Dependency symbol bindings]
+            [$in href: ../ast-semantics-and-types/]
+            [$in eyebrow: Visibility and AST]
+            [$in title: Dependency symbol bindings]
             Which public names from a provider become usable here, and under which local spellings.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Stage 3]
-            [$insert("title"): Local ordering edges]
+            [$in href: ./]
+            [$in eyebrow: Stage 3]
+            [$in title: Local ordering edges]
             Which top-level declarations inside this one module must be processed before which others.
         ]
     ]

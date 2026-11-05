@@ -45,31 +45,31 @@ Stage 4 specialises ordinary executable work from resolved configuration values:
 Stage 4 adds no config-value branch node. HIR never redoes the decision, and Moth source has no platform-conditional source mechanism. Future compiler-owned `$feature` is a separate deferred structural-selection mechanism: it may select source structure before graph and declaration publication, but it is not another evaluator.
 
 [diagram:
-    [$insert("label"): What leaves the runtime program entirely]
-    [$insert("caption"): Folding is deletion as much as evaluation. Work finished at Stage 4 has no runtime cost and no second chance to disagree with itself.]
+    [$in label: What leaves the runtime program entirely]
+    [$in caption: Folding is deletion as much as evaluation. Work finished at Stage 4 has no runtime cost and no second chance to disagree with itself.]
 
     [stage:
         [node:
-            [$insert("href"): ../ast-semantics-and-types/]
-            [$insert("eyebrow"): Authored]
-            [$insert("title"): greeting_prefix #= "Hello"]
+            [$in href: ../ast-semantics-and-types/]
+            [$in eyebrow: Authored]
+            [$in title: greeting_prefix #= "Hello"]
             A compile-time declaration with a value that fully folds.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Also settled here]
+                [$in label: Also settled here]
                 [lane:
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     Known-Bool branches selected
                 ]
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     Generic requests committed
                 ]
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     Trait evidence resolved
                 ]
                 ]
@@ -79,18 +79,18 @@ Stage 4 adds no config-value branch node. HIR never redoes the decision, and Mot
 
     [stage:
         [node:
-            [$insert("href"): ../module-artefacts-and-reuse/]
-            [$insert("eyebrow"): Folded]
-            [$insert("title"): A backend-neutral value]
+            [$in href: ../module-artefacts-and-reuse/]
+            [$in eyebrow: Folded]
+            [$in title: A backend-neutral value]
             Copied into the immutable module interface. Consumers read the answer instead of re-folding the source.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ../hir/]
-            [$insert("eyebrow"): Absent]
-            [$insert("title"): Nothing reaches HIR]
+            [$in href: ../hir/]
+            [$in eyebrow: Absent]
+            [$in title: Nothing reaches HIR]
             No config-value branch node, no runtime wrapper type, no second evaluation. Future `$feature` selection is a separate pre-graph concern, not a Stage 4 evaluator.
         ]
     ]

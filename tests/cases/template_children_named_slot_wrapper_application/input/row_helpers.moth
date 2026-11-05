@@ -1,1 +1,1 @@
-rows #= [$children([$html:<tr style="[$slot("row_style")]">[$slot]</tr>]):[$slot]]
+rows #= [$children([$html:<tr style="[$slot row_style]">[$slot]</tr>]):[$slot]]

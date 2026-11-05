@@ -79,31 +79,31 @@ HIR stores no dependency aliases as semantic authority and no backend runtime na
 Those facts are the linking authority later stages consume.
 
 [diagram:
-    [$insert("label"): Link facts sit beside HIR, never inside it]
-    [$insert("caption"): Later stages read the facts on the right without touching the control flow on the left. Analysis writes side tables; it never rewrites the IR to taste.]
+    [$in label: Link facts sit beside HIR, never inside it]
+    [$in caption: Later stages read the facts on the right without touching the control flow on the left. Analysis writes side tables; it never rewrites the IR to taste.]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Validated]
-            [$insert("title"): HIR control flow]
+            [$in href: ./]
+            [$in eyebrow: Validated]
+            [$in title: HIR control flow]
             Blocks, statements, terminators and locals. Fixed once validation passes.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Recorded alongside, per function]
+                [$in label: Recorded alongside, per function]
                 [lane:
                 [detail:
-                    [$insert("href"): ../linking-entries-and-reachability/]
+                    [$in href: ../linking-entries-and-reachability/]
                     Call edges to explicit identities
                 ]
                 [detail:
-                    [$insert("href"): ../target-planning-and-validation/]
+                    [$in href: ../target-planning-and-validation/]
                     Helper and capability needs
                 ]
                 [detail:
-                    [$insert("href"): ../html-assembly-and-output/]
+                    [$in href: ../html-assembly-and-output/]
                     Resource uses
                 ]
                 ]
