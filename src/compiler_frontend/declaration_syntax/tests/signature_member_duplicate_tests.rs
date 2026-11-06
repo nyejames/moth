@@ -461,7 +461,7 @@ fn parameter_default_unclosed_parenthesis_reports_expected_delimiter() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let token_stream = stream_positioned_at_open_bracket(
-        "fn |prefix String = [$children(",
+        "fn |prefix String = [$before = (1 + 2",
         &mut path_fork,
         &mut string_table,
         &mut span_builder,

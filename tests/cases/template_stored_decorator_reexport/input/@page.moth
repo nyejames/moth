@@ -1,0 +1,4 @@
+@row_facade prefix
+
+stored = [$before = prefix, $after = [$html:</tr>]:[$slot]]
+[stored:[$in row_style:background: blue;][:third]]

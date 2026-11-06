@@ -1,6 +1,4 @@
-list = [$children([loop 0 to 1 |item|:
-    <li class="loop-slot">[$slot]-[item]</li>
-]):
+list = [$before = [loop 0 to 1 |item|:<li class="loop-slot">], $after = [loop 0 to 1 |item|:-[item]</li>]:
     <ul>[$slot]</ul>
 ]
 

@@ -21,7 +21,8 @@ pub(crate) use builtin_call_args::concrete_shape_type;
 pub(crate) use field_member::project_explicit_const_record_field;
 pub use parse_chain::parse_field_access;
 pub(crate) use parse_chain::{
-    ParsedPostfixExpression, parse_field_access_expression_with_receiver_access,
+    ParsedPostfixExpression, constant_reference_expression_from_declaration,
+    materialize_constant_template_expression, parse_field_access_expression_with_receiver_access,
     parse_postfix_chain_expression, reference_expression_from_declaration,
 };
 pub(crate) use receiver_calls::{

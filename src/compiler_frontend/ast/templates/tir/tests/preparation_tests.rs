@@ -6,6 +6,9 @@
 
 use super::super::attach_conditional_wrapper_set;
 use super::super::ids::{TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId, TemplateWrapperSetId};
+use super::super::overlays::{
+    TirWrapperApplicationMode, TirWrapperContext, TirWrapperContextOverlay,
+};
 use super::super::preparation::{
     RuntimeTemplateReason, TemplatePreparation, TemplatePreparationMode,
     TemplatePreparationOutcome, prepare_tir_view,
@@ -183,6 +186,112 @@ fn preparation_preserves_structural_wrapper_shape_for_value_callers() {
             ..
         } if facts.final_value_kind == TemplateConstValueKind::WrapperTemplate
     ));
+}
+
+#[test]
+fn preparation_keeps_wrapper_identity_for_inherited_named_wrapper_slots() {
+    let (prepared, _) = prepare_root(
+        TemplateType::String,
+        |builder, table, _, _| {
+            let row_style = table.intern("row_style");
+            let named_slot = builder.push_slot_node(SlotKey::Named(row_style), None);
+            let wrapper_root = builder.push_sequence_node(vec![named_slot], None);
+            let named_wrapper = builder.finish_template(
+                wrapper_root,
+                Style::default(),
+                TemplateType::String,
+                TemplateIrSummary::default(),
+                None,
+            );
+            let inherited_set =
+                builder
+                    .store
+                    .push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+                        named_wrapper,
+                        TemplateTirPhase::Composed,
+                        TemplateViewContext::default(),
+                    )]);
+
+            let fixed_text = table.intern("fixed");
+            let fixed_text_len = table.resolve(fixed_text).len();
+            let fixed_text_node = builder.push_text_node(
+                fixed_text,
+                fixed_text_len,
+                TemplateSegmentOrigin::Body,
+                None,
+            );
+            let fixed_template = builder.finish_template(
+                fixed_text_node,
+                Style::default(),
+                TemplateType::String,
+                TemplateIrSummary::default(),
+                None,
+            );
+
+            let fixed_occurrence = builder.store.next_child_template_occurrence_id();
+            let fixed_child = builder.store.push_node(TemplateIrNode::new(
+                TemplateIrNodeKind::ChildTemplate {
+                    reference: TemplateTirChildReference::new(
+                        fixed_template,
+                        TemplateTirPhase::Composed,
+                        TemplateViewContext::default(),
+                    ),
+                    occurrence_id: fixed_occurrence,
+                },
+                None,
+            ));
+            let overlay = builder
+                .store
+                .allocate_wrapper_context_overlay(TirWrapperContextOverlay {
+                    contexts: vec![(
+                        fixed_occurrence,
+                        TirWrapperContext {
+                            inherited_wrapper_set: Some(inherited_set),
+                            skip_parent_child_wrappers: false,
+                            application_mode: TirWrapperApplicationMode::Always,
+                        },
+                    )],
+                })
+                .expect("wrapper-context overlay allocation");
+            let nested_context = TemplateViewContext {
+                wrapper_context: Some(overlay),
+                ..TemplateViewContext::default()
+            };
+            let nested_root = builder.push_sequence_node(vec![fixed_child], None);
+            let nested_template = builder.finish_template(
+                nested_root,
+                Style::default(),
+                TemplateType::String,
+                TemplateIrSummary::default(),
+                None,
+            );
+
+            builder.push_child_template_node_with_reference(
+                TemplateTirChildReference::new(
+                    nested_template,
+                    TemplateTirPhase::Composed,
+                    nested_context,
+                ),
+                None,
+            )
+        },
+        TemplatePreparationMode::Value,
+    )
+    .expect("context-only wrapper slot preparation should succeed");
+
+    assert!(
+        prepared.facts.has_unresolved_slot_occurrences,
+        "an inherited named occurrence must block renderable-String folding"
+    );
+    assert_eq!(
+        prepared.facts.final_value_kind,
+        TemplateConstValueKind::WrapperTemplate,
+        "the enclosing value must keep wrapper-template identity"
+    );
+    assert!(
+        matches!(prepared.outcome, TemplatePreparationOutcome::Foldable),
+        "the wrapper pattern is compile-time known even though its name is unresolved"
+    );
 }
 
 #[test]

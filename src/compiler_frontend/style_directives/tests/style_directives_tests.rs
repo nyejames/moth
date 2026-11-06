@@ -148,7 +148,7 @@ fn supported_directives_for_diagnostic_uses_stable_registry_order() {
 
     assert_eq!(
         registry.supported_directives_for_diagnostic(),
-        "'$children', '$fresh', '$slot', '$in', '$note', '$todo', '$doc', '$raw', '$md'"
+        "'$before', '$after', '$fresh', '$slot', '$in', '$note', '$todo', '$doc', '$raw', '$md'"
     );
 }
 
@@ -157,7 +157,7 @@ fn frontend_built_ins_have_expected_classification() {
     let built_ins = StyleDirectiveRegistry::built_ins();
 
     for required in [
-        "children", "slot", "in", "fresh", "doc", "todo", "note", "raw",
+        "before", "after", "slot", "in", "fresh", "doc", "todo", "note", "raw",
     ] {
         let directive = built_ins
             .find(required)

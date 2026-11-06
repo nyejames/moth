@@ -312,6 +312,29 @@ impl TemplateIrStore {
         Ok(self.push_template(derived))
     }
 
+    /// Versions an existing store-owned template around a new structural root
+    /// whose exact summary the caller already established.
+    ///
+    /// WHAT: publishes the derived template from `summary` instead of walking
+    ///       `new_root` again.
+    /// WHY: runtime wrapper fill passes version a prepared source around rebuilt
+    ///      fill paths only. The unchanged prefix and suffix edges are already
+    ///      validated and summarized by that source, so re-deriving their facts
+    ///      per child would make publication linear in the whole decorator.
+    ///      Callers must pass the summary `summarize_existing_root` would produce:
+    ///      validated source facts combined with the pass's replacements.
+    pub(crate) fn push_derived_template_with_summary(
+        &mut self,
+        source: TemplateIrId,
+        new_root: TemplateIrNodeId,
+        summary: TemplateIrSummary,
+        metadata: DerivedTemplateMetadata,
+    ) -> Result<TemplateIrId, InfrastructureFailure> {
+        self.validate_derived_publication(source, new_root)?;
+        let derived = self.derived_template(source, new_root, summary, metadata)?;
+        Ok(self.push_template(derived))
+    }
+
     /// Versions an existing template as a runtime-slot application.
     ///
     /// Computes one summary from the completed wrapper root and the committed

@@ -892,8 +892,9 @@ pub enum InvalidTemplateDirectiveReason {
     InvalidSlotDefault,
     /// `$in` received an invalid slot name declaration.
     InvalidInsertTarget,
-    /// `$children` received an invalid wrapper argument.
-    InvalidChildrenArgument,
+    /// `$before` or `$after` received a value that is not a compile-time
+    /// `String` or constant template wrapper.
+    InvalidChildDecoratorValue,
 }
 
 impl InvalidTemplateDirectiveReason {
@@ -1709,6 +1710,10 @@ pub enum InvalidTemplateSlotReason {
     InsertTargetsUnknownNamedSlot,
     InsertTargetsUnknownPositionalSlot,
     SlotDefinitionOutsideTemplateBody,
+    /// A `$before`/`$after` value contains the default `$slot`.
+    DefaultSlotInChildDecorator,
+    /// A `$before`/`$after` value contains a positional `$slot n`.
+    PositionalSlotInChildDecorator,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

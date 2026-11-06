@@ -29,11 +29,14 @@ mod specs;
 pub(crate) use crate::compiler_frontend::compiler_messages::TemplateHeadConflictReason;
 pub use compatibility::{TemplateHeadCompatibility, TemplateHeadTag};
 pub use registry::StyleDirectiveRegistry;
+pub(crate) use specs::{
+    AFTER_DIRECTIVE_NAME, BEFORE_DIRECTIVE_NAME, DOC_DIRECTIVE_NAME, INSERT_DIRECTIVE_NAME,
+    SLOT_DIRECTIVE_NAME,
+};
 pub use specs::{
     CoreStyleDirectiveKind, StyleDirectiveArgumentType, StyleDirectiveArgumentValue,
     StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveKind, StyleDirectiveSpec,
 };
-pub(crate) use specs::{DOC_DIRECTIVE_NAME, INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME};
 
 #[cfg(test)]
 #[path = "tests/style_directives_tests.rs"]

@@ -69,7 +69,7 @@ fn frontend_builtin_directives_work_without_builder_registered_project_directive
     let entry_file = root.join("builtins.moth");
     fs::write(
         &entry_file,
-        "[$children([:<li>[$slot]</li>]):\n<ul>\n  [$md:\n# Docs\n]\n  [$raw:\n  keep\n]\n  [$fresh:\n    [: plain ]\n  ]\n</ul>\n]",
+        "[$before = [:<li>], $after = [:</li>]:\n<ul>\n  [$md:\n# Docs\n]\n  [$raw:\n  keep\n]\n  [$fresh:\n    [: plain ]\n  ]\n</ul>\n]",
     )
     .expect("should write source file");
 

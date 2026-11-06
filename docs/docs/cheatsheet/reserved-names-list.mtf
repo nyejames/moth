@@ -35,7 +35,7 @@ The `@project` dependency root is reserved for project globals.
 
 ### Core template directives
 
-- `$children` - wrap each direct child.
+- `$before`, `$after` - prefix and suffix each direct child.
 - `$fresh` - bypass the parent's child wrapper.
 - `$slot` - declare a template slot.
 - `$in` - contribute content to a named slot.

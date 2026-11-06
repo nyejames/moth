@@ -4,11 +4,24 @@
 //! occurrence. Schema discovery, placeholder collection and the structural
 //! slot-presence probe share this walk. It is not a generic TIR visitor.
 //!
-//! A placeholder's attached `$children(..)` wrappers contribute their named slots
+//! A placeholder's attached `$before`/`$after` decorator wrappers contribute their named slots
 //! to the same schema: the wrapper application created for that placeholder's
-//! contributions is the occurrence that consumes them.
+//! contributions is the occurrence that consumes them. A child reference's inherited
+//! wrapper-context overlay contributes the same way: those decorators keep their named
+//! occurrences outside the referenced template's structural root, and the enclosing
+//! application's named content is resolved into that overlay.
+//!
+//! Inherited overlay wrappers contribute only named targets. Their default and
+//! positional slots stay owned by the fixed child they decorate, so exposing those
+//! would accept content the overlay can never consume.
+//!
+//! A child template that already owns a runtime slot plan is an opaque boundary.
+//! Its placeholders are resolved sites and every child-edge overlay inside its tree
+//! was filled with that plan's markers, so the enclosing application can neither
+//! address those names nor fill those contexts. The walk therefore treats such an
+//! edge as a leaf, matching the marker fill that deliberately stops there instead
+//! of writing foreign plan markers.
 
-use crate::compiler_frontend::compiler_messages::CompilerStage;
 use std::collections::BTreeSet;
 
 use rustc_hash::FxHashSet;
@@ -18,13 +31,21 @@ use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::tir::ids::{
     SlotOccurrenceId, TemplateIrId, TemplateIrNodeId, TemplateWrapperSetId,
 };
-use crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind;
+use crate::compiler_frontend::ast::templates::tir::node::{TemplateIr, TemplateIrNodeKind};
+use crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext;
+use crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-/// Unique slot targets declared by a wrapper tree.
+
+/// Unique slot targets addressable from one wrapper tree.
+///
+/// Structural placeholders and slot-attached wrapper sets contribute their named
+/// targets. Inherited wrapper-context overlays contribute only named targets:
+/// their default and positional slots belong to the fixed child they decorate.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct TirSlotSchema {
     pub(crate) has_default_slot: bool,
@@ -90,6 +111,20 @@ impl TirSlotSchema {
         keys
     }
 
+    /// Retains only the routing facts a wrapper fold consumes per direct child.
+    ///
+    /// WHAT: records whether the wrapper declares any slots and which occurrence is
+    ///       its loose-fill target.
+    /// WHY: folding applies one wrapper edge around every direct child that inherits
+    ///      it. Caching this compact view preserves the exact insertion decision
+    ///      without retaining the schema's name and position collections.
+    pub(crate) fn wrapper_slot_routing(&self) -> WrapperSlotRouting {
+        WrapperSlotRouting {
+            has_any_slots: self.has_any_slots(),
+            loose_fill_target_key: self.loose_fill_target_key(),
+        }
+    }
+
     /// Records a unique target key. Repeated occurrences stay valid replay sites.
     pub(crate) fn record_key(&mut self, key: &SlotKey) {
         match key {
@@ -106,6 +141,20 @@ impl TirSlotSchema {
             }
         }
     }
+}
+
+/// Slot-routing facts one fold needs to place a child at a wrapper edge.
+///
+/// WHAT: keeps whether the wrapper declares any slots together with its loose-fill
+///       target.
+/// WHY: a fold applies one inherited wrapper edge around every direct child, and
+///      only these two facts steer where the child is spliced. Keeping them
+///      separate from [`TirSlotSchema`] avoids retaining schema name and position
+///      collections for the whole fold.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WrapperSlotRouting {
+    pub(crate) has_any_slots: bool,
+    pub(crate) loose_fill_target_key: Option<SlotKey>,
 }
 
 /// Occurrence facts needed by routing and runtime sites.
@@ -130,38 +179,88 @@ pub(crate) struct TirSlotPlaceholderRef {
 }
 
 /// Complete slot layout for one wrapper tree.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct TirSlotLayout {
     pub(crate) schema: TirSlotSchema,
     pub(crate) placeholders: Vec<TirSlotPlaceholderRef>,
 }
 
+/// Whether a template is an independently materialized runtime slot application.
+///
+/// WHAT: true when the published template carries a committed `runtime_slot_plan`.
+/// WHY: such a template is a completed application. Its placeholders are resolved
+///      sites and the child-edge overlays inside its tree were filled with its own
+///      plan's markers, so an enclosing application can neither address those names
+///      nor fill those contexts. Slot-layout discovery, structural expansion and
+///      runtime marker fills all use this predicate to treat the edge as a leaf;
+///      keeping it named keeps those three owners on one boundary definition.
+pub(crate) fn template_is_independently_planned(template: &TemplateIr) -> bool {
+    template.runtime_slot_plan.is_some()
+}
+
 /// Collects the slot layout of a published template.
+///
+/// This form carries no value context, so it sees only the template's
+/// structural tree and the wrapper sets stored on its own placeholders. Use
+/// [`collect_tir_slot_layout_with_context`] when a reference to the template
+/// also carries inherited wrapper-context overlays.
+#[cfg(test)]
 pub(crate) fn collect_tir_slot_layout(
     store: &TemplateIrStore,
     template_id: TemplateIrId,
 ) -> Result<TirSlotLayout, InfrastructureFailure> {
-    increment_ast_counter(AstCounter::TirSlotSchemaWalks);
+    collect_tir_slot_layout_with_context(store, template_id, TemplateViewContext::default())
+}
 
+/// Collects the slot layout of a published template under one exact reference context.
+///
+/// WHAT: additionally records the named targets of wrapper sets inherited by the
+///       reference's fixed-child overlay contexts.
+/// WHY: a composite `$before`/`$after` value can carry nested component decorators
+///      whose named slots exist only in the value reference's wrapper-context
+///      overlay, not in the referenced template's structural root. Those decorators
+///      replay the receiving application's named content, so the enclosing
+///      application must be able to address them.
+///
+/// An independently planned template yields an empty layout: its own plan owns every
+/// occurrence reachable through that reference, so an enclosing application cannot
+/// address any of them and must not treat the reference as a receiver.
+pub(crate) fn collect_tir_slot_layout_with_context(
+    store: &TemplateIrStore,
+    template_id: TemplateIrId,
+    context: TemplateViewContext,
+) -> Result<TirSlotLayout, InfrastructureFailure> {
     let Some(template) = store.get_template(template_id) else {
         return Err(layout_error(format!(
             "TIR slot layout: template {template_id} was not present in the store."
         )));
     };
 
-    collect_layout_from_root(store, template.root)
+    if template_is_independently_planned(template) {
+        return Ok(TirSlotLayout::default());
+    }
+
+    increment_ast_counter(AstCounter::TirSlotSchemaWalks);
+    collect_layout_from_root(store, template.root, context)
 }
 
 /// Collects the slot layout of a node tree.
+///
+/// A bare node tree has no reference identity, so this form carries no inherited
+/// wrapper context. Nested child references still contribute their own contexts.
+/// A child reference to a template that already owns a runtime slot plan is a
+/// leaf: that plan resolved every occurrence under it, so none belongs to this
+/// tree's layout.
 pub(crate) fn collect_tir_slot_layout_from_root(
     store: &TemplateIrStore,
     root_node_id: TemplateIrNodeId,
 ) -> Result<TirSlotLayout, InfrastructureFailure> {
     increment_ast_counter(AstCounter::TirSlotSchemaWalks);
-    collect_layout_from_root(store, root_node_id)
+    collect_layout_from_root(store, root_node_id, TemplateViewContext::default())
 }
 
 /// Schema-only convenience over the one layout walk.
+#[cfg(test)]
 pub(crate) fn collect_tir_slot_schema(
     store: &TemplateIrStore,
     template_id: TemplateIrId,
@@ -169,15 +268,32 @@ pub(crate) fn collect_tir_slot_schema(
     Ok(collect_tir_slot_layout(store, template_id)?.schema)
 }
 
+/// Schema-only convenience over the context-aware layout walk.
+pub(crate) fn collect_tir_slot_schema_with_context(
+    store: &TemplateIrStore,
+    template_id: TemplateIrId,
+    context: TemplateViewContext,
+) -> Result<TirSlotSchema, InfrastructureFailure> {
+    Ok(collect_tir_slot_layout_with_context(store, template_id, context)?.schema)
+}
+
 fn collect_layout_from_root(
     store: &TemplateIrStore,
     root_node_id: TemplateIrNodeId,
+    reference_context: TemplateViewContext,
 ) -> Result<TirSlotLayout, InfrastructureFailure> {
     let mut schema = TirSlotSchema::default();
     let mut placeholders = Vec::new();
     let mut visiting_nodes = FxHashSet::default();
     let mut visiting_templates = FxHashSet::default();
     let mut visited_wrappers = FxHashSet::default();
+
+    collect_reference_context_named_slots(
+        store,
+        reference_context,
+        &mut schema,
+        &mut visited_wrappers,
+    )?;
 
     collect_from_node(
         store,
@@ -202,7 +318,7 @@ fn collect_from_node(
     placeholders: &mut Vec<TirSlotPlaceholderRef>,
     visiting_nodes: &mut FxHashSet<TemplateIrNodeId>,
     visiting_templates: &mut FxHashSet<TemplateIrId>,
-    visited_wrappers: &mut FxHashSet<TemplateIrId>,
+    visited_wrappers: &mut FxHashSet<TemplateWrapperReference>,
 ) -> Result<(), InfrastructureFailure> {
     if !visiting_nodes.insert(node_id) {
         return Err(layout_error(format!(
@@ -265,14 +381,45 @@ fn collect_from_node(
             Ok(())
         }
 
-        TemplateIrNodeKind::ChildTemplate { reference, .. } => collect_from_child_template(
-            store,
-            reference.root,
-            schema,
-            placeholders,
-            visiting_templates,
-            visited_wrappers,
-        ),
+        TemplateIrNodeKind::ChildTemplate { reference, .. } => {
+            // An independently planned child is a completed application: its plan
+            // resolved its sites and filled every child-edge overlay under this
+            // reference with its own markers. Descending would advertise names no
+            // enclosing fill may deliver and collect foreign occurrences behind the
+            // plan boundary, so the edge stays opaque.
+            let Some(child_template) = store.get_template(reference.root) else {
+                visiting_nodes.remove(&node_id);
+                return Err(layout_error(format!(
+                    "TIR slot layout referenced missing child template {}.",
+                    reference.root
+                )));
+            };
+
+            if template_is_independently_planned(child_template) {
+                visiting_nodes.remove(&node_id);
+                return Ok(());
+            }
+
+            // A fixed child occurrence keeps inherited decorators in its reference
+            // context rather than in the child's structural root. Those decorators
+            // receive the enclosing application's named content, so their named
+            // occurrences are part of this tree's receiving interface.
+            collect_reference_context_named_slots(
+                store,
+                reference.context,
+                schema,
+                visited_wrappers,
+            )?;
+            collect_from_child_template(
+                store,
+                reference.root,
+                child_template,
+                schema,
+                placeholders,
+                visiting_templates,
+                visited_wrappers,
+            )
+        }
 
         TemplateIrNodeKind::Conditional { body, .. } => collect_from_node(
             store,
@@ -332,17 +479,12 @@ fn collect_from_node(
 fn collect_from_child_template(
     store: &TemplateIrStore,
     child_template_id: TemplateIrId,
+    child_template: &TemplateIr,
     schema: &mut TirSlotSchema,
     placeholders: &mut Vec<TirSlotPlaceholderRef>,
     visiting_templates: &mut FxHashSet<TemplateIrId>,
-    visited_wrappers: &mut FxHashSet<TemplateIrId>,
+    visited_wrappers: &mut FxHashSet<TemplateWrapperReference>,
 ) -> Result<(), InfrastructureFailure> {
-    let Some(child_template) = store.get_template(child_template_id) else {
-        return Err(layout_error(format!(
-            "TIR slot layout referenced missing child template {child_template_id}."
-        )));
-    };
-
     if store.get_node(child_template.root).is_none() {
         return Err(layout_error(format!(
             "TIR slot layout found child template {child_template_id} with missing root node {}.",
@@ -377,9 +519,9 @@ fn layout_error(message: impl Into<Box<str>>) -> InfrastructureFailure {
 
 /// Records the named slot targets declared by a wrapper set attached to a placeholder.
 ///
-/// WHAT: for every wrapper template in the set, adds the named slots reachable from
-///       that wrapper's tree, including named slots of wrappers attached to its own
-///       placeholders.
+/// WHAT: for every wrapper reference in the set, adds the named slots reachable from
+///       that reference's exact tree and inherited overlay contexts, including named
+///       slots of wrappers attached to its own placeholders.
 /// WHY: routing accepts a name only when some receiving occurrence can consume it.
 ///      The wrapper application created for this placeholder's contributions is that
 ///      occurrence, so excluding its names would reject an insert the composition can
@@ -390,7 +532,7 @@ fn collect_wrapper_named_slots(
     store: &TemplateIrStore,
     wrapper_set_id: Option<TemplateWrapperSetId>,
     schema: &mut TirSlotSchema,
-    visited_wrappers: &mut FxHashSet<TemplateIrId>,
+    visited_wrappers: &mut FxHashSet<TemplateWrapperReference>,
 ) -> Result<(), InfrastructureFailure> {
     let Some(wrapper_set_id) = wrapper_set_id else {
         return Ok(());
@@ -402,29 +544,45 @@ fn collect_wrapper_named_slots(
     })?;
 
     for wrapper in &wrapper_set.wrappers {
-        collect_wrapper_template_named_slots(store, wrapper.root, schema, visited_wrappers)?;
+        collect_wrapper_reference_named_slots(store, *wrapper, schema, visited_wrappers)?;
     }
 
     Ok(())
 }
 
-fn collect_wrapper_template_named_slots(
+/// Records the named slots reachable through one exact wrapper reference.
+///
+/// The reference's root, phase and context form the visited identity. Two references
+/// to the same template under different inherited contexts can expose different named
+/// occurrences, so a template-only identity would silently drop the second context.
+fn collect_wrapper_reference_named_slots(
     store: &TemplateIrStore,
-    wrapper_template_id: TemplateIrId,
+    reference: TemplateWrapperReference,
     schema: &mut TirSlotSchema,
-    visited_wrappers: &mut FxHashSet<TemplateIrId>,
+    visited_wrappers: &mut FxHashSet<TemplateWrapperReference>,
 ) -> Result<(), InfrastructureFailure> {
     // A wrapper may contain another application of itself. Names are already known after the
-    // first visit, so re-entry is a repeat rather than a malformed tree.
-    if !visited_wrappers.insert(wrapper_template_id) {
+    // first exact reference, so re-entry is a repeat rather than a malformed tree.
+    if !visited_wrappers.insert(reference) {
         return Ok(());
     }
 
-    let Some(wrapper) = store.get_template(wrapper_template_id) else {
+    let Some(wrapper) = store.get_template(reference.root) else {
         return Err(layout_error(format!(
-            "TIR slot layout found wrapper template {wrapper_template_id} missing from the store."
+            "TIR slot layout found wrapper template {} missing from the store.",
+            reference.root
         )));
     };
+
+    // A wrapper reference that already owns a runtime plan is a completed
+    // application, not a compile-time wrapper value. Its named occurrences and
+    // child-edge overlays belong to that plan, so an enclosing fill cannot reach
+    // them.
+    if template_is_independently_planned(wrapper) {
+        return Ok(());
+    }
+
+    collect_reference_context_named_slots(store, reference.context, schema, visited_wrappers)?;
 
     let mut visiting_nodes = FxHashSet::default();
     collect_named_slots_from_node(
@@ -436,12 +594,54 @@ fn collect_wrapper_template_named_slots(
     )
 }
 
+/// Records named slots of wrapper sets inherited at a reference's fixed-child occurrences.
+///
+/// WHAT: reads the reference's wrapper-context overlay and adds the named schema of
+///       every inherited set that still applies at its occurrence.
+/// WHY: nested `$before`/`$after` values keep their decorators in these overlays.
+///      The enclosing named fill resolves into the same sets, so their named
+///      occurrences are addressable even though no structural node in the referenced
+///      template declares them. Only named targets are collected: the fixed child owns
+///      the inherited wrappers' default and positional insertion points.
+fn collect_reference_context_named_slots(
+    store: &TemplateIrStore,
+    context: TemplateViewContext,
+    schema: &mut TirSlotSchema,
+    visited_wrappers: &mut FxHashSet<TemplateWrapperReference>,
+) -> Result<(), InfrastructureFailure> {
+    let Some(overlay_id) = context.wrapper_context else {
+        return Ok(());
+    };
+    let overlay = store.wrapper_context_overlay(overlay_id).ok_or_else(|| {
+        layout_error(format!(
+            "TIR slot layout found a missing wrapper-context overlay {overlay_id:?}."
+        ))
+    })?;
+
+    for (_, wrapper_context) in &overlay.contexts {
+        // `$fresh` suppresses the inherited set at this occurrence, so its names are
+        // not addressable through this reference even if a stale set id is present.
+        if wrapper_context.skip_parent_child_wrappers {
+            continue;
+        }
+
+        collect_wrapper_named_slots(
+            store,
+            wrapper_context.inherited_wrapper_set,
+            schema,
+            visited_wrappers,
+        )?;
+    }
+
+    Ok(())
+}
+
 fn collect_named_slots_from_node(
     store: &TemplateIrStore,
     node_id: TemplateIrNodeId,
     schema: &mut TirSlotSchema,
     visiting_nodes: &mut FxHashSet<TemplateIrNodeId>,
-    visited_wrappers: &mut FxHashSet<TemplateIrId>,
+    visited_wrappers: &mut FxHashSet<TemplateWrapperReference>,
 ) -> Result<(), InfrastructureFailure> {
     if !visiting_nodes.insert(node_id) {
         return Err(layout_error(format!(
@@ -489,7 +689,12 @@ fn collect_named_slots_from_node(
         }
 
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {
-            collect_wrapper_template_named_slots(store, reference.root, schema, visited_wrappers)
+            collect_wrapper_reference_named_slots(
+                store,
+                TemplateWrapperReference::new(reference.root, reference.phase, reference.context),
+                schema,
+                visited_wrappers,
+            )
         }
 
         TemplateIrNodeKind::Conditional { body, .. } => {

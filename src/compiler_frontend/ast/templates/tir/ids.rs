@@ -89,7 +89,7 @@ impl fmt::Display for TemplateIrNodeId {
 
 /// Stable index for a wrapper set in `TemplateIrStore::wrapper_sets`.
 ///
-/// WHAT: identifies a reusable set of `$children(..)` wrapper templates.
+/// WHAT: identifies a reusable set of `$before`/`$after` wrapper templates.
 /// WHY: keeping wrapper ownership behind an ID avoids storing wrapper vectors
 /// directly on `TemplateIr` and gives later phases a stable handle for
 /// deduplicating identical wrapper combinations.

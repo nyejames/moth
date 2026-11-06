@@ -1,6 +1,6 @@
 -- template-render-plan-churn.moth
 -- Stresses template render-plan construction: nested composition,
--- slots, inserts, $children wrappers, and runtime template rebuilding.
+-- slots, inserts, before/after wrappers, and runtime template rebuilding.
 
 page_title #= "Template Render Plan Churn"
 
@@ -43,15 +43,15 @@ row_template #= [:
 ]
 
 -- Wrapper chains.
-wrap_emphasis #= [$children([:<em class="emphasis">[$slot]</em>]):
+wrap_emphasis #= [$before = [:<em class="emphasis">], $after = [:</em>]:
     [$slot]
 ]
 
-wrap_strong #= [$children([:<strong class="strong">[$slot]</strong>]):
+wrap_strong #= [$before = [:<strong class="strong">], $after = [:</strong>]:
     [$slot]
 ]
 
-wrap_code #= [$children([:<code class="code">[$slot]</code>]):
+wrap_code #= [$before = [:<code class="code">], $after = [:</code>]:
     [$slot]
 ]
 

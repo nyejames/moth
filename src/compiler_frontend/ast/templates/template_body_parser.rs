@@ -540,6 +540,7 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
                 construction_context.record_insert_contribution(
                     contribution.template,
                     contribution.authored_name,
+                    TemplateSegmentOrigin::Body,
                     contribution.span,
                 );
             }
@@ -610,7 +611,12 @@ fn record_parser_tir_insert_contribution(
 ) {
     let child_template_id = child_template.tir_reference.root;
 
-    construction_context.record_insert_contribution(child_template_id, None, child_template.span);
+    construction_context.record_insert_contribution(
+        child_template_id,
+        None,
+        TemplateSegmentOrigin::Body,
+        child_template.span,
+    );
 }
 #[derive(Clone, Copy)]
 enum InheritedChildWrapperPolicy {

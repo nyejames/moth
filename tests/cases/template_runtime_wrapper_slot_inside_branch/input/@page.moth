@@ -1,6 +1,4 @@
-list = [$children([if true:
-    <li class="branch-slot">[$slot]</li>
-]):
+list = [$before = [if true:<li class="branch-slot">], $after = [if true:</li>]:
     <ul>[$slot]</ul>
 ]
 

@@ -12,8 +12,7 @@ use crate::compiler_frontend::ast::templates::template_head_parser::core_directi
     parse_in_target, parse_slot_declaration,
 };
 use crate::compiler_frontend::ast::templates::template_head_parser::directive_args::{
-    parse_optional_parenthesized_expression, parse_required_parenthesized_expression,
-    reject_unexpected_directive_arguments,
+    parse_optional_parenthesized_expression, reject_unexpected_directive_arguments,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::{
@@ -24,14 +23,12 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::template
     InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
-    ExpectedTokenView, UnexpectedTokenShape, UnexpectedTokenView,
+    UnexpectedTokenShape, UnexpectedTokenView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::CompactDiagnosticBagForTest;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
-use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, DiagnosticToken, InvalidTemplateDirectiveReason,
-};
+use crate::compiler_frontend::compiler_messages::{DiagnosticBag, DiagnosticToken};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::folded_value::resolve_const_string_value;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
@@ -71,7 +68,6 @@ enum DirectiveStyleTestDiagnosticKind {
         detail: Option<StringId>,
     },
     UnexpectedToken(Option<DiagnosticToken>),
-    ExpectedToken(DiagnosticToken),
     InvalidCallShape(InvalidCallShapeCode),
     Other,
 }
@@ -103,8 +99,6 @@ fn summarize_diagnostics(diagnostics: CompactDiagnosticBagForTest) -> DirectiveS
                         UnexpectedTokenShape::MultiBind { .. } => None,
                     };
                     DirectiveStyleTestDiagnosticKind::UnexpectedToken(found)
-                } else if let Some(facts) = view.family_view::<ExpectedTokenView>() {
-                    DirectiveStyleTestDiagnosticKind::ExpectedToken(facts.expected)
                 } else if let Some(facts) = view.family_view::<InvalidCallShapeView>() {
                     DirectiveStyleTestDiagnosticKind::InvalidCallShape(facts.reason)
                 } else {
@@ -152,15 +146,6 @@ fn assert_unexpected_token(diagnostic: &DirectiveStyleTestError, expected: Diagn
     }
 }
 
-fn assert_expected_token(diagnostic: &DirectiveStyleTestError, expected: DiagnosticToken) {
-    let facts = diagnostic
-        .first()
-        .expect("expected-token diagnostic should compact to one record");
-    match &facts.kind {
-        DirectiveStyleTestDiagnosticKind::ExpectedToken(found) => assert_eq!(*found, expected),
-        other => panic!("expected expected-token facts, found {other:?}"),
-    }
-}
 fn directive_tokens(
     source: &str,
     string_table: &mut StringTable,
@@ -287,36 +272,6 @@ fn parse_optional_parenthesized_expression_for_test(
         path_fork,
     )
     .map_err(directive_diagnostic)
-}
-
-fn parse_required_parenthesized_expression_for_test(
-    tokens: &mut AstCursor,
-    context: &ScopeContext,
-    expression_builder: &mut AstExpressionBuilder,
-    const_values: &mut ConstValueStore,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> DirectiveStyleTestResult<ExprId> {
-    let mut type_environment = TypeEnvironment::new();
-    let mut compatibility_cache = TypeCompatibilityCache::new();
-    let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
-    let directive_name = string_table.intern("test_directive");
-    parse_required_parenthesized_expression(
-        directive_name,
-        tokens,
-        context,
-        &mut type_interner,
-        expression_builder,
-        const_values,
-        string_table,
-        path_fork,
-    )
-    .map_err(|error| {
-        directive_diagnostic(error.into_template_error(
-            directive_name,
-            InvalidTemplateDirectiveReason::EmptyArguments,
-        ))
-    })
 }
 
 fn parse_optional_expression_source(source: &str) -> DirectiveStyleTestResult<Option<ExprId>> {
@@ -1001,7 +956,7 @@ fn optional_expression_with_parens_and_one_trailing_comma_returns_some() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let file_tokens = directive_tokens(
-        "[$children(\n\"wrap\"\n,)]",
+        "[$code(\n\"wrap\"\n,)]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -1069,8 +1024,7 @@ fn optional_expression_empty_parens_errors() {
 #[test]
 fn optional_expression_whitespace_only_parens_use_generic_empty_arguments() {
     // A whitespace-only argument stays on the generic empty-arguments owner
-    // rather than the `$children`-specific reason, proving non-`$children`
-    // directives do not receive children wording.
+    // rather than any decorator-specific reason.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -1111,7 +1065,7 @@ fn optional_expression_extra_comma_errors() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
-    let source = "[$children(\"a\", \"b\")]";
+    let source = "[$code(\"a\", \"b\")]";
     let file_tokens =
         directive_tokens(source, &mut string_table, &mut span_builder, &mut path_fork);
     let context = test_context(file_tokens.source_path, &path_fork);
@@ -1145,13 +1099,13 @@ fn optional_expression_extra_comma_errors() {
         panic!("extra-argument diagnostic should retain its local offending-comma span");
     };
     let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
-    assert_eq!((range.start(), range.end()), (14, 15));
+    assert_eq!((range.start(), range.end()), (10, 11));
     assert_eq!(&source[range.start() as usize..range.end() as usize], ",");
 }
 
 #[test]
 fn optional_expression_named_argument_is_rejected() {
-    let diagnostic = parse_optional_expression_source("[$children(value = 1)]")
+    let diagnostic = parse_optional_expression_source("[$code(value = 1)]")
         .expect_err("directive expressions must reject named arguments");
 
     let facts = diagnostic
@@ -1166,7 +1120,7 @@ fn optional_expression_named_argument_is_rejected() {
 
 #[test]
 fn optional_expression_mutable_argument_is_rejected() {
-    let diagnostic = parse_optional_expression_source("[$children(~1)]")
+    let diagnostic = parse_optional_expression_source("[$code(~1)]")
         .expect_err("directive expressions must reject mutable arguments");
 
     let facts = diagnostic
@@ -1183,7 +1137,7 @@ fn optional_expression_mutable_argument_is_rejected() {
 
 #[test]
 fn optional_expression_double_comma_errors() {
-    let diagnostic = parse_optional_expression_source("[$children(\"a\",,)]")
+    let diagnostic = parse_optional_expression_source("[$code(\"a\",,)]")
         .expect_err("directive expressions must reject double commas");
 
     assert_unexpected_token(
@@ -1194,7 +1148,7 @@ fn optional_expression_double_comma_errors() {
 
 #[test]
 fn optional_expression_missing_close_paren_errors() {
-    let diagnostic = parse_optional_expression_source("[$children(\"a\"]")
+    let diagnostic = parse_optional_expression_source("[$code(\"a\"]")
         .expect_err("directive expressions must require a closing parenthesis");
 
     assert_unexpected_token(
@@ -1202,87 +1156,6 @@ fn optional_expression_missing_close_paren_errors() {
         DiagnosticToken::from_static_tag(TokenTag::TEMPLATE_CLOSE),
     );
 }
-#[test]
-fn required_expression_missing_parens_errors() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let mut expression_builder = AstExpressionBuilder::new().unwrap();
-    let mut const_values = ConstValueStore::default();
-    let file_tokens = directive_tokens(
-        "[$children]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let context = test_context(file_tokens.source_path, &path_fork);
-    let canonical_owner = file_tokens.canonical_owner();
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    cursor
-        .set_position(file_tokens.opener_index + 1)
-        .expect("test token stream position must remain in canonical range");
-    let result = parse_required_parenthesized_expression_for_test(
-        &mut cursor,
-        &context,
-        &mut expression_builder,
-        &mut const_values,
-        &mut string_table,
-        &mut path_fork,
-    );
-    assert!(result.is_err());
-    let diagnostic = result.unwrap_err();
-    assert_expected_token(
-        &diagnostic,
-        DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS),
-    );
-}
-
-#[test]
-fn required_expression_compile_time_constant_ok() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let mut expression_builder = AstExpressionBuilder::new().unwrap();
-    let mut const_values = ConstValueStore::default();
-    let file_tokens = directive_tokens(
-        "[$children(\"wrap\")]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let context = test_context(file_tokens.source_path, &path_fork);
-    let canonical_owner = file_tokens.canonical_owner();
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    cursor
-        .set_position(file_tokens.opener_index + 1)
-        .expect("test token stream position must remain in canonical range");
-    let result = parse_required_parenthesized_expression_for_test(
-        &mut cursor,
-        &context,
-        &mut expression_builder,
-        &mut const_values,
-        &mut string_table,
-        &mut path_fork,
-    );
-    assert!(result.is_ok());
-    let expr = result.unwrap_or_else(|_| panic!("required expression should parse successfully"));
-    let view = expression_builder
-        .view(expr)
-        .expect("directive expression should be owned by the test builder");
-    assert!(matches!(
-        view.operation(),
-        ExpressionOperationView::Constant(id) if const_values.string_value(id).is_some()
-    ));
-}
-
 #[test]
 fn note_and_todo_templates_do_not_render_content() {
     let note_rendered = folded_template_output("[:before[$note:ignored]after]");

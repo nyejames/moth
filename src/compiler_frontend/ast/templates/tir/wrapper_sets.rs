@@ -1,25 +1,27 @@
 //! TIR wrapper-set and wrapper-context overlay helpers.
 //!
-//! WHAT: owns wrapper-set equivalence, conditional slot-wrapper composition,
-//! and wrapper-context overlay construction. The overlays record inherited
-//! wrapper sets and `$fresh` suppression for child-template occurrences on a
-//! template's authoritative structural root. Wrapper-context overlays are the
+//! WHAT: owns wrapper-set equivalence, direct-child decorator composites,
+//! conditional slot-wrapper composition, and wrapper-context overlay
+//! construction. The overlays record inherited wrapper sets and `$fresh`
+//! suppression for child-template occurrences on a template's authoritative
+//! structural root. Wrapper-context overlays are the
 //! sole owner of direct-child inherited wrappers, including children inside
 //! conditional and loop bodies.
 //!
 //! WHY: wrapper sets and wrapper-context overlays both describe how
-//! `$children(..)` wrappers apply to child-template boundaries. Keeping set
-//! composition, wrapper-reference normalization, and overlay construction in
-//! one module makes that boundary explicit without leaking store internals
-//! into the template construction orchestrator.
+//! `$before`/`$after` decorator wrappers apply to child-template boundaries.
+//! Keeping set composition, wrapper-reference normalization, and overlay
+//! construction in one module makes that boundary explicit without leaking
+//! store internals into the template construction orchestrator.
 
-use crate::compiler_frontend::ast::templates::template::Template;
+use crate::compiler_frontend::ast::templates::template::{SlotKey, Style, Template, TemplateType};
 use crate::compiler_frontend::ast::templates::tir::contribution_shape::ContributionShape;
 use crate::compiler_frontend::ast::templates::tir::ids::{
     ChildTemplateOccurrenceId, TemplateIrNodeId, TemplateWrapperSetId,
 };
 use crate::compiler_frontend::ast::templates::tir::node::{
-    RetainedControlFlowRenderUnit, RetainedNumericIntakeRole, TemplateIrNodeKind,
+    RetainedControlFlowRenderUnit, RetainedNumericIntakeRole, TemplateIr, TemplateIrNode,
+    TemplateIrNodeKind, TirSlotPlaceholder,
 };
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TemplateViewContext, TirWrapperApplicationMode, TirWrapperContext, TirWrapperContextOverlay,
@@ -29,6 +31,7 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateWrapperReference,
 };
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
+use crate::compiler_frontend::ast::templates::tir::summary::summarize_existing_root;
 use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, validate_context};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -168,6 +171,122 @@ pub(crate) fn wrapper_reference_for_template(
         reference.phase,
         reference.context,
     ))
+}
+
+// -------------------------
+//  Direct-child decorator composite
+// -------------------------
+
+/// Composes the optional `$before` and `$after` edges into one direct-child wrapper.
+///
+/// WHAT: builds a `Sequence` of the original prefix and suffix template
+///       references around exactly one compiler-created default-slot
+///       placeholder. The prefix/suffix references keep their exact root,
+///       phase and view context, so structural resources, formatting overlays
+///       and named-slot routing are unchanged.
+///
+/// A prefix or suffix value may itself declare `$before`/`$after`, so its
+/// reference context can carry a nested wrapper-context overlay for the
+/// fixed children that decorator owns. Retaining that context on the
+/// child edge lets the shared named-fill walk resolve the enclosing
+/// application's named contributions without flattening the edge context.
+/// WHY: direct-child wrapper machinery consumes one wrapper per occurrence.
+///      Keeping the two decorator edges as one composite prevents a second
+///      composition pipeline and gives the implicit child exactly one
+///      insertion point.
+///
+/// The composite is published at `Composed`: its root is built directly from
+/// already-composed prefix/suffix references and one compiler-created slot, so
+/// no parser-owned composition remains. Wrapper sets hand this reference to
+/// preparation and public projection, which require `Composed`-or-later
+/// identity, and structural transitions only carry a wrapper's own context
+/// dimensions from `Composed` onwards. Labeling it `Parsed` would understate
+/// the finished root and discard named-fill context added to the composite.
+///
+/// Returns `Err` when a referenced template, node or summary is missing from
+/// the active store. Those are internal invariant failures.
+pub(crate) fn compose_child_decorator_wrapper(
+    store: &mut TemplateIrStore,
+    before: Option<TemplateWrapperReference>,
+    after: Option<TemplateWrapperReference>,
+) -> Result<TemplateWrapperReference, InfrastructureFailure> {
+    let before_span = wrapper_reference_span(store, before)?;
+    let after_span = wrapper_reference_span(store, after)?;
+    let composite_span = before_span.or(after_span);
+
+    let mut children = Vec::with_capacity(3);
+    if let Some(before) = before {
+        children.push(push_wrapper_child_node(store, before, before_span));
+    }
+
+    let placeholder = TirSlotPlaceholder::with_wrapper_sets(
+        SlotKey::Default,
+        store.next_slot_occurrence_id(),
+        None,
+        None,
+        None,
+        false,
+    );
+    children.push(store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Slot { placeholder },
+        None,
+    )));
+
+    if let Some(after) = after {
+        children.push(push_wrapper_child_node(store, after, after_span));
+    }
+
+    let root = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Sequence { children },
+        composite_span,
+    ));
+    let summary = summarize_existing_root(store, root)?;
+    let template_id = store.push_template(TemplateIr::new(
+        root,
+        Style::default(),
+        TemplateType::String,
+        summary,
+        composite_span,
+    ));
+
+    Ok(TemplateWrapperReference::new(
+        template_id,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    ))
+}
+
+fn push_wrapper_child_node(
+    store: &mut TemplateIrStore,
+    reference: TemplateWrapperReference,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+) -> TemplateIrNodeId {
+    let occurrence_id = store.next_child_template_occurrence_id();
+    store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::ChildTemplate {
+            reference: reference.into_structural_child_reference(),
+            occurrence_id,
+        },
+        span,
+    ))
+}
+
+fn wrapper_reference_span(
+    store: &TemplateIrStore,
+    reference: Option<TemplateWrapperReference>,
+) -> Result<Option<crate::compiler_frontend::source::SourceSpan>, InfrastructureFailure> {
+    let Some(reference) = reference else {
+        return Ok(None);
+    };
+    store
+        .get_template(reference.root)
+        .map(|template| template.span)
+        .ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "child decorator composition referenced a missing wrapper template.",
+            )
+        })
 }
 
 // -------------------------

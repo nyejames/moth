@@ -11,7 +11,7 @@
 
 use super::control_flow_suffix::{parse_if_suffix, parse_loop_suffix};
 use super::core_directives::{
-    mark_template_body_whitespace_style_controlled, maybe_parse_slot_or_insert_helper_directive,
+    mark_template_body_whitespace_style_controlled, maybe_parse_structural_helper_directive,
     parse_core_style_directive,
 };
 use super::directive_args::directive_has_arguments;
@@ -954,7 +954,7 @@ pub fn parse_template_head(
                     directive_span,
                 )?;
 
-                let handled_slot_insert = maybe_parse_slot_or_insert_helper_directive(
+                let handled_structural_helper = maybe_parse_structural_helper_directive(
                     &spec.kind,
                     token_stream,
                     context,
@@ -966,9 +966,9 @@ pub fn parse_template_head(
                     path_fork,
                 )?;
 
-                if handled_slot_insert {
-                    // Slot declarations consume their directive token and any
-                    // target or default, so the loop must not advance again.
+                if handled_structural_helper {
+                    // Structural helpers consume their directive token and any
+                    // target or assigned value, so the loop must not advance again.
                     defer_comma_advance = true;
                     apply_head_compatibility(
                         &mut head_state,
@@ -1108,15 +1108,10 @@ fn parse_style_directive_from_spec(
     let directive_result = match &spec.kind {
         StyleDirectiveKind::Core(kind) => parse_core_style_directive(
             token_stream,
-            context,
-            type_interner,
-            expression_builder,
-            const_values,
             build_state,
             directive_name,
             *kind,
             string_table,
-            path_fork,
         ),
         StyleDirectiveKind::Handler(handler_spec) => apply_handler_style_directive(
             token_stream,

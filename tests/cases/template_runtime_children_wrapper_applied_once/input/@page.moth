@@ -1,4 +1,4 @@
-list #= [$children([:<span class="once">[$slot]</span>]):
+list #= [$before = [:<span class="once">], $after = [:</span>]:
     [$slot]
 ]
 

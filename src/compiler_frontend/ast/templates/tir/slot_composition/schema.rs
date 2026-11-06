@@ -2,7 +2,9 @@
 //!
 //! Slot schema and occurrence facts come from `tir/slot_layout.rs`. This
 //! module rebuilds a wrapper tree with routed contributions spliced in place
-//! of `$slot` nodes.
+//! of `$slot` nodes. It also resolves the same routed named content into
+//! composition-owned child-edge wrapper-context overlays, whose nested
+//! decorators live outside the structural slot tree.
 
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
@@ -15,6 +17,7 @@ use crate::compiler_frontend::ast::templates::tir::overlays::{
 };
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference;
+use crate::compiler_frontend::ast::templates::tir::slot_layout::template_is_independently_planned;
 use crate::compiler_frontend::ast::templates::tir::summary::summarize_existing_root;
 use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::ast::templates::tir::wrapper_sets::merge_wrapper_sets;
@@ -33,18 +36,43 @@ use super::helpers::{build_composed_wrapper_template, internal_infrastructure_fa
 
 type SlotSchemaResult<T> = Result<T, TemplateError>;
 
+/// Read-only owners shared by one named-slot expansion.
+///
+/// The TIR store is threaded separately because fills mutate it. Grouping these
+/// three immutable authorities keeps the recursive fill family focused on slot
+/// work instead of repeating the same three parameters at every hop.
+#[derive(Clone, Copy)]
+struct SlotFillServices<'a> {
+    expressions: &'a AstExpressionBuilder,
+    const_values: &'a ConstValueStore,
+    string_table: &'a StringTable,
+}
+
 /// Which slot occurrences one expansion pass resolves.
 ///
 /// WHAT: `All` replaces every routed occurrence, `NamedOnly` leaves default and
-///       positional placeholders untouched.
+///       positional placeholders untouched, and `ContextOnly` leaves every
+///       placeholder in place while still resolving composition-owned child-edge
+///       wrapper contexts.
 /// WHY: a wrapper applied to a control-flow contribution must be composed before its
 ///       child output exists. Filling only the named slots keeps the wrapper's own loose
-///       insertion point unresolved for the later conditional application.
+///       insertion point unresolved for the later conditional application. Runtime
+///       injection supplies the named fills itself, so it needs only the nested
+///       child-edge contexts resolved before the wrapper tree is copied.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SlotExpansionScope {
     All,
     NamedOnly,
+    ContextOnly,
 }
+
+// Boundary ownership: every fill that writes plan markers or routed named content
+// treats a child template with its own runtime slot plan as a leaf. That child owns
+// a separate plan and handoff: its resolved sites and the child-edge overlays under
+// its reference already carry that plan's markers. Writing this application's nodes
+// or markers into its tree or overlay would mix two slot plans, and advertising its
+// named occurrences would accept content no enclosing fill can deliver.
+// `slot_layout::template_is_independently_planned` is the shared predicate.
 
 /// Resolves each named-filled wrapper set at most once per receiving application.
 ///
@@ -66,11 +94,10 @@ impl NamedFilledWrapperSetCache {
     fn resolve(
         &mut self,
         store: &mut TemplateIrStore,
-        expressions: &AstExpressionBuilder,
-        const_values: &ConstValueStore,
+        services: SlotFillServices<'_>,
         wrapper_set_id: TemplateWrapperSetId,
         named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
-        string_table: &StringTable,
+        visiting_wrapper_sets: &mut FxHashSet<TemplateWrapperSetId>,
     ) -> SlotSchemaResult<TemplateWrapperSetId> {
         // Without named content the set is already final; leaving the map empty keeps
         // the common case allocation-free.
@@ -82,13 +109,20 @@ impl NamedFilledWrapperSetCache {
             return Ok(*resolved_set_id);
         }
 
-        let resolved_set_id = fill_named_slots_in_wrapper_set(
+        // A set already being filled by an enclosing context resolution cannot be
+        // resolved again without re-entering its own wrapper tree. Return it as-is
+        // and do not memoise the partial result: the enclosing fill will publish the
+        // completed set, and a later occurrence must still resolve it.
+        if visiting_wrapper_sets.contains(&wrapper_set_id) {
+            return Ok(wrapper_set_id);
+        }
+
+        let resolved_set_id = fill_named_slots_in_wrapper_set_inner(
             store,
-            expressions,
-            const_values,
+            services,
             wrapper_set_id,
             named_fill,
-            string_table,
+            visiting_wrapper_sets,
         )?;
         self.resolved.insert(wrapper_set_id, resolved_set_id);
         Ok(resolved_set_id)
@@ -110,17 +144,22 @@ pub(crate) fn expand_tir_slot_placeholders_into(
     };
     let root = template.root;
     let mut named_filled_wrapper_sets = NamedFilledWrapperSetCache::default();
+    let mut visiting_wrapper_sets = FxHashSet::default();
+    let services = SlotFillServices {
+        expressions,
+        const_values,
+        string_table,
+    };
 
     expand_tir_slot_placeholders_from_node(
         store,
-        expressions,
-        const_values,
+        services,
         root,
         routed_contributions,
         &routed_contributions.named_nodes,
         &mut named_filled_wrapper_sets,
+        &mut visiting_wrapper_sets,
         SlotExpansionScope::All,
-        string_table,
     )
 }
 
@@ -128,6 +167,7 @@ pub(crate) fn expand_tir_slot_placeholders_into(
 ///
 /// Returns the derived wrapper template when at least one named occurrence changed, so
 /// conditional wrapper application can carry the content without a second fill list.
+#[cfg(test)]
 pub(crate) fn fill_named_slot_placeholders_into(
     store: &mut TemplateIrStore,
     expressions: &AstExpressionBuilder,
@@ -135,6 +175,34 @@ pub(crate) fn fill_named_slot_placeholders_into(
     wrapper_template_id: TemplateIrId,
     named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
     string_table: &StringTable,
+) -> SlotSchemaResult<Option<TemplateIrId>> {
+    let mut visiting_wrapper_sets = FxHashSet::default();
+    let services = SlotFillServices {
+        expressions,
+        const_values,
+        string_table,
+    };
+    fill_named_slot_placeholders_into_with_guard(
+        store,
+        services,
+        wrapper_template_id,
+        named_fill,
+        &mut visiting_wrapper_sets,
+    )
+}
+
+/// Shared named-only expansion with a caller-owned recursive wrapper-set guard.
+///
+/// The guard is the wrapper-fill in-progress set: a wrapper template may contain a
+/// child edge whose overlay inherits the very set being filled, so the expansion
+/// must terminate through the same authority as the wrapper-set fill rather than
+/// creating a fresh guard that could re-enter that set.
+fn fill_named_slot_placeholders_into_with_guard(
+    store: &mut TemplateIrStore,
+    services: SlotFillServices<'_>,
+    wrapper_template_id: TemplateIrId,
+    named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
+    visiting_wrapper_sets: &mut FxHashSet<TemplateWrapperSetId>,
 ) -> SlotSchemaResult<Option<TemplateIrId>> {
     let Some(template) = store.get_template(wrapper_template_id) else {
         return Err(internal_infrastructure_failure(
@@ -147,14 +215,13 @@ pub(crate) fn fill_named_slot_placeholders_into(
 
     let expanded_root = expand_tir_slot_placeholders_from_node(
         store,
-        expressions,
-        const_values,
+        services,
         original_root,
         &no_routed_contributions,
         named_fill,
         &mut named_filled_wrapper_sets,
+        visiting_wrapper_sets,
         SlotExpansionScope::NamedOnly,
-        string_table,
     )?;
 
     if expanded_root == original_root {
@@ -172,24 +239,32 @@ pub(crate) fn fill_named_slot_placeholders_into(
 ///
 /// WHAT: dispatches on `TemplateIrNodeKind`, replacing `Slot` nodes with a
 ///       `Sequence` containing the routed contribution node IDs, and recursing
-///       into structures that can contain further slot placeholders.
+///       into structures that can contain further slot placeholders. A
+///       composition-owned `ChildTemplate` edge also receives the routed named
+///       content in its wrapper-context overlay: the edge reference is part of
+///       the wrapper value being resolved, not an independently owned child, so
+///       its own decorators must replay the same named content the structural
+///       wrapper tree receives.
 /// WHY: wrapper templates may declare slots inside sequences, conditionals, loops,
 ///      or nested child templates, so a single root walk must reach every
 ///      reachable slot and rebuild only the parts of the tree that changed.
+///
+/// A child template that already owns a runtime slot plan is a leaf for every
+/// scope: its own plan resolved its sites and filled its child-edge overlays, so
+/// this fill must not enter its tree or rewrite its contexts.
 #[allow(
     clippy::too_many_arguments,
-    reason = "the walk needs the store, expression and constant owners, the routes, the named fill and its application cache, the scope and the string table"
+    reason = "the walk needs the store, the immutable fill services, the routes, the named fill and its application cache, the in-progress wrapper-set guard and the scope"
 )]
 fn expand_tir_slot_placeholders_from_node(
     store: &mut TemplateIrStore,
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
+    services: SlotFillServices<'_>,
     node_id: TemplateIrNodeId,
     routed_contributions: &TirSlotContributions,
     named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
     named_filled_wrapper_sets: &mut NamedFilledWrapperSetCache,
+    visiting_wrapper_sets: &mut FxHashSet<TemplateWrapperSetId>,
     scope: SlotExpansionScope,
-    string_table: &StringTable,
 ) -> SlotSchemaResult<TemplateIrNodeId> {
     let Some(node) = store.get_node(node_id).cloned() else {
         return Err(internal_infrastructure_failure(
@@ -205,14 +280,13 @@ fn expand_tir_slot_placeholders_from_node(
             for child_id in children {
                 let expanded_child_id = expand_tir_slot_placeholders_from_node(
                     store,
-                    expressions,
-                    const_values,
+                    services,
                     *child_id,
                     routed_contributions,
                     named_fill,
                     named_filled_wrapper_sets,
+                    visiting_wrapper_sets,
                     scope,
-                    string_table,
                 )?;
 
                 if expanded_child_id != *child_id {
@@ -253,6 +327,7 @@ fn expand_tir_slot_placeholders_from_node(
             // Routing owns presence, not content: an explicit empty contribution
             // suppresses the occurrence default even though it contributes no nodes.
             let (contribution_nodes, has_routed_presence) = match scope {
+                SlotExpansionScope::ContextOnly => return Ok(node_id),
                 SlotExpansionScope::All => (
                     routed_contributions.nodes_for_slot(&placeholder.key),
                     routed_contributions.slot_has_routed_presence(&placeholder.key),
@@ -290,11 +365,10 @@ fn expand_tir_slot_placeholders_from_node(
                     )? {
                         let wrapper_set_id = named_filled_wrapper_sets.resolve(
                             store,
-                            expressions,
-                            const_values,
+                            services,
                             wrapper_set_id,
                             named_fill,
-                            string_table,
+                            visiting_wrapper_sets,
                         )?;
                         attach_conditional_wrapper_set(store, *node_id, wrapper_set_id)?
                     } else {
@@ -303,12 +377,10 @@ fn expand_tir_slot_placeholders_from_node(
                 } else {
                     apply_tir_wrapper_sets_to_contribution(
                         store,
-                        expressions,
-                        const_values,
+                        services,
                         *node_id,
                         placeholder,
                         named_fill,
-                        string_table,
                     )?
                 };
 
@@ -342,42 +414,69 @@ fn expand_tir_slot_placeholders_from_node(
             occurrence_id,
         } => {
             let child_template_id = reference.root;
-            let Some(child_root) = store
-                .get_template(child_template_id)
-                .map(|template| template.root)
-            else {
+            let Some(child_template) = store.get_template(child_template_id) else {
                 return Err(internal_infrastructure_failure(
                     "TIR slot expansion: child template ID was not present in the store.",
                 ));
             };
 
+            // A nested runtime application owns its own plan, overlay context and
+            // handoff. Its resolved sites and the child-edge overlays under this
+            // reference already carry that plan's markers, and this fill's nodes or
+            // markers would belong to a foreign slot plan. The edge is a leaf for
+            // every scope; the wrapper value's own child edges keep descending.
+            if template_is_independently_planned(child_template) {
+                return Ok(node_id);
+            }
+
+            let child_root = child_template.root;
+
             let expanded_child_root = expand_tir_slot_placeholders_from_node(
                 store,
-                expressions,
-                const_values,
+                services,
                 child_root,
                 routed_contributions,
                 named_fill,
                 named_filled_wrapper_sets,
+                visiting_wrapper_sets,
                 scope,
-                string_table,
             )?;
 
-            if expanded_child_root == child_root {
+            // A wrapper value may contain a nested helper that declares its own
+            // `$before`/`$after` decorators. Those decorators live in the child
+            // reference's wrapper-context overlay, not in the child's structural root,
+            // so structural expansion cannot reach their named slots. The edge is
+            // composition-owned: fill the same routed named content into the reference
+            // context while keeping the root, phase and occurrence identity.
+            let filled_context = fill_direct_child_wrapper_names_inner(
+                store,
+                services,
+                reference.context,
+                named_fill,
+                visiting_wrapper_sets,
+            )?;
+
+            if expanded_child_root == child_root && filled_context == reference.context {
                 return Ok(node_id);
             }
 
-            let expanded_child_template_id = store.push_structurally_derived_template(
-                child_template_id,
-                expanded_child_root,
-                DerivedTemplateMetadata::preserve_source(),
-            )?;
+            let expanded_child_template_id = if expanded_child_root == child_root {
+                child_template_id
+            } else {
+                store.push_structurally_derived_template(
+                    child_template_id,
+                    expanded_child_root,
+                    DerivedTemplateMetadata::preserve_source(),
+                )?
+            };
 
             // The derived template is a structural version of this same occurrence, so it
             // keeps the occurrence identity. Retained wrapper-context overlays are keyed by
             // occurrence; a fresh key would silently drop the occurrence's inherited
             // `$children(..)` context for every consumer of the reference's view context.
-            let expanded_reference = reference.with_root(expanded_child_template_id);
+            let expanded_reference = reference
+                .with_root(expanded_child_template_id)
+                .with_context(filled_context);
             Ok(store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::ChildTemplate {
                     reference: expanded_reference,
@@ -394,14 +493,13 @@ fn expand_tir_slot_placeholders_from_node(
         } => {
             let expanded_body_id = expand_tir_slot_placeholders_from_node(
                 store,
-                expressions,
-                const_values,
+                services,
                 *body,
                 routed_contributions,
                 named_fill,
                 named_filled_wrapper_sets,
+                visiting_wrapper_sets,
                 scope,
-                string_table,
             )?;
 
             if expanded_body_id == *body {
@@ -426,14 +524,13 @@ fn expand_tir_slot_placeholders_from_node(
         } => {
             let expanded_body_id = expand_tir_slot_placeholders_from_node(
                 store,
-                expressions,
-                const_values,
+                services,
                 *body,
                 routed_contributions,
                 named_fill,
                 named_filled_wrapper_sets,
+                visiting_wrapper_sets,
                 scope,
-                string_table,
             )?;
 
             let mut any_part_changed = expanded_body_id != *body;
@@ -442,14 +539,13 @@ fn expand_tir_slot_placeholders_from_node(
                 Some(aggregate_wrapper_id) => {
                     let expanded_aggregate_wrapper_id = expand_tir_slot_placeholders_from_node(
                         store,
-                        expressions,
-                        const_values,
+                        services,
                         *aggregate_wrapper_id,
                         routed_contributions,
                         named_fill,
                         named_filled_wrapper_sets,
+                        visiting_wrapper_sets,
                         scope,
-                        string_table,
                     )?;
 
                     if expanded_aggregate_wrapper_id != *aggregate_wrapper_id {
@@ -503,12 +599,10 @@ fn expand_tir_slot_placeholders_from_node(
 ///       slot-less wrapper before it.
 fn apply_tir_wrapper_set_to_node(
     store: &mut TemplateIrStore,
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
+    services: SlotFillServices<'_>,
     node_id: TemplateIrNodeId,
     wrapper_set_id: TemplateWrapperSetId,
     named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
-    string_table: &StringTable,
 ) -> SlotSchemaResult<TemplateIrNodeId> {
     let wrapper_set = store.get_wrapper_set(wrapper_set_id).ok_or_else(|| {
         internal_infrastructure_failure(
@@ -520,63 +614,35 @@ fn apply_tir_wrapper_set_to_node(
 
     wrap_tir_node_in_wrappers_into(
         store,
-        expressions,
-        const_values,
+        services.expressions,
+        services.const_values,
         node_id,
         &wrapper_references,
         named_fill,
-        string_table,
-    )
-}
-
-/// Composes routed named content into every wrapper in a set that declares it.
-///
-/// WHAT: derives a version of each affected wrapper template whose named placeholders
-///       and wrapper-local direct-child overlays are already filled, then returns the
-///       replacement wrapper set.
-/// WHY: wrapper sets store only wrapper references, so deferred applications (conditional
-///       contribution wrappers and direct-child overlays) must carry the named content in
-///       the wrapper templates themselves. Filling the named occurrences before attachment
-///       keeps the deferred loose child insertion working while still replaying the
-///       receiving application's named content. A wrapper may itself own fixed direct
-///       children, whose nested `$children(..)` sets live in the wrapper reference's
-///       overlay context rather than its structural tree; those sets are filled through
-///       the same immediate-receiver overlay path so their named occurrences resolve too.
-pub(crate) fn fill_named_slots_in_wrapper_set(
-    store: &mut TemplateIrStore,
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
-    wrapper_set_id: TemplateWrapperSetId,
-    named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
-    string_table: &StringTable,
-) -> SlotSchemaResult<TemplateWrapperSetId> {
-    let mut visiting_wrapper_sets = FxHashSet::default();
-    fill_named_slots_in_wrapper_set_inner(
-        store,
-        expressions,
-        const_values,
-        wrapper_set_id,
-        named_fill,
-        string_table,
-        &mut visiting_wrapper_sets,
+        services.string_table,
     )
 }
 
 /// Resolves one wrapper set while guarding against recursive `$children(..)` graphs.
 ///
-/// WHAT: fills each wrapper's structural named occurrences and its wrapper-local
-///       direct-child overlay, sharing one in-progress set across the recursion.
-/// WHY: a wrapper context may inherit the very set being resolved (directly or through
-///       another wrapper), so the guard terminates that cycle instead of deriving
-///       templates forever. The guard is scoped to one top-level fill; sibling
-///       occurrences still resolve against the same deterministic named content.
+/// WHAT: fills each wrapper's structural named occurrences, slot-owned wrapper sets and
+///       wrapper-local direct-child overlay, sharing one in-progress set across the
+///       recursion.
+/// WHY: wrapper sets store only wrapper references, so deferred applications (conditional
+///       contribution wrappers and direct-child overlays) must carry the named content in
+///       the wrapper templates themselves. A wrapper may itself own fixed direct children,
+///       whose nested `$children(..)` sets live in the wrapper reference's overlay context
+///       rather than its structural tree; those sets are filled through the same
+///       immediate-receiver overlay path so their named occurrences resolve too. A wrapper
+///       context may inherit the very set being resolved (directly or through another
+///       wrapper), so the guard terminates that cycle instead of deriving templates
+///       forever. The guard is shared across one expansion; sibling occurrences still
+///       resolve against the same deterministic named content.
 fn fill_named_slots_in_wrapper_set_inner(
     store: &mut TemplateIrStore,
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
+    services: SlotFillServices<'_>,
     wrapper_set_id: TemplateWrapperSetId,
     named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
-    string_table: &StringTable,
     visiting_wrapper_sets: &mut FxHashSet<TemplateWrapperSetId>,
 ) -> SlotSchemaResult<TemplateWrapperSetId> {
     if named_fill.is_empty() {
@@ -604,20 +670,16 @@ fn fill_named_slots_in_wrapper_set_inner(
     for wrapper_reference in wrapper_references {
         let filled_root = fill_wrapper_template_named_content(
             store,
-            expressions,
-            const_values,
+            services,
             wrapper_reference.root,
             named_fill,
-            string_table,
             visiting_wrapper_sets,
         )?;
         let filled_context = fill_direct_child_wrapper_names_inner(
             store,
-            expressions,
-            const_values,
+            services,
             wrapper_reference.context,
             named_fill,
-            string_table,
             visiting_wrapper_sets,
         )?;
 
@@ -664,13 +726,53 @@ pub(crate) fn fill_named_slots_in_wrapper_template(
     }
 
     let mut visiting_wrapper_sets = FxHashSet::default();
-    fill_wrapper_template_named_content(
-        store,
+    let services = SlotFillServices {
         expressions,
         const_values,
+        string_table,
+    };
+    fill_wrapper_template_named_content(
+        store,
+        services,
         template_id,
         named_fill,
+        &mut visiting_wrapper_sets,
+    )
+}
+
+/// Fills routed named content into one wrapper root without resolving its slot-owned
+/// wrapper sets.
+///
+/// WHAT: composes structural named occurrences and the composition-owned child-edge
+///       overlay contexts the walk reaches, returning the derived template when it
+///       changed.
+/// WHY: runtime site planning still owns the store when it applies a wrapper's
+///      loose-fill slot wrappers, so those sets can resolve the same named content
+///      per fill without a prepared replacement. Only the wrapper edges that every
+///      child shares need resolving once.
+pub(crate) fn fill_named_slots_in_wrapper_root(
+    store: &mut TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+    template_id: TemplateIrId,
+    named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
+    string_table: &StringTable,
+) -> SlotSchemaResult<Option<TemplateIrId>> {
+    if named_fill.is_empty() {
+        return Ok(None);
+    }
+
+    let mut visiting_wrapper_sets = FxHashSet::default();
+    let services = SlotFillServices {
+        expressions,
+        const_values,
         string_table,
+    };
+    fill_named_slot_placeholders_into_with_guard(
+        store,
+        services,
+        template_id,
+        named_fill,
         &mut visiting_wrapper_sets,
     )
 }
@@ -679,20 +781,17 @@ pub(crate) fn fill_named_slots_in_wrapper_template(
 /// recursive wrapper-set guard.
 fn fill_wrapper_template_named_content(
     store: &mut TemplateIrStore,
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
+    services: SlotFillServices<'_>,
     template_id: TemplateIrId,
     named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
-    string_table: &StringTable,
     visiting_wrapper_sets: &mut FxHashSet<TemplateWrapperSetId>,
 ) -> SlotSchemaResult<Option<TemplateIrId>> {
-    let named_template = fill_named_slot_placeholders_into(
+    let named_template = fill_named_slot_placeholders_into_with_guard(
         store,
-        expressions,
-        const_values,
+        services,
         template_id,
         named_fill,
-        string_table,
+        visiting_wrapper_sets,
     )?;
     let candidate_template_id = named_template.unwrap_or(template_id);
     let Some(candidate_template) = store.get_template(candidate_template_id) else {
@@ -704,11 +803,9 @@ fn fill_wrapper_template_named_content(
 
     let Some(filled_root) = fill_slot_wrapper_sets_from_node(
         store,
-        expressions,
-        const_values,
+        services,
         candidate_root,
         named_fill,
-        string_table,
         visiting_wrapper_sets,
     )?
     else {
@@ -731,11 +828,9 @@ fn fill_wrapper_template_named_content(
 ///      templates keep their occurrence identity so retained overlays still resolve.
 fn fill_slot_wrapper_sets_from_node(
     store: &mut TemplateIrStore,
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
+    services: SlotFillServices<'_>,
     node_id: TemplateIrNodeId,
     named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
-    string_table: &StringTable,
     visiting_wrapper_sets: &mut FxHashSet<TemplateWrapperSetId>,
 ) -> SlotSchemaResult<Option<TemplateIrNodeId>> {
     let Some(node) = store.get_node(node_id).cloned() else {
@@ -752,11 +847,9 @@ fn fill_slot_wrapper_sets_from_node(
             for child_id in children {
                 match fill_slot_wrapper_sets_from_node(
                     store,
-                    expressions,
-                    const_values,
+                    services,
                     child_id,
                     named_fill,
-                    string_table,
                     visiting_wrapper_sets,
                 )? {
                     Some(filled_child_id) => {
@@ -782,11 +875,9 @@ fn fill_slot_wrapper_sets_from_node(
         TemplateIrNodeKind::Slot { placeholder } => {
             let filled_child = fill_slot_wrapper_set(
                 store,
-                expressions,
-                const_values,
+                services,
                 placeholder.child_wrapper_set,
                 named_fill,
-                string_table,
                 visiting_wrapper_sets,
             )?;
             // A placeholder that skips parent wrappers never applies its inherited set, so
@@ -796,11 +887,9 @@ fn fill_slot_wrapper_sets_from_node(
             } else {
                 fill_slot_wrapper_set(
                     store,
-                    expressions,
-                    const_values,
+                    services,
                     placeholder.applied_child_wrapper_set,
                     named_fill,
-                    string_table,
                     visiting_wrapper_sets,
                 )?
             };
@@ -836,14 +925,20 @@ fn fill_slot_wrapper_sets_from_node(
                     "TIR slot expansion: child template was not present while filling slot wrapper sets.",
                 ));
             };
+
+            // A child that already owns a runtime slot plan resolved its wrapper
+            // sets under that plan. Rewriting them here would inject this fill's
+            // named content into a completed application, so the edge is opaque.
+            if template_is_independently_planned(child_template) {
+                return Ok(None);
+            }
+
             let child_root = child_template.root;
             let Some(filled_child_root) = fill_slot_wrapper_sets_from_node(
                 store,
-                expressions,
-                const_values,
+                services,
                 child_root,
                 named_fill,
-                string_table,
                 visiting_wrapper_sets,
             )?
             else {
@@ -871,11 +966,9 @@ fn fill_slot_wrapper_sets_from_node(
         } => {
             let Some(filled_body) = fill_slot_wrapper_sets_from_node(
                 store,
-                expressions,
-                const_values,
+                services,
                 body,
                 named_fill,
-                string_table,
                 visiting_wrapper_sets,
             )?
             else {
@@ -900,21 +993,17 @@ fn fill_slot_wrapper_sets_from_node(
         } => {
             let filled_body = fill_slot_wrapper_sets_from_node(
                 store,
-                expressions,
-                const_values,
+                services,
                 body,
                 named_fill,
-                string_table,
                 visiting_wrapper_sets,
             )?;
             let filled_aggregate = match aggregate_wrapper {
                 Some(wrapper_id) => fill_slot_wrapper_sets_from_node(
                     store,
-                    expressions,
-                    const_values,
+                    services,
                     wrapper_id,
                     named_fill,
-                    string_table,
                     visiting_wrapper_sets,
                 )?,
                 None => None,
@@ -942,11 +1031,9 @@ fn fill_slot_wrapper_sets_from_node(
 /// Fills one optional slot wrapper set against the routed named content.
 fn fill_slot_wrapper_set(
     store: &mut TemplateIrStore,
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
+    services: SlotFillServices<'_>,
     wrapper_set_id: Option<TemplateWrapperSetId>,
     named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
-    string_table: &StringTable,
     visiting_wrapper_sets: &mut FxHashSet<TemplateWrapperSetId>,
 ) -> SlotSchemaResult<Option<TemplateWrapperSetId>> {
     let Some(wrapper_set_id) = wrapper_set_id else {
@@ -955,11 +1042,9 @@ fn fill_slot_wrapper_set(
 
     Ok(Some(fill_named_slots_in_wrapper_set_inner(
         store,
-        expressions,
-        const_values,
+        services,
         wrapper_set_id,
         named_fill,
-        string_table,
         visiting_wrapper_sets,
     )?))
 }
@@ -971,9 +1056,10 @@ fn fill_slot_wrapper_set(
 ///       named occurrences, then returns the view context with the replacement overlay.
 /// WHY: a receiver's fixed direct children keep their occurrence-keyed overlay context while
 ///      composition only expands slot placeholders. Filling the overlay's wrapper sets is the
-///      only path that reaches a fixed child authored before the receiving slot, and rewriting
-///      the overlay keeps the fix inside the receiver's own occurrence scope instead of
-///      descending into independently owned child-template contexts.
+///      only path that reaches a fixed child authored before the receiving slot. Rewriting the
+///      overlay keeps the fix inside one reference's occurrence scope; composition-owned child
+///      edges are filled by the structural walk that owns their nested context instead of this
+///      function mutating the child template's independently owned reference.
 pub(crate) fn fill_direct_child_wrapper_names_into(
     store: &mut TemplateIrStore,
     expressions: &AstExpressionBuilder,
@@ -983,25 +1069,73 @@ pub(crate) fn fill_direct_child_wrapper_names_into(
     string_table: &StringTable,
 ) -> SlotSchemaResult<TemplateViewContext> {
     let mut visiting_wrapper_sets = FxHashSet::default();
-    fill_direct_child_wrapper_names_inner(
-        store,
+    let services = SlotFillServices {
         expressions,
         const_values,
+        string_table,
+    };
+    fill_direct_child_wrapper_names_inner(
+        store,
+        services,
         context,
         named_fill,
-        string_table,
         &mut visiting_wrapper_sets,
     )
+}
+
+/// Resolves routed named content into a wrapper tree's composition-owned child contexts.
+///
+/// WHAT: walks a wrapper template root, filling every composition-owned child-edge
+///       wrapper-context overlay with the routed named content while leaving slot
+///       placeholders intact. Returns the derived root only when a context changed.
+///       A child template that already owns a runtime slot plan remains a leaf.
+/// WHY: runtime slot injection copies the wrapper's structural tree but the handoff store
+///      is read-only, so wrapper templates and overlays cannot be derived later. A wrapper
+///      value may contain nested decorated helpers whose named slots live only in a child
+///      reference overlay; resolving them before injection makes those decorators replay
+///      the plan's named markers without copying the helper's subtree. A nested planned
+///      application has its own plan and handoff, so writing this plan's markers into its
+///      overlay would leave that handoff referencing a foreign slot plan.
+pub(crate) fn fill_wrapper_tree_named_contexts(
+    store: &mut TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+    root_node_id: TemplateIrNodeId,
+    named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
+    string_table: &StringTable,
+) -> SlotSchemaResult<Option<TemplateIrNodeId>> {
+    if named_fill.is_empty() {
+        return Ok(None);
+    }
+
+    let no_routed_contributions = TirSlotContributions::default();
+    let mut named_filled_wrapper_sets = NamedFilledWrapperSetCache::default();
+    let mut visiting_wrapper_sets = FxHashSet::default();
+    let services = SlotFillServices {
+        expressions,
+        const_values,
+        string_table,
+    };
+    let filled_root = expand_tir_slot_placeholders_from_node(
+        store,
+        services,
+        root_node_id,
+        &no_routed_contributions,
+        named_fill,
+        &mut named_filled_wrapper_sets,
+        &mut visiting_wrapper_sets,
+        SlotExpansionScope::ContextOnly,
+    )?;
+
+    Ok((filled_root != root_node_id).then_some(filled_root))
 }
 
 /// Rewrites one overlay's inherited wrapper sets with the cycle-guarded fill.
 fn fill_direct_child_wrapper_names_inner(
     store: &mut TemplateIrStore,
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
+    services: SlotFillServices<'_>,
     context: TemplateViewContext,
     named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
-    string_table: &StringTable,
     visiting_wrapper_sets: &mut FxHashSet<TemplateWrapperSetId>,
 ) -> SlotSchemaResult<TemplateViewContext> {
     if named_fill.is_empty() {
@@ -1035,11 +1169,9 @@ fn fill_direct_child_wrapper_names_inner(
                 None => {
                     let filled_set_id = fill_named_slots_in_wrapper_set_inner(
                         store,
-                        expressions,
-                        const_values,
+                        services,
                         wrapper_set_id,
                         named_fill,
-                        string_table,
                         visiting_wrapper_sets,
                     )?;
                     resolved_sets.insert(wrapper_set_id, filled_set_id);
@@ -1082,12 +1214,10 @@ fn fill_direct_child_wrapper_names_inner(
 ///      placeholder while operating on TIR node IDs.
 fn apply_tir_wrapper_sets_to_contribution(
     store: &mut TemplateIrStore,
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
+    services: SlotFillServices<'_>,
     node_id: TemplateIrNodeId,
     placeholder: &TirSlotPlaceholder,
     named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
-    string_table: &StringTable,
 ) -> SlotSchemaResult<TemplateIrNodeId> {
     let mut current_node_id = node_id;
 
@@ -1098,12 +1228,10 @@ fn apply_tir_wrapper_sets_to_contribution(
     {
         current_node_id = apply_tir_wrapper_set_to_node(
             store,
-            expressions,
-            const_values,
+            services,
             current_node_id,
             wrapper_set_id,
             named_fill,
-            string_table,
         )?;
     }
 
@@ -1114,12 +1242,10 @@ fn apply_tir_wrapper_sets_to_contribution(
     {
         current_node_id = apply_tir_wrapper_set_to_node(
             store,
-            expressions,
-            const_values,
+            services,
             current_node_id,
             wrapper_set_id,
             named_fill,
-            string_table,
         )?;
     }
 
@@ -1147,16 +1273,19 @@ pub(crate) fn apply_slot_wrapper_sets_to_deferred_fill(
     string_table: &StringTable,
 ) -> SlotSchemaResult<TemplateIrNodeId> {
     let mut current_node_id = fill_root;
+    let services = SlotFillServices {
+        expressions,
+        const_values,
+        string_table,
+    };
 
     if let Some(wrapper_set_id) = placeholder.child_wrapper_set {
         current_node_id = apply_tir_wrapper_set_to_node(
             store,
-            expressions,
-            const_values,
+            services,
             current_node_id,
             wrapper_set_id,
             named_fill,
-            string_table,
         )?;
     }
 
@@ -1165,12 +1294,10 @@ pub(crate) fn apply_slot_wrapper_sets_to_deferred_fill(
     {
         current_node_id = apply_tir_wrapper_set_to_node(
             store,
-            expressions,
-            const_values,
+            services,
             current_node_id,
             wrapper_set_id,
             named_fill,
-            string_table,
         )?;
     }
 

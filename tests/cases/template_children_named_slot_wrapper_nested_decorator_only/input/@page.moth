@@ -1,0 +1,19 @@
+-- Regression: `row_style` is declared only by the `$before` wrapper of the
+-- fixed child inside the receiver's `$before` value. No structural node in the
+-- receiver declares row_style, so the enclosing application can deliver the
+-- named contribution only through the nested decorator's inherited
+-- wrapper-context overlay. Runtime conditional and loop contributions replay
+-- that same named marker; a false condition and a zero-iteration loop emit no
+-- wrapper at all.
+identity |value I32| -> I32:
+    return value
+;
+
+sections = [$before = [:[$before = [$html:<b style="[$slot row_style]">], $after = [$html:</b>]:[:fixed]]], $after = [$html:</section>]:[$slot]]
+
+show_condition = 1
+skip_condition = 2
+loop_limit = 2
+empty_limit = 0
+
+[sections:[$in row_style:background: red;][:contributed][if identity(show_condition) < 2:[:shown]][if identity(skip_condition) < 2:[:hidden]][loop 0 to identity(loop_limit) |loop_item|:[:row-[loop_item]]][loop 0 to identity(empty_limit) |empty_item|:[:row-no-output]]]

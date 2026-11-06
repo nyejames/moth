@@ -128,14 +128,13 @@ pub(crate) use store::MalformedTirStore;
 pub(crate) use store::{
     ControlFlowBodyKind, DerivedCount, DerivedTemplateMetadata, TemplateIrStore,
 };
-#[cfg(test)]
-pub(crate) use summary::TemplateIrSummary;
+pub(crate) use summary::{TemplateIrSummary, summarize_existing_root};
 
 pub(crate) use refs::{TemplateTirReference, TemplateWrapperReference};
 pub(crate) use view::{TirView, TirViewIdentity};
 pub(crate) use wrapper_sets::{
-    attach_wrapper_context_overlay, conditional_wrapper_set_for_control_flow,
-    wrapper_reference_for_template,
+    attach_wrapper_context_overlay, compose_child_decorator_wrapper,
+    conditional_wrapper_set_for_control_flow, wrapper_reference_for_template,
 };
 
 pub(crate) use overlays::TemplateViewContext;
@@ -155,16 +154,19 @@ pub(crate) use contribution_shape::{
 };
 
 pub(crate) use node::TirSlotPlaceholder;
+#[cfg(test)]
+pub(crate) use slot_layout::collect_tir_slot_layout;
 pub(crate) use slot_layout::{
-    TirSlotPlaceholderRef, TirSlotSchema, collect_tir_slot_layout,
-    collect_tir_slot_layout_from_root, collect_tir_slot_schema,
+    TirSlotPlaceholderRef, TirSlotSchema, WrapperSlotRouting, collect_tir_slot_layout_from_root,
+    collect_tir_slot_layout_with_context, collect_tir_slot_schema_with_context,
 };
 
-pub(crate) use slot_composition::child_wrappers::wrap_tir_node_in_wrappers_into;
 pub(crate) use slot_composition::{
     TirSlotContributions, apply_slot_wrapper_sets_to_deferred_fill, attach_conditional_wrapper_set,
-    compose_tir_head_chain_from_root, fill_direct_child_wrapper_names_into,
-    fill_named_slots_in_wrapper_template, stored_insert_contribution_templates,
+    compose_tir_head_chain_from_root, compose_tir_head_chain_from_template,
+    fill_direct_child_wrapper_names_into, fill_named_slots_in_wrapper_root,
+    fill_named_slots_in_wrapper_template, fill_wrapper_tree_named_contexts,
+    stored_insert_contribution_templates,
 };
 
 pub(crate) use construction_context::TemplateConstructionContext;

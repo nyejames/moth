@@ -1,0 +1,9 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<tr style=\"background: red;\">a</tr><tr style=\"background: red;\">b</tr>X"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<tr style=\"background: red;\">a</tr><tr style=\"background: red;\">b</tr>X"

@@ -1,0 +1,16 @@
+-- Regression: `row_style` is declared only by the inherited `$before` value of a
+-- fixed child edge nested inside the receiver's root. No structural node in the
+-- receiver declares it, so the enclosing application reaches it only through the
+-- child reference's wrapper-context overlay. Both the constant composition path
+-- and a genuinely runtime named contribution must render the value in <tr>'s
+-- opening tag.
+identity |value String| -> String:
+    return value
+;
+
+row_wrap #= [$before = [$html:<tr style="[$slot row_style]">], $after = [$html:</tr>]:[:row]]
+table #= [$html:<table>[row_wrap]</table>[$slot]]
+
+runtime_style = identity("background: blue;")
+
+[:const=[table:[$in row_style:background: red;][:body]]|runtime=[table:[$in row_style:[runtime_style]][:body]]]

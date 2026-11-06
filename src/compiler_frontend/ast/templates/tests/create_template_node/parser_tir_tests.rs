@@ -979,8 +979,8 @@ fn head_stringslice_records_formatted_tir_phase() {
 }
 
 #[test]
-fn style_child_wrapper_no_children_records_formatted_tir_phase() {
-    // A `$children(..)` style wrapper with no body child templates is a no-op
+fn style_before_wrapper_no_children_records_formatted_tir_phase() {
+    // A `$before` wrapper with no body child templates is a no-op
     // wrapper; the formatted TIR root remains available.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -988,7 +988,7 @@ fn style_child_wrapper_no_children_records_formatted_tir_phase() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let (template, _store) = parse_template(
-        "[$md, $children([:<b>[$slot]</b>]): body text]",
+        "[$md, $before = [:<b>]: body text]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -1002,7 +1002,7 @@ fn style_child_wrapper_no_children_records_formatted_tir_phase() {
         TemplateTirPhase::Formatted,
         "setup: style-wrapper markdown template must have a Formatted TIR reference"
     );
-    let rendered = folded_template_output("[$md, $children([:<b>[$slot]</b>]): body text]");
+    let rendered = folded_template_output("[$md, $before = [:<b>]: body text]");
     assert_eq!(
         rendered, "<p> body text</p>",
         "style child-template wrappers with no body children must not change formatted output"
@@ -1559,7 +1559,7 @@ fn formatter_head_chain_composition_keeps_formatted_reference() {
 }
 
 #[test]
-fn positional_default_slot_children_preserve_separator_whitespace() {
+fn positional_default_slot_before_wrappers_preserve_separator_whitespace() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -1576,7 +1576,7 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
         .expect("test path fits");
 
     let wrapper_file_tokens = template_tokens_from_source(
-        "[:\n    [$children([:H: [$slot]]):[$slot 1]]\n    [$children([:R: [$slot]]):[$slot]]\n]",
+        "[:\n    [$before = [:H: ]:[$slot 1]]\n    [$before = [:R: ]:[$slot]]\n]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -1657,14 +1657,14 @@ fn positional_default_slot_children_preserve_separator_whitespace() {
 }
 
 #[test]
-fn formatter_children_wrapper_composition_keeps_formatted_reference() {
+fn formatter_before_after_wrapper_composition_keeps_formatted_reference() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let (template, _store) = parse_template(
-        "[$md, $children([:<b>[$slot]</b>]): hello [:child] ]",
+        "[$md, $before = [:<b>], $after = [:</b>]: hello [:child] ]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -1684,7 +1684,7 @@ fn formatter_children_wrapper_composition_keeps_formatted_reference() {
         "child-wrapper composition should preserve Formatted phase when it consumes formatted output"
     );
     assert_eq!(
-        folded_template_output("[$md, $children([:<b>[$slot]</b>]): hello [:child] ]"),
+        folded_template_output("[$md, $before = [:<b>], $after = [:</b>]: hello [:child] ]"),
         "<p> hello <b>child</b> </p>",
         "direct-child wrappers should continue to apply only to the child-template anchor"
     );
@@ -1876,14 +1876,14 @@ fn no_formatter_slot_receiver_does_not_claim_formatted_phase() {
 }
 
 #[test]
-fn no_formatter_child_wrapper_reaches_formatted_phase_through_tir() {
+fn no_formatter_before_after_wrapper_reaches_formatted_phase_through_tir() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let (template, _store) = parse_template(
-        "[$children([:<b>[$slot]</b>]): hello [:child] ]",
+        "[$before = [:<b>], $after = [:</b>]: hello [:child] ]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -1898,7 +1898,7 @@ fn no_formatter_child_wrapper_reaches_formatted_phase_through_tir() {
         "no-formatter child-template roots with TIR-normalized wrappers should reach Formatted through the TIR formatter view"
     );
     assert_eq!(
-        folded_template_output("[$children([:<b>[$slot]</b>]): hello [:child] ]"),
+        folded_template_output("[$before = [:<b>], $after = [:</b>]: hello [:child] ]"),
         " hello <b>child</b> ",
         "no-formatter direct-child wrappers should preserve existing folded output shape"
     );
@@ -2422,7 +2422,7 @@ fn parser_tir_skips_conditional_child_wrappers_for_fresh_control_flow_child() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let (parent, store) = parse_template(
-        "[$children([:wrap]): [$fresh, if true: body]]",
+        "[$before = [:wrap]: [$fresh, if true: body]]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,

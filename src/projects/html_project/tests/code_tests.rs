@@ -635,17 +635,11 @@ fn moth_highlighter_keeps_all_caps_constants_non_contract() {
 #[test]
 fn moth_highlighter_marks_directives_and_import_paths() {
     let directives = highlight_code_html(
-        "$md $code $slot $insert $children $html $css",
+        "$md $code $slot $in $before $after $html $css",
         CodeLanguage::Moth,
     );
     for directive in [
-        "$md",
-        "$code",
-        "$slot",
-        "$insert",
-        "$children",
-        "$html",
-        "$css",
+        "$md", "$code", "$slot", "$in", "$before", "$after", "$html", "$css",
     ] {
         assert!(
             directives.contains(&format!(

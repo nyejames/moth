@@ -589,9 +589,7 @@ export:
     ]
 
     header #= [$html:
-        [$children([$html:
-            <th style="border: 1px solid; padding: 0.5em; text-align: left;">[$slot]</th>
-        ]):[$slot]]
+        [$before = [$html:<th style="border: 1px solid; padding: 0.5em; text-align: left;">], $after = [$html:</th>]:[$slot]]
     ]
 
     styled_table #= [$html:
@@ -603,7 +601,7 @@ export:
             </tr>
 
             [$note: Each remaining row is styled with a dotted border to separate the rows visually.]
-            [$children([$html:<tr style="border-bottom: 1px dotted grey;">[$slot]</tr>]):
+            [$before = [$html:<tr style="border-bottom: 1px dotted grey;">], $after = [$html:</tr>]:
                 [$slot]
             ]
 
@@ -611,7 +609,7 @@ export:
     ]
 
     data #= [$html:
-        [$children([$html: <td style="padding: 0.1em 0.5em; [$slot style]">[$slot]</td>]):
+        [$before = [$html: <td style="padding: 0.1em 0.5em; [$slot style]">], $after = [$html:</td>]:
             [$slot]
         ]
     ]

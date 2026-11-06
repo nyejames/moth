@@ -17,7 +17,7 @@ card #= [:named=[$slot title = "Named fallback"]|again=[$slot title = "Again fal
 -- Each occurrence in the runtime child wrapper owns its fallback. No routed
 -- row_style contribution keeps both defaults; an explicit empty route suppresses
 -- them instead of falling back.
-rows #= [$children([$html:<tr style="[$slot row_style = "background: red;"]" data-style="[$slot row_style = "color: blue;"]">[$slot]</tr>]):[$slot]]
+rows #= [$before = [$html:<tr style="[$slot row_style = "background: red;"]" data-style="[$slot row_style = "color: blue;"]">], $after = [$html:</tr>]:[$slot]]
 
 plain #= [card]
 filled = [card, runtime_pos:[$in title:[title_a]][$in title:[title_b]]]
@@ -25,10 +25,10 @@ emptied = [card, runtime_pos:[$in title:[empty_text]]]
 shell #= [:[$slot title = "fallback"][$slot]]
 -- A selected authored fallback is output even when it is blank, so the shell
 -- still renders for a false runtime child. The probe observes the empty case
--- through an output-conditioned $children wrapper.
+-- through output-conditioned before/after wrappers.
 shell_whitespace #= [:[$slot title = " "][$slot]]
 shell_empty #= [:[$slot title = ""][$slot]]
-probe #= [$children([$html:<seen>[$slot]</seen>]):[$slot]]
+probe #= [$before = [$html:<seen>], $after = [$html:</seen>]:[$slot]]
 
 conditional = [shell:[if flag(false):hidden]]
 conditional_whitespace = [shell_whitespace:[if flag(false):hidden]]

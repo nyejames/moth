@@ -470,9 +470,17 @@ pub(crate) fn invalid_template_directive_message(
         InvalidTemplateDirectiveReason::InvalidInsertTarget => {
             "`$in` requires a slot name.\n                 Use `$in title: ...`.".to_owned()
         }
-        InvalidTemplateDirectiveReason::InvalidChildrenArgument => {
-            "`$children(...)` requires one wrapper template or string argument.\n                 Example: `$children([:<li>[$slot]</li>])`.".to_owned()
-        }
+        InvalidTemplateDirectiveReason::InvalidChildDecoratorValue => match name {
+            "before" => {
+                "`$before` requires `= <compile-time String or constant template wrapper>`.\n                 Example: `$before = [: <tr> ]`.".to_owned()
+            }
+            "after" => {
+                "`$after` requires `= <compile-time String or constant template wrapper>`.\n                 Example: `$after = [: </tr> ]`.".to_owned()
+            }
+            _ => format!(
+                "`${name}` requires `= <compile-time String or constant template wrapper>`."
+            ),
+        },
     }
 }
 
@@ -488,7 +496,7 @@ pub(crate) fn render_invalid_template_directive(
     let reason = facts.reason.to_reason(facts.detail);
     let guidance = if facts.reason == InvalidTemplateDirectiveCode::UnknownDirective {
         vec![
-            "Known template directives include `$md`, `$raw`, `$children`, `$slot`, `$in`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, and `$doc`.".to_owned(),
+            "Known template directives include `$md`, `$raw`, `$before`, `$after`, `$slot`, `$in`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, and `$doc`.".to_owned(),
         ]
     } else {
         Vec::new()

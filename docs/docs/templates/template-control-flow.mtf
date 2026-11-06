@@ -85,7 +85,7 @@ per-iteration wrapper inside the loop body.
 
 A false or absent conditional, a false conditional loop and a zero-iteration
 collection or range loop produce structural no-output. Shared head wrappers and
-parent `$children(...)` wrappers are skipped in those cases. A selected body
+parent before/after wrappers are skipped in those cases. A selected body
 with no content is still selected, so its own head wrapper may render an empty
 wrapper. A runtime expression that produces an empty `String` still produces
 output.

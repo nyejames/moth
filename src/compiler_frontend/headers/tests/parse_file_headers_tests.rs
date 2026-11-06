@@ -816,16 +816,16 @@ fn prepare_source_contract_syntax(source: &str) -> Result<PreparedHeaderSyntax, 
 }
 
 #[test]
-fn malformed_nested_children_wrapper_constant_initializer_reports_eof_delimiter_error() {
+fn malformed_nested_decorator_wrapper_constant_initializer_reports_eof_delimiter_error() {
     let result = parse_single_file_headers_with_entry(
-        "broken #= [$children([:<tr>[$slot]</tr>):\n<table>\n    [$children([:<td>[$slot]</td>):[$slot]]\n</table>\n]\n",
+        "broken #= [$before = [:<tr>]:\n<table>\n    [$before = [:<td>]:[$slot]]\n</table>\n",
         "src/@page.moth",
         "src/@page.moth",
     );
 
     assert!(
         matches!(&result, HeaderTestOutcome::Diagnostics(_)),
-        "nested unterminated '$children(..)' wrapper templates should fail instead of hanging"
+        "nested unterminated decorator wrapper templates should fail instead of hanging"
     );
     let errors = expect_header_error(result, "expected parse errors");
 
@@ -833,11 +833,7 @@ fn malformed_nested_children_wrapper_constant_initializer_reports_eof_delimiter_
         errors
             .diagnostics
             .views()
-            .any(
-                |diagnostic| diagnostic_has_family::<token_lexical::UnexpectedEndOfFileView>(
-                    &diagnostic
-                )
-            )
+            .any(|diagnostic| { diagnostic.descriptor().code == "MOTH-SYNTAX-0022" })
     );
 }
 

@@ -26,6 +26,14 @@ use crate::compiler_frontend::ast::templates::tir::{
 pub(crate) struct TemplateBuildState {
     pub(crate) kind: TemplateType,
     pub(crate) style: Style,
+    /// Authored `$before` wrapper value, awaiting composition with `$after`.
+    pub(crate) child_wrapper_before: Option<TemplateWrapperReference>,
+    /// Authored `$after` wrapper value, awaiting composition with `$before`.
+    pub(crate) child_wrapper_after: Option<TemplateWrapperReference>,
+    /// The single direct-child wrapper composed from `$before` and `$after`.
+    ///
+    /// At most one entry: both edges are one composite wrapper so downstream
+    /// wrapper sets, folding and runtime handoff see the same nesting.
     pub(crate) child_wrappers: Vec<TemplateWrapperReference>,
 }
 
@@ -35,6 +43,8 @@ impl TemplateBuildState {
         Self {
             kind: TemplateType::StringFunction,
             style: Style::default(),
+            child_wrapper_before: None,
+            child_wrapper_after: None,
             child_wrappers: vec![],
         }
     }

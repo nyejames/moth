@@ -1,0 +1,11 @@
+-- A constant receiver inlines record-field projections as folded constants.
+-- Each projection must rebuild to the stored wrapper before classification.
+theme #= (
+    prefix = [$html:<tr data-site="[@/]" data-icon="[@assets/icon.svg]" style="[$slot tone]">],
+)
+prefix_alias #= theme.prefix
+
+direct_folded #= [$before = theme.prefix, $after = [$html:</tr>]:[$slot]]
+alias_folded #= [$before = prefix_alias, $after = [$html:</tr>]:[$slot]]
+
+[:[direct_folded:[$in tone:background: green;][:constant-direct]][alias_folded:[$in tone:background: green;][:constant-alias]]]

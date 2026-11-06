@@ -1,6 +1,6 @@
 list = [:
     <ul>
-        [$children([:<li>[$slot]</li>]):
+        [$before = [:<li>], $after = [:</li>]:
             [$slot]
         ]
     </ul>

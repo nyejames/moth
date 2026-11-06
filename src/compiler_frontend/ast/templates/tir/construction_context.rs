@@ -256,10 +256,16 @@ impl TemplateConstructionContext {
         self.children.push(node_id);
     }
 
+    /// Records one insert-contribution marker at the current root position.
+    ///
+    /// `origin` is the parser phase that produced the marker: a head-position
+    /// helper counts toward the authored head boundary, while body-position
+    /// helper flattening does not.
     pub(crate) fn record_insert_contribution(
         &mut self,
         contribution_template_id: TemplateIrId,
         authored_name: Option<StringId>,
+        origin: TemplateSegmentOrigin,
         span: Option<SourceSpan>,
     ) {
         let node_id = {
@@ -268,6 +274,7 @@ impl TemplateConstructionContext {
         };
 
         self.children.push(node_id);
+        self.note_head_origin(origin);
     }
 
     // -------------------------

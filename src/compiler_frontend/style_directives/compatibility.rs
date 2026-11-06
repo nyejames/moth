@@ -17,13 +17,14 @@ impl TemplateHeadTag {
     pub const IN_DIRECTIVE: Self = Self(1 << 2);
     pub const COMMENT_DIRECTIVE: Self = Self(1 << 3);
     pub const FORMATTER_DIRECTIVE: Self = Self(1 << 4);
-    pub const CHILDREN_DIRECTIVE: Self = Self(1 << 5);
+    pub const BEFORE_DIRECTIVE: Self = Self(1 << 5);
     pub const FRESH_DIRECTIVE: Self = Self(1 << 6);
     pub const RAW_DIRECTIVE: Self = Self(1 << 7);
     pub const CODE_DIRECTIVE: Self = Self(1 << 8);
+    pub const AFTER_DIRECTIVE: Self = Self(1 << 9);
 
     /// How many one-bit tag slots exist. Every declared tag constant uses one index below this.
-    pub const SLOT_COUNT: usize = 9;
+    pub const SLOT_COUNT: usize = 10;
 
     pub const fn empty() -> Self {
         Self(0)
@@ -52,7 +53,8 @@ const _: () = assert!(
             | TemplateHeadTag::IN_DIRECTIVE.0
             | TemplateHeadTag::COMMENT_DIRECTIVE.0
             | TemplateHeadTag::FORMATTER_DIRECTIVE.0
-            | TemplateHeadTag::CHILDREN_DIRECTIVE.0
+            | TemplateHeadTag::BEFORE_DIRECTIVE.0
+            | TemplateHeadTag::AFTER_DIRECTIVE.0
             | TemplateHeadTag::FRESH_DIRECTIVE.0
             | TemplateHeadTag::RAW_DIRECTIVE.0
             | TemplateHeadTag::CODE_DIRECTIVE.0)

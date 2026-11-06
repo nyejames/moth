@@ -1,4 +1,4 @@
-wrapper #= [$children([:<li>W[$slot]Z</li>]):
+wrapper #= [$before = [:<li>W], $after = [:Z</li>]:
 <ul>
 [$slot]
 </ul>

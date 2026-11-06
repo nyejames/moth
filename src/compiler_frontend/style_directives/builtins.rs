@@ -17,16 +17,22 @@ use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
     vec![
         StyleDirectiveSpec::core(
-            "children",
+            "before",
             TemplateBodyMode::Normal,
-            TemplateHeadCompatibility {
-                presence_tags: TemplateHeadTag::MEANINGFUL_ITEM
-                    | TemplateHeadTag::CHILDREN_DIRECTIVE,
-                required_absent_tags: TemplateHeadTag::empty(),
-                blocks_future_tags: TemplateHeadTag::empty(),
-                conflict_reason: None,
-            },
-            CoreStyleDirectiveKind::Children,
+            TemplateHeadCompatibility::blocks_same(
+                TemplateHeadTag::BEFORE_DIRECTIVE,
+                TemplateHeadConflictReason::DuplicateExclusiveDirective,
+            ),
+            CoreStyleDirectiveKind::Before,
+        ),
+        StyleDirectiveSpec::core(
+            "after",
+            TemplateBodyMode::Normal,
+            TemplateHeadCompatibility::blocks_same(
+                TemplateHeadTag::AFTER_DIRECTIVE,
+                TemplateHeadConflictReason::DuplicateExclusiveDirective,
+            ),
+            CoreStyleDirectiveKind::After,
         ),
         StyleDirectiveSpec::core(
             "fresh",

@@ -9,7 +9,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionB
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{Style, TemplateType};
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference;
-use crate::compiler_frontend::ast::templates::tir::slot_layout::collect_tir_slot_layout;
+use crate::compiler_frontend::ast::templates::tir::slot_layout::collect_tir_slot_layout_with_context;
 use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIr, TemplateIrId, TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
@@ -51,7 +51,11 @@ pub(crate) fn wrap_tir_node_in_wrappers_into(
     let mut current_child_node_id = child_node_id;
 
     for wrapper_reference in wrapper_references {
-        let layout = collect_tir_slot_layout(store, wrapper_reference.root)?;
+        let layout = collect_tir_slot_layout_with_context(
+            store,
+            wrapper_reference.root,
+            wrapper_reference.context,
+        )?;
 
         if layout.schema.has_any_slots() {
             let resolved = compose_wrapper_application(

@@ -30,7 +30,6 @@ use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionB
 use crate::compiler_frontend::ast::expressions::expression_store::ExprId;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     templates, token_lexical,
@@ -38,67 +37,12 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticToken, InvalidTemplateDirectiveReason,
 };
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Typed result shared by directive-argument parsing helpers.
 type DirectiveArgsResult<T> = Result<T, TemplateError>;
-#[derive(Debug)]
-pub(crate) enum RequiredDirectiveArgumentError {
-    EmptyArguments(Option<SourceSpan>),
-    Other(TemplateError),
-}
-
-impl RequiredDirectiveArgumentError {
-    pub(crate) fn into_template_error(
-        self,
-        directive_name: StringId,
-        empty_reason: InvalidTemplateDirectiveReason,
-    ) -> TemplateError {
-        match self {
-            Self::EmptyArguments(span) => {
-                let is_children_argument = matches!(
-                    empty_reason,
-                    InvalidTemplateDirectiveReason::InvalidChildrenArgument
-                );
-                let diagnostic =
-                    templates::invalid_template_directive(Some(directive_name), empty_reason, span);
-                if is_children_argument {
-                    TemplateError::Diagnostic(diagnostic)
-                } else {
-                    TemplateError::EmptyArguments(diagnostic)
-                }
-            }
-            Self::Other(TemplateError::EmptyArguments(diagnostic))
-                if matches!(
-                    empty_reason,
-                    InvalidTemplateDirectiveReason::InvalidChildrenArgument
-                ) =>
-            {
-                TemplateError::Diagnostic(templates::invalid_template_directive(
-                    Some(directive_name),
-                    InvalidTemplateDirectiveReason::InvalidChildrenArgument,
-                    diagnostic.primary_span(),
-                ))
-            }
-            Self::Other(error) => error,
-        }
-    }
-}
-
-impl From<TemplateError> for RequiredDirectiveArgumentError {
-    fn from(error: TemplateError) -> Self {
-        Self::Other(error)
-    }
-}
-
-impl From<DiagnosticDraft> for RequiredDirectiveArgumentError {
-    fn from(diagnostic: DiagnosticDraft) -> Self {
-        Self::Other(diagnostic.into())
-    }
-}
 
 /// Returns true if the next token after the current directive is `(`.
 ///
@@ -172,7 +116,7 @@ fn parse_single_directive_argument(
     const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<ExprId, RequiredDirectiveArgumentError> {
+) -> DirectiveArgsResult<ExprId> {
     // Move from the directive token to the opening delimiter. The shared
     // parser receives this exact cursor shape and consumes both delimiters.
     token_stream.advance();
@@ -185,14 +129,15 @@ fn parse_single_directive_argument(
 
     // Preserve directive-owned empty and template-boundary diagnostics without
     // advancing and rewinding the cursor around the shared parser.
-    if first_argument_tag == TokenTag::CLOSE_PARENTHESIS {
-        return Err(RequiredDirectiveArgumentError::EmptyArguments(
-            first_argument_span,
-        ));
-    }
-    if ends_directive_argument_without_expression(first_argument_tag) {
-        return Err(RequiredDirectiveArgumentError::EmptyArguments(
-            first_argument_span,
+    if first_argument_tag == TokenTag::CLOSE_PARENTHESIS
+        || ends_directive_argument_without_expression(first_argument_tag)
+    {
+        return Err(TemplateError::EmptyArguments(
+            templates::invalid_template_directive(
+                Some(directive_name),
+                InvalidTemplateDirectiveReason::EmptyArguments,
+                first_argument_span,
+            ),
         ));
     }
     let syntax = CallArgumentSyntax::Supported {
@@ -217,7 +162,7 @@ fn parse_single_directive_argument(
     )
     .map_err(|error| {
         let error = TemplateError::from(error);
-        let error = if token_stream.current_tag() == TokenTag::EOF {
+        if token_stream.current_tag() == TokenTag::EOF {
             error.map_diagnostic(|diagnostic| {
                 if diagnostic.code() == "MOTH-SYNTAX-0002" {
                     return with_current_token_span(
@@ -233,14 +178,17 @@ fn parse_single_directive_argument(
             })
         } else {
             error
-        };
-        RequiredDirectiveArgumentError::Other(error)
+        }
     })?;
 
     let Some(argument) = arguments.first() else {
-        return Err(RequiredDirectiveArgumentError::EmptyArguments(Some(
-            token_stream.current_span(),
-        )));
+        return Err(TemplateError::EmptyArguments(
+            templates::invalid_template_directive(
+                Some(directive_name),
+                InvalidTemplateDirectiveReason::EmptyArguments,
+                Some(token_stream.current_span()),
+            ),
+        ));
     };
 
     if argument.access_mode != CallAccessMode::Shared {
@@ -301,62 +249,6 @@ pub(crate) fn parse_optional_parenthesized_expression(
         path_fork,
     )
     .map(Some)
-    .map_err(|error| {
-        error.into_template_error(
-            directive_name,
-            InvalidTemplateDirectiveReason::EmptyArguments,
-        )
-    })
-}
-
-/// Parses a required parenthesized compile-time expression after a directive.
-///
-/// Returns an error if no `(` follows the directive.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "required parsing keeps the directive name and parser borrows as separate inputs"
-)]
-pub(crate) fn parse_required_parenthesized_expression(
-    directive_name: StringId,
-    token_stream: &mut AstCursor,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    expression_builder: &mut AstExpressionBuilder,
-    const_values: &mut ConstValueStore,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> Result<ExprId, RequiredDirectiveArgumentError> {
-    if !directive_has_arguments(token_stream) {
-        let found = token_stream
-            .current_diagnostic_token(string_table)
-            .map_err(|error| {
-                TemplateError::from(InfrastructureFailure::malformed_token_projection(
-                    "template directive opening-paren diagnostic",
-                    error,
-                ))
-            })?
-            .or_else(|| Some(DiagnosticToken::from_static_tag(token_stream.current_tag())));
-        return Err(with_current_token_span(
-            token_stream,
-            token_lexical::expected_token_from_projections(
-                DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS),
-                found,
-                None,
-            ),
-        )
-        .into());
-    }
-
-    parse_single_directive_argument(
-        directive_name,
-        token_stream,
-        context,
-        type_interner,
-        expression_builder,
-        const_values,
-        string_table,
-        path_fork,
-    )
 }
 
 /// Attach the authored span of the token that owns a directive syntax diagnostic.

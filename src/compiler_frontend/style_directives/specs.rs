@@ -30,10 +30,21 @@ pub(crate) const SLOT_DIRECTIVE_NAME: &str = "slot";
 /// constant references.
 pub(crate) const INSERT_DIRECTIVE_NAME: &str = "in";
 
+/// The core `$before` directive name.
+///
+/// Its assigned value wraps every direct child template on the prefix edge.
+pub(crate) const BEFORE_DIRECTIVE_NAME: &str = "before";
+
+/// The core `$after` directive name.
+///
+/// Its assigned value wraps every direct child template on the suffix edge.
+pub(crate) const AFTER_DIRECTIVE_NAME: &str = "after";
+
 /// Core language directive behavior handled directly by compiler-owned template parsing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CoreStyleDirectiveKind {
-    Children,
+    Before,
+    After,
     Fresh,
     Slot,
     In,
@@ -74,7 +85,7 @@ pub struct StyleDirectiveEffects {
     pub body_whitespace_policy: Option<BodyWhitespacePolicy>,
     /// Optional toggle for parsing `[...]` as literal body text.
     pub suppress_child_templates: Option<bool>,
-    /// Optional toggle that opts this template out of parent `$children(..)` wrappers.
+    /// Optional toggle that opts this template out of parent `$before`/`$after` wrappers.
     pub skip_parent_child_wrappers: Option<bool>,
 }
 

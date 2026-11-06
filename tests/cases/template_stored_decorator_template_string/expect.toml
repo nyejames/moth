@@ -1,0 +1,17 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<strong>text</strong><img src=\"./assets/mark.svg\" data-site=\"/decorator/\" alt=\"mark\">structural"
+
+[[backends.html.artifact_assertions]]
+path = "assets/mark.svg"
+kind = "binary"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<strong>text</strong><img src=\"./assets/mark.svg\" data-site=\"/decorator/\" alt=\"mark\">structural"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "assets/mark.svg"
+kind = "binary"

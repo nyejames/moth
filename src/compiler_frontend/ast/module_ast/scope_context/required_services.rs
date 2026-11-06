@@ -14,6 +14,8 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::traits::definitions::TraitVisibility;
 use crate::compiler_frontend::traits::ids::TraitId;
 
+use rustc_hash::FxHashMap;
+
 impl ScopeContext {
     pub(crate) fn trait_environment(&self) -> &TraitEnvironment {
         self.shared.trait_environment.as_ref()
@@ -136,6 +138,7 @@ impl ScopeContext {
             bindings: Vec::new(),
             source_scope: Some(self),
             external_package_registry: Some(self.shared.external_package_registry.as_ref()),
+            prepared_wrapper_slot_routing: FxHashMap::default(),
         }
     }
 }

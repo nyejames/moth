@@ -1733,14 +1733,13 @@ fn rejects_unknown_style_directive_name() {
 }
 
 #[test]
-fn tokenizes_children_directive_with_template_argument() {
-    let (file_tokens, string_table) = tokenize_source("[$children([:prefix]), $md:\nhello\n]");
+fn tokenizes_style_directive_with_template_argument() {
+    let (file_tokens, string_table) = tokenize_source("[$code([:prefix]), $md:\nhello\n]");
     let tokens = file_tokens.tokens.as_ref();
 
     let outer_head = find_token_index(tokens, |token| token.tag() == TokenTag::TEMPLATE_HEAD);
     let children = find_token_index(tokens, |token| {
-        token.tag() == TokenTag::STYLE_DIRECTIVE
-            && token_string_is(token, &string_table, "children")
+        token.tag() == TokenTag::STYLE_DIRECTIVE && token_string_is(token, &string_table, "code")
     });
     let open_paren = find_token_index(tokens, |token| token.tag() == TokenTag::OPEN_PARENTHESIS);
     let child_template = token_refs(tokens)

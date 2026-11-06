@@ -1,0 +1,17 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<tr data-site=\"/decorator/\" data-icon=\"./assets/icon.svg\" style=\"background: green;\">constant-direct</tr><tr data-site=\"/decorator/\" data-icon=\"./assets/icon.svg\" style=\"background: green;\">constant-alias</tr>"
+
+[[backends.html.artifact_assertions]]
+path = "assets/icon.svg"
+kind = "binary"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<tr data-site=\"/decorator/\" data-icon=\"./assets/icon.svg\" style=\"background: green;\">constant-direct</tr><tr data-site=\"/decorator/\" data-icon=\"./assets/icon.svg\" style=\"background: green;\">constant-alias</tr>"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "assets/icon.svg"
+kind = "binary"

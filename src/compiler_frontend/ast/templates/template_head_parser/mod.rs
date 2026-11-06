@@ -12,7 +12,7 @@
 //  Submodules
 // -------------------------
 
-mod children_directive;
+mod child_decorators;
 mod control_flow_suffix;
 pub(crate) mod core_directives;
 pub(crate) mod directive_args;
@@ -24,6 +24,7 @@ mod head_parser;
 //  Public API
 // -------------------------
 
+pub(crate) use child_decorators::finish_child_decorators;
 pub(crate) use core_directives::apply_doc_comment_defaults;
 pub(crate) use head_expressions::validate_template_head_value_type;
 pub(crate) use head_parser::{ParsedTemplateHead, TemplateHeadParseRequest, parse_template_head};

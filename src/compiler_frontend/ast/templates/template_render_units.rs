@@ -126,11 +126,15 @@ fn compose_conditional_body_tir_root(
         &mut store,
     )?;
 
+    // The candidate root is the authored head prefix followed by the branch
+    // body, so its head boundary is the prefix length even when the body starts
+    // with a structural child template.
     compose_tir_head_chain_from_root(
         &mut store,
         expression_builder,
         const_values,
         candidate_root,
+        head_prefix_nodes.len(),
         string_table,
         true,
         Some(context.external_package_registry.as_ref()),

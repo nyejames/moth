@@ -1,7 +1,7 @@
-`$children(...)` applies a wrapper to each direct child template.
+`$before` and `$after` add a prefix and suffix around each direct child template.
 
 [codeblock, $code("moth"):
-    list #= [$children([:<li>[$slot]</li>]):
+    list #= [$before = [:<li>], $after = [:</li>]:
         <ul>
             [$slot]
         </ul>
@@ -15,6 +15,16 @@
 
 Each direct child becomes one list item.
 
+Either directive may be omitted. Each accepts a compile-time String or constant
+template, and may appear once in a head. Their values may contain named slots,
+which are filled by the enclosing composition, but not default or positional
+slots: the child insertion point is implicit.
+
+A false or absent condition and a zero-iteration loop emit no wrapper. A selected
+empty String still counts as output and is wrapped. A direct child loop is
+wrapped once around its aggregate output; put a wrapper inside the loop body
+to wrap each iteration.
+
 ### Direct-child scope
 
 The wrapper applies only to direct children.
@@ -23,7 +33,7 @@ A selected child becomes an opaque contribution to its parent.
 
 The parent's wrapper does not descend into that child's nested templates.
 
-A nested helper may declare its own `$children(...)` wrapper.
+A nested helper may declare its own `$before` and `$after` wrapper.
 
 This keeps row, cell, list and layout helpers from leaking wrappers into deeper
 content.

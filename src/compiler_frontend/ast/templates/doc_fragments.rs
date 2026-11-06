@@ -37,6 +37,8 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use rustc_hash::FxHashMap;
+
 // -------------------------
 //  Fragment Extraction
 // -------------------------
@@ -155,6 +157,7 @@ fn collect_doc_fragments(
             bindings: Vec::new(),
             source_scope: None,
             external_package_registry: context.external_package_registry,
+            prepared_wrapper_slot_routing: FxHashMap::default(),
         };
         let reference = template.tir_reference;
         let store = context.template_ir_store.borrow();

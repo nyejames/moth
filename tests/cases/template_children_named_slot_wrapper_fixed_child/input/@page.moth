@@ -1,4 +1,4 @@
--- Regression: the receiver's `$children` wrapper declares the named `row_style`
+-- Regression: the receiver's `$before` value declares the named `row_style`
 -- slot. The receiver owns a fixed first child before its default slot, so that
 -- child keeps its occurrence-keyed wrapper overlay instead of passing through
 -- slot expansion. The enclosing application's named contribution must reach the
@@ -9,7 +9,7 @@ identity |value I32| -> I32:
     return value
 ;
 
-rows = [$children([$html:<tr style="[$slot row_style]">[$slot]</tr>]):[:fixed][$slot]]
+rows = [$before = [$html:<tr style="[$slot row_style]">], $after = [$html:</tr>]:[:fixed][$slot]]
 
 show_condition = 1
 skip_condition = 2

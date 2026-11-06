@@ -1,0 +1,1 @@
+prefix_source #= [$html:<tr data-site="[@/]" data-icon="[@assets/icon.svg]" style="[$slot row_style]">]

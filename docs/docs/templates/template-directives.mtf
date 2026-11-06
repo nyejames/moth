@@ -14,15 +14,17 @@ Directive availability comes from one merged registry:
 
 ### Frontend directives
 
-`$children(...)`:
+`$before = value` and `$after = value`:
 
-- applies one wrapper to each direct child
-- accepts a template or string-slice wrapper
-- the wrapper template must close before the directive closes
+- add a prefix and suffix to each direct child; either directive may be omitted
+- each may appear once per head and accepts a compile-time String or constant template
+- values may contain named slots, but not default or positional slots; child insertion is implicit
+- produce no wrapper for structurally absent output, but wrap a selected empty String
+- wrap a direct child loop's aggregate output once
 
 `$fresh`:
 
-- opts one child out of the immediate parent's `$children(...)` wrapper
+- opts one child out of the immediate parent's before/after wrapper
 
 `$slot`:
 

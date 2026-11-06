@@ -2,3 +2,8 @@
 mode = "success"
 warnings = "forbid"
 rendered_output_not_contains = ["hidden child", "skipped-child"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_not_contains = ["hidden child", "skipped-child"]

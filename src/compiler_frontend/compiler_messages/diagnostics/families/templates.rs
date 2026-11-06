@@ -49,6 +49,8 @@ unit_code! {
         InsertTargetsUnknownPositionalSlot = 6,
         SlotDefinitionOutsideTemplateBody = 7,
         NamedInsertOutsideParentSlot = 8,
+        DefaultSlotInChildDecorator = 9,
+        PositionalSlotInChildDecorator = 10,
     }
 }
 
@@ -62,7 +64,7 @@ unit_code! {
         EmptyArguments = 6,
         InvalidSlotTarget = 7,
         InvalidInsertTarget = 8,
-        InvalidChildrenArgument = 9,
+        InvalidChildDecoratorValue = 9,
         InvalidSlotDefault = 10,
     }
 }
@@ -91,8 +93,8 @@ impl InvalidTemplateDirectiveCode {
             InvalidTemplateDirectiveReason::InvalidInsertTarget => {
                 (Self::InvalidInsertTarget, None)
             }
-            InvalidTemplateDirectiveReason::InvalidChildrenArgument => {
-                (Self::InvalidChildrenArgument, None)
+            InvalidTemplateDirectiveReason::InvalidChildDecoratorValue => {
+                (Self::InvalidChildDecoratorValue, None)
             }
         }
     }
@@ -110,8 +112,8 @@ impl InvalidTemplateDirectiveCode {
             Self::InvalidSlotTarget => InvalidTemplateDirectiveReason::InvalidSlotTarget,
             Self::InvalidSlotDefault => InvalidTemplateDirectiveReason::InvalidSlotDefault,
             Self::InvalidInsertTarget => InvalidTemplateDirectiveReason::InvalidInsertTarget,
-            Self::InvalidChildrenArgument => {
-                InvalidTemplateDirectiveReason::InvalidChildrenArgument
+            Self::InvalidChildDecoratorValue => {
+                InvalidTemplateDirectiveReason::InvalidChildDecoratorValue
             }
         }
     }

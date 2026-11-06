@@ -1,0 +1,18 @@
+-- Regression: `rows` contains an already-materialized runtime child application
+-- as a fixed child. The child's `$before` decorator declares `tone`, but that
+-- occurrence belongs to the child's own runtime plan and handoff. The enclosing
+-- application may not address it: its immediate receiving interface is `rows`
+-- alone, whose receiver-root fill deliberately stops at an independently
+-- planned child. Routing must therefore reject the outer `$in tone` as an
+-- unknown immediate-parent target instead of accepting it and leaving the
+-- nested handoff with a marker from a foreign plan.
+
+identity |value String| -> String:
+    return value
+;
+
+inner #= [$before = [$html:<b style="[$slot tone]">], $after = [$html:</b>]:[$slot]]
+
+rows = [:$html:<div>[inner:[$in tone:inner-red][:[identity("body")]]]</div>[$slot]]
+
+[rows:[$in tone:[identity("outer-red")]][:outer-body]]

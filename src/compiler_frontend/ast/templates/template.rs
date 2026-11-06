@@ -246,7 +246,7 @@ pub(crate) struct FormatterResult {
 /// WHAT: non-recursive style metadata for a template: formatter, style ID,
 ///       whitespace policy, and suppress-child-template behavior.
 /// WHY: parser-local wrapper references and TIR wrapper-context overlays own
-///      `$children(..)` application, so `Style` remains a non-recursive config
+///      `$before`/`$after` wrapper application, so `Style` remains a non-recursive config
 ///      shape that can be stored on TIR entries without recursive wrapper
 ///      payloads.
 #[derive(Clone, Debug)]
@@ -259,7 +259,7 @@ pub struct Style {
     /// If at all. Compiler will determine if this can be run at compile-time, or need a runtime call.
     pub(crate) formatter: Option<Formatter>,
 
-    /// When true, nested child templates skip the parent-applied `$children(..)`
+    /// When true, nested child templates skip the parent-applied `$before`/`$after`
     /// wrappers while still allowing wrappers declared on the child itself.
     pub skip_parent_child_wrappers: bool,
 

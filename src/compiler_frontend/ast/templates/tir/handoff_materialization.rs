@@ -28,7 +28,7 @@ use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, owned_folded_string_from_const_string, owned_folded_string_from_const_value,
 };
 
-use crate::compiler_frontend::ast::templates::tir::collect_tir_slot_schema;
+use crate::compiler_frontend::ast::templates::tir::collect_tir_slot_schema_with_context;
 use crate::compiler_frontend::ast::templates::tir::expression_constness::{
     effective_branch_selector_for_view, effective_loop_header_for_view,
 };
@@ -978,7 +978,11 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
             ));
         }
 
-        let schema = collect_tir_slot_schema(wrapper_store, wrapper_reference.root)?;
+        let schema = collect_tir_slot_schema_with_context(
+            wrapper_store,
+            wrapper_reference.root,
+            wrapper_reference.context,
+        )?;
         let fill_target_key = schema.loose_fill_target_key();
 
         let wrapper_view = view.wrapper(wrapper_reference)?;

@@ -1,10 +1,10 @@
--- Runtime regression: $children() wrapper around a runtime template loop.
+-- Runtime regression: before/after wrapper around a runtime template loop.
 -- Verifies the wrapper wraps the loop's emitted aggregate output once
 -- and is skipped when the loop emits nothing.
 
 list = [:
     <ul>
-        [$children([:<li>[$slot]</li>]):
+        [$before = [:<li>], $after = [:</li>]:
             [$slot]
         ]
     </ul>

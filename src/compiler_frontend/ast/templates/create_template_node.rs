@@ -32,7 +32,8 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     validate_runtime_template_control_flow_slot_artifacts,
 };
 use crate::compiler_frontend::ast::templates::template_head_parser::{
-    ParsedTemplateHead, TemplateHeadParseRequest, apply_doc_comment_defaults, parse_template_head,
+    ParsedTemplateHead, TemplateHeadParseRequest, apply_doc_comment_defaults,
+    finish_child_decorators, parse_template_head,
 };
 use crate::compiler_frontend::ast::templates::template_render_units::{
     ControlFlowRenderUnitRequest, install_formatted_tir_reference_for_linear_template,
@@ -42,7 +43,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     RuntimeTemplateReason, TemplateConstructionContext, TemplatePreparation,
     TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase, TemplateTirReference,
     TemplateWrapperReference, TirView, attach_wrapper_context_overlay,
-    compose_tir_head_chain_from_root, prepare_tir_view_with_source_scope,
+    compose_tir_head_chain_from_template, prepare_tir_view_with_source_scope,
 };
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
@@ -430,6 +431,10 @@ impl Template {
             )
         };
 
+        // Both decorator edges become one direct-child wrapper before the body
+        // parser hands wrappers to nested templates and slot declarations.
+        finish_child_decorators(&mut build_state, &context.template_ir_store)?;
+
         if parsing_mode == TemplateParsingMode::DocComment {
             apply_doc_comment_defaults(&mut build_state);
         }
@@ -507,7 +512,7 @@ impl Template {
 
         {
             // Head-chain composition materializes slot routing as needed, while
-            // `$children(..)` direct-child wrappers are represented as
+            // `$before`/`$after` direct-child wrappers are represented as
             // wrapper-context overlays. Both passes update the parser-owned TIR
             // reference directly. There is no second template representation to
             // reconstruct here.
@@ -535,11 +540,11 @@ impl Template {
                     })?
             };
 
-            let composed_root = compose_tir_head_chain_from_root(
+            let composed_root = compose_tir_head_chain_from_template(
                 &mut context.template_ir_store.borrow_mut(),
                 expression_builder,
                 const_values,
-                original_root,
+                template_id,
                 string_table,
                 matches!(
                     control_flow_validation,

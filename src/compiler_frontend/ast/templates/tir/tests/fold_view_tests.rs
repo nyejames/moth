@@ -68,6 +68,8 @@ use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use rustc_hash::FxHashMap;
+
 struct TextFixture {
     store: TemplateIrStore,
     template_id: TemplateIrId,
@@ -108,6 +110,7 @@ fn fold_context<'a>(
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         source_scope: None,
         external_package_registry: None,
+        prepared_wrapper_slot_routing: FxHashMap::default(),
         bindings: vec![],
     }
 }
@@ -270,6 +273,7 @@ fn fold_view_is_deterministic_with_and_without_active_bindings() {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         source_scope: None,
         external_package_registry: None,
+        prepared_wrapper_slot_routing: FxHashMap::default(),
         bindings: vec![TemplateFoldBinding {
             path,
             value: active_value,

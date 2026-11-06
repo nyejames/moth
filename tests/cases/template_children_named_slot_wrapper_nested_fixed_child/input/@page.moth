@@ -1,15 +1,16 @@
--- Regression: the receiver's `$children` wrapper argument is itself a nested
--- `$children` receiver. The inner wrapper declares the named `row_style` slot,
--- and the nested receiver owns a fixed direct child before its default slot.
--- The enclosing application supplies row_style, so the fixed direct child must
--- replay it for both the ordinary composed contribution and the deferred runtime
--- conditional and loop wrappers. A false condition and a zero-iteration loop
--- emit no wrapper, so no fixed child appears for them.
+-- Regression: the receiver's `$before` value contains a nested decorated
+-- template before the wrapper's own opening tag. The nested template owns a
+-- fixed direct child and declares the named `row_style` slot in its `$before`
+-- value; the following opening tag declares `row_style` directly. The enclosing
+-- application supplies row_style, so the fixed direct child must replay it for
+-- the ordinary composed contribution and the deferred runtime conditional and
+-- loop wrappers. A false condition and a zero-iteration loop emit no wrapper,
+-- so no fixed child appears for them.
 identity |value I32| -> I32:
     return value
 ;
 
-rows = [$children([$children([$html:<b style="[$slot row_style]">[$slot]</b>]):[:fixed][$slot]]):[$slot]]
+rows = [$before = [:[$before = [$html:<b style="[$slot row_style]">], $after = [$html:</b>]:[:fixed]][$html:<b style="[$slot row_style]">]], $after = [$html:</b>]:[$slot]]
 
 show_condition = 1
 skip_condition = 2

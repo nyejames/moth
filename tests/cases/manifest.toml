@@ -6154,10 +6154,24 @@ contract = "language.templates.children_named_slot_nested_wrapper_fixed_direct_c
 role = "primary"
 
 [[case]]
+id = "template_children_named_slot_wrapper_nested_decorator_only"
+path = "template_children_named_slot_wrapper_nested_decorator_only"
+tags = ["integration","templates","slots"]
+contract = "language.templates.children_named_slot_from_nested_decorator_context_only"
+role = "primary"
+
+[[case]]
 id = "template_children_wrapper_on_control_flow_body"
 path = "template_children_wrapper_on_control_flow_body"
 tags = ["integration","templates"]
 contract = "language.templates.children_wrapper_on_control_flow_body"
+role = "primary"
+
+[[case]]
+id = "template_control_flow_body_leading_decorated_child"
+path = "template_control_flow_body_leading_decorated_child"
+tags = ["integration","templates","slots"]
+contract = "language.templates.control_flow_body_leading_decorated_child"
 role = "primary"
 
 [[case]]
@@ -6875,6 +6889,13 @@ contract = "language.templates.runtime_loop_slot_application"
 role = "primary"
 
 [[case]]
+id = "template_runtime_nested_child_edge_named_slot"
+path = "template_runtime_nested_child_edge_named_slot"
+tags = ["integration","templates","slots"]
+contract = "language.templates.runtime_named_slot_from_nested_child_edge_decorator"
+role = "primary"
+
+[[case]]
 id = "template_runtime_slot_children_fresh_control_flow"
 path = "template_runtime_slot_children_fresh_control_flow"
 tags = ["integration","templates"]
@@ -7040,6 +7061,13 @@ id = "template_slot_defaults_stored_insert"
 path = "template_slot_defaults_stored_insert"
 tags = ["integration", "templates", "slots", "const-folding"]
 contract = "language.templates.slot_defaults_stored_insert"
+role = "primary"
+
+[[case]]
+id = "template_head_insert_before_head_receiver"
+path = "template_head_insert_before_head_receiver"
+tags = ["integration", "templates", "slots", "const-folding"]
+contract = "language.templates.head_insert_before_head_receiver"
 role = "primary"
 
 [[case]]
@@ -18774,4 +18802,46 @@ id = "diagnostic_recovery_unlimited_error_limits"
 path = "diagnostic_recovery_unlimited_error_limits"
 tags = ["integration", "diagnostics", "functions", "config"]
 contract = "language.diagnostics.ordinary_body_recovery_explicit_none_limits"
+role = "primary"
+
+[[case]]
+id = "template_stored_decorator_reexport"
+path = "template_stored_decorator_reexport"
+tags = ["integration", "templates", "imports", "resources"]
+contract = "language.templates.stored_decorator_reexport"
+role = "primary"
+
+[[case]]
+id = "template_stored_decorator_template_string"
+path = "template_stored_decorator_template_string"
+tags = ["integration", "templates", "resources"]
+contract = "language.templates.stored_decorator_template_string"
+role = "primary"
+
+[[case]]
+id = "template_stored_decorator_projected_wrapper"
+path = "template_stored_decorator_projected_wrapper"
+tags = ["integration", "templates", "slots", "resources"]
+contract = "language.templates.stored_decorator_projected_wrapper"
+role = "primary"
+
+[[case]]
+id = "template_stored_decorator_projected_wrapper_constant"
+path = "template_stored_decorator_projected_wrapper_constant"
+tags = ["integration", "templates", "slots", "resources"]
+contract = "language.templates.stored_decorator_projected_wrapper_constant"
+role = "primary"
+
+[[case]]
+id = "template_runtime_child_plan_foreign_slot_rejected"
+path = "template_runtime_child_plan_foreign_slot_rejected"
+tags = ["integration", "templates", "slots", "diagnostics"]
+contract = "language.templates.runtime_child_plan_foreign_named_target_rejected"
+role = "primary"
+
+[[case]]
+id = "template_runtime_child_plan_outer_slot_success"
+path = "template_runtime_child_plan_outer_slot_success"
+tags = ["integration", "templates", "slots", "runtime"]
+contract = "language.templates.runtime_child_plan_outer_named_target_acceptance"
 role = "primary"

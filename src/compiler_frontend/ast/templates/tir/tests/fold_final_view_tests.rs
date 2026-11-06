@@ -75,6 +75,8 @@ use std::path::Path;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use rustc_hash::FxHashMap;
+
 fn build_test_fold_context<'a>(
     string_table: &'a mut StringTable,
     expressions: &'a mut AstExpressionBuilder,
@@ -89,6 +91,7 @@ fn build_test_fold_context<'a>(
         bindings: vec![],
         source_scope: None,
         external_package_registry: None,
+        prepared_wrapper_slot_routing: FxHashMap::default(),
     }
 }
 

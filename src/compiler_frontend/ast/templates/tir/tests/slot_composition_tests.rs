@@ -15,12 +15,17 @@ use super::super::overlays::{
 use super::super::preparation::{TemplatePreparationMode, TemplatePreparationOutcome};
 use super::super::prepare_tir_view;
 use super::super::refs::{TemplateTirChildReference, TemplateWrapperReference};
+use super::super::slot_composition::child_wrappers::wrap_tir_node_in_wrappers_into;
 use super::super::slot_composition::contributions::route_tir_fill_nodes_against_schema;
 use super::super::slot_composition::helpers::{children_of_node, root_node_id_for_template};
 use super::super::slot_composition::{
-    TirSlotContributions, compose_tir_head_chain_from_root, fill_named_slot_placeholders_into,
+    TirSlotContributions, compose_tir_head_chain_from_root, compose_tir_head_chain_from_template,
+    fill_named_slot_placeholders_into,
 };
-use super::super::slot_layout::{TirSlotSchema, collect_tir_slot_layout, collect_tir_slot_schema};
+use super::super::slot_layout::{
+    TirSlotSchema, collect_tir_slot_layout, collect_tir_slot_layout_with_context,
+    collect_tir_slot_schema,
+};
 use super::super::slot_plan::{
     TemplateSlotPlan, TemplateSlotSitePlan, push_runtime_slot_contribution_source,
 };
@@ -28,7 +33,8 @@ use super::super::store::{TemplateIrStore, TemplateWrapperSet};
 use super::super::summary::{TemplateIrSummary, summarize_existing_root};
 use super::super::view::{TemplateTirPhase, TirView};
 use super::super::{
-    ContributionShape, classify_tir_contribution_node, tir_node_is_control_flow_root,
+    ContributionShape, classify_tir_contribution_node, compose_child_decorator_wrapper,
+    tir_node_is_control_flow_root,
 };
 use super::builder::TemplateIrBuilder;
 use super::support::{
@@ -2702,6 +2708,7 @@ fn single_receiver_routes_head_and_body_fill_in_authored_order() {
         &expressions,
         &const_values,
         root_node_id,
+        2,
         &string_table,
         false,
         None,
@@ -2762,6 +2769,7 @@ fn head_chain_receiver_collects_one_slot_layout() {
         &expressions,
         &const_values,
         root_node_id,
+        1,
         &string_table,
         false,
         None,
@@ -2798,6 +2806,7 @@ fn composed_wrapper_published_summary_matches_the_expanded_tree() {
         &expressions,
         &const_values,
         root_node_id,
+        1,
         &string_table,
         false,
         None,
@@ -2841,6 +2850,7 @@ fn head_chain_missing_root_authority_remains_infrastructure_error() {
         &expressions,
         &const_values,
         missing_root,
+        0,
         &string_table,
         false,
         None,
@@ -2899,6 +2909,7 @@ fn nested_receivers_route_multiple_fills_in_chain_order() {
         &expressions,
         &const_values,
         root_node_id,
+        2,
         &string_table,
         false,
         None,
@@ -2965,6 +2976,7 @@ fn receiver_with_no_fill_stays_unresolved() {
         &expressions,
         &const_values,
         original_root,
+        1,
         &string_table,
         false,
         None,
@@ -3003,6 +3015,7 @@ fn receiver_with_named_slots() {
         &expressions,
         &const_values,
         root_node_id,
+        2,
         &string_table,
         false,
         None,
@@ -3061,6 +3074,7 @@ fn mixed_head_text_and_receiver() {
         &expressions,
         &const_values,
         root_node_id,
+        2,
         &string_table,
         false,
         None,
@@ -3116,6 +3130,7 @@ fn no_receiver_returns_original_root_with_head_and_body_in_order() {
         &expressions,
         &const_values,
         original_root,
+        1,
         &string_table,
         false,
         None,
@@ -3159,6 +3174,7 @@ fn compose_preserves_non_receiver_head_child_templates() {
         &expressions,
         &const_values,
         original_root,
+        1,
         &string_table,
         false,
         None,
@@ -3181,6 +3197,183 @@ fn compose_preserves_non_receiver_head_child_templates() {
     assert_eq!(
         preserved_child_id, non_receiver,
         "non-receiver head child template should keep its original template ID"
+    );
+}
+
+#[test]
+fn template_head_boundary_keeps_body_structural_children_out_of_receiver_chain() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
+    let row_style = string_table.intern("row_style");
+
+    // A body-owned decorator can declare a named slot only through the wrapper
+    // context of its own fixed child. Context-aware layout exposes that name, which
+    // must not promote the body decorator into a head receiver.
+    let named_wrapper = build_wrapper_with_slots(&mut store, vec![SlotKey::Named(row_style)]);
+    let inherited_set = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+        named_wrapper,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )]);
+
+    let fixed_text = string_table.intern("fixed");
+    let fixed_text_len = string_table.resolve(fixed_text).len();
+    let fixed_template = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let root = builder.push_text_node(
+            fixed_text,
+            fixed_text_len,
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            None,
+        )
+    };
+    let fixed_occurrence = store.next_child_template_occurrence_id();
+    let fixed_child = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::ChildTemplate {
+            reference: TemplateTirChildReference::new(
+                fixed_template,
+                TemplateTirPhase::Composed,
+                TemplateViewContext::default(),
+            ),
+            occurrence_id: fixed_occurrence,
+        },
+        None,
+    ));
+    let overlay = store
+        .allocate_wrapper_context_overlay(TirWrapperContextOverlay {
+            contexts: vec![(
+                fixed_occurrence,
+                TirWrapperContext {
+                    inherited_wrapper_set: Some(inherited_set),
+                    skip_parent_child_wrappers: false,
+                    application_mode: TirWrapperApplicationMode::Always,
+                },
+            )],
+        })
+        .expect("wrapper-context overlay allocation");
+    let nested_context = TemplateViewContext {
+        wrapper_context: Some(overlay),
+        ..TemplateViewContext::default()
+    };
+    let nested = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let root = builder.push_sequence_node(vec![fixed_child], None);
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            None,
+        )
+    };
+
+    let nested_layout = collect_tir_slot_layout_with_context(&store, nested, nested_context)
+        .expect("context-aware nested layout should resolve");
+    assert!(
+        nested_layout.schema.named_slots.contains(&row_style),
+        "the fixture must expose the context-only name that previously formed a receiver"
+    );
+    assert!(
+        !nested_layout.schema.has_default_slot,
+        "the body decorator must own no loose fill target"
+    );
+
+    let sibling_text = string_table.intern("sibling");
+    let sibling_text_len = string_table.resolve(sibling_text).len();
+    let (outer, original_root) = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let nested_child = builder.push_child_template_node_with_reference(
+            TemplateTirChildReference::new(nested, TemplateTirPhase::Composed, nested_context),
+            None,
+        );
+        let sibling = builder.push_text_node(
+            sibling_text,
+            sibling_text_len,
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        let root = builder.push_sequence_node(vec![nested_child, sibling], None);
+        let summary = TemplateIrSummary {
+            child_template_count: 1,
+            ..TemplateIrSummary::default()
+        };
+        let template_id =
+            builder.finish_template(root, Style::default(), TemplateType::String, summary, None);
+        (template_id, root)
+    };
+
+    let composed = compose_tir_head_chain_from_template(
+        &mut store,
+        &expressions,
+        &const_values,
+        outer,
+        &string_table,
+        false,
+        None,
+    )
+    .expect("a body structural child must not consume its sibling as receiver fill");
+
+    assert_eq!(
+        composed, original_root,
+        "the authored wrapper value must keep both body children as siblings"
+    );
+}
+
+#[test]
+fn template_head_boundary_still_routes_body_structural_children_as_fill() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
+
+    let receiver = build_wrapper_with_slots(&mut store, vec![SlotKey::Default]);
+    let receiver_node = build_child_template_node_for_template(&mut store, receiver);
+    let body_child = build_child_template_node(&mut store, &mut string_table);
+
+    let (outer, original_root) = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let root = builder.push_sequence_node(vec![receiver_node, body_child], None);
+        let summary = TemplateIrSummary {
+            child_template_count: 2,
+            head_node_count: 1,
+            ..TemplateIrSummary::default()
+        };
+        let template_id =
+            builder.finish_template(root, Style::default(), TemplateType::String, summary, None);
+        (template_id, root)
+    };
+
+    let composed = compose_tir_head_chain_from_template(
+        &mut store,
+        &expressions,
+        &const_values,
+        outer,
+        &string_table,
+        false,
+        None,
+    )
+    .expect("the head receiver should resolve its body structural fill");
+
+    assert_ne!(
+        composed, original_root,
+        "a head receiver with body fill must compose into a derived root"
+    );
+    let composed_children = root_child_node_ids_for_node(composed, &store);
+    assert_eq!(composed_children.len(), 1);
+    let resolved_reference = expect_child_template_reference(composed_children[0], &store);
+    assert_eq!(
+        root_child_node_ids(resolved_reference.root, &store),
+        vec![body_child],
+        "the body structural child must fill the head receiver's default slot"
     );
 }
 
@@ -3467,6 +3660,7 @@ fn head_chain_returns_the_original_root_when_no_receiver_exists() {
         &expressions,
         &const_values,
         original_root,
+        0,
         &string_table,
         false,
         None,
@@ -3524,6 +3718,7 @@ fn test_fold_context<'a>(
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         source_scope: None,
         external_package_registry: None,
+        prepared_wrapper_slot_routing: FxHashMap::default(),
         bindings: vec![],
     }
 }
@@ -4253,6 +4448,7 @@ fn receiver_direct_child_wrapper_replays_named_contribution() {
         &expressions,
         &const_values,
         caller_root,
+        1,
         &string_table,
         false,
         None,
@@ -4495,6 +4691,7 @@ fn runtime_receiver_rebases_fixed_direct_child_wrapper_context_and_names() {
         &expressions,
         &const_values,
         caller_root,
+        1,
         &string_table,
         true,
         None,
@@ -4589,5 +4786,143 @@ fn runtime_receiver_rebases_fixed_direct_child_wrapper_context_and_names() {
     assert!(
         matches!(prepared.outcome, TemplatePreparationOutcome::Runtime(_)),
         "a runtime slot application must prepare as runtime, not fold"
+    );
+}
+
+#[test]
+fn child_decorator_composite_exposes_one_default_slot_and_resolves_named_content() {
+    let mut store = TemplateIrStore::new();
+    let mut string_table = StringTable::new();
+    let expressions = AstExpressionBuilder::new().expect("expression builder should construct");
+    let const_values = ConstValueStore::default();
+
+    let row_style = string_table.intern("row_style");
+    let before_open = string_table.intern("<tr style=\"");
+    let before_close = string_table.intern("\">");
+    let after_text = string_table.intern("</tr>");
+
+    let before_template = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let open = builder.push_text_node(
+            before_open,
+            string_table.resolve(before_open).len(),
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        let named = builder.push_slot_node(SlotKey::Named(row_style), None);
+        let close = builder.push_text_node(
+            before_close,
+            string_table.resolve(before_close).len(),
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        let root = builder.push_sequence_node(vec![open, named, close], None);
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            slot_summary(1),
+            None,
+        )
+    };
+    let after_template = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let text = builder.push_text_node(
+            after_text,
+            string_table.resolve(after_text).len(),
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        builder.finish_template(
+            text,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            None,
+        )
+    };
+
+    let composite = compose_child_decorator_wrapper(
+        &mut store,
+        Some(TemplateWrapperReference::new(
+            before_template,
+            TemplateTirPhase::Parsed,
+            TemplateViewContext::default(),
+        )),
+        Some(TemplateWrapperReference::new(
+            after_template,
+            TemplateTirPhase::Parsed,
+            TemplateViewContext::default(),
+        )),
+    )
+    .expect("child decorator composite should build");
+
+    let layout = collect_tir_slot_layout(&store, composite.root)
+        .expect("composite wrapper layout should resolve");
+    assert!(
+        layout.schema.has_default_slot,
+        "the composite must own exactly one implicit default child slot"
+    );
+    assert!(
+        layout.schema.named_slots.contains(&row_style),
+        "named slots from the prefix template must stay addressable"
+    );
+    let keys = layout
+        .placeholders
+        .iter()
+        .map(|placeholder| placeholder.key.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        keys,
+        vec![SlotKey::Named(row_style), SlotKey::Default],
+        "layout must see the prefix named occurrence and one implicit default slot"
+    );
+
+    let child_text = string_table.intern("child");
+    let child = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Text {
+            text: child_text,
+            byte_len: string_table.resolve(child_text).len(),
+            origin: TemplateSegmentOrigin::Body,
+        },
+        None,
+    ));
+    let style_text = string_table.intern("red");
+    let style_node = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Text {
+            text: style_text,
+            byte_len: string_table.resolve(style_text).len(),
+            origin: TemplateSegmentOrigin::Body,
+        },
+        None,
+    ));
+    let mut named_fill = FxHashMap::default();
+    named_fill.insert(row_style, vec![style_node]);
+
+    let wrapped = wrap_tir_node_in_wrappers_into(
+        &mut store,
+        &expressions,
+        &const_values,
+        child,
+        &[composite],
+        &named_fill,
+        &string_table,
+    )
+    .expect("composite wrapper application should compose");
+
+    let TemplateIrNodeKind::ChildTemplate { reference, .. } =
+        &store.get_node(wrapped).expect("wrapped node exists").kind
+    else {
+        panic!("a slot-bearing composite must compose into a child-template reference");
+    };
+    let resolved_layout = collect_tir_slot_layout(&store, reference.root)
+        .expect("resolved composite layout should resolve");
+    assert!(
+        !resolved_layout.schema.has_any_slots(),
+        "named and implicit default occurrences must both be resolved"
+    );
+    assert!(
+        resolved_layout.placeholders.is_empty(),
+        "no unresolved placeholder may survive a named-content application"
     );
 }

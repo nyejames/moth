@@ -53,6 +53,12 @@ pub(crate) fn invalid_template_slot_message(
         InvalidTemplateSlotReason::SlotDefinitionOutsideTemplateBody => {
             "$slot markers are only valid as direct nested templates inside template bodies.".to_string()
         }
+        InvalidTemplateSlotReason::DefaultSlotInChildDecorator => {
+            "A `$before` or `$after` value may only contain named slots. An unnamed `[$slot]` would add a second child insertion point; use `[$slot name]` instead.".to_string()
+        }
+        InvalidTemplateSlotReason::PositionalSlotInChildDecorator => {
+            "A `$before` or `$after` value may only contain named slots. A positional `[$slot n]` would add another child insertion point; use `[$slot name]` instead.".to_string()
+        }
     }
 }
 

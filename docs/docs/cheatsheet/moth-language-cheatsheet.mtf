@@ -865,13 +865,13 @@ Formatters apply to their own templates, and incompatible formatters can't share
     image #= [: <img src="[$slot 1]" alt="[$slot]">]
     [image, "logo.png": Moth logo]
 
-    list #= [$children([:<li>[$slot]</li>]): <ul>[$slot]</ul>]
+    list #= [$before = [:<li>], $after = [:</li>]: <ul>[$slot]</ul>]
     [list: [: one] [$fresh: [: two]]]
 ]
 
 Named `$slot` values receive matching `$in` content. Numbered slots consume head contributions in order. `$slot` receives the remainder.
 Missing slots render empty, repeated slots reuse content and unassigned content is an error.
-`$children` wraps direct children. `$fresh` skips one parent wrapper.
+`$before` and `$after` wrap direct children with compile-time values; those values may contain named slots only. `$fresh` skips one parent wrapper. Structurally absent output produces no wrapper, while a selected empty String is wrapped.
 
 ### Template control flow
 

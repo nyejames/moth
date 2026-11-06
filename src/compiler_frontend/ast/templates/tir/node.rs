@@ -71,7 +71,7 @@ pub(crate) struct TemplateIr {
     pub(crate) summary: TemplateIrSummary,
 
     pub(crate) span: Option<SourceSpan>,
-    /// Parent `$children(..)` wrappers that must be applied around this
+    /// Parent `$before`/`$after` wrappers that must be applied around this
     /// template's output during folding.
     ///
     /// WHAT: references a `TemplateWrapperSet` side-table entry that stores

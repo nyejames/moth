@@ -392,7 +392,7 @@ global_styles #= [$in style, $css:
     }
 ]
 
-page #= [$children([:<section class="section">[$slot]</section>]):
+page #= [$before = [:<section class="section">], $after = [:</section>]:
     <main class="page">
         [$slot]
     </main>
@@ -431,7 +431,7 @@ accent_title_4 #= [$in style:
 color: [accent_4];
 ]
 
-bullet_list #= [$children([:<li>[$slot]</li>]):
+bullet_list #= [$before = [:<li>], $after = [:</li>]:
 <ul class="tight-list">
     [$slot]
 </ul>
@@ -445,15 +445,15 @@ chip #= [:
 </span>
 ]
 
-chip_row #= [$children([:[$slot]]):
+chip_row #= [:
 <div class="chip-row">
     [$slot]
 </div>
 ]
 
-compare_table #= [$children([:<div class="compare-row">[$slot]</div>]):
+compare_table #= [$before = [:<div class="compare-row">], $after = [:</div>]:
 <div class="compare-table">
-    [$children([:<div class="compare-cell">[$slot]</div>]):[$slot]]
+    [$before = [:<div class="compare-cell">], $after = [:</div>]:[$slot]]
 </div>
 ]
 
@@ -475,7 +475,7 @@ escaped_snippet #= [$escape_html:
 </div>
 ]
 
-fresh_list #= [$children([:<li>[$slot]</li>]):
+fresh_list #= [$before = [:<li>], $after = [:</li>]:
 <ul class="tight-list">
     [$slot]
 </ul>
@@ -633,7 +633,7 @@ compile_card_d #= [card, compile_d_head, compile_d_foot:
     [$md:
         ### Nested direct-child wrappers
 
-        The table below uses one `$children(..)` wrapper for rows and another nested one for cells.
+        The table below uses before/after wrappers for rows and nested wrappers for cells.
     ]
 
     [compare_table:

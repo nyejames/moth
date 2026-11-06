@@ -2,13 +2,13 @@
 //!
 //! WHAT:
 //! - Handles compiler-owned core directives in template heads.
-//! - Keeps slot/insert helper parsing separate from generic style-handler logic.
+//! - Keeps structural helper parsing separate from generic style-handler logic.
 //!
 //! WHY:
 //! - Core directives encode language semantics and structural helpers, so their
 //!   control flow belongs in one dedicated module.
 
-use super::children_directive::parse_children_style_directive;
+use super::child_decorators::{ChildDecoratorEdge, parse_child_decorator_directive};
 use super::directive_args::reject_unexpected_directive_arguments;
 use super::head_parser::parse_head_expression_with_resources;
 use crate::compiler_frontend::ast::ScopeContext;
@@ -35,8 +35,8 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerStage, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::style_directives::{
-    CoreStyleDirectiveKind, DOC_DIRECTIVE_NAME, INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME,
-    StyleDirectiveKind,
+    AFTER_DIRECTIVE_NAME, BEFORE_DIRECTIVE_NAME, CoreStyleDirectiveKind, DOC_DIRECTIVE_NAME,
+    INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME, StyleDirectiveKind,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -50,11 +50,15 @@ use moth_lexical::numeric::grammar::{NumericLiteralKind, NumericLiteralSign};
 /// Typed result for the connected core-directive family.
 type CoreDirectiveResult<T> = Result<T, TemplateError>;
 
+/// Parses compiler-owned structural helpers that own their trailing tokens.
+///
+/// A successful return leaves the cursor on the separator or body boundary, so
+/// the head parser must not advance again.
 #[allow(
     clippy::too_many_arguments,
-    reason = "slot helper dispatch keeps the token stream, scope, mutable interner/build/string/path state, and the directive kind as separate borrows"
+    reason = "structural helper dispatch keeps the token stream, scope, mutable interner/build/string/path state, and the directive kind as separate borrows"
 )]
-pub(super) fn maybe_parse_slot_or_insert_helper_directive(
+pub(super) fn maybe_parse_structural_helper_directive(
     directive_kind: &StyleDirectiveKind,
     token_stream: &mut AstCursor,
     context: &ScopeContext,
@@ -94,7 +98,28 @@ pub(super) fn maybe_parse_slot_or_insert_helper_directive(
         return Ok(true);
     }
 
-    Ok(false)
+    let decorator_edge = match directive_kind {
+        StyleDirectiveKind::Core(CoreStyleDirectiveKind::Before) => ChildDecoratorEdge::Before,
+        StyleDirectiveKind::Core(CoreStyleDirectiveKind::After) => ChildDecoratorEdge::After,
+        _ => return Ok(false),
+    };
+    let directive_name = string_table.intern(match decorator_edge {
+        ChildDecoratorEdge::Before => BEFORE_DIRECTIVE_NAME,
+        ChildDecoratorEdge::After => AFTER_DIRECTIVE_NAME,
+    });
+    parse_child_decorator_directive(
+        directive_name,
+        decorator_edge,
+        token_stream,
+        context,
+        type_interner,
+        expression_builder,
+        const_values,
+        build_state,
+        string_table,
+        path_fork,
+    )?;
+    Ok(true)
 }
 
 /// Parses `$slot`, `$slot name`, `$slot 1` and an optional `= <compile-time String>`.
@@ -423,21 +448,12 @@ fn slot_declaration_ends_at(tag: TokenTag) -> bool {
     )
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "core directive parsing keeps the token stream, scope, mutable interner/build/string/path state, and the directive name and kind as separate borrows"
-)]
 pub(super) fn parse_core_style_directive(
     token_stream: &mut AstCursor,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    expression_builder: &mut AstExpressionBuilder,
-    const_values: &mut ConstValueStore,
     build_state: &mut TemplateBuildState,
     directive_name: &str,
     kind: CoreStyleDirectiveKind,
     string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
 ) -> CoreDirectiveResult<()> {
     match kind {
         CoreStyleDirectiveKind::Raw => {
@@ -446,24 +462,8 @@ pub(super) fn parse_core_style_directive(
             configure_raw_style(build_state);
         }
 
-        CoreStyleDirectiveKind::Children => {
-            let children_name = string_table.intern("children");
-            // Preserve the diagnostic or infrastructure lane selected by the children parser.
-            parse_children_style_directive(
-                children_name,
-                token_stream,
-                context,
-                type_interner,
-                expression_builder,
-                const_values,
-                build_state,
-                string_table,
-                path_fork,
-            )?;
-        }
-
         CoreStyleDirectiveKind::Fresh => {
-            // `$fresh` opt-outs this template from parent-applied `$children(..)`
+            // `$fresh` opts this template out of parent-applied direct-child
             // wrappers while still allowing local directives/wrappers in the same head.
             build_state.style.skip_parent_child_wrappers = true;
         }
@@ -488,11 +488,14 @@ pub(super) fn parse_core_style_directive(
             apply_doc_comment_defaults(build_state);
         }
 
-        CoreStyleDirectiveKind::Slot | CoreStyleDirectiveKind::In => {
+        CoreStyleDirectiveKind::Slot
+        | CoreStyleDirectiveKind::In
+        | CoreStyleDirectiveKind::Before
+        | CoreStyleDirectiveKind::After => {
             return Err(TemplateError::from(InfrastructureFailure::internal(
                 CompilerStage::AstConstruction,
                 format!(
-                    "Core style directive '{directive_name}' reached generic style parsing but should have been handled by slot helper dispatch."
+                    "Core style directive '{directive_name}' reached generic style parsing but should have been handled by structural helper dispatch."
                 ),
             )));
         }

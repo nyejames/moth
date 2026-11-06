@@ -17,6 +17,7 @@ use crate::compiler_frontend::ast::templates::tir::contribution_shape::Contribut
 use crate::compiler_frontend::ast::templates::tir::copy_state::TirCopyState;
 use crate::compiler_frontend::ast::templates::tir::ids::{TemplateIrNodeId, TemplateSlotPlanId};
 use crate::compiler_frontend::ast::templates::tir::node::{TemplateIrNode, TemplateIrNodeKind};
+use crate::compiler_frontend::ast::templates::tir::slot_layout::template_is_independently_planned;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -149,7 +150,9 @@ pub(crate) fn push_runtime_slot_contribution_source(
 /// slot is converted.
 ///
 /// `ChildTemplate` nodes are recursed into so nested slots inside child
-/// templates are converted in the same document-order pass. When a child
+/// templates are converted in the same document-order pass. A child template
+/// that already owns a runtime slot plan is a leaf: its slots belong to that
+/// plan's sites, and this enclosing plan must not assign its own. When a child
 /// template has slots converted, its `TemplateIr.summary` is recomputed from
 /// the converted tree.
 ///
@@ -216,14 +219,21 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {
             let child_template_id = reference.root;
 
-            let child_root = store
-                .get_template(child_template_id)
-                .ok_or_else(|| {
-                    InfrastructureFailure::internal(CompilerStage::AstConstruction,
-                        "TIR active-slot conversion: child template ID was not present in the store.",
-                    )
-                })?
-                .root;
+            let child_template = store.get_template(child_template_id).ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "TIR active-slot conversion: child template ID was not present in the store.",
+                )
+            })?;
+
+            // A child that already owns a runtime plan resolved its slots against
+            // that plan's sites. This walk belongs to an enclosing plan, so it must
+            // not assign its sites to occurrences inside the nested application.
+            if template_is_independently_planned(child_template) {
+                return Ok(false);
+            }
+
+            let child_root = child_template.root;
 
             let child_converted = convert_tir_tree_to_active_slot_plan(
                 child_root,

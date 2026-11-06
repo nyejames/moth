@@ -1,6 +1,4 @@
-list = [$children([:<section class="agg-slot">[$slot]</section>, loop 0 to 1:
-    item
-]):
+list = [$before = [:<section class="agg-slot">], $after = [:</section>]:
     <ul>[$slot]</ul>
 ]
 

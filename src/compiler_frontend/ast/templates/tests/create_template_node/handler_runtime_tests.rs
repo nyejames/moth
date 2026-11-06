@@ -14,11 +14,6 @@ fn handler_directive_argument_preserves_infrastructure_failure() {
 }
 
 #[test]
-fn children_directive_argument_preserves_infrastructure_failure() {
-    assert_stale_template_directive_argument_is_infrastructure("[$children(stale_template): body]");
-}
-
-#[test]
 fn truncated_template_head_stream_returns_missing_closing_delimiter() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();

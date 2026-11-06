@@ -101,7 +101,7 @@ fn docs_style_table_and_data_declarations(
         .expect("test path fits");
 
     let header_row_file_tokens = template_tokens_from_source(
-        "[$children([:\n            <th style=\"border: 1px solid; padding: 0.5em; text-align: left;\">[$slot]</th>\n        ]):[$slot]]",
+        "[$before = [:\n            <th style=\"border: 1px solid; padding: 0.5em; text-align: left;\">], $after = [:</th>\n        ]:[$slot]]",
         string_table,
         span_builder,
         path_fork,
@@ -131,7 +131,7 @@ fn docs_style_table_and_data_declarations(
     .expect("docs-style header row wrapper should parse");
 
     let table_file_tokens = template_tokens_from_source(
-        "[:\n    <table style=\"[$slot style ]\">\n        <tr style=\"background-color: hsla(107, 100%, 36%, 0.23);\">\n            [$slot 1]\n        </tr>\n        [$children([:<tr style=\"border-bottom: 1px dotted grey;\">[$slot]</tr>]):\n            [$slot]\n        ]\n    </table>\n]",
+        "[:\n    <table style=\"[$slot style ]\">\n        <tr style=\"background-color: hsla(107, 100%, 36%, 0.23);\">\n            [$slot 1]\n        </tr>\n        [$before = [:<tr style=\"border-bottom: 1px dotted grey;\">], $after = [:</tr>]:[$slot]\n        ]\n    </table>\n]",
         string_table,
         span_builder,
         path_fork,
@@ -161,7 +161,7 @@ fn docs_style_table_and_data_declarations(
     .expect("docs-style table wrapper should parse");
 
     let data_file_tokens = template_tokens_from_source(
-        "[$children([: <td style=\"padding: 0.2em 0.5em;\">[$slot]</td>]):\n    [$slot]\n]",
+        "[$before = [: <td style=\"padding: 0.2em 0.5em;\">], $after = [:</td>]:\n    [$slot]\n]",
         string_table,
         span_builder,
         path_fork,
@@ -236,7 +236,7 @@ fn child_wrapper_composition_marks_template_tir_reference_composed() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = template_tokens_from_source(
-        "[$children([:<b>[$slot]</b>]): hello [:child] ]",
+        "[$before = [:<b>], $after = [:</b>]: hello [:child] ]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
