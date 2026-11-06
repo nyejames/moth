@@ -7239,3 +7239,50 @@ Validation: `just validate-full` passed, including 17 standard feature lanes,
 the integration suite, performance checks and the no-timer release-artifact
 check. The isolated release documentation build and builder-slot title smoke
 also passed.
+
+### Merge-audit follow-up
+
+On Apple M1 Pro, 16 GiB, rustc 1.99.0, the dev-profile
+`data_layout_memory_probe` measured deterministic conditional-wrapper projects in alternating
+order. Nine runs of 64 receiving sites with nested named decorators had a 343.880 ms median,
+195 schema walks and 8.81 MiB peak allocator growth. The no-wrapper control was 57.550 ms,
+two walks and 1.16 MiB. A 16-site, 16-child case took 1,050.519 ms and 123.96 MiB over seven
+runs; a 64-site, 16-child case took 12,445.933 ms and 1,571.84 MiB over five. These are
+different synthetic workloads, not matched before/after compiler comparisons. The probe counts
+TIR nodes created by runtime-plan materialisation, not all retained TIR nodes.
+
+Breakpoint counts show the per-site cache already limits the site-planner layout walk to one
+per receiving site and wrapper set. Sampling puts all context-aware layout work at about
+1.6 ms per 64-site run. The 64 site-planner walks are about a third of those calls, roughly
+0.5 ms if their costs are equal, so another cache is not justified. Separately, the runtime
+handoff materialiser repeated schema collection once or twice per emitted runtime child:
+128 of 194 context-aware walks at 64 sites and 2,048 at 64 sites by 16 children. Layout
+sampling for the whole large case was about 13.75 ms of 12.4 s, so this is a low-priority
+candidate, not a demonstrated material cost.
+
+The large synthetic case instead showed substantial TIR preparation and borrow-analysis activity.
+Its peak-memory ownership was not directly attributed; blocks-times-locals borrow-state storage
+is an investigation candidate, not a proven cause. Release behaviour and ordinary-project impact
+remain unmeasured.
+
+For the preceding project-structure change, release timer builds of `41f7993ee` and
+`2b2acc088` checked identical copied source files in alternating order for 25 measured pairs.
+The old compiler used its required `src` boundary and old config while the new compiler used
+the selected root and new config; package inputs and compiler implementations also differed.
+Both used `MOTH_TIMERS=bench MOTH_COUNTERS=off moth check <project> --terse` and the
+`stage0.directory.inventory` timing. The old binary was built with
+`cargo build -p moth-cli --bin moth --release --features timers`; the candidate came from
+`just bench-check`.
+The `stage0.directory.inventory` medians were 1.251 to 1.120 ms for module graph, 1.716 to
+1.590 ms for import fanout and 1.568 to 1.427 ms for module-root stress. Module graph plus 256
+matching directories, each containing a non-source file, gave 14.609 to 10.430 ms. These are
+directional measurements across the stated revision range, which includes changes after the
+project-structure refactor, not an isolated estimate of discovery changes. They do not show
+the suspected slowdown on these inputs.
+
+The non-recording `just bench-frontend-check` and `just bench-check` passed on `2b2acc088`
+with one preflight and ten measured iterations per case. Several workload fingerprints differed
+from benchmark history, so those historical comparisons do not establish a speedup or regression.
+The generated fixtures and raw measurements live in ignored `tmp/wrapper-cost/` and
+`tmp/discovery-experiment/`; they are not reproduced by a checked-in harness.
+
