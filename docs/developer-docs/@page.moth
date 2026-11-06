@@ -1,9 +1,9 @@
 @html table
 @styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
 
-page_title #= "Developer documentation"
-page_description #= "Compiler and build-system references for contributors and anyone reading Moth's internals."
-page_head #= theme_head
+#[$in title:["Developer documentation"]]
+#[$in description:["Compiler and build-system references for contributors and anyone reading Moth's internals."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]

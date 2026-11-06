@@ -739,7 +739,7 @@ fn slot_declaration_folded_default_keeps_occurrence_provenance() {
     );
     assert_eq!(
         metadata.synthetic_interface_provenance.members(),
-        &[member.clone()],
+        std::slice::from_ref(&member),
         "the staged default must carry the folded occurrence provenance"
     );
     let (value, resolved_provenance) = resolve_const_string_value(&const_values, default)

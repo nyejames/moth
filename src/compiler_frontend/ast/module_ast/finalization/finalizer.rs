@@ -10,7 +10,6 @@
 use super::super::build_context::AstPhaseContext;
 use super::super::emission::AstEmission;
 use super::super::environment::AstModuleEnvironment;
-use super::const_fact_collection::ConstFactCollector;
 use super::normalize_ast::{TemplateNormalizationError, discard_inactive_assertion_messages};
 use super::static_if_specialization::{StaticIfCandidate, StaticIfSpecialization};
 use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, AstNode, NodeKind};
@@ -129,8 +128,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
     /// Assembles the final [`AstBuildResult`] from emitted nodes and the resolved environment.
     ///
     /// WHAT: runs template normalization, module-constant normalization, type-boundary
-    /// validation, const-fact collection, builtin merging, and choice-definition gathering
-    /// in dependency order.
+    /// validation, builtin merging, and choice-definition gathering in dependency order.
     ///
     /// WHY: each step mutates or consumes intermediate state that later steps depend on,
     /// so they must run sequentially in a single orchestration function.
@@ -339,24 +337,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 )
             })?;
 
-        // ----------------------------
-        //  Collect active const facts
-        // ----------------------------
-        // Const-fact collection reads template values through their exact module-local effective
-        // views after static selection, so inactive bodies publish no executable advisory facts.
-        let const_facts = ConstFactCollector::new(
-            string_table,
-            &mut self.context.const_values,
-            &mut self.context.expression_builder,
-            Rc::clone(&self.context.template_ir_store),
-            &self.environment.type_environment,
-            Some(self.context.external_package_registry.as_ref()),
-        )
-        .collect(&emitted.ast)
-        .map_err(|error| {
-            self.template_normalization_error_messages(error, &mut emitted.warnings, string_table)
-        })?;
-
         let mut choice_definitions = self.collect_choice_definitions();
         for imported in &self.environment.lookups.imported_choice_definitions {
             if !choice_definitions
@@ -545,7 +525,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 choice_definitions,
                 imported_struct_definitions: owned_lookups.imported_struct_definitions,
                 type_environment,
-                const_facts,
                 imported_functions_by_local_path: owned_lookups.imported_functions_by_local_path,
                 infallible_cast_evidence,
                 static_if_function_provenance,

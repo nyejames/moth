@@ -1,9 +1,9 @@
 @html center, span
 @styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, init_docs_sidebar
 
-page_title #= "Packages and Builders Progress Matrix"
-page_description #= "Current implementation status, coverage and accepted follow-ups for Moth packages and project builders."
-page_head #= theme_head
+#[$in title:["Packages and Builders Progress Matrix"]]
+#[$in description:["Current implementation status, coverage and accepted follow-ups for Moth packages and project builders."]]
+#[$in head:[theme_head]]
 
 red #= [$css("inline"): background-color: rgb(239, 112, 112); color: black;]
 pink #= [$css("inline"): background-color: rgb(231, 133, 218); color: black;]
@@ -377,10 +377,17 @@ init_docs_sidebar()!
         ]
 
         [data:
-            [: Root-only [$html:<code>$page</code>] and explicit purpose]
+            [: General [$html:<code>$entry</code>] purpose]
             [: Deferred]
             [: None]
-            [: Accepted queued HTML entry declaration. One normal-root [$html:<code>$page</code>] per directory, metadata cutover from reserved [$html:<code>page_*</code>] names, and command-specific no-page rules. Current HTML entries still come from implemented root activity and reserved page metadata.]
+            [: Explicit root-purpose and command-specific no-entry rules remain queued. Current HTML entries use root activity.]
+        ]
+
+        [data:
+            [: HTML builder root slots]
+            [: Supported]
+            [: Direct const root inserts supply document metadata and tracked stylesheet resources.]
+            [: Scalar metadata concatenates, stylesheet origins deduplicate and complete head contributions deduplicate after URL rendering. Reserved [$html:<code>page_*</code>] constants have no implicit effect.]
         ]
 
         [data:

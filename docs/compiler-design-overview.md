@@ -693,7 +693,7 @@ Header preparation discovers constant dependencies. AST checks and folds them. `
 
 Bootstrap defaults fold within the config service. Source defaults remain self-contained primitive literals or `none`, resolved after graph discovery and before module AST semantics. The resolved value is an ordinary folded constant, with no runtime wrapper, HIR category or visibility rule. The build document owns the exact domain, precedence and matching contract.
 
-A module folds each ordinary constant and const template once. Exported facts are owned backend-neutral values. Consumers do not parse or fold provider templates again. Advisory private const facts change neither declaration semantics nor ordering/visibility.
+A module folds each ordinary constant and const template once. Exported facts are owned backend-neutral values. Consumers do not parse or fold provider templates again.
 
 An explicit `#` constant read by a runtime expression folds through one owner, `explicit_constant_operand`. Numeric constants replace numeric operator operands. String constants replace `is` and `is not` operands and runtime template interpolations. Plain text then folds; resource-bearing and site-root strings stay structural until URL rendering, so their comparisons and interpolations still render the page-relative URL. String operands of other operators keep their runtime operands, and a mixed expression keeps the runtime operation for its non-constant operands.
 

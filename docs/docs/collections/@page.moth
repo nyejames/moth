@@ -16,9 +16,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Collections and maps"
-page_description #= "Collections, fixed capacity, builtin operations and insertion-ordered maps in Moth."
-page_head #= language_theme_head
+#[$in title:["Collections and maps"]]
+#[$in description:["Collections, fixed capacity, builtin operations and insertion-ordered maps in Moth."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]

@@ -18,9 +18,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Templates"
-page_description #= "Template strings, directives, slots, wrappers, control flow and Markdown in Moth."
-page_head #= language_theme_head
+#[$in title:["Templates"]]
+#[$in description:["Template strings, directives, slots, wrappers, control flow and Markdown in Moth."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]

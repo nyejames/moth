@@ -8,9 +8,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "@web/canvas"
-page_description #= "2D canvas drawing as a builder binding-backed runtime package."
-page_head #= language_theme_head
+#[$in title:["@web/canvas"]]
+#[$in description:["2D canvas drawing as a builder binding-backed runtime package."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]

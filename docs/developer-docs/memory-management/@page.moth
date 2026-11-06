@@ -1,8 +1,8 @@
 @styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
 
-page_title #= "Memory management"
-page_description #= "Reference semantics, borrow validation, lifetime topology, declared regions and collector-free backend lowering."
-page_head #= theme_head
+#[$in title:["Memory management"]]
+#[$in description:["Reference semantics, borrow validation, lifetime topology, declared regions and collector-free backend lowering."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]

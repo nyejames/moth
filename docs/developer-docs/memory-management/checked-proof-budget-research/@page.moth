@@ -1,9 +1,9 @@
 @checked-proof-budget-research content as reference_content
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-page_title #= "Checked proof-budget research"
-page_description #= "Future research into opt-in deep static analysis for difficult borrow proofs."
-page_head #= theme_head
+#[$in title:["Checked proof-budget research"]]
+#[$in description:["Future research into opt-in deep static analysis for difficult borrow proofs."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]

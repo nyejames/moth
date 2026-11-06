@@ -1,0 +1,5 @@
+-- A nested route compares complete contributions after rendering them in its own URL context.
+#[$in head:<link rel="preload" href="./static/theme.css">]
+#[$in head:<link rel="preload" href="[@static/theme.css]">]
+
+#[:<main>about head dedup body</main>]

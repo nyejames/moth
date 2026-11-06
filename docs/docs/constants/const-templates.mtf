@@ -1,4 +1,4 @@
-**Current support versus accepted design.** The Alpha compiler currently selects HTML entries from authored root activity and still uses reserved `page_*` metadata. The accepted queued design requires an explicit root purpose; `$page` is the first HTML purpose, but it is not implemented yet.
+The Alpha compiler selects HTML entries from authored root activity. Direct const root inserts supply builder metadata. General `$entry` purpose validation remains queued.
 
 A template can be required to finish during compilation.
 
@@ -19,10 +19,9 @@ returned from a function remains a value and does not become a page fragment by 
 
 ### Direct top-level const fragments
 
-In the accepted queued design, direct root const-template fragments require an explicit
-purpose with an applicable consumer. `$page` is the initial HTML purpose. Until that
-cutover, the current compiler continues to use activity-based entry selection and the
-reserved `page_*` metadata path; the `$page` spelling is not a working directive.
+Direct root const-template fragments use the current activity-based entry
+selection policy. A future general `$entry` purpose is separate from metadata
+and is not implemented yet.
 
 [codeblock, $code("moth"):
     #[$md:
@@ -30,7 +29,7 @@ reserved `page_*` metadata path; the `$page` spelling is not a working directive
     ]
 ]
 
-The direct form, when the root has an applicable purpose:
+The direct form on an active root:
 
 - is valid only as top-level root fragment syntax
 - must fully fold

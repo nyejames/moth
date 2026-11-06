@@ -30,7 +30,6 @@ use crate::projects::html_project::diagnostics::{
     artefact_output_path_invalid_diagnostic, capture_html_diagnostic,
     resource_output_path_collision_diagnostic, resource_output_path_reserved_diagnostic,
 };
-use crate::projects::html_project::page_metadata::{HtmlPageMetadataPlan, MetadataResourceUse};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -95,8 +94,8 @@ pub(crate) struct PlannedResourceUse {
 /// The lane through which one output record observes a resource URL use.
 ///
 /// Executable uses are HIR-reachable and claim the record's first authored location over
-/// metadata uses. Metadata uses are compile-time fragment and page-metadata observations, which
-/// keep a resource output-planned without an executable reference.
+/// metadata uses. Metadata uses are compile-time root-fragment observations, which keep a
+/// resource output-planned without an executable reference.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ResourceUseKind {
     Executable,
@@ -119,8 +118,8 @@ pub(crate) struct PlannedResourceOutput {
 
 /// Authored spans for one origin, with an intern-table fallback last.
 ///
-/// `executable` holds HIR-reachable uses. `metadata` holds compile-time fragment and
-/// page-metadata uses, which are output-live but not HIR-reachable.
+/// `executable` holds HIR-reachable uses. `metadata` holds compile-time root-fragment uses,
+/// which are output-live but not HIR-reachable.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct OriginAuthoredSpans {
     pub executable: Vec<Option<ResourceDiagnosticSite>>,
@@ -168,7 +167,6 @@ impl HtmlResourceOutputPlan {
         &mut self,
         entry: &ProjectEntry<'_>,
         page_output_path: &Path,
-        page_metadata_plan: &HtmlPageMetadataPlan,
         string_table: &mut DiagnosticStringBuilder,
     ) -> Result<(), PreparedFailure> {
         let context = ResourceUrlContext::page_document(page_output_path).map_err(|reason| {
@@ -177,13 +175,7 @@ impl HtmlResourceOutputPlan {
         self.reserve_builder_output_path(page_output_path, "HTML page", string_table)?;
 
         let spans = first_authored_spans(entry)?;
-        self.plan_union(entry.resource_union, &spans, context.clone(), string_table)?;
-        self.plan_page_metadata_uses(
-            &page_metadata_plan.resource_uses,
-            context,
-            entry.source_domain,
-            string_table,
-        )
+        self.plan_union(entry.resource_union, &spans, context, string_table)
     }
 
     /// Reserve a known HTML, JavaScript, Wasm, CSS or manifest destination.
@@ -245,8 +237,8 @@ impl HtmlResourceOutputPlan {
         Ok(())
     }
 
-    /// Add one origin and one explicit context, primarily for focused planner tests and future
-    /// builders whose link-plan owner already has the first authored span.
+    /// Add one origin and context for focused planner tests.
+    #[cfg(test)]
     pub(crate) fn plan_origin(
         &mut self,
         origin: StableResourceOriginId,
@@ -267,25 +259,6 @@ impl HtmlResourceOutputPlan {
             Some(observed_use),
             string_table,
         )
-    }
-
-    fn plan_page_metadata_uses(
-        &mut self,
-        resource_uses: &[MetadataResourceUse],
-        context: ResourceUrlContext,
-        source_domain: Option<&StablePackageIdentity>,
-        string_table: &mut DiagnosticStringBuilder,
-    ) -> Result<(), PreparedFailure> {
-        for resource_use in resource_uses {
-            self.plan_origin(
-                resource_use.origin.clone(),
-                ResourceDiagnosticSite::from_span(resource_use.authored_span, source_domain),
-                context.clone(),
-                string_table,
-                ResourceUseKind::Metadata,
-            )?;
-        }
-        Ok(())
     }
 
     /// Plan one provider-owned runtime asset origin into the shared byte-free plan.

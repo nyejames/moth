@@ -17,13 +17,13 @@ pub(crate) mod document_config;
 pub(crate) mod document_shell;
 pub(crate) mod external_js;
 pub mod html_project_builder;
+pub(crate) mod html_slot_plan;
 pub(crate) mod js_path;
 // WHY: production `.mtf` compilation uses the integrated Stage 0
 // `module_preparation`/`canonical` dependency path; this direct service is used only by its tests.
 #[cfg(test)]
 pub(crate) mod moth_template;
 pub(crate) mod output_plan;
-pub(crate) mod page_metadata;
 pub(crate) mod path_policy;
 pub(crate) mod resource_output_plan;
 pub(crate) mod structural_url_renderer;

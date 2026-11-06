@@ -59,8 +59,8 @@ impl<'a> HirValidator<'a> {
 
     pub(super) fn validate_start_function(&self) -> Result<(), InfrastructureFailure> {
         // WHAT: the entry function ID and its source owner are one contract and must agree.
-        // WHY: root-scoped consumers such as page metadata branch on the source owner; a missing
-        //      half would silently skip entries or attribute them to the wrong root.
+        // WHY: root-scoped consumers branch on the source owner; a missing half would silently
+        //      skip entries or attribute them to the wrong root.
         match (self.module.start_function, self.module.start_source_file) {
             (None, None) => Ok(()),
             (Some(start_function), Some(_)) => {

@@ -1,0 +1,112 @@
+entry = "."
+
+# Complete head contributions are compared only after structural URL rendering. Literal and
+# structural spellings that render to the same final String emit once, distinct complete
+# contributions keep first-occurrence order, and duplicate subelements inside one contribution
+# are preserved. Stylesheet links precede every additional head contribution.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
+    "<link rel=\"preload\" href=\"./static/theme.css\">",
+    "<meta property=\"og:type\" content=\"website\">",
+    "<meta name=\"theme-color\" content=\"#ffffff\">",
+    "<meta name=\"inner-dup\" content=\"1\"><meta name=\"inner-dup\" content=\"1\">",
+]
+must_contain_in_order = [
+    "<meta charset=\"UTF-8\">",
+    "<title>",
+    "<style>",
+    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
+    "<link rel=\"preload\" href=\"./static/theme.css\">",
+    "<meta property=\"og:type\" content=\"website\">",
+    "<meta name=\"theme-color\" content=\"#ffffff\">",
+    "<meta name=\"inner-dup\" content=\"1\"><meta name=\"inner-dup\" content=\"1\">",
+    "</head>",
+    "<body style=",
+    "<main>head dedup body</main>",
+]
+must_contain_exactly_once = [
+    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
+    "<link rel=\"preload\" href=\"./static/theme.css\">",
+    "<meta property=\"og:type\" content=\"website\">",
+    "<meta name=\"theme-color\" content=\"#ffffff\">",
+    "<meta name=\"inner-dup\" content=\"1\"><meta name=\"inner-dup\" content=\"1\">",
+]
+
+[[backends.html.artifact_assertions]]
+path = "about/index.html"
+kind = "html"
+must_contain = ["<link rel=\"preload\" href=\"./static/theme.css\">"]
+must_contain_exactly_once = ["rel=\"preload\""]
+
+[[backends.html.artifact_assertions]]
+path = "styles/docs.css"
+kind = "binary"
+
+[[backends.html.artifact_assertions]]
+path = "static/theme.css"
+kind = "binary"
+
+[[backends.html.artifact_assertions]]
+path = "about/static/theme.css"
+kind = "binary"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
+    "<link rel=\"preload\" href=\"./static/theme.css\">",
+    "<meta property=\"og:type\" content=\"website\">",
+    "<meta name=\"theme-color\" content=\"#ffffff\">",
+    "<meta name=\"inner-dup\" content=\"1\"><meta name=\"inner-dup\" content=\"1\">",
+]
+must_contain_in_order = [
+    "<meta charset=\"UTF-8\">",
+    "<title>",
+    "<style>",
+    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
+    "<link rel=\"preload\" href=\"./static/theme.css\">",
+    "<meta property=\"og:type\" content=\"website\">",
+    "<meta name=\"theme-color\" content=\"#ffffff\">",
+    "<meta name=\"inner-dup\" content=\"1\"><meta name=\"inner-dup\" content=\"1\">",
+    "</head>",
+    "<body style=",
+    "<main>head dedup body</main>",
+]
+must_contain_exactly_once = [
+    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
+    "<link rel=\"preload\" href=\"./static/theme.css\">",
+    "<meta property=\"og:type\" content=\"website\">",
+    "<meta name=\"theme-color\" content=\"#ffffff\">",
+    "<meta name=\"inner-dup\" content=\"1\"><meta name=\"inner-dup\" content=\"1\">",
+]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "about/index.html"
+kind = "html"
+must_contain = ["<link rel=\"preload\" href=\"./static/theme.css\">"]
+must_contain_exactly_once = ["rel=\"preload\""]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "styles/docs.css"
+kind = "binary"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "static/theme.css"
+kind = "binary"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "about/static/theme.css"
+kind = "binary"

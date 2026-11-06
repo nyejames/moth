@@ -883,7 +883,12 @@ fn scaffolded_project_checks_and_builds_with_generated_config() {
         "scaffolded dev build failed: {}",
         String::from_utf8_lossy(&build.stdout)
     );
-    assert!(project.join("_dev/index.html").is_file());
+    let html = fs::read_to_string(project.join("_dev/index.html"))
+        .expect("scaffolded document should be readable");
+    assert!(html.contains("<title>Welcome</title>"), "{html}");
+    let head = html.split_once("</head>").expect("document has a head").0;
+    assert!(head.contains("background-color: light-dark("), "{head}");
+    assert!(head.contains("padding: var(--moth-spacing)"), "{head}");
 
     let release = run_moth(&["build", &project_argument, "--release"]);
     assert!(

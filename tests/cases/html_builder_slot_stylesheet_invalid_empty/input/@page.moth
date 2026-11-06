@@ -1,0 +1,4 @@
+-- An empty contribution names no stylesheet resource.
+#[$in stylesheets:]
+
+#[:<main>invalid empty stylesheet</main>]

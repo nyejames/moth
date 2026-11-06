@@ -1960,10 +1960,23 @@ pub enum DeferredFeatureReason {
     RuntimeAnonymousRecord,
 }
 
+/// Why one HTML builder root-slot contribution cannot be interpreted.
+///
+/// WHAT: the narrow set of structural-value rejections owned by the HTML builder.
+/// WHY: the compiler routes the contribution and the builder validates slot-specific meaning;
+///      a resource-bearing slot must explain which part of that meaning the contribution missed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum InvalidPageMetadataReason {
-    NotAString,
-    DuplicateDeclaration,
+pub enum InvalidHtmlSlotContributionReason {
+    /// The contribution carries no resource origin at all.
+    MissingResource,
+    /// The contribution carries literal text, such as a rendered path or external URL.
+    NotAStaticResource,
+    /// The contribution carries more than one resource origin.
+    MultipleResources,
+    /// The contribution uses the site root, which names no tracked resource.
+    SiteRoot,
+    /// The single resource origin does not name a CSS file.
+    NonCssResource,
 }
 
 /// Which operand position one loop header rejected.

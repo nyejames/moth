@@ -138,7 +138,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
     - [environment](src/compiler_frontend/ast/module_ast/environment/): declarations, aliases, nominal types, signatures, constants.
         - [import projection](src/compiler_frontend/ast/module_ast/environment/builder/import_projection/): reachability-driven provider nominals, folded values, callables, and durable canonical interning.
     - [emission](src/compiler_frontend/ast/module_ast/emission/): function/start/body emission, with ordinary concrete-body diagnostic recovery bounded by the module error allowance and the compiler-owned AST work-token guard.
-    - [finalization](src/compiler_frontend/ast/module_ast/finalization/): normalize constants/templates, const facts, type validation.
+    - [finalization](src/compiler_frontend/ast/module_ast/finalization/): normalize constants/templates and validate types.
         - [expression census](src/compiler_frontend/ast/module_ast/finalization/expression_census.rs): counter-feature-only published AST occurrence, payload and predecessor-layout observations.
     - [scope_context](src/compiler_frontend/ast/module_ast/scope_context/): visibility, local declarations and diagnostic sinks, including checked parameter-frame publication and shared loop/capture binding validation.
         - [lookup.rs](src/compiler_frontend/ast/module_ast/scope_context/lookup.rs): visible declaration lookup, shared new-binding collision checks for bound external symbols and namespaces and reserved-receiver resolution for expressions, statements and place roots.
@@ -250,7 +250,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 ## HTML project
 
 - [BackendBuilder implementation](src/projects/html_project/html_project_builder.rs)
-- [HTML document assembly](src/projects/html_project/output_plan.rs), [page_metadata.rs](src/projects/html_project/page_metadata.rs), [document_shell.rs](src/projects/html_project/document_shell.rs), [document_config.rs](src/projects/html_project/document_config.rs)
+- [HTML document assembly](src/projects/html_project/output_plan.rs), [root-slot interpretation](src/projects/html_project/html_slot_plan.rs), [document_shell.rs](src/projects/html_project/document_shell.rs), [document_config.rs](src/projects/html_project/document_config.rs)
 - [compile_input.rs](src/projects/html_project/compile_input.rs), [diagnostics.rs](src/projects/html_project/diagnostics.rs), [js_path.rs](src/projects/html_project/js_path.rs), [path_policy.rs](src/projects/html_project/path_policy.rs), [style_directives.rs](src/projects/html_project/style_directives.rs): build inputs/policy.
 - [styles](src/projects/html_project/styles/): $html/$css/$escape_html/$code validation/rendering.
     - [code.rs](src/projects/html_project/styles/code.rs): the `$code` scanner shell, role vocabulary and span emission, with [moth_scanner.rs](src/projects/html_project/styles/moth_scanner.rs) owning the Moth contextual state machines and [language_profiles.rs](src/projects/html_project/styles/language_profiles.rs) the profile registry and non-Moth word tables.

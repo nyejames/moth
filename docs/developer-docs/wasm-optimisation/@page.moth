@@ -1,9 +1,9 @@
 @styles navbar, section, theme_head, codeblock, sidebar, init_docs_sidebar
 @wasm-optimisation content as optimisation_content
 
-page_title #= "Wasm optimisation"
-page_description #= "Optimisation ownership across Moth, WebAssembly and native execution."
-page_head #= theme_head
+#[$in title:["Wasm optimisation"]]
+#[$in description:["Optimisation ownership across Moth, WebAssembly and native execution."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]

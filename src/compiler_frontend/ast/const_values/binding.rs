@@ -208,8 +208,8 @@ pub(crate) fn const_template_value_from_projection(
             })
         }
 
-        // A wrapper stays visible to HIR through its folded string while its structured pieces
-        // remain available to the public interface.
+        // A wrapper keeps its folded string while its structured pieces remain available to the
+        // public interface.
         TemplateConstValueKind::WrapperTemplate => {
             let folded = projected.folded.unwrap_or_else(|| {
                 crate::compiler_bug!(
@@ -220,18 +220,16 @@ pub(crate) fn const_template_value_from_projection(
             Ok(ConstTemplateValue::Public {
                 template: public,
                 kind: ConstValueKind::TemplateWrapper,
-                hir_visible: true,
                 folded: Some(folded),
                 provenance: projected.provenance,
             })
         }
 
         // INVARIANT: `$in name: ...` helpers are composition inputs, not values. They keep their
-        // public projection and stay out of the HIR constant handoff.
+        // public projection without a folded string.
         TemplateConstValueKind::SlotInsertHelper => Ok(ConstTemplateValue::Public {
             template: public,
             kind: ConstValueKind::SlotInsertTemplate,
-            hir_visible: false,
             folded: None,
             provenance: projected.provenance,
         }),

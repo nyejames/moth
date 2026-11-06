@@ -15,8 +15,8 @@ use crate::compiler_frontend::module_compilation::{ModuleRootActivity, ResolvedC
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
+use crate::projects::html_project::html_slot_plan::HtmlSlotPlan;
 use crate::projects::html_project::output_plan::CanonicalPageRoute;
-use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ pub(crate) struct HtmlModuleCompileInput<'a> {
     pub reachability: &'a HirReachability,
     pub type_environment: &'a TypeEnvironment,
     pub const_fragments: &'a [ResolvedConstFragment],
-    pub page_metadata_plan: &'a HtmlPageMetadataPlan,
+    pub slot_plan: &'a HtmlSlotPlan,
     pub borrow_facts: &'a BorrowFacts,
     /// Conservative bounded-integer proof facts paired with `hir_module`'s executable.
     ///
@@ -49,7 +49,7 @@ pub(crate) struct HtmlModuleCompileInput<'a> {
 /// different module assemblies.
 pub(crate) struct HtmlModuleCompileContext<'a> {
     pub(crate) entry: ProjectEntry<'a>,
-    pub(crate) page_metadata_plan: &'a HtmlPageMetadataPlan,
+    pub(crate) slot_plan: &'a HtmlSlotPlan,
     /// Canonical route projections shared by JS output, Wasm placement and the HTML shell.
     pub(crate) route: &'a CanonicalPageRoute,
     pub(crate) structural_url_renderer: &'a StructuralUrlRenderer<'a>,

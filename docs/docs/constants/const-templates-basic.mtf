@@ -8,10 +8,9 @@ A constant template is finished during compilation.
     ]
 ]
 
-A direct top-level const template needs an explicit root purpose in the accepted
-queued design. `$page` is the first HTML purpose but is not implemented yet; the
-Alpha compiler still uses activity-based entry selection and reserved `page_*`
-metadata.
+Direct top-level const templates contribute to an active root. The Alpha
+compiler uses activity-based entry selection and direct inserts for builder
+metadata. General `$entry` purpose validation remains queued.
 
 [codeblock, $code("moth"):
     #[$md:

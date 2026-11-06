@@ -538,7 +538,6 @@ fn const_template_projection_retains_per_occurrence_defaults() -> Result<(), Tem
             TemplateIrSummary::default(),
             None,
         );
-        drop(builder);
         let occurrence = |node_id| match store.get_node(node_id).expect("slot exists") {
             TemplateIrNode {
                 kind: TemplateIrNodeKind::Slot { placeholder },
@@ -629,7 +628,6 @@ fn routed_empty_source_suppresses_occurrence_default() -> Result<(), TemplateErr
             TemplateIrSummary::default(),
             None,
         );
-        drop(builder);
         let occurrence = match store.get_node(slot).expect("slot exists") {
             TemplateIrNode {
                 kind: TemplateIrNodeKind::Slot { placeholder },
@@ -721,7 +719,6 @@ fn occurrence_default_preserves_structural_pieces_in_projection() -> Result<(), 
             TemplateIrSummary::default(),
             None,
         );
-        drop(builder);
         let occurrence = match store.get_node(slot).expect("slot exists") {
             TemplateIrNode {
                 kind: TemplateIrNodeKind::Slot { placeholder },

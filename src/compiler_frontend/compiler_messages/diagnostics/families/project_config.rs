@@ -18,14 +18,14 @@ use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
 use crate::compiler_frontend::compiler_messages::render::{
     render_circular_dependency, render_dependency_namespace_used_as_value,
     render_html_single_file_route_name_empty, render_invalid_compile_time_path,
-    render_invalid_config, render_invalid_dependency_clause, render_invalid_page_metadata,
+    render_invalid_config, render_invalid_dependency_clause, render_invalid_html_slot_contribution,
     render_legacy_dependency_clause, render_namespace_type_value_misuse,
     render_nested_dependency_traversal, render_project_context_escape,
     render_project_entry_extension_required, render_unsupported_builder_package,
 };
 use crate::compiler_frontend::compiler_messages::{
     DependencyClauseKind, DiagnosticSeverity, InvalidCompileTimePathReason, InvalidConfigReason,
-    InvalidDependencyClauseReason, InvalidOutputFolderReason, InvalidPageMetadataReason,
+    InvalidDependencyClauseReason, InvalidHtmlSlotContributionReason, InvalidOutputFolderReason,
     LegacyDependencyClauseReason, NamespaceTypeValueMisuseKind, ProjectContextEscapeReason,
 };
 use crate::compiler_frontend::source::SourceSpan;
@@ -138,9 +138,12 @@ unit_code! {
     }
 }
 unit_code! {
-    impl InvalidPageMetadataReason {
-        NotAString = 1,
-        DuplicateDeclaration = 2,
+    impl InvalidHtmlSlotContributionReason {
+        MissingResource = 1,
+        NotAStaticResource = 2,
+        MultipleResources = 3,
+        SiteRoot = 4,
+        NonCssResource = 5,
     }
 }
 
@@ -266,22 +269,22 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    INVALID_PAGE_METADATA {
+    INVALID_HTML_SLOT_CONTRIBUTION {
         internal: 3061,
         stable: "MOTH-RULE-0061",
         category: DiagnosticCategory::Rule,
         severity: DiagnosticSeverity::Error,
-        title: "Invalid page metadata",
+        title: "Invalid HTML slot contribution",
         facts: [
-            key: StringFact,
-            reason: UnitFact<InvalidPageMetadataReason>,
+            slot: StringFact,
+            reason: UnitFact<InvalidHtmlSlotContributionReason>,
         ],
         labels: [],
         extra: None,
-        ctor: generated invalid_page_metadata,
+        ctor: generated invalid_html_slot_contribution,
         reason_key: reason,
-        view: InvalidPageMetadataView,
-        render: render_invalid_page_metadata,
+        view: InvalidHtmlSlotContributionView,
+        render: render_invalid_html_slot_contribution,
     }
 }
 
@@ -1402,7 +1405,7 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES:
     LEGACY_DEPENDENCY_CLAUSE,
     CIRCULAR_DEPENDENCY,
     UNSUPPORTED_BUILDER_PACKAGE,
-    INVALID_PAGE_METADATA,
+    INVALID_HTML_SLOT_CONTRIBUTION,
     INVALID_COMPILE_TIME_PATH,
     DEPENDENCY_NAMESPACE_USED_AS_VALUE,
     NESTED_DEPENDENCY_TRAVERSAL,

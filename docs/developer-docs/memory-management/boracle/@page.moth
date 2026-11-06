@@ -2,9 +2,9 @@
 @boracle-operational-oracle content as operational_content
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-page_title #= "Boracle"
-page_description #= "Moth's permanent slow reference borrow solver, its borrow-analysis laboratory and the operational contract for its bounded oracle."
-page_head #= theme_head
+#[$in title:["Boracle"]]
+#[$in description:["Moth's permanent slow reference borrow solver, its borrow-analysis laboratory and the operational contract for its bounded oracle."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]

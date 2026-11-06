@@ -135,22 +135,19 @@ A project field named `version` does not satisfy a source input contract. `$proj
 
 Exact field tables, optional version, explicit-only input providers and HTML settings live in @../project-structure/#project-config (Project config) and @../project-structure/#build-inputs (Build configuration values).
 
-### Page example
+### Entry purpose and builder metadata
 
-`$page` is the accepted queued HTML-builder directive for normal-root metadata and page purpose. Ordinary files, support roots, facades and `config.moth` cannot declare pages. Its implementation will supply the first root purpose in this directive family.
+General `$entry` root-purpose validation remains queued. HTML document metadata
+uses direct const root inserts through builder slots, not a `$page` directive:
 
 [codeblock, $code("moth"):
-    $page(
-        title = "Moth",
-        description = "A language for creating reliable software",
-        lang = "en",
-        favicon = @assets/favicon.svg,
-    )
+    #[$in title:Moth]
+    #[$in description:A language for creating reliable software]
+    #[$in favicon:[@assets/favicon.svg]]
 ]
 
-Bare `$page` is the default invocation. `$page()` is invalid. Exact arguments, command policy and runtime title live in @../project-structure/#entry-config (Entry metadata and page directives).
-
-Until that implementation lands, operational pages keep reserved `page_title`, `page_head` and related declarations.
+See @../project-structure/#entry-config (Entry metadata) for the builder slot
+contract and current entry policy.
 
 ### Future blocks
 
@@ -163,5 +160,5 @@ Future compiler-owned blocks use `$name(...): ... ;` or `$name: ... ;`. `$async:
 - For template-specific directive meanings see @../templates/#template-directives (Template directives).
 - For project and HTML configuration signatures see @../project-structure/#project-config (Project config).
 - For input contracts see @../project-structure/#build-inputs (Build configuration values).
-- For `$page` and root purpose see @../project-structure/#entry-config (Entry metadata and page directives).
+- For builder slots and future root purpose see @../project-structure/#entry-config (Entry metadata).
 - For accepted, deferred and excluded boundaries see @../design-scope (Design scope).

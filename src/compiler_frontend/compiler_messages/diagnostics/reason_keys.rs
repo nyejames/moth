@@ -958,9 +958,12 @@ define_stable_reason_keys! {
         &DeferredFeatureCode::RuntimeAnonymousRecord => "deferred_feature.runtime_anonymous_record",
     },
 
-    InvalidPageMetadataReason => {
-    &InvalidPageMetadataReason::NotAString => "invalid_page_metadata.not_a_string",
-    &InvalidPageMetadataReason::DuplicateDeclaration => "invalid_page_metadata.duplicate_declaration",
+    InvalidHtmlSlotContributionReason => {
+    &InvalidHtmlSlotContributionReason::MissingResource => "invalid_html_slot_contribution.missing_resource",
+    &InvalidHtmlSlotContributionReason::NotAStaticResource => "invalid_html_slot_contribution.not_a_static_resource",
+    &InvalidHtmlSlotContributionReason::MultipleResources => "invalid_html_slot_contribution.multiple_resources",
+    &InvalidHtmlSlotContributionReason::SiteRoot => "invalid_html_slot_contribution.site_root",
+    &InvalidHtmlSlotContributionReason::NonCssResource => "invalid_html_slot_contribution.non_css_resource",
     },
 
     InvalidLoopOperandReason => {

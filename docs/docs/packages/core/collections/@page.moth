@@ -8,9 +8,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Core collections"
-page_description #= "Ordered collection literals and common collection methods."
-page_head #= language_theme_head
+#[$in title:["Core collections"]]
+#[$in description:["Ordered collection literals and common collection methods."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]

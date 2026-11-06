@@ -1,4 +1,8 @@
-#[$in title: Imported title sentinel]
+#[$in title:Imported title sentinel]
+#[$in description:["Imported description sentinel"]]
+#[$in head:<meta name="imported-head" content="imported head sentinel">]
+#[$in stylesheets: [@shared/imported.css]]
+#[$in favicon:[@shared/imported.png]]
 #[:<p>imported root body sentinel</p>]
 
 export:

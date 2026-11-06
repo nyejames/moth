@@ -1,9 +1,9 @@
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 @lappet content as lappet_content
 
-page_title #= "Lappet"
-page_description #= "Moth's planned native runtime, Rust embedding and package infrastructure."
-page_head #= theme_head
+#[$in title:["Lappet"]]
+#[$in description:["Moth's planned native runtime, Rust embedding and package infrastructure."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]

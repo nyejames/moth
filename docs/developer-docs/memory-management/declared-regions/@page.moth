@@ -1,9 +1,9 @@
 @declared-regions content as reference_content
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-page_title #= "Declared regions"
-page_description #= "Accepted deferred declared-region syntax, placement and hard destination lifetimes."
-page_head #= theme_head
+#[$in title:["Declared regions"]]
+#[$in description:["Accepted deferred declared-region syntax, placement and hard destination lifetimes."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]

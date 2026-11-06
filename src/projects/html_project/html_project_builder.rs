@@ -51,11 +51,11 @@ use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExter
 use crate::projects::html_project::external_js::runtime_glue::{
     emit_build_runtime_modules, is_glue_module_output_path, planned_runtime_module_output_paths,
 };
+use crate::projects::html_project::html_slot_plan::plan_html_entry_slots;
 use crate::projects::html_project::js_path::{HtmlJsCompileInput, compile_html_module_js};
 use crate::projects::html_project::output_plan::{
     LogicalHtmlPathError, derive_logical_html_path, plan_wasm_output_from_route,
 };
-use crate::projects::html_project::page_metadata::extract_html_page_metadata;
 use crate::projects::html_project::path_policy::HtmlEntryPathPlan;
 use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, ResourceDiagnosticSite, ResourceUrlContext, display_origin,
@@ -235,43 +235,11 @@ impl BackendBuilder for HtmlProjectBuilder {
                 .map_or(route.logical_html_path.as_path(), |plan| {
                     plan.html_path.as_path()
                 });
-            let page_metadata_plan = {
-                let mut diagnostic_strings = backend_context.diagnostic_strings();
-                match extract_html_page_metadata(
-                    &module.executable.hir,
-                    &module.executable.path_table,
-                    &module.executable.resource_table,
-                    &mut diagnostic_strings,
-                ) {
-                    Ok(plan) => plan,
-                    Err(
-                        crate::projects::html_project::page_metadata::PageMetadataError::Diagnostic(
-                            diagnostic,
-                        ),
-                    ) => {
-                        return Err(capture_module_diagnostic(
-                            diagnostic,
-                            &module.executable.hir,
-                            entry.source_domain,
-                            &module.executable.type_environment,
-                            &module.executable.path_table,
-                            diagnostic_strings.strings(),
-                        )
-                        .into());
-                    }
-                    Err(
-                        crate::projects::html_project::page_metadata::PageMetadataError::Infrastructure(
-                            error,
-                        ),
-                    ) => return Err(error.into()),
-                }
-            };
             {
                 let mut diagnostic_strings = backend_context.diagnostic_strings();
                 resource_output_plan.plan_entry(
                     &entry,
                     planned_html_output_path,
-                    &page_metadata_plan,
                     &mut diagnostic_strings,
                 )?;
             }
@@ -299,11 +267,20 @@ impl BackendBuilder for HtmlProjectBuilder {
                 &resource_url_context,
                 site_config.origin.as_str(),
             );
+            let slot_plan = {
+                let mut diagnostic_strings = backend_context.diagnostic_strings();
+                plan_html_entry_slots(
+                    &module.metadata.const_top_level_fragments,
+                    &structural_url_renderer,
+                    entry.source_domain,
+                    &mut diagnostic_strings,
+                )?
+            };
 
             let compiled_artifacts = self.compile_one_module(
                 HtmlModuleCompileContext {
                     entry,
-                    page_metadata_plan: &page_metadata_plan,
+                    slot_plan: &slot_plan,
                     route: &route,
                     structural_url_renderer: &structural_url_renderer,
                     project_name: config.project_name.as_str(),
@@ -603,7 +580,7 @@ impl HtmlProjectBuilder {
                     all_generated_function_names,
                     ..
                 },
-            page_metadata_plan,
+            slot_plan,
             route,
             structural_url_renderer,
             project_name,
@@ -740,7 +717,7 @@ impl HtmlProjectBuilder {
             reachability,
             type_environment: &module.executable.type_environment,
             const_fragments: &module.metadata.const_top_level_fragments,
-            page_metadata_plan,
+            slot_plan,
             borrow_facts: module.executable.borrow_analysis.borrow_facts(),
             numeric_proofs: &module.executable.numeric_proofs,
             project_name,

@@ -60,19 +60,16 @@ Each physical-target-bearing file path is resolved once. Repeating it in the sam
 
 ### Page metadata uses ordinary resource paths
 
-In the accepted queued design, root page metadata uses the same file-path
-expressions as other source code. A tracked favicon remains a resource-bearing
-`String`:
+Root builder slots use the same file-path expressions as other source code.
+A tracked favicon remains a resource-bearing `String`:
 
 [codeblock, $code("moth"):
-    $page(
-        favicon = @assets/favicon.svg,
-    )
+    #[$in favicon:[@assets/favicon.svg]]
 ]
 
-The path resolves from the owning module root, enters the normal resource pipeline
-and is rendered relative to the output artefact that observes it. `$page` does not
-create a page-URL expression, and `.moth` still has no file value.
+The path resolves from the owning module root, enters the normal resource
+pipeline and renders relative to the output artefact that observes it.
+`.moth` still has no file value.
 
 
 ### Filesystem ownership

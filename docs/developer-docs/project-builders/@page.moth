@@ -4,9 +4,9 @@
 @assemblies-and-runtime content as assembly_content
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-page_title #= "Create a project builder in Rust"
-page_description #= "Define Moth builder capabilities, expose checked Rust host packages and assemble validated application output."
-page_head #= theme_head
+#[$in title:["Create a project builder in Rust"]]
+#[$in description:["Define Moth builder capabilities, expose checked Rust host packages and assemble validated application output."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]

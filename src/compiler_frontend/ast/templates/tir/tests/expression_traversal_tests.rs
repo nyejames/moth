@@ -1652,10 +1652,10 @@ fn reachability_nested_copy_chain_shares_summaries_instead_of_flattening_sets() 
         cache.register_copied_template(*template);
     }
 
-    for level in 0..DEPTH {
+    for (level, template) in level_templates.iter().enumerate() {
         let reach = collect_reachable_expression_sites(
             &store,
-            ReachableExpressionRoot::Template(level_templates[level]),
+            ReachableExpressionRoot::Template(*template),
             TemplateViewContext::default(),
             &cache,
         )
@@ -1792,10 +1792,10 @@ fn retained_candidates_answers_absent_and_deep_sites_from_the_summary_index() {
 
     // Recording every level before the outer query makes each summary inherit
     // the previous summary rather than re-walking it.
-    for level in 0..DEPTH - 1 {
+    for template in level_templates.iter().take(DEPTH - 1) {
         collect_reachable_expression_sites(
             &store,
-            ReachableExpressionRoot::Template(level_templates[level]),
+            ReachableExpressionRoot::Template(*template),
             TemplateViewContext::default(),
             &cache,
         )

@@ -14,9 +14,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Plain Markdown"
-page_description #= "Plain Markdown content dependencies for HTML projects."
-page_head #= language_theme_head
+#[$in title:["Plain Markdown"]]
+#[$in description:["Plain Markdown content dependencies for HTML projects."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]

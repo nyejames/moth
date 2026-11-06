@@ -9,9 +9,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Getting Started with moth"
-page_description #= "How to use the Moth compiler CLI, create a project, run the dev server, and read compiler diagnostics."
-page_head #= language_theme_head
+#[$in title:["Getting Started with moth"]]
+#[$in description:["How to use the Moth compiler CLI, create a project, run the dev server, and read compiler diagnostics."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -22,10 +22,10 @@ init_docs_sidebar()!
     `moth` compiles and tools Moth projects.
     You use it from the command line to create projects, check them, build them and run the hot-reloading dev server.
 
-    **Support notice.** Live config syntax is parenthesised grouped `project` and
-    `html` records with declaration-owned `#Config of T` inputs, plus reserved `page_*` metadata.
-    The accepted `$config`, `$project`, `$html_builder` and root-only `$page`
-    forms below remain queued design. `moth new` emits the current grouped parenthesised config, not those forms yet.
+    **Support notice.** Live config syntax uses grouped parenthesised `project` and
+    `html` records with declaration-owned `#Config of T` inputs. Direct const
+    root inserts supply HTML metadata. The accepted `$config`, `$project` and
+    `$html_builder` forms remain queued design.
 
     Other tooling continues rapid development.
 
@@ -151,15 +151,14 @@ init_docs_sidebar()!
     To supply a version explicitly, add an earlier `$config` contract or a fixed
     literal to `$project`. The selected directory is the source root.
 
-    A normal module root declares an HTML page separately. The accepted page
-    directive is root-only and does not belong in helper files:
+    A normal module root can supply HTML metadata with builder slots:
 
     [codeblock, $code("moth"):
-        $page
+        #[$in title:Welcome]
     ]
 
-    `moth new` does not emit these accepted forms yet. Keep operational
-    scaffolds on their current grouped parenthesised config and reserved page metadata.
+    `moth new` emits the current grouped parenthesised config and builder slots.
+    Explicit root purpose remains future work.
 
     Start a new project:
 

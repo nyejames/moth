@@ -1,9 +1,9 @@
 @lifetime-regions-and-escape-validation content as reference_content
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-page_title #= "Lifetime regions and escape validation"
-page_description #= "How Moth validates lifetime owners, retained references, escapes and region topology."
-page_head #= theme_head
+#[$in title:["Lifetime regions and escape validation"]]
+#[$in description:["How Moth validates lifetime owners, retained references, escapes and region topology."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]

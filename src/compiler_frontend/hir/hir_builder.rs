@@ -27,14 +27,13 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::HirBlock;
-use crate::compiler_frontend::hir::const_facts::HirConstFacts;
 #[cfg(test)]
 use crate::compiler_frontend::hir::expression_store::HirExpressionStoreTestLimits;
 use crate::compiler_frontend::hir::expression_store::{HirConstructionFailure, HirExpressionStore};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOriginLookup};
 use crate::compiler_frontend::hir::hir_side_table::{HirLocation, HirSideTable};
 use crate::compiler_frontend::hir::ids::{
-    BlockId, ChoiceId, FieldId, FunctionId, HirConstId, HirNodeId, LocalId, RegionId, StructId,
+    BlockId, ChoiceId, FieldId, FunctionId, HirNodeId, LocalId, RegionId, StructId,
 };
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::regions::HirRegion;
@@ -158,7 +157,6 @@ pub struct HirBuilder<'a> {
     next_function_id: u32,
     next_struct_id: u32,
     next_field_id: u32,
-    next_const_id: u32,
     next_choice_id: u32,
     pub(super) temp_local_counter: u32,
 
@@ -344,7 +342,6 @@ impl<'a> HirBuilder<'a> {
             next_function_id: 0,
             next_struct_id: 0,
             next_field_id: 0,
-            next_const_id: 0,
             next_choice_id: 0,
             temp_local_counter: 0,
 
@@ -522,7 +519,6 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<HirLoweringResult, PreparedFailure> {
         self.module_const_values = std::mem::take(&mut ast.const_values);
 
-        self.module.const_facts = HirConstFacts::from(&ast.const_facts);
         self.imported_functions_by_name = ast.imported_functions_by_local_path.clone();
         for contract in self.imported_functions_by_name.values() {
             let Some(error) = contract.error_return else {
@@ -582,10 +578,8 @@ impl<'a> HirBuilder<'a> {
             return Err(self.lower_error_messages(error));
         }
 
-        // 2. Lower module-level constants
-        if let Err(error) = self.lower_module_constants() {
-            return Err(self.lower_error_messages(error));
-        }
+        // 2. Register module-level constants for expression lowering.
+        self.lower_module_constants();
 
         // 3. Resolve documentation fragments
         self.resolve_doc_fragments(&ast);
@@ -656,7 +650,6 @@ impl<'a> HirBuilder<'a> {
     allocate_id!(allocate_node_id, next_node_id, HirNodeId);
     allocate_id!(allocate_struct_id, next_struct_id, StructId);
     allocate_id!(allocate_field_id, next_field_id, FieldId);
-    allocate_id!(allocate_const_id, next_const_id, HirConstId);
     allocate_id!(allocate_choice_id, next_choice_id, ChoiceId);
 
     // -------------------------

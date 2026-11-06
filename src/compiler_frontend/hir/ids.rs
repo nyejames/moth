@@ -1,6 +1,6 @@
 //! Stable HIR ID newtypes.
 //!
-//! WHAT: dense IDs used to index HIR modules, blocks, locals, expressions, constants, and choices.
+//! WHAT: dense IDs used to index HIR modules, blocks, locals, expressions, and choices.
 //! WHY: HIR facts and side tables refer to semantic objects by ID rather than by AST paths.
 
 macro_rules! define_hir_id {
@@ -18,5 +18,4 @@ define_hir_id!(StructId);
 define_hir_id!(FieldId);
 define_hir_id!(FunctionId);
 define_hir_id!(RegionId);
-define_hir_id!(HirConstId);
 define_hir_id!(ChoiceId);

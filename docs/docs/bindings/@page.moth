@@ -16,9 +16,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Values and bindings"
-page_description #= "Bindings, mutability, shared access, explicit copies and shadowing in Moth."
-page_head #= language_theme_head
+#[$in title:["Values and bindings"]]
+#[$in description:["Bindings, mutability, shared access, explicit copies and shadowing in Moth."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]

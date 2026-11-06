@@ -14,9 +14,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Choices"
-page_description #= "Choice declarations, variants, payload patterns and structural equality in Moth."
-page_head #= language_theme_head
+#[$in title:["Choices"]]
+#[$in description:["Choice declarations, variants, payload patterns and structural equality in Moth."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]

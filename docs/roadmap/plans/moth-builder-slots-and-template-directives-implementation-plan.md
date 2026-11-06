@@ -1,9 +1,9 @@
 # Builder slots and template directive redesign - implementation plan
 
 Status: Active on `builder-slots`
-Current slice: Phase 4 HTML metadata and stylesheet assembly
+Current slice: Phase 5 cleanup, documentation and performance
 Blockers: None identified
-Next action: Assemble HTML metadata and structural stylesheet contributions from builder slots.
+Next action: Complete documentation, performance checks and the final validation gate.
 Scope: Core template syntax and composition, builder-defined top-level const slots, HTML metadata and stylesheet assembly
 
 ## Purpose
@@ -429,10 +429,10 @@ These exclusions must remain visible in the roadmap where they affect unsettled 
 - [x] `$slot`, `$in` and per-occurrence defaults match the approved syntax and routing behaviour.
 - [x] `$before`/`$after` accept constant wrappers with named slots, reject their default/positional slots and preserve `$fresh` and runtime no-output semantics.
 - [x] Root named inserts route only when direct and const, with builder schema independence and accurate source provenance.
-- [ ] HTML metadata uses slots only, with existing fallbacks and escaping intact.
-- [ ] `stylesheets` validates one tracked CSS origin per insert and deduplicates by stable origin.
-- [ ] `head` deduplicates only identical fully rendered complete contributions and is emitted after dedicated content.
-- [ ] Old `page_*` reserved behaviour, `$insert(...)`, parenthesised `$slot(...)` and `$children(...)` are gone.
-- [ ] JS/Wasm output parity, resource preflight, mixed const/runtime ordering and import isolation have regression coverage.
+- [x] HTML metadata uses slots only, with existing fallbacks and escaping intact.
+- [x] `stylesheets` validates one tracked CSS origin per insert and deduplicates by stable origin.
+- [x] `head` deduplicates only identical fully rendered complete contributions and is emitted after dedicated content.
+- [x] Old `page_*` reserved behaviour, `$insert(...)`, parenthesised `$slot(...)` and `$children(...)` are gone.
+- [x] JS/Wasm output parity, resource preflight, mixed const/runtime ordering and import isolation have regression coverage.
 - [ ] Docs and roadmap reflect approved design and explicit deferrals, without introducing stale `$page` or `$stylesheet` claims.
 - [ ] Validation and benchmarks are recorded, and no unnecessary parallel representation or legacy compatibility code remains.

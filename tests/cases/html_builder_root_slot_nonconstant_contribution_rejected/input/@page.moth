@@ -3,5 +3,5 @@ runtime_title || -> String:
     return "runtime title"
 ;
 
-#[$in title: [runtime_title()]]
+#[$in title:[runtime_title()]]
 #[:<p>body kept</p>]

@@ -10,9 +10,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Resources and file values"
-page_description #= "Naming project files with file paths, and what those paths evaluate to in Moth."
-page_head #= language_theme_head
+#[$in title:["Resources and file values"]]
+#[$in description:["Naming project files with file paths, and what those paths evaluate to in Moth."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]

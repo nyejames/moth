@@ -16,7 +16,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstStringValue, ConstValueId, ConstValueStore, ConstValueVisit,
+    ConstStringValue, ConstValueId, ConstValueVisit,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionStore;
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnChannel};
@@ -26,7 +26,6 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKey;
 use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::hir::blocks::HirLocal;
-use crate::compiler_frontend::hir::constants::{HirConstField, HirConstValue, HirModuleConst};
 use crate::compiler_frontend::hir::expression_store::HirVariantFieldRange;
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirVariantCarrier, HirVariantField, OPTION_SOME_VARIANT_INDEX, ValueKind,
@@ -39,6 +38,7 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::HirWriteTarget;
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+#[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -83,140 +83,14 @@ impl<'a> HirBuilder<'a> {
         self.validate_entry_presence(ast)
     }
 
-    // WHAT: lowers the AST module-constant pool into HIR's dedicated constant metadata arena.
-    // WHY: module constants should remain compile-time data instead of turning into runtime statements.
-    pub(crate) fn lower_module_constants(&mut self) -> Result<(), HirConstructionFailure> {
-        self.module.module_constants.clear();
+    // WHAT: registers folded AST module constants in the HIR lookup used by expression lowering.
+    // WHY: module constants stay compile-time data owned by the const store, so HIR only needs
+    // the path-to-value bindings that constant references resolve through.
+    pub(crate) fn lower_module_constants(&mut self) {
         self.module_constants_by_name.clear();
-
-        // WHAT: the store leaves `self` once for the whole pass and returns at the end.
-        // WHY: the closure passed to `fold_value` borrows the rest of `HirBuilder` mutably, so
-        // the store cannot stay borrowed from `self` while lowering runs. Moving it out once
-        // into an owned `Vec`, cloning each constant's `PathId` purely to end the borrow,
-        // and then took and restored the store again for every single value.
-        let store = std::mem::take(&mut self.module_const_values);
-        let result = self.lower_module_constants_from(&store);
-        self.module_const_values = store;
-        result
-    }
-
-    fn lower_module_constants_from(
-        &mut self,
-        store: &ConstValueStore,
-    ) -> Result<(), HirConstructionFailure> {
-        for (path, id) in store.path_value_bindings() {
+        for (path, id) in self.module_const_values.path_value_bindings() {
             self.module_constants_by_name.insert(*path, id);
         }
-
-        for row in store.iter_module_constant_views() {
-            if !row.metadata.hir_visible {
-                continue;
-            }
-
-            let const_value = self.lower_const_value_for_module_pool(store, row.id)?;
-
-            let const_id = self.allocate_const_id();
-            let const_type = self.lower_type_id(row.metadata.type_id)?;
-            let mut path_scratch = Vec::new();
-            let name =
-                self.path_fork
-                    .render_portable(*row.path, self.string_table, &mut path_scratch);
-
-            self.module.module_constants.push(HirModuleConst {
-                id: const_id,
-                name,
-                ty: const_type,
-                value: const_value,
-            });
-        }
-
-        Ok(())
-    }
-
-    fn lower_const_value_for_module_pool(
-        &mut self,
-        store: &ConstValueStore,
-        value_id: ConstValueId,
-    ) -> Result<HirConstValue, HirConstructionFailure> {
-        let mut path_scratch = Vec::new();
-        store.fold_value(value_id, &mut |metadata, visit| {
-            increment_frontend_counter(FrontendCounter::HirConstValueConversions);
-            match visit {
-                ConstValueVisit::Number(value) => {
-                    self.validate_number_value_type(value, metadata.type_id)?;
-                    Ok(HirConstValue::Number(value.clone()))
-                }
-                ConstValueVisit::FixedScalar(value) => Ok(HirConstValue::FixedScalar(value)),
-                ConstValueVisit::Bool(value) => Ok(HirConstValue::Bool(value)),
-                ConstValueVisit::Char(value) => Ok(HirConstValue::Char(value)),
-                ConstValueVisit::String(value) => match value {
-                    ConstStringValue::Text(text) => Ok(HirConstValue::String(
-                        self.string_table.resolve(*text).to_owned(),
-                    )),
-
-                    // Pieces stay structural in the pool exactly like structural HIR
-                    // expressions; physical variant planning owns final URL text.
-                    ConstStringValue::Pieces(pieces) => {
-                        Ok(HirConstValue::StructuralString {
-                            pieces: pieces.clone(),
-                        })
-                    }
-                },
-                ConstValueVisit::Collection(values) => Ok(HirConstValue::Collection(values)),
-                ConstValueVisit::Record(fields) => Ok(HirConstValue::Record(
-                    fields
-                        .into_iter()
-                        .map(|field| HirConstField {
-                            name: self.path_fork.render_portable(
-                                *field.name,
-                                self.string_table,
-                                &mut path_scratch,
-                            ),
-                            value: field.value,
-                        })
-                        .collect(),
-                )),
-                ConstValueVisit::Choice { tag, fields, .. } => Ok(HirConstValue::Choice {
-                    tag,
-                    fields: fields
-                        .into_iter()
-                        .map(|field| HirConstField {
-                            name: self.path_fork.render_portable(
-                                *field.name,
-                                self.string_table,
-                                &mut path_scratch,
-                            ),
-                            value: field.value,
-                        })
-                        .collect(),
-                }),
-                ConstValueVisit::Range { start, end } => {
-                    Ok(HirConstValue::Range(Box::new(start), Box::new(end)))
-                }
-                ConstValueVisit::Coerced(value) => Ok(value),
-                ConstValueVisit::OptionSome(value) => {
-                    Ok(HirConstValue::OptionSome(Box::new(value)))
-                }
-                ConstValueVisit::OptionNone => Ok(HirConstValue::OptionNone),
-                ConstValueVisit::Template { folded, .. } => match folded {
-                    Some(ConstStringValue::Text(value)) => Ok(HirConstValue::String(
-                        self.string_table.resolve(*value).to_owned(),
-                    )),
-
-                    // A piece-bearing template fold is the same structural string the
-                    // `String` arm above keeps, so it lowers with the same variant.
-                    Some(ConstStringValue::Pieces(pieces)) => {
-                        Ok(HirConstValue::StructuralString {
-                            pieces: pieces.clone(),
-                        })
-                    }
-                    None => Err(InfrastructureFailure::internal(CompilerStage::HirConstruction,
-                        "HIR invariant: Template constant reached HIR module-constant lowering before AST materialized it. Non-renderable template.",
-                    )
-                    .into()),
-                },
-            }
-        })
     }
 
     /// Lower one module-store value directly to a constant HIR expression.
@@ -423,7 +297,7 @@ impl<'a> HirBuilder<'a> {
                             region,
                         )
                     }
-                    None => Err(InfrastructureFailure::hir_transformation("HIR invariant: Template constant reached HIR module-constant lowering before AST materialized it. Non-renderable template.").into()),
+                    None => Err(InfrastructureFailure::hir_transformation("HIR invariant: Template constant reached HIR constant expression lowering before AST materialized it. Non-renderable template.").into()),
                 },
             }
         });

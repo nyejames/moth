@@ -14,9 +14,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Branching"
-page_description #= "If statements, value-producing control flow, pattern matching and exhaustiveness in Moth."
-page_head #= language_theme_head
+#[$in title:["Branching"]]
+#[$in description:["If statements, value-producing control flow, pattern matching and exhaustiveness in Moth."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]

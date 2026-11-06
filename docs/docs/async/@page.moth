@@ -1,9 +1,9 @@
 @html center
 @styles navbar, title, section, styled_table, header, data, codeblock, theme_head, sidebar, init_docs_sidebar
 
-page_title #= "Coroutines and Async in Moth"
-page_description #= "Design draft for structured async, coroutines, channels and explicit suspension in Moth."
-page_head #= theme_head
+#[$in title:["Coroutines and Async in Moth"]]
+#[$in description:["Design draft for structured async, coroutines, channels and explicit suspension in Moth."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]

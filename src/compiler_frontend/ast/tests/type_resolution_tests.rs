@@ -1049,7 +1049,6 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
                 contains_regular_division: false,
                 synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
                 value_kind: ConstValueKind::TemplateWrapper,
-                hir_visible: true,
             },
             ConstValuePayload::Template {
                 template: wrapper_template,

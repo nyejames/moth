@@ -1,0 +1,4 @@
+-- An ordinary permitted String is also a valid favicon slot value.
+#[$in favicon:["/slot-icon.ico"]]
+
+#[:<main>String icon</main>]

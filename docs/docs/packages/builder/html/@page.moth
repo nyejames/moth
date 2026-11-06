@@ -8,9 +8,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "@html"
-page_description #= "Compile-time HTML helpers and canvas wrapper from the HTML builder."
-page_head #= language_theme_head
+#[$in title:["@html"]]
+#[$in description:["Compile-time HTML helpers and canvas wrapper from the HTML builder."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]

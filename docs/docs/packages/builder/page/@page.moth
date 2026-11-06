@@ -8,9 +8,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "@web/page"
-page_description #= "Live browser state and navigation from the HTML builder."
-page_head #= language_theme_head
+#[$in title:["@web/page"]]
+#[$in description:["Live browser state and navigation from the HTML builder."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]

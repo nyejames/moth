@@ -1,0 +1,90 @@
+entry = "."
+
+# Scalar slots render builder-interpreted Strings. Present contributions suppress configured
+# fallbacks, absent slots keep them, and every emitted value is HTML-escaped in its context.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "<html lang=\"en-GB\">",
+    "<meta name=\"description\" content=\"Intro &amp; &lt;guide&gt;\">",
+    "<link rel=\"icon\" href=\"./static/favicon.png\">",
+    "<body style=\"padding: 0;&quot;quoted&quot;\">",
+]
+must_contain_exactly_once = [
+    "<meta name=\"description\" content=\"Intro &amp; &lt;guide&gt;\">",
+    "<link rel=\"icon\" href=\"./static/favicon.png\">",
+]
+
+[[backends.html.artifact_assertions]]
+path = "fallback/index.html"
+kind = "html"
+must_contain = [
+    "<html lang=\"en\">",
+    "<link rel=\"icon\" href=\"/configured.ico\">",
+    "<body style=\"margin: 0;\">",
+]
+must_not_contain = ["name=\"description\""]
+
+[[backends.html.artifact_assertions]]
+path = "empty/index.html"
+kind = "html"
+must_contain = [
+    "<html lang=\"\">",
+    "<meta name=\"description\" content=\"\">",
+    "<link rel=\"icon\" href=\"\">",
+    "<body style=\"\">",
+]
+must_not_contain = ["<html lang=\"en\">", "href=\"/configured.ico\"", "<body style=\"margin: 0;\">"]
+
+[[backends.html.artifact_assertions]]
+path = "static/favicon.png"
+kind = "binary"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "<html lang=\"en-GB\">",
+    "<meta name=\"description\" content=\"Intro &amp; &lt;guide&gt;\">",
+    "<link rel=\"icon\" href=\"./static/favicon.png\">",
+    "<body style=\"padding: 0;&quot;quoted&quot;\">",
+]
+must_contain_exactly_once = [
+    "<meta name=\"description\" content=\"Intro &amp; &lt;guide&gt;\">",
+    "<link rel=\"icon\" href=\"./static/favicon.png\">",
+]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "fallback/index.html"
+kind = "html"
+must_contain = [
+    "<html lang=\"en\">",
+    "<link rel=\"icon\" href=\"/configured.ico\">",
+    "<body style=\"margin: 0;\">",
+]
+must_not_contain = ["name=\"description\""]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "empty/index.html"
+kind = "html"
+must_contain = [
+    "<html lang=\"\">",
+    "<meta name=\"description\" content=\"\">",
+    "<link rel=\"icon\" href=\"\">",
+    "<body style=\"\">",
+]
+must_not_contain = ["<html lang=\"en\">", "href=\"/configured.ico\"", "<body style=\"margin: 0;\">"]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "static/favicon.png"
+kind = "binary"

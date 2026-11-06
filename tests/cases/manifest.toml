@@ -3877,13 +3877,6 @@ contract = "backend.html.builder_invalid_config_rejected"
 role = "primary"
 
 [[case]]
-id = "html_builder_invalid_page_metadata"
-path = "html_builder_invalid_page_metadata"
-tags = ["integration", "html", "diagnostics"]
-contract = "backend.html.builder_invalid_page_metadata_rejected"
-role = "primary"
-
-[[case]]
 id = "html_builder_js_script_inside_body"
 path = "html_builder_js_script_inside_body"
 tags = ["integration", "html"]
@@ -3891,24 +3884,94 @@ contract = "backend.html.builder_js_script_placement"
 role = "primary"
 
 [[case]]
-id = "html_builder_page_head"
-path = "html_builder_page_head"
-tags = ["integration", "html"]
-contract = "backend.html.builder_page_head"
+id = "html_builder_old_page_constants_ordinary"
+path = "html_builder_old_page_constants_ordinary"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots"]
+contract = "backend.html.old_page_constants_are_ordinary_body_fragments"
 role = "primary"
 
 [[case]]
-id = "html_builder_page_title"
-path = "html_builder_page_title"
-tags = ["integration", "html"]
-contract = "backend.html.builder_page_title"
+id = "html_builder_slot_favicon_sources"
+path = "html_builder_slot_favicon_sources"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "resources"]
+contract = "backend.html.builder_slot_favicon_resource_and_string"
 role = "primary"
 
 [[case]]
-id = "html_builder_structural_page_metadata"
-path = "html_builder_structural_page_metadata"
-tags = ["integration", "html"]
-contract = "backend.html.builder_structural_page_metadata"
+id = "html_builder_slot_head_dedup"
+path = "html_builder_slot_head_dedup"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "resources"]
+contract = "backend.html.builder_slot_head_dedup_after_rendering"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_metadata_scalars"
+path = "html_builder_slot_metadata_scalars"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots"]
+contract = "backend.html.builder_slot_scalar_metadata_escaping_and_fallback"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_stylesheet_invalid_combined"
+path = "html_builder_slot_stylesheet_invalid_combined"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "diagnostics"]
+contract = "backend.html.builder_slot_stylesheet_invalid_combined"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_stylesheet_invalid_empty"
+path = "html_builder_slot_stylesheet_invalid_empty"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "diagnostics"]
+contract = "backend.html.builder_slot_stylesheet_invalid_empty"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_stylesheet_invalid_external_url"
+path = "html_builder_slot_stylesheet_invalid_external_url"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "diagnostics"]
+contract = "backend.html.builder_slot_stylesheet_invalid_external_url"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_stylesheet_invalid_multiple_resources"
+path = "html_builder_slot_stylesheet_invalid_multiple_resources"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "diagnostics"]
+contract = "backend.html.builder_slot_stylesheet_invalid_multiple_resources"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_stylesheet_invalid_non_css"
+path = "html_builder_slot_stylesheet_invalid_non_css"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "diagnostics"]
+contract = "backend.html.builder_slot_stylesheet_invalid_non_css"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_stylesheet_invalid_site_root"
+path = "html_builder_slot_stylesheet_invalid_site_root"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "diagnostics"]
+contract = "backend.html.builder_slot_stylesheet_invalid_site_root"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_stylesheet_invalid_text"
+path = "html_builder_slot_stylesheet_invalid_text"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "diagnostics"]
+contract = "backend.html.builder_slot_stylesheet_invalid_text"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_stylesheets_dedup"
+path = "html_builder_slot_stylesheets_dedup"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "resources"]
+contract = "backend.html.builder_slot_stylesheets_origin_dedup"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_title"
+path = "html_builder_slot_title"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots"]
+contract = "backend.html.builder_slot_title_concatenation_empty_and_fallback"
 role = "primary"
 
 [[case]]

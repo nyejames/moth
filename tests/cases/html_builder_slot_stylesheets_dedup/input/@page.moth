@@ -1,0 +1,15 @@
+@aliases docs_alias
+
+-- The direct reference, the imported alias, and the formatting-whitespace contribution all
+-- resolve to one stable resource origin and emit one link. A and B have identical bytes but
+-- distinct origins, so they remain separate links.
+
+#[$in stylesheets: [@styles/docs.css]]
+#[$in stylesheets: [docs_alias]]
+#[$in stylesheets:
+    [@styles/docs.css]
+]
+#[$in stylesheets: [@styles/a.css]]
+#[$in stylesheets: [@styles/b.css]]
+
+#[:<main>stylesheets body</main>]

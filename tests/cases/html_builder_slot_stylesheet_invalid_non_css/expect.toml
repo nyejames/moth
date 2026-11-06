@@ -1,0 +1,26 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0061"]
+
+# The authored structural contribution keeps its source span through phase-3 resource handoff.
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0061"
+reason = "invalid_html_slot_contribution.non_css_resource"
+path = "input/@page.moth"
+line = 2
+column = 3
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0061"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0061"
+reason = "invalid_html_slot_contribution.non_css_resource"
+path = "input/@page.moth"
+line = 2
+column = 3

@@ -12,8 +12,8 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::projects::html_project::html_slot_plan::HtmlSlotPlan;
 use crate::projects::html_project::output_plan::derive_logical_html_path;
-use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
 use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, ResourceUrlContext, ResourceUseKind,
 };
@@ -279,11 +279,11 @@ fn no_runtime_fragments_still_emits_start_call() {
     let plan = HtmlResourceOutputPlan::new("");
     let context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
-    let page_metadata_plan = HtmlPageMetadataPlan::default();
+    let slot_plan = HtmlSlotPlan::default();
     let html = render_html_document(
         &crate::projects::html_project::js_path::HtmlDocumentRenderInput {
             hir_module: &module.executable.hir,
-            page_metadata_plan: &page_metadata_plan,
+            slot_plan: &slot_plan,
             const_fragments: &[],
             structural_url_renderer: &renderer,
             document_config: &HtmlDocumentConfig::default(),
@@ -361,11 +361,11 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
     let plan = HtmlResourceOutputPlan::new("");
     let context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
-    let page_metadata_plan = HtmlPageMetadataPlan::default();
+    let slot_plan = HtmlSlotPlan::default();
     let html = render_html_document(
         &crate::projects::html_project::js_path::HtmlDocumentRenderInput {
             hir_module: &hir_module,
-            page_metadata_plan: &page_metadata_plan,
+            slot_plan: &slot_plan,
             const_fragments: &[],
             structural_url_renderer: &renderer,
             document_config: &HtmlDocumentConfig::default(),
@@ -421,11 +421,11 @@ fn module_script_places_escaped_import_preamble_before_the_bundle() {
     let plan = HtmlResourceOutputPlan::new("");
     let context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
-    let page_metadata_plan = HtmlPageMetadataPlan::default();
+    let slot_plan = HtmlSlotPlan::default();
     let html = render_html_document(
         &crate::projects::html_project::js_path::HtmlDocumentRenderInput {
             hir_module: &hir_module,
-            page_metadata_plan: &page_metadata_plan,
+            slot_plan: &slot_plan,
             const_fragments: &[],
             structural_url_renderer: &renderer,
             document_config: &HtmlDocumentConfig::default(),

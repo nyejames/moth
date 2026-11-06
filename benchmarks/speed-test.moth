@@ -10,6 +10,7 @@
 -- - runtime template construction in function bodies
 
 page_title #= "Moth Frontend Speed Test"
+#[$in title:[page_title]]
 accent #= "hsl(273, 92%, 63%)"
 accent_2 #= "hsl(196, 91%, 58%)"
 accent_3 #= "hsl(22, 96%, 60%)"

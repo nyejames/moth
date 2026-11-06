@@ -52,7 +52,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::generics
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::DeferredFeatureView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
-    InvalidPageMetadataView, UnsupportedBuilderPackageView,
+    InvalidHtmlSlotContributionView, UnsupportedBuilderPackageView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView, MalformedCssTemplateView,
@@ -75,8 +75,8 @@ use crate::compiler_frontend::compiler_messages::{
     HtmlTemplateWarning, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
     InvalidCompileTimePathReason, InvalidConfigReason, InvalidDependencyClauseReason,
     InvalidExpressionReason, InvalidExternalModuleReason, InvalidGenericParameterReason,
-    InvalidImportPathReason, InvalidLoopOperandReason, InvalidMapLiteralReason,
-    InvalidMutableAccessReason, InvalidOutputFolderReason, InvalidPageMetadataReason,
+    InvalidHtmlSlotContributionReason, InvalidImportPathReason, InvalidLoopOperandReason,
+    InvalidMapLiteralReason, InvalidMutableAccessReason, InvalidOutputFolderReason,
     InvalidRouteOutputReason, InvalidTemplateDirectiveReason, LoopOperandKind,
     MalformedTemplateReason, NameNamespace, NamespaceTypeValueMisuseKind, PathKind,
     SourceSpanCapacityResource, UnsupportedBackendFeatureReason,
@@ -1149,32 +1149,43 @@ pub(crate) fn render_unsupported_builder_package(
     }
 }
 
-pub(crate) fn invalid_page_metadata_message(
-    key: StringId,
-    reason: InvalidPageMetadataReason,
+pub(crate) fn invalid_html_slot_contribution_message(
+    slot: StringId,
+    reason: InvalidHtmlSlotContributionReason,
     string_table: &dyn StringTableResolver,
 ) -> String {
-    let key_str = string_table.resolve(key);
+    let slot = string_table.resolve(slot);
     match reason {
-        InvalidPageMetadataReason::NotAString => {
-            format!("Reserved HTML page metadata constant '{key_str}' must fold to a string.")
-        }
-        InvalidPageMetadataReason::DuplicateDeclaration => {
-            format!(
-                "Reserved HTML page metadata constant '{key_str}' is declared more than once for this entry page."
-            )
-        }
+        InvalidHtmlSlotContributionReason::MissingResource => format!(
+            "The `{slot}` HTML builder slot requires exactly one tracked resource reference; this contribution contains none."
+        ),
+        InvalidHtmlSlotContributionReason::NotAStaticResource => format!(
+            "The `{slot}` HTML builder slot accepts one tracked resource reference and formatting whitespace; this contribution contains literal text instead."
+        ),
+        InvalidHtmlSlotContributionReason::MultipleResources => format!(
+            "The `{slot}` HTML builder slot accepts exactly one resource reference; this contribution contains more than one."
+        ),
+        InvalidHtmlSlotContributionReason::SiteRoot => format!(
+            "The `{slot}` HTML builder slot cannot use the site root; reference one tracked resource instead."
+        ),
+        InvalidHtmlSlotContributionReason::NonCssResource => format!(
+            "The `{slot}` HTML builder slot requires a CSS resource; this contribution references a non-CSS file."
+        ),
     }
 }
-/// WHAT: renders invalid page metadata from its key and reason facts.
-/// WHY: `invalid_page_metadata_message` owns both substitutions.
-pub(crate) fn render_invalid_page_metadata(
+/// WHAT: renders one invalid HTML builder slot contribution from its slot and reason facts.
+/// WHY: `invalid_html_slot_contribution_message` owns both substitutions.
+pub(crate) fn render_invalid_html_slot_contribution(
     _diagnostic: &DiagnosticView<'_>,
-    facts: &InvalidPageMetadataView,
+    facts: &InvalidHtmlSlotContributionView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
     RenderedPayload {
-        message: invalid_page_metadata_message(facts.key, facts.reason, context.string_table),
+        message: invalid_html_slot_contribution_message(
+            facts.slot,
+            facts.reason,
+            context.string_table,
+        ),
         guidance: Vec::new(),
     }
 }

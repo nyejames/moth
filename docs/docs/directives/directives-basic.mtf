@@ -5,8 +5,8 @@ A `$` marker is not automatically harmless metadata. Compiler-owned directives m
 ### Current versus accepted syntax
 
 Today, `config.moth` uses declaration-owned `#Config of T` inputs with grouped
-parenthesised `project` and `html` records, and pages still use reserved names
-such as `page_title`. The accepted configuration shape is:
+parenthesised `project` and `html` records. Direct const root inserts supply
+HTML metadata through builder slots. The accepted configuration shape is:
 
 [codeblock, $code("moth"):
     $project(
@@ -18,11 +18,8 @@ such as `page_title`. The accepted configuration shape is:
 
 Version is optional, and there is no `entry_root`; the selected directory is the source root.
 
-`$page` will be legal only on a normal module root, or on an explicitly selected synthetic single-file root. Helper files cannot declare pages.
-
-[codeblock, $code("moth"):
-    $page(title = "Moth")
-]
+General `$entry` root-purpose validation remains queued. It does not replace
+builder slots. See @../project-structure/#entry-config (Entry metadata).
 
 ### Directive argument basics
 

@@ -1,8 +1,8 @@
 @styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
 
-page_title #= "Builder packages"
-page_description #= "HTML helpers, static site URLs, canvas drawing, WebGL2 graphics and live page state from the HTML builder."
-page_head #= language_theme_head
+#[$in title:["Builder packages"]]
+#[$in description:["HTML helpers, static site URLs, canvas drawing, WebGL2 graphics and live page state from the HTML builder."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]

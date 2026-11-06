@@ -18,8 +18,6 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::HirBlock;
-use crate::compiler_frontend::hir::const_facts::HirConstFacts;
-use crate::compiler_frontend::hir::constants::HirModuleConst;
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::failure_facts::HirFunctionFailureFacts;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
@@ -107,8 +105,8 @@ pub struct HirModule {
     /// Logical source-file path of the root file that owns the implicit entry body.
     ///
     /// WHAT: source ownership for the entry body, whose HIR function has no declaration path.
-    /// WHY: root-scoped facts such as reserved page metadata are authored beside the entry body,
-    ///      so consumers need the owning file without inventing a synthetic entry name.
+    /// WHY: root-scoped facts are authored beside the entry body, so consumers need the owning
+    ///      file without inventing a synthetic entry name.
     pub start_source_file: Option<PathId>,
     /// Classification for every function in the module.
     ///
@@ -132,18 +130,8 @@ pub struct HirModule {
         FxHashMap<ModulePrivateExecutableIdentity, PublicCallSummary>,
     pub(crate) generated_call_summaries: FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
 
-    pub module_constants: Vec<HirModuleConst>,
-
     /// Region tree
     pub regions: Vec<HirRegion>,
-
-    /// Advisory const facts projected from the AST for future optimization.
-    ///
-    /// WHAT: records which declarations are compile-time constants, their scope,
-    ///       source, value kind, and source location.
-    /// WHY: provides metadata for later borrow-checker and lowering optimizations
-    ///      without changing HIR semantics.
-    pub const_facts: HirConstFacts,
 
     /// Direct synthetic compile-time interface provenance for every local function.
     ///
@@ -209,9 +197,7 @@ impl HirModule {
             imported_call_summaries: FxHashMap::default(),
             module_private_call_summaries: FxHashMap::default(),
             generated_call_summaries: FxHashMap::default(),
-            module_constants: vec![],
             regions: vec![],
-            const_facts: HirConstFacts::default(),
             function_provenance: FxHashMap::default(),
             function_provenance_by_block: FxHashMap::default(),
             function_provenance_projection_used: false,
@@ -223,7 +209,6 @@ impl HirModule {
 
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         self.side_table.remap_path_ids(remap);
-        self.const_facts.remap_path_ids(remap);
         if let Some(path) = self.start_source_file {
             self.start_source_file = Some(remap.get(path));
         }
@@ -349,13 +334,7 @@ impl HirModule {
             }
         }
 
-        // Structural string constants carry interned `Text` handles alongside the
-        // executable lane, so they re-bind on the same merge.
-        for constant in &mut self.module_constants {
-            constant.value.remap_string_ids(remap);
-        }
         self.side_table.remap_string_ids(remap);
-        self.const_facts.remap_string_ids(remap);
     }
 
     pub(crate) fn require_start_function(

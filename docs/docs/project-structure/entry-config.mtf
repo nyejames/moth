@@ -1,6 +1,6 @@
-**Current support versus accepted design.** Explicit `@project` is implemented. HTML pages currently become entries from root runtime work or fragments and use reserved `page_title`, `page_head` and related names. Root-only `$page`, explicit purposes and capability-checked `io.set_title` are accepted queued design. Keep live operational `page_*` declarations until that cutover. See @../progress (Progress) and @../progress/packages-and-builders (Packages and builders).
+HTML pages currently become entries from root runtime work or fragments. Direct const root inserts supply builder metadata. A general `$entry` purpose and capability-checked `io.set_title` remain queued. See @../progress (Progress) and @../progress/packages-and-builders (Packages and builders).
 
-This page owns entry metadata and page directives. It no longer describes accepted `config:` blocks.
+This page describes entry metadata and its relationship to project configuration.
 
 ### The `@project` namespace
 
@@ -22,85 +22,55 @@ bindings do not become project metadata merely because they exist.
 See @#project-config (Project configuration) for the field contract and
 @#build-inputs (Build configuration values) for independent input resolution.
 
-### `$page`
+### HTML builder slots
 
-`$page` is accepted queued HTML-builder metadata and the first planned root purpose. Bare `$page` uses the declared defaults. `$page()` is invalid.
+Use direct top-level const inserts on an active root to supply document metadata:
 
 [codeblock, $code("moth"):
-    $page(
-        title = "Moth",
-        description = "A language for creating reliable software",
-        lang = "en",
-        favicon = @assets/favicon.svg,
-    )
+    #[$in title:Moth]
+    #[$in description:A language for creating reliable software]
+    #[$in lang:en]
+    #[$in favicon:[@assets/favicon.svg]]
+    #[$in stylesheets:[@styles/site.css]]
+    #[$in head:<meta name="theme-color" content="#ffffff">]
+    #[: <main>Hello Moth</main>]
 ]
 
-The positional parameter order is `title`, `description`, `lang`, `favicon`, `body_style`, `head`. All six accept compile-time `String?` values, including structural resource-bearing Strings, and default to `none`.
+The HTML builder registers `title`, `description`, `lang`, `favicon`,
+`body_style`, `stylesheets` and `head`. Ordinary top-level const and runtime
+fragments render into the body. A nested or aliased `$in` remains a template
+composition helper, not a builder message. Helper files and imported roots do
+not contribute to the selected entry.
 
-Placement:
+Repeated `title`, `description`, `lang`, `favicon` and `body_style`
+contributions concatenate in source order. Template body whitespace remains
+part of each value, including a space immediately after `:`. A supplied empty
+value counts as present. An absent title uses the route, then project name, with the configured
+title prefix and postfix. An absent description emits no description element.
+Absent language, favicon and body style use the HTML builder defaults.
 
-- top level of a normal module root, at most once
-- the explicitly selected synthetic single-file root, at most once
-- invalid in helper files, support roots, facades, `config.moth`, bodies, `export:` and a second `$page` in the same root
+The builder escapes title text and attribute values. It inserts `head` as raw
+HTML after its dedicated head content. It removes only repeated complete head
+contributions that render identically in the page's URL context. It does not
+rewrite duplicates inside one contribution.
 
-`$page` describes the whole root. Same-file forward references in its arguments remain invalid.
+Each `stylesheets` contribution must contain exactly one tracked CSS resource
+and optional formatting whitespace. Plain paths, external URLs, site-root
+values, non-CSS resources and combined resources are invalid. The builder
+deduplicates by stable resource origin, keeps the first occurrence and renders
+the URL relative to each output page. Use `head` for an external stylesheet.
 
-### Initial document metadata
+Resource and site-root pieces retain their identity through folding and output
+planning. Named contributions keep their tracked resources live, including on
+metadata-only pages. The builder does not scan rendered HTML for paths. The
+former `page_title`, `page_description`, `page_lang`, `page_favicon`,
+`page_body_style` and `page_head` names are ordinary constants with no implicit
+document effect.
 
-Every parameter is `String? = none`. `none` means no page override, including
-when supplied explicitly. A present empty String remains a present value where
-the existing metadata domain permits it.
+### Future entry purpose and runtime title
 
-- A present `title` supplies the base title. Otherwise use the existing
-  route-title fallback, then the project name. Apply the builder's initial title
-  prefix and postfix to that base title.
-- An absent `description` emits no description element. Absent `lang`,
-  `favicon` and `body_style` use the HTML builder's document defaults.
-- An absent `head` adds no markup. A present `head` is one folded String
-  inserted as HTML with its meaningful whitespace preserved.
-
-Escape title text and attribute values for their existing HTML contexts.
-`head` is deliberately authored HTML, not title text. Compose it through normal
-constant/template expressions. There are no typed head nodes, repeated-call
-merges, `+=` metadata updates or last-write-wins behaviour.
-
-These are specific document-shell fallbacks, not generic inheritance between
-project and page configuration. Keep the same shell policy for HTML-JS and the
-existing HTML-Wasm output path.
-
-### Metadata ownership and resources
-
-Arguments use ordinary root-file compile-time visibility, including earlier
-same-file constants, dependency-bound constants, explicit `@project` members
-and resolved source configuration values. Same-file forward references remain
-invalid.
-
-The module folds its own metadata once and stores owned non-HIR facts. Provider
-metadata never becomes consumer metadata, and entry activation never compiles
-it again. Resource and site-root anchors survive folding and remapping until
-output planning. Retain the authored argument spans on metadata resource uses.
-
-A tracked favicon enters the ordinary graph and resource pipeline. Only uses
-reachable from selected metadata, fragments or code enter output unions.
-Builder resource handling never scans rendered HTML or HIR constant names.
-A metadata-only page can therefore emit its document and resources without
-artificial runtime work.
-
-Runtime title mutation is a separate, queued Core IO capability. Its exact
-behaviour is defined in @../packages/core/io/ (Core IO).
-
-
-### Explicit root purpose in entry metadata
-
-Top-level executable work or direct output requires a recognised purpose with a consumer. Only `$page` works initially. Functions, types and constants without purpose remain a valid API-only root. Semantically classified `$doc`, `$note` or `$todo` templates do not require a purpose. Future `$test` is a later non-page purpose; it cannot satisfy validation until implemented.
-
-### Command policy
-
-A declaration-only root at the selected project directory is valid. HTML application `build` and `dev` need a page somewhere below it, not necessarily a homepage at that root. `check` accepts valid zero-page projects and still rejects unpurposed runtime work. Single-file HTML output requires `$page`.
-
-### Current page metadata
-
-Until the cutover, operational pages keep reserved names such as `page_title` and `page_head`. Do not add live `$page` statements merely because this page documents them.
+General `$entry` purpose validation and `io.set_title` remain queued. They do
+not replace builder slots or change the current active-root policy.
 
 ### Concepts related to entry metadata
 

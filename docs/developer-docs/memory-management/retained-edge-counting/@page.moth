@@ -1,9 +1,9 @@
 @retained-edge-counting content as reference_content
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-page_title #= "Retained Edge Counting"
-page_description #= "The narrow counted strategy for runtime-many persistent retained edges."
-page_head #= theme_head
+#[$in title:["Retained Edge Counting"]]
+#[$in description:["The narrow counted strategy for runtime-many persistent retained edges."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]

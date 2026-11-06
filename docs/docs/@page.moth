@@ -1,8 +1,8 @@
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-page_title #= "Documentation"
-page_description #= "Moth language, project and compiler documentation."
-page_head #= theme_head
+#[$in title:["Documentation"]]
+#[$in description:["Moth language, project and compiler documentation."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]

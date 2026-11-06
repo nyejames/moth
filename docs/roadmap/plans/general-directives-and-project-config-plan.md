@@ -48,7 +48,7 @@ This plan delivers:
 5. Updated generated config, migrated first-party config inputs and truthful documentation/status.
 6. Targeted recognition of the agreed deferred directive names, without their semantics.
 
-The later HTML entry work delivers `$page`, explicit root-purpose enforcement, page-metadata migration and runtime title mutation. Until that cutover, the current HTML entry and `page_*` mechanism remains the one working page path. This plan may recognise `$page` as unavailable, but cannot make it a working or no-op directive.
+The later entry work delivers general `$entry` purpose enforcement and runtime title mutation. The active builder slots plan owns HTML metadata, independently of that directive. This plan may recognise `$entry` as unavailable, but cannot make it a working or no-op directive.
 
 ## 1. Directive vocabulary and ownership
 
@@ -61,7 +61,7 @@ The registry contract separates owner, permitted context, argument signature, pr
 | Template directive | Compiler or builder. Existing constrained template formatting, composition and lexical contracts apply. |
 | Declaration modifier | Compiler-owned when it changes language semantics. `$config` is the first implemented source modifier. |
 | Standalone project configuration | Compiler-owned project contract or builder-owned settings, valid only in `config.moth`. |
-| Standalone normal-root metadata or purpose | Builder-owned metadata consumed by entry planning. `$page` is delivered later. |
+| Standalone normal-root purpose | Compiler-owned purpose consumed by entry planning. `$entry` is delivered later. |
 | Source block or structural selection | Compiler-owned only. All such implementations are deferred. |
 
 Builders may consume folded metadata and supply lifecycle/entry inputs. They cannot add source declarations, rewrite functions, change nominal identity, mutate HIR, alter visibility or bypass borrow/lifetime rules. Template extension powers do not authorise arbitrary source parsers or function transformations.
@@ -261,7 +261,7 @@ Migrate the existing HTML settings into one closed directive signature. The posi
 
 The signature's defaults replace repeated fallback/default filling in downstream settings readers. Keep specialised domain checks with their existing owners. Configuration signatures and page signatures stay distinct. Preserve explicitly documented HTML document fallbacks, but add no generic cross-scope field inheritance or merge system.
 
-Config still rejects source dependencies and authored file-value paths because its source graph does not exist yet. A favicon here can be a literal URL. Tracked file resources belong in the later root-local `$page` metadata path.
+Config still rejects source dependencies and authored file-value paths because its source graph does not exist yet. A favicon here can be a literal URL. Tracked file resources belong in root-local builder slots.
 
 No inactive-builder registration or validation is implemented. Known unavailable directives error. Unknown directives error. Multi-builder source/configuration awaits structural `$feature` selection. The HTML-only initial product does not justify scattering hard-coded builder-name conditionals through compiler semantics.
 
@@ -292,7 +292,7 @@ Later consumers receive typed configuration and metadata. They do not compare di
 
 ## 7. Deferred vocabulary and limits
 
-Recognise the agreed future names for useful diagnostics: `$feature`, `$layout`, `$export`, `$async`, `$checked`, `$test` and the queued HTML `$page`. Keep ownership/context information sufficient to distinguish an unknown name, wrong context and recognised-but-unimplemented capability.
+Recognise the agreed future names for useful diagnostics: `$feature`, `$layout`, `$export`, `$async`, `$checked`, `$test` and the queued `$entry`. Keep ownership/context information sufficient to distinguish an unknown name, wrong context and recognised-but-unimplemented capability.
 
 A deferred registration cannot validate successfully as a no-op or count as a working root purpose. Move existing reserved/deferred `async:` and `checked:` recognition to the `$async:` and `$checked:` spellings without implementing their bodies. Release their old keyword reservations when that recognition moves. Ordinary identifier and named-region rules then apply to `async` and `checked`, without migration-specific recognition. Retain independent async vocabulary such as `yield` unless its own authority changes. The implemented `export:` keyword block stays intact until the separate export migration.
 
@@ -326,7 +326,7 @@ Migrate all operational `config.moth` inputs and actual declaration-owned `#Conf
 
 Release the grouped parenthesised `project #= (...)`/`html #= (...)` bootstrap names and `Config` identifier reservations. Ordinary records with these names acquire no settings effect. Missing required directives then use normal missing-configuration diagnostics. Remove declaration-bootstrap-only parsers, special spacing rules, grouped-record scanning and migration-only compatibility paths. A user-defined type named `Config` follows ordinary type syntax, so removal does not mean banning every textual `#Config` substring.
 
-Keep the existing operational page template and `page_*` extraction working at this plan's completion. The later page cutover migrates those together. Delivered template-list consolidation is consumed, not reimplemented; remaining fixture updates here do not authorise early `$page` activation.
+Preserve the operational page template and the builder slot metadata contract at this plan's completion. Delivered template-list consolidation is consumed, not reimplemented; fixture updates here do not authorise early `$entry` activation.
 
 ## 9. Current owner map
 

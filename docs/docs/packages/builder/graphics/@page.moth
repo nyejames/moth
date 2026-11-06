@@ -8,9 +8,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "@web/graphics"
-page_description #= "WebGL2 rendering as a builder binding-backed runtime package."
-page_head #= language_theme_head
+#[$in title:["@web/graphics"]]
+#[$in description:["WebGL2 rendering as a builder binding-backed runtime package."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]

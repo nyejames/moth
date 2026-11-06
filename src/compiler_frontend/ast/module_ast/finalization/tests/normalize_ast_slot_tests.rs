@@ -10,7 +10,7 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueMetadata;
 ///
 /// WHAT: gives the resolver a module-local root plus the slot-resolution
 ///       overlay that makes the template an effective wrapper value.
-/// WHY: const-fact classification must preserve the overlay-backed wrapper
+/// WHY: template classification must preserve the overlay-backed wrapper
 ///      category rather than reading only the structural root.
 fn build_resolved_slot_template_store() -> (Template, Rc<RefCell<TemplateIrStore>>) {
     let location = None;
@@ -100,7 +100,6 @@ fn slot_bearing_module_constant_classifies_through_effective_tir_view() {
             value,
             ConstTemplateValue::Public {
                 kind: ConstValueKind::TemplateWrapper,
-                hir_visible: true,
                 folded: Some(_),
                 ..
             }

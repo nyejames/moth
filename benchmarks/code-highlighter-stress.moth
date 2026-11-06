@@ -126,6 +126,7 @@ push |this {I32}, value I32|:
 
 -- constants and literal values
 page_title #= "Highlighter stress"
+#[$in title:[page_title]]
 max_attempts #= 1_000
 step #= 1.5
 rate #= 1e6

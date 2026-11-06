@@ -3692,7 +3692,6 @@ fn const_record_module_constant_field_access_lowers_field_value_without_struct_c
         ConstValueMetadata::resolved(palette_type_id, span, ValueMode::ImmutableOwned);
     palette_metadata.const_record_state = ConstRecordState::ConstRecord;
     palette_metadata.value_kind = ConstValueKind::Composite;
-    palette_metadata.hir_visible = false;
     let palette_constant = constants
         .insert_value(
             palette_metadata,

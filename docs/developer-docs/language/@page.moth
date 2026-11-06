@@ -1,8 +1,8 @@
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-page_title #= "Compiler-facing language reference"
-page_description #= "Canonical language references and related compiler design documentation."
-page_head #= theme_head
+#[$in title:["Compiler-facing language reference"]]
+#[$in description:["Canonical language references and related compiler design documentation."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]

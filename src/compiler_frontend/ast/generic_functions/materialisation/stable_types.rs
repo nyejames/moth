@@ -509,7 +509,6 @@ pub(super) fn import_canonical_folded_value(
                     contains_regular_division: false,
                     synthetic_interface_provenance: Default::default(),
                     value_kind: ConstValueKind::Composite,
-                    hir_visible: true,
                 },
                 ConstValuePayload::Collection(items),
             )
@@ -610,7 +609,6 @@ pub(super) fn import_canonical_folded_value(
                     contains_regular_division: false,
                     synthetic_interface_provenance: Default::default(),
                     value_kind: ConstValueKind::Composite,
-                    hir_visible: true,
                 },
                 ConstValuePayload::Choice { nominal_path, tag: variant.tag, fields },
             )
@@ -645,7 +643,6 @@ pub(super) fn import_canonical_folded_value(
                     contains_regular_division: false,
                     synthetic_interface_provenance: Default::default(),
                     value_kind: ConstValueKind::Composite,
-                    hir_visible: true,
                 },
                 ConstValuePayload::Range { start: start_id, end: end_id },
             )
@@ -677,7 +674,6 @@ pub(super) fn import_canonical_folded_value(
                     contains_regular_division: false,
                     synthetic_interface_provenance: Default::default(),
                     value_kind: ConstValueKind::Composite,
-                    hir_visible: true,
                 },
                 ConstValuePayload::OptionSome(inner),
             )
@@ -711,7 +707,6 @@ pub(super) fn import_canonical_folded_value(
                     contains_regular_division: false,
                     synthetic_interface_provenance: Default::default(),
                     value_kind: ConstValueKind::Literal,
-                    hir_visible: true,
                 },
                 ConstValuePayload::OptionNone,
             )
@@ -749,7 +744,6 @@ fn insert_literal(
             contains_regular_division: false,
             synthetic_interface_provenance: Default::default(),
             value_kind: ConstValueKind::Literal,
-            hir_visible: true,
         },
         payload,
     )
@@ -789,9 +783,9 @@ fn import_const_template(
     const_values: &mut ConstValueStore,
     span: Option<SourceSpan>,
 ) -> Result<ConstValueId, ConstValueStoreError> {
-    let (kind, hir_visible) = match template.kind {
-        PublicConstTemplateKind::Wrapper => (ConstValueKind::TemplateWrapper, true),
-        PublicConstTemplateKind::SlotInsert(_) => (ConstValueKind::SlotInsertTemplate, false),
+    let kind = match template.kind {
+        PublicConstTemplateKind::Wrapper => ConstValueKind::TemplateWrapper,
+        PublicConstTemplateKind::SlotInsert(_) => ConstValueKind::SlotInsertTemplate,
     };
     const_values.insert_value(
         ConstValueMetadata {
@@ -802,7 +796,6 @@ fn import_const_template(
             contains_regular_division: false,
             synthetic_interface_provenance: Default::default(),
             value_kind: kind,
-            hir_visible,
         },
         ConstValuePayload::Template {
             template: template.clone(),
@@ -845,7 +838,6 @@ fn import_anonymous_record(
         ConstValueMetadata::resolved(expected_type_id, span, ValueMode::ImmutableReference);
     metadata.const_record_state = ConstRecordState::ConstRecord;
     metadata.value_kind = ConstValueKind::Composite;
-    metadata.hir_visible = false;
     const_values.insert_value(metadata, ConstValuePayload::Record(projected))
 }
 #[allow(
@@ -874,7 +866,6 @@ fn import_record_fields(
         ConstValueMetadata::resolved(expected_type_id, span, ValueMode::ImmutableReference);
     if const_record {
         metadata.const_record_state = ConstRecordState::ConstRecord;
-        metadata.hir_visible = false;
     }
     metadata.value_kind = ConstValueKind::Composite;
     const_values.insert_value(metadata, ConstValuePayload::Record(fields))
