@@ -1,173 +1,105 @@
-**Mixed current and accepted design.** `$` is the general directive marker. Template directives are implemented. General non-template directives, shared directive-call integration, `$config`, `$project` and `$html_builder` remain accepted design queued for implementation and are not yet available in the Alpha compiler. Current projects use grouped `project`/`html` records and `#Config of T` contracts. HTML document metadata uses direct const root inserts through builder slots; the former `page_*` names have no reserved effect. A general `$entry` root purpose and `io.set_title` are later deferred work. See @../progress (Progress) for current support.
+**Current support and accepted design.** Template-head directives are implemented. General source and module-root directives are accepted design but are not yet available in the Alpha compiler. The queued general-directives plan introduces `$config` and `$entry`. `config.moth` retains its named `project` and builder-specific records. See @../progress (Progress) for current support.
 
-`$` does not mean harmless metadata. Compiler-owned semantic directives may impose real language or structural contracts. Builder extensions remain constrained: they may supply template directives and consume metadata, configuration and root-purpose facts, but they cannot rewrite functions, change nominal identity, mutate HIR, alter visibility or weaken borrow and lifetime rules.
+A directive modifies an existing construct. Template-head directives modify their template, module-root directives modify their module and other source directives modify the following eligible construct.
 
-This page owns general grammar, ownership, context, arguments, attachment and diagnostic distinctions. Exact `$project`, `$config` and `$html_builder` signatures live in the project-structure references linked below.
+### Three attachment locations
 
-### Marker and non-goals
-
-In the accepted directive design, `$` introduces a registered compiler or builder directive, not a binding mode, ordinary expression or source-defined callable. The former `$Type` and `$=` binding spellings are not part of the current binding grammar. Wiring uses parameter contracts and no `$` marker. There is no accepted `with` attribute keyword.
-
-Users and source packages cannot define, alias, import or override semantic directives. Frontend names are authoritative. Duplicate registrations and name conflicts are rejected rather than resolved by last registration.
-
-Directive names do not reserve the corresponding ordinary identifiers. `$project`, `$config` and `$html_builder` do not reserve `project`, `config`, `Config` or `html_builder` outside directive syntax. File semantics for `config.moth` and the `@project` dependency root remain separately reserved.
-
-This is not a generic attribute or macro framework. It does not guarantee that every future directive can target every statement.
-
-### Ownership and context
-
-Config-only is a placement and processing-phase restriction. It is not a second registry and is not synonymous with compiler ownership.
+The directive's compiler-defined contract determines its kind. **Position never changes a directive's kind.** In particular, a declaration modifier placed first in a root file still modifies the following declaration.
 
 [table:
     [th:
-        [: Category]
-        [: Owner]
-        [: Context]
+        [: Location]
+        [: Target]
+        [: Example]
     ]
 
     [td:
-        [: Template directive]
-        [: Compiler or builder]
-        [: A template head, including the head of a nested template]
+        [: Inside a template head]
+        [: That template]
+        [: `[$slot title]` or `[$md: text]`]
     ]
 
     [td:
-        [: Declaration modifier]
-        [: Compiler]
-        [: `$config` on one eligible compile-time declaration. Future `$layout` and `$export` have separate semantic contracts; `$export` block support remains undecided]
+        [: Beginning of a normal module root file]
+        [: The containing implicit module root, for a designated root directive only]
+        [: `$entry`]
     ]
 
     [td:
-        [: Project configuration]
-        [: Compiler-owned `$project` or builder-owned `$html_builder`]
-        [: Standalone items in `config.moth` only]
-    ]
-
-    [td:
-        [: Normal-root purpose]
-        [: Builder]
-        [: Future root-only `$entry` on a normal module root. Builder metadata instead uses direct const root inserts through builder slots]
-    ]
-
-    [td:
-        [: Semantic source block]
-        [: Compiler]
-        [: Future `$async:` and `$checked:` blocks. Their implementations remain deferred]
-    ]
-
-    [td:
-        [: Structural source selection]
-        [: Compiler]
-        [: Future `$feature` selection before graph and declaration publication]
+        [: Before a source declaration or statement]
+        [: Exactly the next eligible construct]
+        [: `$config` followed by `api_url #String`]
     ]
 ]
 
-`$html_builder` is HTML-builder-owned and config-only. `$project` is compiler-owned at the language boundary and config-only. The existing build owner still applies validated project settings. `$config` is compiler-owned and legal in both bootstrap and specified source declarations.
+A module-root directive must be the first meaningful item in its **root file**, on its own line. Leading whitespace and comments are permitted. It cannot appear in a helper, support facade, configuration file, function, export block or template. Only `$entry` has this role in the accepted design. It marks eligibility for builder entry selection, does not activate the implicit `start` and introduces no binding or scope.
 
-### Arguments
-
-Handler directives that take parameters use one ordinary call parser, one parameter-slot router and one default validator.
-
-- A directive with supplied arguments uses `$name(arguments)`.
-- A directive with no supplied arguments uses `$name`.
-- Authored empty `()` is invalid for directives, even when every parameter has a default.
-- Ordinary function calls keep `f()`. Only the directive entry boundary rejects empty parentheses.
-- Arguments and defaults are compile-time values. Runtime values, exclusive or mutable arguments and escaping control flow are invalid.
-- Positional arguments, named arguments, ordering, duplicates, unknown names, commas and multiline whitespace use the shared call owner.
+A source modifier attaches to one immediately following eligible construct in the same scope. Its own line is followed by the target's next line, or by contiguous comment-only lines and then the target. **Blank lines between a source modifier and its target are invalid.** Multiple blank lines are not a special case: even one empty line breaks attachment. Comments alone do not break attachment, but a blank line among them does. A modifier cannot cross another source item, an ending scope or a module boundary. Compatible consecutive modifiers may stack without blank lines. A dangling, duplicate or incompatible modifier is an error. The root and template rules do not impose this next-line spacing restriction on template body content or the text following `$entry`.
 
 [codeblock, $code("moth"):
-    $project("my_site", "0.1.0")
-    $html_builder
-]
-
-The same project invocation may use named arguments: `$project(name = "my_site", version = "0.1.0")`. These are alternative spellings of the one required invocation, not two invocations in one config file.
-
-`$project()` and `$html_builder()` are invalid. Bare `$html_builder` still runs required-parameter and default validation.
-
-Core template directives do not use the call form:
-
-- `$slot`, `$slot name` and `$slot 1` declare the default, named or positional slot. An occurrence may add `= <compile-time String>`.
-- `$in name` contributes to a named slot. Its target is a bare symbol, not an expression; `$in 1:` is invalid and positional slots receive loose contributions instead.
-- `$before = <constant value>` and `$after = <constant value>` wrap direct children. Each accepts a compile-time String or a constant template wrapper, may occur once per head and requires named slots only inside the value.
-- `$fresh` takes no value.
-
-The removed `$slot(...)`, `$insert(...)` and `$children(...)` spellings have no alias or transition mode. Handler directives such as `$code(language)` still use the shared call owner. See @../templates/#template-directives (Template directives).
-
-### Attachment
-
-The descriptor fixes the directive's form.
-
-- `$project` and `$html_builder` are standalone items. They never modify the next declaration.
-- `$config` modifies exactly one following declaration, ignoring ordinary lexer trivia such as whitespace and `--` comments. It does not cross an intervening source item or block boundary.
-- A dangling `$config` is an error. Duplicate `$config` modifiers on one declaration are errors.
-- Source modifiers may occupy their own line or precede their target on the same line where ordinary token boundaries permit it. Documentation uses the separate-line form.
-- Standalone directives follow ordinary item boundaries. There is no semicolon statement terminator, comma-separated `with` clause or new block delimiter.
-
-### Unknown, unavailable and placement
-
-Recognition, permitted placement, diagnostics and tooling share one registration authority. Context is checked after name recognition.
-
-- An unknown directive in active source is an error.
-- A known but unimplemented directive is a deferred-feature diagnostic, never a successful no-op and never a working root purpose.
-- A known directive in the wrong place receives a placement diagnostic.
-- Ordinary static `if false` does not suppress frontend directive errors. Both branches remain frontend-valid.
-
-### Configuration example
-
-Accepted `config.moth` shape:
-
-[codeblock, $code("moth"):
-    $project(
-        name = "my_site",
-    )
-
-    $html_builder
-]
-
-Version is optional. To supply one, declare an earlier `$config` contract or use a fixed literal:
-
-[codeblock, $code("moth"):
+    -- Accepted source modifier syntax:
     $config
-    version #String? = none
+    api_url #String = "https://example.com"
 
-    $project(
-        name = "my_site",
-        version = version,
-    )
-
-    $html_builder
+    -- Accepted module-root syntax (in a normal @ root):
+    $entry
 ]
 
-A project field named `version` does not satisfy a source input contract. `$project` has no `entry_root`; the selected directory is the source root.
+The examples above describe accepted syntax, not current Alpha compiler support.
 
-Exact field tables, optional version, explicit-only input providers and HTML settings live in @../project-structure/#project-config (Project config) and @../project-structure/#build-inputs (Build configuration values).
+### Operands and ownership
 
-### Entry purpose and builder metadata
+The compiler defines directive names, valid target kinds, phases and operand contracts. A directive has at most one optional compile-time operand:
 
-General `$entry` root-purpose validation remains queued. The earlier `$page`
-proposal is superseded and is not current syntax. HTML document metadata uses
-direct const root inserts through builder slots:
+[codeblock, $code("text"):
+    $name
+    $name value
+    $name key = value
+]
+
+A named operand is one key/value pair, not a parameter list. It has no authored type annotation. Values reuse existing compile-time expression rules where the directive permits a value. A directive may require a specific literal shape, phase or value type. Mutable, runtime or side-effectful operands are invalid. Call-style `$name(...)` and arbitrary `$name: ... ;` source blocks are outside this contract. Ordinary Moth calls such as `f()` are unaffected.
+
+Template heads keep their own delimiters and static slot labels. `$slot title`, `$slot 1`, `$slot title = "Fallback"`, `$in title` and `$fresh` are examples. Current `$before = value` and `$after = value` wrappers migrate to `$before value` and `$after value` under the general plan. `$code("moth")` migrates to a single operand. These are syntax migrations, not new template behaviours. See @../templates/#template-directives (Template directives).
+
+Directives are compiler-owned modifiers, not attributes available to arbitrary source code, macros, user-defined annotations or new independent control-flow constructs. Builders may supply configuration and destination schemas, but cannot register new directive names or semantic callbacks once the general plan lands. Directive names do not reserve matching ordinary source identifiers.
+
+### Examples and contexts
+
+- `$config` marks one explicitly typed top-level compile-time `#` constant as an input contract. Its type and fallback are written on the declaration itself. It is valid in selected bootstrap configuration and eligible selected source modules. `#Config of T` remains the operational spelling until this migration.
+- `$entry` is a bare, argument-free normal-module-root directive. There is no `$entry()` form and `$page` is not an alias.
+- `$test`, `$export`, `$layout` and computation constraints are separate planned designs. Their exact targets and semantics are not implemented by this reference.
+- `$async` and `$checked` remain undecided proposals. Their earlier block spellings do not establish a general-purpose directive block grammar.
+- Project and active-builder settings remain ordinary named compile-time records inside `config.moth`. There are no accepted `$project`, `$builder` or `$html_builder` directives.
 
 [codeblock, $code("moth"):
-    #[$in title:Moth]
-    #[$in description:A language for creating reliable software]
-    #[$in favicon:[@assets/favicon.svg]]
+    -- Operational named configuration records:
+    project #= (
+        name = "my_site",
+    )
+
+    html #= ()
 ]
 
-See @../project-structure/#entry-config (Entry metadata and builder slots) for
-the builder slot contract and current entry policy. Runtime top-level templates
-do not provide named builder slots.
+See @../project-structure/#project-config (Project configuration), @../project-structure/#build-inputs (Build configuration values) and @../project-structure/#entry-config (Entry metadata and builder slots).
 
-### Future blocks
+### Diagnostics and recovery
 
-Future compiler-owned blocks use `$name(...): ... ;` or `$name: ... ;`. `$async:` and `$checked:` are the accepted future source-block spellings. Recognition of a name for diagnostics is not semantic implementation. Block bodies, `$feature` predicate algebra, `$layout` representation contracts, `$export` migration and `$test` as a later non-page purpose remain future work.
+The compiler recognises a known directive name **before** validating context, so a known directive outside its allowed location receives a placement diagnostic rather than an unknown-directive or generic invalid-character diagnostic. Distinguish unknown names, known but unavailable/deferred names, invalid target kinds, invalid operand shapes, incompatible combinations and root-only placement errors.
 
-`$feature` is structural source selection before graph and declaration publication. Ordinary `$config` values and static `if` cannot remove declarations or dependencies. Multi-builder projects wait for `$feature`.
+Diagnostics should identify the directive's authored span, the attachment it attempted and the nearest useful fix:
 
-### Related concepts
+- `$entry` after a declaration: move `$entry` to the beginning of the normal root file. A duplicated `$entry` identifies the original marker as well.
+- `$entry` in a helper, `+` facade, `config.moth` or nested scope: the directive belongs only at the start of an eligible normal root.
+- `$config` separated from its declaration by an empty line or a scope boundary: place the target directly after the modifier. A wrong target, such as a function or local value, identifies the allowed declaration kind.
+- `$md` in ordinary source or `$config` inside a template head: use the valid directive context. A `$slot` in a malformed head receives the existing template-head structural diagnostics.
+- An unknown directive receives a name diagnostic, while a recognised but not implemented directive receives the established deferred-feature diagnostic. Neither is a successful no-op.
 
-- For template-specific directive meanings see @../templates/#template-directives (Template directives).
-- For project and HTML configuration signatures see @../project-structure/#project-config (Project config).
-- For input contracts see @../project-structure/#build-inputs (Build configuration values).
-- For builder slots and future root purpose see @../project-structure/#entry-config (Entry metadata and builder slots).
-- For accepted, deferred and excluded boundaries see @../design-scope (Design scope).
+Do not diagnose a valid first-file `$config` as root-scoped. Do not infer directive kind from capitalisation or add a second spelling for root directives. CRLF and LF line endings must give the same results. A malformed directive must not consume unrelated following source during recovery.
+
+### Related references
+
+- @../templates/#template-directives (Template directives)
+- @../project-structure/#project-config (Project configuration)
+- @../project-structure/#build-inputs (Build configuration values)
+- @../project-structure/#entry-config (Entry metadata and builder slots)
+- @../design-scope (Design scope)
