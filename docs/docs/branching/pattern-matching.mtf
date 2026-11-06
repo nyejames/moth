@@ -48,7 +48,8 @@ A match can produce values with `then` at a closed receiving site.
 ]
 
 Every selected value-producing arm must produce the receiver's required values
-or terminate.
+or leave the value-producing block, including through `break` or `continue`
+targeting an enclosing loop.
 
 ### Single-predicate value match
 

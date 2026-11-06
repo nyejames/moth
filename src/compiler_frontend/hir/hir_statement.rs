@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, LoopBindings, MultiBindTarget, MultiBindTargetKind, NodeKind, RangeLoopSpec,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    ExprId, ExpressionOperationView, ExpressionStore, ExpressionView, PlaceView,
+    ExprId, ExpressionStore, ExpressionView, PlaceView,
 };
 
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
@@ -542,16 +542,13 @@ impl<'a> HirBuilder<'a> {
         Ok(())
     }
 
+    /// Reads a folded `Bool` condition from the shared AST constant authority.
+    ///
+    /// WHY: HIR lowering must classify assertion and loop conditions exactly as the AST exit
+    /// analysis does. Re-deriving a literal-only match here would disagree with a named
+    /// constant or a body-local `#=` binding and leave an accepted body without a terminator.
     pub(super) fn expression_constant_bool(&self, expression: ExpressionView<'_>) -> Option<bool> {
-        let ExpressionOperationView::Constant(value) = expression.operation() else {
-            return None;
-        };
-        match self.module_const_values.payload(value) {
-            Some(crate::compiler_frontend::ast::const_values::store::ConstValuePayload::Bool(
-                value,
-            )) => Some(*value),
-            _ => None,
-        }
+        self.module_const_values.folded_bool_value(expression)
     }
 
     // -------------------------

@@ -725,6 +725,29 @@ fn rejects_catch_handler_without_fallback_when_handler_can_fall_through() {
 }
 
 #[test]
+fn accepts_catch_handler_ending_in_loop_exit_inside_loop() {
+    for exit in ["break", "continue"] {
+        let source = format!(
+            "can_error || -> I32, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |keep_going Bool| -> I32:\n    loop keep_going:\n        output = can_error() catch:\n            {exit}\n        ;\n        return output\n    ;\n    return 0\n;\n"
+        );
+        let (ast, path_fork, string_table) = parse_single_file_ast(&source);
+        let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
+        assert!(
+            matches!(body[0].kind, NodeKind::WhileLoop(..)),
+            "the accepted value-required catch handler stays inside its loop"
+        );
+    }
+}
+
+#[test]
+fn rejects_catch_handler_whose_nested_loop_consumes_its_break() {
+    assert_invalid_fallible_handling(
+        "can_error || -> I32, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |keep_going Bool| -> I32:\n    loop keep_going:\n        output = can_error() catch:\n            loop true:\n                break\n            ;\n        ;\n        return output\n    ;\n    return 0\n;\n",
+        InvalidFallibleHandlingReason::CatchHandlerCanFallThrough,
+    );
+}
+
+#[test]
 fn rejects_catch_handler_if_without_else_even_when_then_branch_returns() {
     assert_invalid_fallible_handling(
         "can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String, route Bool| -> String:\n    return can_error(value) catch:\n        if route:\n            return \"fallback\"\n        ;\n    ;\n;\n",

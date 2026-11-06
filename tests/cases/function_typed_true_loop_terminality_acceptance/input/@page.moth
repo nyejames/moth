@@ -1,0 +1,36 @@
+-- A folded-true loop with no self-targeting break proves non-fallthrough, so a typed function
+-- does not need a trailing return.
+forever || -> I32:
+    loop true:
+        continue
+    ;
+;
+
+-- Falling off the body starts another iteration just like `continue`.
+forever_falls_through || -> I32:
+    loop true:
+        io.line("never runs")
+    ;
+;
+
+-- A body-local folded Bool reaches AST and HIR through the same constant store.
+body_local || -> I32:
+    on #= true
+    loop on:
+        continue
+    ;
+;
+
+-- A letting value block may produce on one branch and diverge on another.
+choose |ready Bool| -> I32:
+    value = if ready:
+        then 7
+    else
+        loop true:
+            continue
+        ;
+    ;
+    return value
+;
+
+[:function_typed_true_loop_terminality_acceptance [choose(true)]]

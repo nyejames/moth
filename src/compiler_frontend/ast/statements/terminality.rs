@@ -1,41 +1,26 @@
 //! Function-body terminality validation.
 //!
-//! WHAT: checks that a function body is guaranteed to terminate on every reachable path before
+//! WHAT: checks that a function body is guaranteed to exit on every reachable path before
 //! control can fall off the end of the function.
 //! WHY: AST owns this user-facing rule diagnostic so HIR lowering only needs to handle
 //! infrastructure invariants. Keeping the check at the AST stage lets body parsing emit a
 //! source-level diagnostic tied to the function declaration.
 //!
-//! ## Rules
-//!
-//! This is a conservative, control-flow-only analysis. It does not evaluate runtime conditions
-//! beyond structurally-folded `assert(false)`.
-//!
-//! - `Return(_)` and `ReturnError(_)` terminate.
-//! - `Assert { condition: false, .. }` terminates only when the condition is the literal `false`.
-//! - `LexicalScope { body }` terminates when its body terminates.
-//! - `If(_, then_body, Some(else_body))` terminates only when both bodies terminate.
-//! - `If(_, _, None)` does not terminate.
-//! - `Match` with a default arm terminates only when every arm body and the default body terminate.
-//! - `ExhaustiveChoice` matches without a default arm terminate only when every arm body terminates.
-//! - Loops, `Break`, `Continue`, declarations, assignments, expression statements, and runtime
-//!   fragment pushes do not terminate.
-//!
-//! A body is terminal when scanning in source order finds any statement that guarantees
-//! all-path terminality. Earlier fall-through statements may be followed by a later terminal
-//! statement.
+//! The control-flow facts come from [`crate::compiler_frontend::ast::statements::control_flow_exits`].
+//! This module owns only the policy (which function shapes require an explicit return) and the
+//! fallthrough diagnostic. It recognises any exit the shared analysis proves, including a
+//! normalised-true loop with no reachable break.
 
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness, NodeKind};
-use crate::compiler_frontend::ast::const_values::{ConstValuePayload, ConstValueStore};
-use crate::compiler_frontend::ast::expressions::expression_store::{
-    AstExpressionBuilder, ExpressionOperationView,
-};
+use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::const_values::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionStore;
+use crate::compiler_frontend::ast::statements::control_flow_exits::analyze_control_flow_exits;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::InvalidReturnShapeReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
 use crate::compiler_frontend::source::SourceSpan;
+
 /// Policy that decides whether a function body must be terminal on all paths.
 ///
 /// WHAT: distinguishes functions that may implicitly fall through from functions that must
@@ -80,112 +65,32 @@ pub(crate) fn terminality_policy_for_signature(
 
 /// Validates that a function body satisfies the requested terminality policy.
 ///
-/// WHAT: scans the body and returns a `FunctionMayFallThrough` diagnostic when the policy
-/// requires explicit terminality and the body can fall through.
+/// WHAT: asks the shared exit analysis whether any reachable path can complete normally and
+/// returns a `FunctionMayFallThrough` diagnostic when the policy requires an explicit exit.
 /// WHY: body parsing already owns user-facing diagnostics, so this is the natural place to
 /// reject missing returns before HIR lowering is invoked.
 pub(crate) fn validate_function_body_terminality(
     body: &[AstNode],
     policy: FunctionTerminalityPolicy,
     span: Option<SourceSpan>,
-    expressions: &AstExpressionBuilder,
+    expressions: &ExpressionStore,
     const_values: &ConstValueStore,
-) -> Result<Option<DiagnosticDraft>, InfrastructureFailure> {
+) -> Option<DiagnosticDraft> {
     match policy {
         FunctionTerminalityPolicy::AllowImplicitUnit
-        | FunctionTerminalityPolicy::EntryStartImplicitReturn => Ok(None),
+        | FunctionTerminalityPolicy::EntryStartImplicitReturn => None,
 
         FunctionTerminalityPolicy::RequireExplicitReturn => {
-            if body_is_all_paths_terminal(body, expressions, const_values)? {
-                Ok(None)
-            } else {
-                Ok(Some(calls_data::invalid_return_shape(
+            let exits = analyze_control_flow_exits(body, expressions, const_values);
+            if exits.may_complete_normally() {
+                Some(calls_data::invalid_return_shape(
                     InvalidReturnShapeReason::FunctionMayFallThrough,
                     span,
-                )))
+                ))
+            } else {
+                None
             }
         }
-    }
-}
-
-/// Returns true if the body is guaranteed to terminate on every reachable path.
-///
-/// WHAT: scans statements in order and returns true once any statement guarantees all-path
-/// terminality. Earlier fall-through statements may be followed by a later terminal statement.
-/// WHY: this matches the conservative contract documented at the module level.
-fn body_is_all_paths_terminal(
-    body: &[AstNode],
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
-) -> Result<bool, InfrastructureFailure> {
-    for statement in body {
-        if statement_is_all_paths_terminal(statement, expressions, const_values)? {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
-}
-
-/// Returns true when a single statement guarantees that all paths through it terminate.
-///
-/// WHAT: inspects the AST node kind and delegates to recursive analysis for compound
-/// statements (`if`, `match`, `LexicalScope`).
-/// WHY: simple statements have fixed behavior, but nested control flow requires checking
-/// every branch.
-fn statement_is_all_paths_terminal(
-    statement: &AstNode,
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
-) -> Result<bool, InfrastructureFailure> {
-    match &statement.kind {
-        NodeKind::Return(_) | NodeKind::ReturnError(_) => Ok(true),
-
-        NodeKind::Assert { condition, .. } => Ok(matches!(
-            expressions.view(*condition)?.operation(),
-            ExpressionOperationView::Constant(id)
-                if matches!(const_values.payload(id), Some(ConstValuePayload::Bool(false)))
-        )),
-
-        NodeKind::LexicalScope { body } => {
-            body_is_all_paths_terminal(body, expressions, const_values)
-        }
-
-        NodeKind::If(_, then_body, Some(else_body), _) => {
-            Ok(
-                body_is_all_paths_terminal(then_body, expressions, const_values)?
-                    && body_is_all_paths_terminal(else_body, expressions, const_values)?,
-            )
-        }
-
-        NodeKind::If(_, _, None, _) => Ok(false),
-
-        NodeKind::Match {
-            arms,
-            default: maybe_default_body,
-            exhaustiveness,
-            ..
-        } => {
-            let mut arms_terminal = true;
-            for arm in arms {
-                arms_terminal &= body_is_all_paths_terminal(&arm.body, expressions, const_values)?;
-            }
-
-            match exhaustiveness {
-                MatchExhaustiveness::HasDefault => {
-                    let Some(default_body) = maybe_default_body else {
-                        return Ok(false);
-                    };
-
-                    Ok(arms_terminal
-                        && body_is_all_paths_terminal(default_body, expressions, const_values)?)
-                }
-
-                MatchExhaustiveness::ExhaustiveChoice => Ok(arms_terminal),
-            }
-        }
-
-        _ => Ok(false),
     }
 }
 

@@ -34,6 +34,8 @@ The next action depends on the loop form:
 - `break` and `continue` are valid only inside a loop.
 - They may appear inside a branch or nested block that is itself inside a loop.
 - They target the nearest enclosing loop.
+- A `break` or `continue` that targets a loop outside a value-producing branch completes that branch without producing a value.
+- A loop nested inside the branch consumes its own `break` and `continue`, so they cannot complete the branch. The branch must still produce, exit or diverge after the loop.
 - Moth does not have labelled loop control.
 - Neither statement produces a value.
 - `return` and `return!` leave the function rather than only leaving the loop.

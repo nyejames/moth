@@ -2,4 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0042"]
-message_contains = ["Every reachable branch of a value-producing 'if' must produce a value or terminate."]
+message_contains = ["Every reachable value-producing branch must produce a value or leave the branch."]

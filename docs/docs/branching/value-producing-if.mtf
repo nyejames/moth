@@ -80,8 +80,10 @@ A value-producing block is invalid directly inside:
 ### Completeness
 
 - A value-producing `if` requires `else`.
-- Every reachable branch must produce the required values or terminate.
-- Mixed producing and terminating paths are complete.
+- Every reachable branch must produce the required values or leave the value-producing block.
+- Returning, diverging and `break` or `continue` targeting an enclosing loop all leave the block.
+- A loop nested inside a branch consumes its own `break` and `continue`, so they cannot complete the branch. The branch must still produce, exit or diverge after the loop.
+- Mixed producing and exiting paths are complete.
 - A real fallthrough path is rejected.
 - At least one reachable branch must produce values.
 - Every producing path must match the receiver's arity.

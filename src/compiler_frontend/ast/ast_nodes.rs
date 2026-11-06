@@ -752,6 +752,27 @@ impl AstNode {
         }
     }
 
+    /// Visit expression roots owned directly by this statement.
+    ///
+    /// WHAT: yields expressions in the statement's own positions and declarations or patterns
+    /// attached to those positions.
+    /// WHY: control-flow exit analysis walks nested statement bodies separately, so it must not
+    /// leak exits from those bodies back into the enclosing statement.
+    pub(crate) fn visit_immediate_expression_ids(&self, visitor: &mut dyn FnMut(ExprId)) {
+        let mut stack = Vec::new();
+        visit_node_expressions(self, &mut stack, visitor);
+        while let Some(item) = stack.pop() {
+            match item {
+                ExpressionVisit::Node(_) => {}
+                ExpressionVisit::Declaration(declaration) => {
+                    visit_declaration_expressions(declaration, &mut stack, visitor)
+                }
+                ExpressionVisit::Pattern(pattern) => pattern.visit_expression_ids(visitor),
+                ExpressionVisit::Expression(expression) => visitor(expression),
+            }
+        }
+    }
+
     /// Visit semantic expression roots held by this statement and its nested bodies.
     /// Place projections remain owned and visited by the expression store's place owner.
     pub(crate) fn visit_expression_ids(&self, visitor: &mut dyn FnMut(ExprId)) {

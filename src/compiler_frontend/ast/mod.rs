@@ -105,6 +105,7 @@ pub(crate) mod statements {
     pub(crate) mod branching;
     pub(crate) mod collections;
     pub(crate) mod condition_validation;
+    pub(crate) mod control_flow_exits;
     pub(crate) mod declarations;
     pub(crate) mod declared_regions;
     pub(crate) mod diagnostics;

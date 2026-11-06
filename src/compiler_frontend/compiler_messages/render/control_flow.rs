@@ -74,7 +74,7 @@ pub(crate) fn invalid_control_flow_statement_message(
             "Value-producing 'if' requires an 'else' branch.".to_string()
         }
         InvalidControlFlowStatementReason::ValueIfBranchFallsThrough => {
-            "Every reachable branch of a value-producing 'if' must produce a value or terminate.".to_string()
+            "Every reachable value-producing branch must produce a value or leave the branch.".to_string()
         }
         InvalidControlFlowStatementReason::ValueIfNoProducingPath => {
             "Value-producing 'if' has no reachable path that produces a value.".to_string()

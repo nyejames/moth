@@ -4,10 +4,8 @@
 //! enclosing function. General failure classification and AST/TIR/handoff traversal belong to
 //! failure_classification; this module owns the assertion-specific policy and diagnostic only.
 
-use crate::compiler_frontend::ast::const_values::{ConstValuePayload, ConstValueStore};
-use crate::compiler_frontend::ast::expressions::expression_store::{
-    ExpressionOperationView, ExpressionView,
-};
+use crate::compiler_frontend::ast::const_values::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
 use crate::compiler_frontend::ast::expressions::failure_classification::{
     EnclosingExitEffect, ExitClassification, FailureClassificationExpressions,
     classify_enclosing_exit_effect,
@@ -23,11 +21,7 @@ pub(crate) fn assertion_condition_is_statically_true(
     condition: ExpressionView<'_>,
     const_values: &ConstValueStore,
 ) -> bool {
-    matches!(
-        condition.operation(),
-        ExpressionOperationView::Constant(id)
-            if matches!(const_values.payload(id), Some(ConstValuePayload::Bool(true)))
-    )
+    const_values.folded_bool_value(condition) == Some(true)
 }
 
 pub(crate) fn classify_assertion_message_effect<'a>(

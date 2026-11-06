@@ -19,7 +19,7 @@ use crate::compiler_frontend::symbols::identifier_policy::{
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
-use crate::compiler_frontend::ast::statements::value_production::analyze_branch_exits;
+use crate::compiler_frontend::ast::statements::control_flow_exits::analyze_control_flow_exits;
 
 /// Validates that a catch-handler binding name is legal and emits naming warnings.
 ///
@@ -73,12 +73,14 @@ pub(super) fn validate_catch_fallible_handler_conflict(
     Ok(())
 }
 
-/// Validates that a catch handler body cannot fall through when a value is required.
+/// Validates that a catch handler body does not fall through when a value is required.
 ///
 /// WHAT: rejects handler bodies that can simply fall through when the call expression must
-/// still produce success values for the surrounding statement/expression. `None` marks a
-/// contract that only resolves at completion: the requirement is unknown, never zero success
-/// values, so the body is revalidated against the resolved site instead of here.
+/// still produce success values for the surrounding statement/expression. Producing values,
+/// returning, diverging and leaving through `break` or `continue` targeting a loop outside the
+/// handler all complete the handler. `None` marks a contract that only resolves at completion:
+/// the requirement is unknown, never zero success values, so the body is revalidated against the
+/// resolved site instead of here.
 /// WHY: without fallback values, a fallthrough path would leave the handled call with no value
 /// continuation to merge back into; a provisional site has no such decision to make yet.
 pub(super) fn validate_catch_fallible_handler_value_requirement(
@@ -93,9 +95,13 @@ pub(super) fn validate_catch_fallible_handler_value_requirement(
         return Ok(());
     };
 
-    let body_exits = analyze_branch_exits(handler_body, expression_builder, const_values);
+    let body_exits =
+        analyze_control_flow_exits(handler_body, expression_builder.store(), const_values);
 
-    if value_required && !success_result_type_ids.is_empty() && body_exits.can_fall_through {
+    if value_required
+        && !success_result_type_ids.is_empty()
+        && !body_exits.is_value_producing_branch_complete()
+    {
         return Err(choices_control_flow::invalid_fallible_handling(
             InvalidFallibleHandlingReason::CatchHandlerCanFallThrough,
             span,

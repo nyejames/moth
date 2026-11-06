@@ -913,10 +913,9 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 body,
                 policy,
                 node.span,
-                &self.context.expression_builder,
+                self.context.expression_builder.store(),
                 &self.context.const_values,
-            )
-            .map_err(|error| self.error_messages(error, warnings, string_table))?;
+            );
             if let Some(diagnostic) = terminality_diagnostic {
                 return Err(self.diagnostic_failure(diagnostic, warnings, string_table));
             }

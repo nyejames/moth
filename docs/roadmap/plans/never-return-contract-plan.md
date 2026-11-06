@@ -13,9 +13,9 @@ This plan also replaces the current duplicated terminality logic with one AST-ow
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/never-return-contract-plan.md
 STATUS: active on the never-returns branch
-CURRENT_SLICE: Phase 2 - consolidate control-flow exits (runs before Phase 1)
+CURRENT_SLICE: Phase 1a - normalise ordinary callable return contracts
 BLOCKERS: none
-NEXT_ACTION: accept Phase 2, then Phase 1a ordinary return-shape normalisation
+NEXT_ACTION: record the clean-tree bench baseline, then slice 1a.0
 ```
 
 Keep this block concise. Establish the active revision, branch, worktree state and validation baseline in untracked working notes when implementation starts. Do not pin a queued plan to a commit.
@@ -41,6 +41,7 @@ Recorded at activation. These correct the plan where the compiler moved after it
 - Activated ahead of runtime anonymous records by explicit decision. Never semantics do not depend on them.
 - The ordinary callable return shape was not yet a compact owner. Phase 1 is split: Phase 1a normalises ordinary return contracts, Phase 1b adds `Returns | Never`.
 - Phase 2 runs before Phase 1. Neither depends on the other.
+- Value-producing `if`, `match` and `catch` paths are complete when they produce the required values or transfer control outside the block. `break` and `continue` targeting an enclosing loop qualify, like `return`. Loop control consumed by a loop inside the branch does not. The previous position-dependent early-break acceptance is removed. Loop exits stay distinct from caller returns and divergence. Phase 2 owns this change and its documentation.
 - Implicit built-in failure that can escape a `-> !` body is a closed-boundary diagnostic, like an exported callable without an error slot. The body handles it locally. `NeverCall` has no failure successor.
 - Moth source has no function values. Never on function types is internal only: interning, equality, substitution and display, covered by datatype unit tests. No source function-value coverage.
 - Function types have no canonical cross-module identity, so no canonical projection changes.
@@ -808,50 +809,50 @@ Replace duplicate terminality logic with one pure AST exit analysis. Add true-lo
 
 ### Shared analysis
 
-- [ ] Add one focused AST control-flow exit module.
-- [ ] Represent fallthrough, produced values, caller returns, divergence and nearest-loop exits independently.
-- [ ] Implement deterministic branch union and reachable statement sequencing.
-- [ ] Stop sequencing once no path can reach the next statement.
-- [ ] Classify `return` and `return!` as caller returns.
-- [ ] Classify normalised false assertions as divergence.
-- [ ] Keep dynamic assertions fallthrough-capable.
-- [ ] Preserve lexical scope.
+- [x] Add one focused AST control-flow exit module.
+- [x] Represent fallthrough, produced values, caller returns, divergence and nearest-loop exits independently.
+- [x] Implement deterministic branch union and reachable statement sequencing.
+- [x] Stop sequencing once no path can reach the next statement.
+- [x] Classify `return` and `return!` as caller returns.
+- [x] Classify normalised false assertions as divergence.
+- [x] Keep dynamic assertions fallthrough-capable.
+- [x] Preserve lexical scope.
 
 ### Branches and matches
 
-- [ ] Preserve statement `if` terminality.
-- [ ] Preserve value-producing `if`, match and catch completeness.
-- [ ] Preserve exhaustiveness and required-default rules.
-- [ ] Preserve the at-least-one-producing-path rule.
-- [ ] Use specialised active AST only for terminality and divergence.
+- [x] Preserve statement `if` terminality.
+- [x] Apply the loop-exit completeness rule from the activation decisions to value-producing `if`, match and catch.
+- [x] Preserve exhaustiveness and required-default rules.
+- [x] Preserve the at-least-one-producing-path rule.
+- [x] Use specialised active AST only for terminality and divergence.
 
 ### Loops
 
-- [ ] Add nearest-loop break and continue accounting without labels.
-- [ ] Treat a normalised-true conditional loop with no reachable break targeting itself as non-fallthrough.
-- [ ] Convert body fallthrough and continue paths into divergence at that loop boundary.
-- [ ] Preserve caller returns and existing divergence through the loop.
-- [ ] Let a reachable self-targeting break expose the post-loop path.
-- [ ] Consume nested-loop exits at the nested boundary.
-- [ ] Keep collection and range loops conservative.
+- [x] Add nearest-loop break and continue accounting without labels.
+- [x] Treat a normalised-true conditional loop with no reachable break targeting itself as non-fallthrough.
+- [x] Convert body fallthrough and continue paths into divergence at that loop boundary.
+- [x] Preserve caller returns and existing divergence through the loop.
+- [x] Let a reachable self-targeting break expose the post-loop path.
+- [x] Consume nested-loop exits at the nested boundary.
+- [x] Keep collection and range loops conservative.
 
 ### Existing consumers
 
-- [ ] Rewrite ordinary function terminality to query the shared summary.
-- [ ] Rewrite value-production completeness and reachable `then` traversal to use the shared owner.
-- [ ] Delete duplicate false-assert and branch-terminal classifiers.
-- [ ] Preserve current diagnostics unless precision requires a better location.
-- [ ] Add pure summary tests for union, sequencing, nested loops, mixed return/diverge paths and unreachable tails.
+- [x] Rewrite ordinary function terminality to query the shared summary.
+- [x] Rewrite value-production completeness and reachable `then` traversal to use the shared owner.
+- [x] Delete duplicate false-assert and branch-terminal classifiers.
+- [x] Preserve current diagnostics unless precision requires a better location.
+- [x] Add pure summary tests for union, sequencing, nested loops, mixed return/diverge paths and unreachable tails.
 
 ## Audit
 
-- [ ] Confirm there is one recursive exit-analysis owner.
-- [ ] Confirm caller return and divergence remain distinct.
-- [ ] Confirm diagnostic policy stays in consumers.
-- [ ] Confirm nested `break` cannot escape the nearest loop.
-- [ ] Confirm folded Bool authority is reused.
-- [ ] Confirm unreachable statements do not affect summaries or produced-type inference.
-- [ ] Complete the mandatory phase audit and Slice review.
+- [x] Confirm there is one recursive exit-analysis owner.
+- [x] Confirm caller return and divergence remain distinct.
+- [x] Confirm diagnostic policy stays in consumers.
+- [x] Confirm nested `break` cannot escape the nearest loop.
+- [x] Confirm folded Bool authority is reused.
+- [x] Confirm unreachable statements do not affect summaries or produced-type inference.
+- [x] Complete the mandatory phase audit and Slice review.
 
 ## Validation
 
@@ -865,8 +866,13 @@ cargo run --quiet -- tests --audit
 just validate
 ```
 
-- [ ] Preserve existing results except the approved true-loop terminality improvement.
-- [ ] Do not expose `-> !` before this phase is accepted.
+- [x] Preserve existing results except the approved true-loop terminality improvement and loop-exit completeness rule.
+- [x] Do not expose `-> !` before this phase is accepted.
+
+Delivered notes:
+
+- HIR consumes the same `ConstValueStore::folded_bool_value` fact for loop and assertion classification. A folded-true statement loop without a self-targeting break lowers with no exit edge. Template loops keep the two-way header.
+- Statement bodies owned by expressions (value blocks and catch handlers) contribute their caller-return, divergence and loop-exit facts to the owning statement. The expression descent is iterative.
 
 # Phase 3 - Add `-> !` syntax and frontend semantics
 

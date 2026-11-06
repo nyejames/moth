@@ -1112,6 +1112,25 @@ impl ConstValueStore {
         self.values_by_path.get(path).copied()
     }
 
+    /// Reads one expression's folded `Bool` value from the authoritative constant graph.
+    ///
+    /// WHAT: resolves a folded constant and a named constant reference to the same payload row.
+    /// WHY: exit analysis and assertion-message validation both need the one "is this Bool
+    /// expression already decided" fact. Centralising it here keeps literal-only classifiers out
+    /// of consumers and makes a module constant and its literal equivalent behave identically.
+    pub(crate) fn folded_bool_value(&self, expression: ExpressionView<'_>) -> Option<bool> {
+        let value_id = match expression.operation() {
+            ExpressionOperationView::Constant(id) => id,
+            ExpressionOperationView::Reference(path) => self.value_for_path(&path)?,
+            _ => return None,
+        };
+
+        match self.payload(value_id) {
+            Some(ConstValuePayload::Bool(value)) => Some(*value),
+            _ => None,
+        }
+    }
+
     /// Every path binding in the store, including body-local const records.
     pub(crate) fn path_value_bindings(&self) -> impl Iterator<Item = (&PathId, ConstValueId)> {
         self.values_by_path.iter().map(|(path, id)| (path, *id))

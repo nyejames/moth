@@ -8996,6 +8996,13 @@ contract = "language.functions.partial_if_return_rejected"
 role = "primary"
 
 [[case]]
+id = "function_typed_true_loop_terminality_acceptance"
+path = "function_typed_true_loop_terminality_acceptance"
+tags = ["integration", "language", "control-flow", "loops"]
+contract = "language.functions.typed_true_loop_terminality_acceptance"
+role = "primary"
+
+[[case]]
 id = "generic_function_fallthrough_rejected"
 path = "generic_function_fallthrough_rejected"
 tags = ["integration", "language", "generics", "control-flow", "diagnostics"]
@@ -12900,6 +12907,13 @@ path = "value_if_branch_fallthrough_rejected"
 tags = ["integration", "diagnostics", "value-blocks"]
 contract = "language.expressions.value_if_branch_must_produce_value_rejected"
 role = "primary"
+
+[[case]]
+id = "value_if_nested_loop_break_fallthrough_rejected"
+path = "value_if_nested_loop_break_fallthrough_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "loops"]
+contract = "language.expressions.value_if_branch_must_produce_value_rejected"
+role = "boundary"
 
 [[case]]
 id = "header_qualified_match_arm_not_declaration"

@@ -3067,6 +3067,87 @@ fn runtime_template_control_flow_conditional_loop_rechecks_condition_and_wraps_w
 }
 
 #[test]
+fn folded_true_template_loop_keeps_two_way_condition_header() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let prefix = string_table.intern("<wrap>");
+    let suffix = string_table.intern("</wrap>");
+    let tick = string_table.intern("tick");
+    let span = None;
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+
+    let tick_expr = expressions
+        .string_slice(
+            &mut builder.module_const_values,
+            tick,
+            span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string should construct");
+    let condition = expressions
+        .bool(
+            &mut builder.module_const_values,
+            true,
+            span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture bool should construct");
+
+    let expr = runtime_template_conditional_loop_expression(
+        &mut expressions,
+        &builder.module_const_values,
+        condition.id(),
+        vec![tick_expr.id()],
+        prefix,
+        suffix,
+        span,
+        builder.string_table,
+    );
+
+    builder
+        .lower_expression(
+            expressions
+                .view(expr)
+                .expect("runtime conditional template loop should have a view"),
+        )
+        .expect("folded-true runtime template loop should lower inline");
+
+    let folded_true_header = builder.module.blocks.iter().find_map(|block| {
+        let HirTerminator::If {
+            condition,
+            then_block,
+            else_block,
+        } = &block.terminator
+        else {
+            return None;
+        };
+        matches!(
+            builder.module.expressions.expression(*condition).kind,
+            HirExpressionKind::Bool(true)
+        )
+        .then_some((block.id, *then_block, *else_block))
+    });
+
+    let Some((header_block, then_block, else_block)) = folded_true_header else {
+        panic!(
+            "template loops must keep an ordinary two-way condition header even when the condition folds true"
+        );
+    };
+    assert_ne!(
+        then_block, else_block,
+        "the folded-true template header must keep distinct body and exit targets"
+    );
+    assert!(
+        builder.module.blocks.iter().any(|block| matches!(
+            block.terminator,
+            HirTerminator::Jump { target, .. } if target == header_block
+        )),
+        "the template loop body must keep its backedge to the two-way header"
+    );
+}
+
+#[test]
 fn runtime_template_control_flow_loop_empty_body_does_not_mark_iteration_emitted() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();

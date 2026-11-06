@@ -116,6 +116,26 @@ pub(in crate::compiler_frontend) fn lower_module_with_owner<'a>(
 pub(super) struct LoopTargets {
     pub break_target: BlockId,
     pub continue_target: BlockId,
+    /// Whether a `break` was lowered for this loop while its targets were active.
+    ///
+    /// WHY: a folded-true loop's exit is reachable only through a self-targeting break. Recording
+    /// the fact as the break is lowered avoids rescanning every module block at the loop boundary.
+    pub saw_break: bool,
+}
+
+/// Whether a folded-true condition may prove this loop's continuation unreachable.
+///
+/// WHAT: a statement loop shares the AST constant-store fact with the exit owner, while a runtime
+/// template loop shares the CFG builder without that AST terminality contract.
+/// WHY: template loops must keep the ordinary two-way header even when their condition folds to
+/// `true`, because their continuation is owned by the template emitter and has no terminality
+/// analysis behind it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LoopExitPolicy {
+    /// A statement loop consumes the AST terminality proof for its body.
+    Statement,
+    /// A runtime template loop keeps the ordinary two-way header.
+    Template,
 }
 
 #[cfg(test)]
