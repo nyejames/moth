@@ -84,7 +84,8 @@ template, validates the destination, folds the contribution and records the
 name, authored span and structural value in the fragment handoff. It never
 interprets an HTML slot name or scans constant names for metadata.
 Each registered name must tokenize as a single source symbol after `$in`.
-Surface validation rejects invalid names before compiling project source.
+Builder-definition validation rejects invalid names. A unit test validates the built-in HTML
+surface.
 
 Slot meaning stays with the builder. The HTML builder interprets its registered
 `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and

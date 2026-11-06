@@ -99,6 +99,8 @@ impl BuilderSurface {
     /// overlapping source-backed and binding-backed package paths.
     /// WHY: definition errors must fail before authored config or project source is compiled.
     pub(crate) fn validate(&self) -> Result<(), BuilderSurfaceValidationError> {
+        // `_` is a wildcard token. `$in` accepts symbols even when declaration naming policy
+        // reserves their spelling, so use exact source-word classification rather than that policy.
         for name in self.builder_root_slots.names() {
             if name == "_" || !is_identifier(name) || classify_source_word(name).is_some() {
                 return Err(BuilderSurfaceValidationError::InvalidDefinition(format!(
@@ -174,7 +176,7 @@ impl BuilderSurface {
 
     /// Register one statically known named destination for direct top-level const contributions.
     ///
-    /// The name must tokenize as a source symbol; invalid names fail surface validation.
+    /// The name must tokenize as a source symbol. Surface validation rejects invalid names.
     pub fn register_root_slot(&mut self, name: impl Into<Arc<str>>) {
         self.builder_root_slots.register(name);
     }

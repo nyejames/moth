@@ -1,9 +1,7 @@
-//! Config schema construction tests.
+//! Config schema construction and builder surface validation tests.
 //!
-//! WHAT: covers the schema engine's data invariants: dense node and field identifiers, root
-//! identity, node field registration, unknown-field policy storage and shape descriptions.
-//! WHY: the validator relies on these facts being total and deterministic; the construction
-//! surface is the one place that could break them.
+//! WHAT: covers schema data invariants and validation of the complete builder surface.
+//! WHY: builder definitions must be deterministic and valid before project compilation.
 
 use super::super::BuilderSurface;
 use super::super::config_schema::{

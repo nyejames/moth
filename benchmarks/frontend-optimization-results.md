@@ -7258,10 +7258,10 @@ Breakpoint counts show the per-site cache already limits the site-planner layout
 per receiving site and wrapper set. Sampling puts all context-aware layout work at about
 1.6 ms per 64-site run. The 64 site-planner walks are about a third of those calls, roughly
 0.5 ms if their costs are equal, so another cache is not justified. Separately, the runtime
-handoff materialiser repeated schema collection once or twice per emitted runtime child:
-128 of 194 context-aware walks at 64 sites and 2,048 at 64 sites by 16 children. Layout
-sampling for the whole large case was about 13.75 ms of 12.4 s, so this is a low-priority
-candidate, not a demonstrated material cost.
+handoff materialiser, introduced on this branch in `1b0be5259`, repeated schema collection once
+or twice per emitted runtime child: 128 of 194 context-aware walks at 64 sites and 2,048 at
+64 sites by 16 children. Layout sampling was about 13.75 ms in one 13.33 s profiled run, so
+this is a low-priority candidate, not a demonstrated material cost.
 
 The large synthetic case instead showed substantial TIR preparation and borrow-analysis activity.
 Its peak-memory ownership was not directly attributed; blocks-times-locals borrow-state storage
@@ -7286,6 +7286,8 @@ matching directories, each containing a non-source file, gave 14.609 to 10.430 m
 directional measurements across the stated revision range, which includes changes after the
 project-structure refactor, not an isolated estimate of discovery changes. They do not show
 the suspected slowdown on these inputs.
+The difference between the new compiler's two medians is about 36 µs per additional directory,
+an approximate cost from distinct inputs rather than an isolated per-directory measurement.
 These inputs contain no excluded or aliased directories or non-source trees formerly outside
 the `src` boundary, so they do not exercise the added boundary and skip-policy cases.
 
