@@ -9,9 +9,8 @@ This page describes entry metadata and its relationship to project configuration
 
 ### The `@project` namespace
 
-`@project` is an explicitly bound immutable namespace. The accepted `$project`
-directive publishes its predefined fields only. Today's grouped record also
-publishes supported extra metadata until that configuration cutover.
+`@project` is an explicitly bound immutable namespace. The named `project` configuration record supplies its predefined fields. The
+existing grouped-record configuration remains the accepted model.
 
 [codeblock, $code("moth"):
     @project version

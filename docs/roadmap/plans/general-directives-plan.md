@@ -3,7 +3,7 @@
 ## Status and scope
 
 - Status: Accepted design, queued after the project-structure and builder-slots work is integrated.
-- Roadmap file: `docs/roadmap/plans/general-directives-and-project-config-plan.md`.
+- Roadmap file: `docs/roadmap/plans/general-directives-plan.md`.
 - Deliver: a constrained compiler-owned directive grammar, core ownership of existing template formatters, `$config` input contracts and `$entry` entry selection.
 - Preserve: optional `config.moth` and its existing named `project` and builder-settings records, including the selected builder's current schema, defaults and validation policy.
 
@@ -11,7 +11,9 @@ The build command selects the builder and compilation boundary before configurat
 
 ## 1. Directive contract
 
-A directive modifies an existing syntactic construct or supplies an additional compiler-owned constraint on it. Directives are not declarations, general attributes, user macros, function calls or independent control-flow constructs. Neither builders nor user code can define, import, alias or override them. Directive names do not reserve the corresponding ordinary identifiers.
+A directive modifies an existing construct. Template-head directives modify their template, module-root directives modify their module and other source directives modify the following eligible construct.
+
+A directive may supply an additional compiler-owned constraint on its target, but it is not a new declaration, general attribute, user macro, function call or independent control-flow construct. Neither builders nor user code can define, import, alias or override directives. Directive names do not reserve the corresponding ordinary identifiers. **The directive's known kind determines its attachment context; its position never changes that kind.** A source modifier at the beginning of a module file still attaches to the following declaration or statement.
 
 ### Forms and operands
 
@@ -26,19 +28,57 @@ $name key = value
 - `value` uses the existing compile-time expression grammar accepted for a const-record field value. A directive may restrict the shape and semantic type of that value, or require it to be known at an earlier compiler phase. Do not add a second directive expression parser or evaluator.
 - `key = value` is **one named operand**, not a parameter list. The key is a statically recognised name with no explicit type annotation. Some template directives use the key as a slot identifier and the value as its default. The directive determines whether a bare operand denotes a static label, a positional index or a compile-time value.
 - No directive operand may contain an authored type annotation, runtime value, side effect, escaping control flow or mutable/exclusive evaluation. The type of an operand is resolved from its ordinary expression and the directive's fixed contract. Type annotations on the **following declaration**, such as `api_url #String`, remain ordinary language syntax.
-- An operand begins on the directive's line; a balanced value may continue over subsequent lines. A bare directive ends at its line boundary. A source directive and the construct it modifies occupy separate lines, permitting intervening comments and whitespace but no other unrelated item or scope boundary. Template heads use their existing `,`, `:` and `]` boundaries.
+- An operand begins on the directive's line; a balanced value may continue over subsequent lines. A bare directive ends at its line boundary. A source directive occupies its own line and attaches to the immediately following eligible construct on the next meaningful line, **without intervening blank physical lines**. Contiguous comment-only lines are permitted, but a blank line within the comment run breaks attachment. Leading indentation is not an empty line. Template heads use their existing `,`, `:` and `]` boundaries. CRLF and LF observe identical logical boundaries.
 - Adjacent call syntax such as `$code("rust")`, `$project(...)` and `$entry()` is invalid. A parenthesised **record value** is allowed only as a single whitespace-separated operand, when the directive's contract permits a record. Multiple positional or named operands and directive-owned argument lists are not supported. Ordinary function calls remain unchanged.
 - Template heads already support static slot names and indices. Preserve `$slot title`, `$slot 1`, `$slot title = "Fallback"` and `$in title`. These are one-operand forms and their names are not runtime variable lookups. Preserve the template head's independent compatibility rules and its ability to contain more than one *distinct* compatible directive.
 
 The `builder-slots` prefix/suffix spelling is normalised to the single-value form in this work: `$before value` and `$after value`, rather than `$before = value` and `$after = value`. Preserve all wrapper, named-slot and runtime no-output semantics. The previous assignment spelling is removed without a compatibility mode.
 
-Recognise a directive's known name before checking context. Each static compiler definition specifies eligible targets, phase, operand kind and compatibility. Diagnose unknown names, known names in the wrong context, duplicate or incompatible modifiers, missing/extra/malformed operands, dangling source modifiers and non-constant values at their authored spans. Known future names retain deferred-feature diagnostics where already recognised; recognising a name does not implement its semantics. Avoid a runtime-extensible registry, a catch-all directive-effect engine and extra annotation states on unrelated AST/HIR nodes.
+Recognise a directive's known name before checking context. Each static compiler definition specifies eligible targets, phase, operand kind and compatibility. Diagnose unknown names, known names in the wrong context, duplicate or incompatible modifiers, missing/extra/malformed operands, dangling source modifiers and non-constant values at their authored spans. Known future names retain deferred-feature diagnostics where already recognised; recognising a name does not implement its semantics. Avoid a runtime-extensible registry, a catch-all directive-effect engine and extra annotation states on unrelated AST/HIR nodes. **Do not diagnose a misplaced known directive as a generic invalid `# General directives and project configuration
 
-### Attachment
+## Status and scope
 
-- Source directives modify **one immediately following eligible declaration or statement**. A compound target includes its own header and body. Directive-specific target restrictions apply. Prefixes do not attach across a scope or source-item boundary and never silently become file-wide settings.
-- Template-head directives modify the **containing template**. Static keys and compile-time values belong to that template's existing TIR composition/formatter contract, not to a new declaration or scope.
-- `$entry` is the sole deliberate exception: it modifies the **implicit containing normal module root**. It is argument-free and must be the first meaningful item in the file, alone on its own line. Leading comments and whitespace are permitted. It creates no binding or scope.
+- Status: Accepted design, queued after the project-structure and builder-slots work is integrated.
+- Roadmap file: `docs/roadmap/plans/general-directives-plan.md`.
+- Deliver: a constrained compiler-owned directive grammar, core ownership of existing template formatters, `$config` input contracts and `$entry` entry selection.
+- Preserve: optional `config.moth` and its existing named `project` and builder-settings records, including the selected builder's current schema, defaults and validation policy.
+
+The build command selects the builder and compilation boundary before configuration is evaluated. `config.moth` remains a self-contained compile-time bootstrap source, not an ordinary module. Do not move configuration into `@` or `+` roots. Builders provide schemas, packages, source capabilities and output policies, not directive names or parsing and semantic callbacks.
+
+## 1. Directive contract
+
+A directive modifies an existing construct. Template-head directives modify their template, module-root directives modify their module and other source directives modify the following eligible construct.
+
+A directive may supply an additional compiler-owned constraint on its target, but it is not a new declaration, general attribute, user macro, function call or independent control-flow construct. Neither builders nor user code can define, import, alias or override directives. Directive names do not reserve the corresponding ordinary identifiers. **The directive's known kind determines its attachment context; its position never changes that kind.** A source modifier at the beginning of a module file still attaches to the following declaration or statement.
+
+### Forms and operands
+
+A directive has **at most one optional compile-time operand**:
+
+```text
+$name
+$name value
+$name key = value
+```
+
+- `value` uses the existing compile-time expression grammar accepted for a const-record field value. A directive may restrict the shape and semantic type of that value, or require it to be known at an earlier compiler phase. Do not add a second directive expression parser or evaluator.
+- `key = value` is **one named operand**, not a parameter list. The key is a statically recognised name with no explicit type annotation. Some template directives use the key as a slot identifier and the value as its default. The directive determines whether a bare operand denotes a static label, a positional index or a compile-time value.
+- No directive operand may contain an authored type annotation, runtime value, side effect, escaping control flow or mutable/exclusive evaluation. The type of an operand is resolved from its ordinary expression and the directive's fixed contract. Type annotations on the **following declaration**, such as `api_url #String`, remain ordinary language syntax.
+- An operand begins on the directive's line; a balanced value may continue over subsequent lines. A bare directive ends at its line boundary. A source directive occupies its own line and attaches to the immediately following eligible construct on the next meaningful line, **without intervening blank physical lines**. Contiguous comment-only lines are permitted, but a blank line within the comment run breaks attachment. Leading indentation is not an empty line. Template heads use their existing `,`, `:` and `]` boundaries. CRLF and LF observe identical logical boundaries.
+- Adjacent call syntax such as `$code("rust")`, `$project(...)` and `$entry()` is invalid. A parenthesised **record value** is allowed only as a single whitespace-separated operand, when the directive's contract permits a record. Multiple positional or named operands and directive-owned argument lists are not supported. Ordinary function calls remain unchanged.
+- Template heads already support static slot names and indices. Preserve `$slot title`, `$slot 1`, `$slot title = "Fallback"` and `$in title`. These are one-operand forms and their names are not runtime variable lookups. Preserve the template head's independent compatibility rules and its ability to contain more than one *distinct* compatible directive.
+
+The `builder-slots` prefix/suffix spelling is normalised to the single-value form in this work: `$before value` and `$after value`, rather than `$before = value` and `$after = value`. Preserve all wrapper, named-slot and runtime no-output semantics. The previous assignment spelling is removed without a compatibility mode.
+
+ character or an unknown directive.**
+
+### Three attachment locations
+
+- **Template head:** template directives modify their containing template. Static keys and compile-time values belong to existing TIR composition/formatter contracts, not to a new declaration or scope. Template-head rules do not constrain blank lines in rendered body text.
+- **Module root:** designated root directives modify the implicit module root and must appear as the first meaningful item of the root file, on their own line. Leading comments and whitespace are permitted. `$entry` is the only such directive in this plan, has no operand and introduces no binding, scope or runtime activation. Blank lines after `$entry` are ordinary source whitespace because it does not target the next item.
+- **Source construct:** source modifiers modify one immediately following eligible declaration or statement. A compound target includes its header and body. The modifier must be contiguous with its target, permitting intervening comment-only lines but no empty physical line, unrelated item, intervening scope or new file. Multiple compatible modifiers may stack under the same rule. A prefix in file-initial position is still a construct modifier.
+
+A known name is classified before position or target validation. A misplaced known root directive must never silently attach to the next declaration, and a misplaced construct directive must never silently gain module scope. No general rule allows arbitrary root directives merely because they are first. An invalid modifier must not swallow the next valid item during diagnostic recovery.
 
 Existing proposal-only block spellings such as `$async:` and `$checked:` are **not** authorised by this grammar. Any future syntax introducing a new execution scope or control flow requires its own language-design decision.
 
@@ -138,7 +178,7 @@ Retain authored source spans until their final diagnostics are emitted, then use
 ### Implementation phases
 
 1. **Integration baseline and canonical docs.** Confirm the merged project-structure and `builder-slots` contracts, current `AGENTS.md`, language/implementation style, testing guide and compiler/build design authorities. Run focused baseline tests for config/defaults, input contracts, formatter output, wrapper/slot behaviour, HTML entry routes and JS/Wasm builds. Align accepted-design documentation to the existing named `project`/builder records **before** documenting directive grammar; retain truthful current-support labels until implementation lands. Verify the selected builder's present section requirements from the live schema.
-2. **Directive grammar and template migration.** Extend the compiler's existing static template specifications with the smallest source modifier/entry recognition needed. Enforce single operands, source-line boundaries, ownership, placement and invalid call shapes. Migrate `$code` and applicable `$css` operands and `$before`/`$after` values without changing template semantics. Move HTML formatter implementations into the frontend and delete builder registration paths.
+2. **Directive grammar and template migration.** Extend the compiler's existing static template specifications with the smallest source modifier/entry recognition needed. Route directive kinds to three attachment contexts without introducing separate directive parsers or a general attachment object. Track whether the preceding source boundary contained an empty physical line or only contiguous comments. Enforce single operands, same-scope attachment, ownership, placement and invalid call shapes. Migrate `$code` and applicable `$css` operands and `$before`/`$after` values without changing template semantics. Move HTML formatter implementations into the frontend and delete builder registration paths.
 3. **Typed input cutover.** Attach `$config` to ordinary typed declaration shells, reuse existing prepared contract facts and config resolver, migrate `#Config of T` authoring and remove obsolete qualifier parsing. Keep named configuration records and active builder schemas untouched.
 4. **Entry cutover.** Publish `$entry` root facts, select marked HTML entries, migrate first-party sites and `moth new html` templates and remove activity-based selection and old root-purpose diagnostics. Confirm direct named builder slots remain restricted to marked active entries.
 5. **Cleanup and validation.** Remove dead paths, stale tests and duplicated parsing or evaluation. Update permanent docs, source examples, cheatsheet, progress matrices and roadmap to match delivered behaviour. Reconcile the queued HTML page/runtime-title work to retain only independently required runtime-title work. Complete focused and full validation and a code-bloat audit.
@@ -149,7 +189,30 @@ Documentation owners to reconcile: `docs/docs/directives/{directives,directives-
 
 Use existing subsystem tests and project/CLI integration harnesses. Put tests under the repository's `tests/` policy. Reuse fixtures and test actual public outcomes rather than introducing an independent directive harness.
 
-- **Grammar:** bare, single-value and `key = value` operands; template named/positional slot forms; const-only resolution; operand type and phase failures; whitespace, multiline balanced records, separator and newline boundaries; no operand type annotations, `()` calls, multi-argument lists or general `$name:` blocks; known/unknown/misplaced/deferred names; duplicate and incompatible directives; ordinary `f()` unchanged.
+- **Grammar and attachment:** bare, single-value and `key = value` operands; template named/positional slot forms; const-only resolution and operand type/phase errors; balanced multiline operands; no operand type annotations, directive calls or multi-argument lists; ordinary `f()` unchanged. Test all three distinct locations, first-file construct modifiers, following-item target restrictions, compatible stacked modifiers, misplaced root markers and comments/blank-line boundaries below. Reject general `$name:` blocks, stray directives and deferred names with context-specific diagnostics.
+### Placement and diagnostic matrix
+
+Use focused lexer/header tests for boundary recognition and existing project-command tests for semantic attachment. Include both positive and negative cases for every supported directive context. Diagnostics must be deterministic, identify the **directive site**, include the target site when present and recommend the correct context or immediate action. A second location is mandatory for duplicate and conflicting modifiers, and where an unrelated intervening declaration blocks attachment. Use the existing typed diagnostic reason and source-span infrastructure rather than adding string-matching parser heuristics.
+
+| Situation | Required outcome |
+|---|---|
+| `$entry` first meaningful item of a normal `@` root, including a comment banner or leading whitespace | Valid; marks the implicit module root |
+| `$entry` after a declaration, runtime statement, template, export group or another directive | Error: root directive must be first; name the root and point to the authored `$entry` |
+| Second `$entry` or the same root marker on a helper, `+` facade, test root, `config.moth` or nested scope | Error: duplicate with original site or wrong root/context |
+| `$entry` with a value, call suffix, trailing source or on the same line as another item | Error: root directive occupies its own line and takes no operand |
+| `$config` at the beginning of an eligible source/config file followed by the correct declaration | Valid construct modifier, never root directive |
+| `$config` followed immediately by its declaration, or by one or more adjacent comment-only lines | Valid; comments do not consume the target |
+| `$config` followed by one or multiple empty lines, including whitespace-only lines or an empty line between comment lines | Error: modifier separated from target; no declaration is silently claimed |
+| `$config` at EOF, before a close-scope, before a function or another ineligible construct | Error: dangling or wrong-target directive, with expected declaration kind |
+| Compatible source modifiers adjacent to each other then a declaration | One attachment to the declaration; incompatible or repeated modifiers identify both sites |
+| `$md` as bare source, `$slot` inside a function, `$config` in a template head, `$entry` in a template head | Known directive in wrong context; no generic invalid-character error |
+| `$slot` and `$in` inside valid heads, invalid heads, or alongside an incompatible formatter | Existing template attachment, exclusivity and conflict diagnostics preserved |
+| Unknown spelling, deferred feature, malformed/extra operand or runtime-dependent operand | Distinct error reason and precise authored span; no successful no-op |
+| LF, CRLF, leading indentation, comments at EOF and balanced multiline operand values | Same semantics and primary diagnostic location across newline forms |
+| Malformed directive followed by an ordinary declaration or template | Recover without consuming the unrelated item or hiding its own diagnostics |
+
+For examples, `$config\nvalue #String` attaches, `$config\n-- explanation\nvalue #String` attaches and `$config\n\nvalue #String` is rejected. Here `\n` denotes one physical line break. A template directive's body may contain blank lines, and the text following an already valid `$entry` is not a next-construct attachment. Do not introduce a new directive family or enable deferred semantics solely to satisfy this matrix; implement the applicable cases alongside each directive's activation.
+
 - **Formatting:** equivalent `$code` language aliases, HTML/Markdown/CSS/escaping, highlighter classes, CSS warnings and optional inline mode where still supported; nested formatting, `.mtf` defaults, TIR opaque/resource anchors, compile-time/runtime wrappers, `$fresh`, named-slot defaults and contributions and output parity under a minimal non-HTML builder.
 - **Inputs/config:** optional/required/defaulted `$config`; source-literal versus bootstrap-helper fallback restrictions; rejected `#Config of T`; exact U64 and F16/F32 numeric cases, optional wrapping and unsupported input types; same-name conflicts, explicit precedence, unknown-input timing, fingerprint/provenance and independent package namespaces. Preserve current `project #= (...)`, active `html #= (...)`, project-field fixed-only rules, omitted-config defaults, active-section requirement and unknown ordinary helper behaviour. Confirm no directive config syntax is accepted.
 - **Entries:** placement-first `$entry` diagnostics, comments, duplicates and invalid contexts; marked static/metadata-only/runtime and descendant entries; unmarked but validated dormant work; `check` with zero entries; no-entry application errors; package-only/facade roots; synthetic single-file root; no-homepage routes; `start` error behaviour; JS and Wasm outputs; direct root `$in` eligibility and resource emission.

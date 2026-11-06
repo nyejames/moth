@@ -1,36 +1,25 @@
-**Current support versus accepted design.** The Alpha compiler accepts an optional `config.moth` with parenthesised grouped `project` and `html` records and declaration-owned `#Config of T` inputs. A missing `config.moth` uses validated builder defaults, a directory-derived project name and no version. Closed `$project` / `$html_builder` configuration and `$config` prefixes remain accepted queued design. `entry_root` is retired from both the operational and future contracts. The module diagnostic limit below now governs file preparation and ordinary-body diagnostic recovery. The project diagnostic threshold is a soft scheduling cutoff for new work, and skipped work is reported as not checked. `moth new` does not yet emit the starter below. See @../progress (Progress) and @../directives (Directives).
+**Current support and accepted design.** The Alpha compiler uses an optional `config.moth` with ordinary grouped `project` and active-builder records such as `html`. These named records remain the accepted configuration design. Build-input declarations currently use `#Config of T`; the queued directive plan replaces only that input spelling with `$config`. There are no `$project`, `$builder` or `$html_builder` directives. `entry_root` is retired. See @../progress (Progress) for implementation status.
 
-`config.moth` is optional. When present, it lives at the selected project root, is loaded before source-tree discovery and is one self-contained compile-time source file with no source dependencies, package resolution or authored file-value paths. A nested `config.moth` is inert to an enclosing build.
+`config.moth` is one self-contained compile-time source at the selected project root. It has no source dependencies, package resolution or authored file-value paths. A nested `config.moth` is inert to an enclosing build.
 
-### Accepted project config
-
-[codeblock, $code("moth"):
-    $project(
-        name = "my_site",
-    )
-
-    $html_builder
-]
-
-Version is optional. To supply one, use an earlier `$config` contract or a fixed literal:
+### Named project and builder records
 
 [codeblock, $code("moth"):
-    $config
-    version #String? = none
-
-    $project(
+    project #= (
         name = "my_site",
-        version = version,
+        version = "1.0.0",
     )
 
-    $html_builder
+    html #= ()
 ]
 
-A project field named `version` does not satisfy a source input contract. Do not treat `"0.1.0"` as a `$project` default.
+The `project` record is optional. An omitted name uses the selected directory name, and an omitted version means the project is unversioned. The active builder section follows its existing required/optional presence rule; HTML currently requires `html #= ()` even when every field takes a default. The selected directory is the source root.
 
-### The `$project` directive
+Use an earlier `#Config of T` input (or `$config` when that migration lands) to provide a configurable value. A field is not itself an input declaration.
 
-`config.moth` contains exactly one `$project` invocation. The positional order is:
+### Project record
+
+The optional `project #= (...)` constant accepts these named fields:
 
 [table:
     [th:
@@ -90,7 +79,7 @@ A project field named `version` does not satisfy a source input contract. Do not
     ]
 ]
 
-The signature is closed. Arbitrary fields, misspelled standard fields and `metadata = ...` are rejected. `@project` publishes the predefined fields except the two diagnostic limits. The diagnostic limits are compiler controls and are never published.
+The record's recognised settings schema is closed. Arbitrary fields, misspelled standard fields and `metadata = ...` are rejected. `@project` publishes the predefined fields except the two diagnostic limits. The diagnostic limits are compiler controls and are never published.
 
 `name`, `template_const_loop_iteration_limit`, `max_errors_per_module` and `max_errors_per_project` remain fixed-only, including through helper constants. An omitted `name` defaults to the selected directory name and is validated as a Moth project identifier; it is never silently rewritten. Omitted `version` means unversioned.
 
@@ -102,11 +91,11 @@ The signature is closed. Arbitrary fields, misspelled standard fields and `metad
 
 A present value must be an `I32` from 1 to 2147483647. Zero, negative values and other types are rejected. Omitting a setting uses its default. An explicit `none` disables that one count and leaves the other unchanged. Warnings, notes and related labels never count. Neither setting disables the compiler's fixed recovery-work guard or changes program meaning.
 
-### `$html_builder`
+### HTML builder settings record
 
-An authored HTML directory project contains exactly one `$html_builder` invocation. Bare `$html_builder` uses defaults. `$html_builder()` is invalid. The command selects the builder first; this directive never selects a backend or platform.
+An authored HTML directory project uses the named `html #= (...)` compile-time record. The command selects the builder first; this record never selects a backend or platform. The active HTML section is required even when its fields use defaults.
 
-The positional order and defaults are:
+The recognised setting names and defaults are:
 
 [table:
     [th:
@@ -202,9 +191,9 @@ The positional order and defaults are:
 
 `page_url_style` accepts `trailing_slash`, `no_trailing_slash` or `ignore`. `html_favicon` accepts a compile-time String containing an untracked URL, not necessarily a string literal. Tracked file resources belong in a direct root builder slot because `config.moth` rejects authored file-value paths.
 
-Unknown or inactive unsupported directives error. Multi-builder configuration waits for `$feature`. Synthetic single-file operations without authored `config.moth` keep their explicit synthetic path and do not invent `$project` / `$html_builder` source.
+Names other than the selected builder's recognised settings section remain ordinary config constants; they do not implicitly configure another builder. The active settings record is checked against the selected builder's existing schema. Synthetic single-file operations without authored `config.moth` keep their explicit synthetic path and do not invent source settings.
 
-### Current grouped config
+### Example with typed inputs
 
 Operational config uses declaration-owned `#Config` inputs and parenthesised grouped records:
 
@@ -226,7 +215,7 @@ The `project` record may omit `name`, `version`, or both. An omitted name uses t
 
 The grouped `project` record accepts `max_errors_per_module` and `max_errors_per_project` as fixed-only `I32?` compiler controls. Omission uses the default of 5 module errors or 30 project errors. An explicit `none` disables that one limit and leaves the other unchanged. A present value must be an exact `I32` from 1 to 2147483647. The grouped record has no field type context, so write an explicit absence through a typed `I32?` constant as the example does. Writing `none` directly in the record is a language type error. The loader validates and stores both settings today. The module limit governs file preparation and ordinary-body diagnostic recovery. The project threshold is a soft scheduling cutoff for new work in check, build and dev. When discovery ends early, one line after the diagnostics names the reason and says that later code was not checked. The CLI, the dev server's terminal and browser error page and the builder SDK's error text all show it.
 
-Retired flat keys and `entry_root` remain rejected. Keep live `docs/config.moth` on this current path.
+Retired flat keys and `entry_root` remain rejected. Keep live `docs/config.moth` on this configuration model.
 
 ### Concepts related to project config
 
