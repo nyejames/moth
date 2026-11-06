@@ -854,13 +854,17 @@ Formatters apply to their own templates, and incompatible formatters can't share
 
 [codeblock, $code("moth"):
     card #= [:
-        <h1>[$slot title]</h1>
+        <h1>[$slot title = "Untitled"]</h1>
         <section>[$slot]</section>
     ]
     [card:
-        [$in title: Welcome]
+        [$in title:Welcome]
         Hello, [name].
     ]
+
+    first #= [:first=[$slot label = "One"]|second=[$slot label = "Two"]|body=[$slot = "Empty body"]]
+    [first]
+    [first:[$in label:Chosen]]
 
     image #= [: <img src="[$slot 1]" alt="[$slot]">]
     [image, "logo.png": Moth logo]
@@ -869,9 +873,11 @@ Formatters apply to their own templates, and incompatible formatters can't share
     [list: [: one] [$fresh: [: two]]]
 ]
 
-Named `$slot` values receive matching `$in` content. Numbered slots consume head contributions in order. `$slot` receives the remainder.
-Missing slots render empty, repeated slots reuse content and unassigned content is an error.
-`$before` and `$after` wrap direct children with compile-time values; those values may contain named slots only. `$fresh` skips one parent wrapper. Structurally absent output produces no wrapper, while a selected empty String is wrapped.
+`$slot`, `$slot name` and `$slot 1` declare default, named and positional slots. Each occurrence may carry a `= <compile-time String>` default. `$in name:` fills one named slot. Names and positions are bare tokens, so `$in` has no String-expression or positional form.
+A routed contribution, including an explicitly empty one, suppresses the occurrence default. Missing slots without a default render empty, repeated slots replay content, multiple named contributions concatenate and unassigned loose content is an error.
+`$before` and `$after` wrap direct children with a compile-time String or constant template. Their values may contain named slots only, and an explicit default or positional slot is rejected. Each directive may appear once per head. `$fresh` skips one parent wrapper. Structurally absent output produces no wrapper, while a selected empty String is wrapped.
+Direct top-level const `$in` inserts on an active entry root are builder slots, not ordinary template slots. See Pages and top-level work.
+`$required` and `$unique` are deferred candidates, not implemented directives. Loop-level uniqueness is excluded; const function syntax is outside this work.
 
 ### Template control flow
 
@@ -1174,19 +1180,21 @@ See @../project-structure/#project-config (Project configuration), @../project-s
 `check` validates the project and required target capabilities without writing output. `dev` serves the development build.
 `build --release` writes configured release output.
 
-Modular project builders supply packages, capabilities and output conventions. HTML turns `$page` roots into documents and routes.
+Modular project builders supply packages, capabilities and output conventions. HTML turns active roots into documents and routes.
 Other builders, such as Lappet, supply their own packages and decide how to consume top-level work.
 Source can't query the OS, architecture, backend or physical target. The selected target must support every reachable required capability.
 
 ## Pages and top-level work
 
-The **HTML project builder** uses `$page` to mark a normal module root as a page and activate its top-level runtime work or direct output.
-Other builders can define their own entry or runtime purpose directives instead.
+The **HTML project builder** turns an active module root into a document and route. An entry becomes active through top-level runtime work or direct const fragments. There is no implemented `$page` directive.
 
 For an HTML page:
 
 [codeblock, $code("moth"):
-    $page(title = "Moth")
+    #[$in title:Moth]
+    #[$in description:A language for creating reliable software]
+    #[$in stylesheets:[@styles/site.css]]
+    #[$in head:<meta name="theme-color" content="#ffffff">]
 
     #[$md:
         # Welcome
@@ -1196,18 +1204,20 @@ For an HTML page:
     [: Hello, [name].]
 ]
 
-`$page` applies to the whole root. It accepts compile-time optional `title`, `description`, `lang`, `favicon`, `body_style` and `head` settings.
-Helpers, support roots, facades and `config.moth` can't declare pages. Declaration-only roots and documentation/comment templates need no page
-purpose.
+Direct top-level const `$in` inserts route to builder-registered destinations. The HTML builder registers `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and `head`.
+Ordinary const and runtime fragments render into the body. Scalar metadata contributions concatenate and never raise a cardinality error, an explicitly empty value stays present, a missing value uses the builder fallback, each stylesheet insert needs one tracked CSS resource, and the builder deduplicates stylesheet links by stable origin. `head` is raw HTML after built-in head content and deduplicates identical complete contributions.
+Only direct root inserts route. Nested, stored and aliased inserts remain template composition. Runtime top-level named builder inserts are not supported and their final design is unsettled. Old `page_*` names are ordinary constants with no implicit metadata effect.
+A general `$entry` purpose remains deferred. The former `$page` metadata design is superseded by builder slots.
+Helpers, support roots, facades and `config.moth` cannot supply entry contributions.
 
 Direct constant fragments become static HTML. Runtime work runs once at page startup, and runtime fragments publish only after successful completion.
 An error leaves static fragments in place but doesn't roll back earlier side effects.
 The release page shows a generic failure notice, not application error text.
 
 Routes derive from directory structure: `guide/@page.moth` creates `guide/index.html`. Root filenames have no route significance.
-HTML builds need at least one page. `check` can validate a declaration-only, zero-page project while still rejecting unpurposed runtime work.
+HTML directory builds currently require a homepage at the selected project root. Command-specific no-entry rules and explicit root-purpose validation remain deferred.
 
-See @../project-structure (Pages and entry behaviour).
+See @../project-structure (Pages and entry behaviour) and @../project-structure/#entry-config (Entry metadata and builder slots).
 
 ## Core IO and foreign functions
 
@@ -1219,8 +1229,7 @@ Format other types with templates:
     io.line([: Count: [count]])
 ]
 
-`io.set_title(text)` changes the host's displayed title when the selected environment supports it.
-For HTML it updates the live document title without rewriting static page metadata.
+`io.set_title(text)` is an accepted future runtime title mutation and is not implemented. Set a static page title with the direct const `title` builder slot.
 
 Foreign packages depend on the selected builder and target. For example, the HTML builder can bind JavaScript files to typed Moth functions:
 

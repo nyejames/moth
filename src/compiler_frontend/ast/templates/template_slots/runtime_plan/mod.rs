@@ -43,10 +43,11 @@ pub(crate) use types::{RuntimeSlotContributionSourceId, RuntimeSlotSiteId};
 ///       contribution sources and slot sites, starting from already-routed
 ///       TIR node IDs. It rebases the receiver's value-carried view context onto
 ///       the copied root so occurrence-keyed overlays still name the copied
-///       direct children, then resolves the plan's named markers into both the
+///       direct children, then resolves the plan's named markers into the
 ///       receiver's own overlay and every reachable child-edge decorator overlay
-///       inside the copied root. A nested child template that owns its own runtime
-///       plan is a leaf: only that plan may resolve markers inside its tree.
+///       inside the copied root when the layout reports inherited wrapper
+///       contexts. A nested child template that owns its own runtime plan is a
+///       leaf: only that plan may resolve markers inside its tree.
 /// WHY: AST handoff materialization consumes this plan to produce owned
 ///      contribution sources and slot sites. HIR evaluates each source once
 ///      and replays it at every site, preserving structural no-output for
@@ -113,8 +114,16 @@ pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runti
     // One plan-qualified marker per named source is shared by every overlay that
     // replays this application's named content. Reusing the node IDs keeps the
     // plan's evaluate-once contract while matching the structural expansion path,
-    // which also reuses one routed named node at every occurrence.
-    let named_markers = plan_named_markers(store, slot_plan_id, &sources);
+    // which also reuses one routed named node at every occurrence. Structural
+    // occurrences are served by site planning's own markers, so marker creation
+    // and the context fill only run when the layout saw an inherited wrapper
+    // context that could replay a name. The common undecorated application pays
+    // for neither.
+    let named_markers = if schema.has_inherited_wrapper_contexts {
+        push_named_source_markers(store, slot_plan_id, &sources, schema)
+    } else {
+        FxHashMap::default()
+    };
 
     // A fixed child inside the receiver root keeps its decorators in the child
     // reference's wrapper-context overlay rather than in the root's structural
@@ -191,25 +200,33 @@ pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runti
     Ok((template_id, scratch_view_context))
 }
 
-/// Builds one plan source marker per named routed contribution.
+/// Pushes one plan source marker per named routed contribution the schema accepts.
 ///
-/// WHAT: emits a `RuntimeSlotContributionSource` node for every named source draft,
-///       including a routed target whose content is explicitly empty, keyed by the
-///       declared slot name in source order.
-/// WHY: every receiver-owned and nested child-edge overlay replays the same plan
-///      sources. One shared marker set keeps the evaluate-once contract and lets the
-///      caller resolve it into every relevant overlay before the store becomes
-///      read-only at handoff.
-fn plan_named_markers(
+/// WHAT: emits a `RuntimeSlotContributionSource` node for every named source draft
+///       declared by `schema`, including a routed target whose content is explicitly
+///       empty, keyed by the declared slot name in source order.
+/// WHY: receiver and child-edge overlays replay the same plan sources, and wrapper
+///      occurrences replay them at their own declared names. One builder keeps
+///      marker shape and filtering identical at every consumer while the plan's
+///      evaluate-once contract stays source-based.
+fn push_named_source_markers(
     store: &mut TemplateIrStore,
     slot_plan_id: TemplateSlotPlanId,
     sources: &[RuntimeSlotContributionSourceDraft],
+    schema: &TirSlotSchema,
 ) -> FxHashMap<StringId, Vec<TemplateIrNodeId>> {
     let mut named_markers: FxHashMap<StringId, Vec<TemplateIrNodeId>> = FxHashMap::default();
+    if schema.named_slots.is_empty() {
+        return named_markers;
+    }
+
     for source in sources {
         let SlotKey::Named(name) = source.source.target else {
             continue;
         };
+        if !schema.named_slots.contains(&name) {
+            continue;
+        }
         let marker = push_runtime_slot_contribution_source(
             store,
             slot_plan_id,
@@ -226,7 +243,7 @@ fn plan_named_markers(
 /// Resolves named contribution markers into the receiver's direct-child wrapper sets.
 ///
 /// WHAT: rewrites the receiver's occurrence-keyed wrapper overlay so every inherited
-///       `$children(..)` wrapper replays the shared plan markers at its own declared
+///       child wrapper replays the shared plan markers at its own declared
 ///       named slots.
 /// WHY: inherited wrappers around fixed direct children are materialized outside the
 ///      plan's slot-site roots, so they are not reached by site planning. Markers keep
@@ -253,3 +270,7 @@ fn fill_receiver_direct_child_names_with_markers(
         services.string_table,
     )
 }
+
+#[cfg(test)]
+#[path = "tests/materialize_tests.rs"]
+mod materialize_tests;

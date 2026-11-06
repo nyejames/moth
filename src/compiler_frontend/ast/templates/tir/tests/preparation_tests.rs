@@ -1191,7 +1191,7 @@ fn preparation_rejects_contribution_marker_outside_owning_plan() {
 }
 
 /// Builds the shape runtime site planning produces when a control-flow
-/// contribution receives a conditional `$children` wrapper whose named slot
+/// contribution receives a conditional child wrapper whose named slot
 /// replays a plan-qualified contribution marker.
 ///
 /// The returned template owns the plan; its site render root is a child template

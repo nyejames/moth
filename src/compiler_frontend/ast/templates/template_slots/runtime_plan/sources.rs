@@ -4,7 +4,7 @@
 //! converts routed TIR nodes into deterministic source plans.
 //!
 //! WHY: Source plans describe authored contribution work that HIR should lower
-//! exactly once. Wrapper-local `$children(..)` and `$fresh` behavior belongs to
+//! exactly once. Wrapper-local child-wrapper and `$fresh` behavior belongs to
 //! site planning so repeated placeholders can replay the same source safely.
 
 use super::super::RuntimeSlotPlanningServices;

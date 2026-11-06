@@ -4,9 +4,11 @@
 
 Until those answers settle, the compiler has no honest graph to walk. Choose climate and soil first. Then grow the plant.
 
-The Alpha compiler currently uses grouped `project`/`html` records, declaration-owned
-`#Config of T` contracts and reserved `page_*` metadata. The `$config`, `$project` and
-`$html_builder` forms in this article are accepted queued design, not current syntax.
+The Alpha compiler currently uses grouped `project`/`html` records and
+declaration-owned `#Config of T` contracts. HTML document metadata uses direct
+const root builder slots. The `$config`, `$project` and `$html_builder` forms in
+this article are accepted queued design, not current syntax. A general `$entry`
+root purpose is deferred; the earlier `$page` proposal is superseded.
 
 ## Command and capability surface
 
@@ -234,7 +236,7 @@ The compiler does not wander the filesystem inventing a project. The builder doe
 
 The command and build system own target intent, target partition and physical-variant orchestration. Compiler-owned validation checks the assignment it is handed rather than choosing it. Builders expose stable capabilities and map them to target artefact forms. Source never observes physical target identity at all.
 
-The compiler owns general directive syntax, `$config` contracts and `$project` semantics. The build system applies folded project settings and runs bootstrap and graph orchestration; the HTML builder owns `$html_builder` settings and `$page` root metadata.
+The compiler owns general directive syntax, `$config` contracts and `$project` semantics. The build system applies folded project settings and runs bootstrap and graph orchestration; the HTML builder owns `$html_builder` settings and its registered root slot destinations.
 
 ## What can fail here
 
@@ -242,7 +244,7 @@ The compiler owns general directive syntax, `$config` contracts and `$project` s
 - invalid config shape, forbidden config dependency or missing required input
 - strict `$project` field, invalid optional version or configuration-dependence violation
 
-The command and config service report these as structured diagnostics. Entry purpose and page selection are validated later by the build system; they are not recovered by reopening `config.moth`.
+The command and config service report these as structured diagnostics. A future `$entry` purpose and explicit entry selection are validated later by the build system; they are not recovered by reopening `config.moth`.
 
 ## Why Moth does it this way
 
@@ -258,7 +260,7 @@ The command and config service report these as structured diagnostics. Entry pur
 
 - **Accepted design:** one self-contained `config.moth` service with explicit `$config` contracts, strict `$project` and `$html_builder` invocations, separate bootstrap input results and a specialised `ProjectGlobalsInterface`.
 - **Current implementation:** grouped parenthesised `config.moth`, declaration-owned `#Config`, typed `--input` for build, check and dev, ordinary static-`if` integration and immutable explicit `@project`.
-- **Queued work:** `general-directives-and-project-config-plan.md` for the directive/config cutover and `html-page-directives-and-runtime-title-plan.md` for root-only `$page`, page metadata and runtime title.
+- **Queued work:** `general-directives-and-project-config-plan.md` for the directive/config cutover and `html-page-directives-and-runtime-title-plan.md` for a general `$entry` purpose and runtime title. Builder slots own initial document metadata; the earlier `$page` proposal is superseded.
 - **Deferred or outside scope:** structural `$feature` selection, config dependencies and a general Moth build-script system.
 
 ## Exit state

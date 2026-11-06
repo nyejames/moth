@@ -1,7 +1,8 @@
 **Current versus accepted.** Alpha scaffolds use declaration-owned `#Config of T`
-inputs with grouped parenthesised config and reserved page metadata. The accepted
-`$config`/`$project`/`$html_builder` and root-only `$page` forms are queued.
-`moth new` does not emit them yet.
+inputs with grouped parenthesised config and direct builder slot contributions.
+The accepted `$config`/`$project`/`$html_builder` forms are queued. A general
+`$entry` purpose is deferred; the earlier `$page` proposal is superseded.
+`moth new` does not emit the queued directives yet.
 
 A Moth project is the directory you select. That directory is both the build
 root and the source root. There is no implicit `src/` folder.
@@ -30,14 +31,18 @@ Each source directory can have one `@*.moth` normal root and one `+*.moth`
 support root. They form one structural module with shared helper files and two
 isolated interfaces. The text after `@` stays cosmetic, so `@page.moth`,
 `@api.moth` and `@mod.moth` all create the same root role. A normal root becomes
-an HTML artefact only when it declares a root-only page:
+an HTML artefact from authored root activity; a direct builder slot
+contribution is const-fragment activity:
 
 [codeblock, $code("moth"):
-    $page
+    #[$in title:Welcome]
 ]
 
-The current scaffold's `@page.moth` filename doesn't mean it already has this
-accepted page syntax.
+A future `$entry` purpose will make that selection explicit. It is deferred and
+is not current syntax; do not write `$entry` or `$page`.
+
+The current scaffold's `@page.moth` filename doesn't make the filename a page
+or indicate that a root-purpose directive is present.
 
 ### Shared scoped packages
 

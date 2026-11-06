@@ -16,6 +16,7 @@ mod ids_tests;
 mod numeric_intake_tests;
 mod overlays_tests;
 mod preparation_tests;
+mod public_const_rebuild_tests;
 mod render_unit_tests;
 mod slot_composition_tests;
 mod slot_layout_tests;

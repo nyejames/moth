@@ -1,40 +1,87 @@
 Slots let one template receive content from another.
 
-### Default and named slots
+### Declaration and insert forms
 
 [codeblock, $code("moth"):
-    card = [:
-        <h1>[$slot title]</h1>
+    card #= [:
+        <h1>[$slot title = "Untitled"]</h1>
         <section>[$slot]</section>
     ]
 
     [card:
-        [$in title: Hello]
+        [$in title:Welcome]
         Body content
     ]
 ]
 
-The default and named forms are:
+The declaration and insert forms are:
 
 [codeblock, $code("moth"):
-    [$slot]                 -- default slot
-    [$slot name]            -- named slot
-    [$in name: ...]         -- contribution to named slot
+    [$slot]                     -- default slot
+    [$slot = "Fallback"]        -- default slot with a default
+    [$slot name]                -- named slot
+    [$slot name = "Fallback"]   -- named slot with a default
+    [$slot 1]                   -- first positional slot
+    [$slot 1 = "Fallback"]      -- positional slot with a default
+    [$in name:body]             -- contribution to one named slot
 ]
 
-The default slot is declared with dollar-slot. A named slot is declared with
-dollar-slot and a bare name. A named insert contributes with dollar-in
-and the same name.
+Names and positions are bare source tokens, not String expressions or lexical
+value bindings. `$slot "title"` and `$slot 0` are invalid. A position is a
+positive whole number. A `$slot` declaration must be the only meaningful item in
+its head and cannot open a body.
 
-A slot occurrence can provide a compile-time String default, such as
-`[$slot title = "Untitled"]` or `[$slot 1 = "Fallback"]`. Each occurrence
-uses its own default only when no contribution is routed to that slot.
-An explicitly empty contribution still suppresses the default. Multiple
-named contributions concatenate in source order.
+`$in` accepts a bare named target. It is not a String expression and it has no
+positional form, so `$in "title"` is invalid. Each `$in` directive fills one
+named slot and can appear once per head.
+
+### Defaults
+
+An occurrence can hold a compile-time `String` default, including a literal, a
+constant binding, a cast or a structural resource path:
+
+[codeblock, $code("moth"):
+    fallback #= "Draft"
+
+    card #= [:
+        <h1>[$slot title = fallback]</h1>
+        icon=[$slot image = @assets/icon.svg]
+        alt=[$slot alt = "Icon"]
+    ]
+]
+
+A default is an ordinary compile-time `String` value. It is not an arbitrary
+expression evaluator and it is not a template wrapper value. A fully folded
+template constant is an ordinary String and is accepted. A wrapper template
+with unresolved slots is not. A nonconstant or non-String default is diagnosed
+at the declaration.
+
+Each slot occurrence owns its own default, even when another occurrence uses the
+same key. A routed contribution, including an explicitly empty one, suppresses
+that occurrence's default. An occurrence with no default and no routed
+contribution renders empty. Repeated named occurrences consume the same routed
+contributions but may fall back independently:
+
+[codeblock, $code("moth"):
+    card #= [:
+        first=[$slot title = "First fallback"]
+        second=[$slot title = "Second fallback"]
+        body=[$slot = "Body fallback"]
+    ]
+
+    unset #= [card]
+    chosen #= [card:[$in title:Chosen]]
+]
+
+Both `title` occurrences show `Chosen` in `chosen`. In `unset` they show their
+separate fallbacks. Multiple contributions to one named slot concatenate in
+source order. Contributions containing `A-` and `B-` fill both title occurrences
+with `A-B-`. An explicitly empty insert still counts as routed.
 
 ### Positional slots
 
-Positive integer slots receive loose head contributions.
+Positive integer slots receive loose head contributions. The number is a
+declaration target, not an insert target:
 
 [codeblock, $code("moth"):
     image = [:
@@ -48,15 +95,36 @@ The first loose contribution fills slot `1`.
 
 The remaining loose body content fills the default slot.
 
+A positional declaration may also carry a default. Positional slots are never
+filled by `$in`.
+
 ### Routing rules
 
 - Loose contributions fill positional slots in ascending numeric order.
 - Remaining loose contributions go to the default slot when one exists.
 - Loose content that cannot be assigned is an error when no default slot exists.
-- An unfilled slot without a default renders as an empty string.
+- An occurrence with a default renders that default when nothing is routed to it.
+- An unfilled occurrence without a default renders as an empty string.
 - Repeated slots replay the same contribution.
-- Named inserts target only their named slot.
+- Named inserts target only their named slot and never fill positional or default slots.
+- Multiple contributions to one named slot concatenate in source order.
+- An unknown named insert target is diagnosed at the receiving template.
 - One application may combine named, positional and default contributions.
+
+### Builder root slots
+
+A builder can register named destinations for direct top-level const inserts.
+On an active entry root, a direct const `$in` routes to that builder destination
+rather than to an ordinary template slot. Only a direct root insert routes. A
+nested, stored or aliased insert remains ordinary template composition.
+
+Builder slot values are builder-interpreted. Their fallbacks and output policies
+belong to the selected builder, not to the language-level occurrence default
+rule. See @../constants/#const-templates (Const templates) and
+@../project-structure/#entry-config (Entry metadata and builder slots).
+
+Runtime top-level named builder inserts are not supported. Their final design
+remains unsettled.
 
 ### Stored named inserts
 
@@ -68,12 +136,15 @@ through an immediate parent:
         <h1>[$slot title]</h1>
         [$slot]
     ]
-    stored_title #= [$in title: Stored title]
+    stored_title #= [$in title:Stored title]
     rendered #= [card: [stored_title] Body]
 ]
 
 The stored helper is flattened into the immediate parent's slot-routing
 stream. An insert with no matching immediate parent remains invalid.
+
+Imported wrappers, re-exports and constant-record projections preserve their
+slot defaults and routing.
 
 ### Runtime contributions
 
@@ -83,7 +154,19 @@ Runtime-capable templates support slot contributions from selected template
 AST prepares the slot routing before HIR.
 
 Runtime lowering appends the routed contributions through normal string
-accumulators.
+accumulators. Presence comes from routing, not from whether rendered content is
+nonempty.
 
 Unresolved slot or insert artefacts after routing are invalid template
 structure.
+
+### Deferred slot constraints
+
+`$required` and `$unique` are deferred and not implemented. Loop-level
+uniqueness is excluded, and const function syntax is not implemented. The
+proposed forms are not accepted by the current parser:
+
+[codeblock, $code("moth"):
+    [$slot title, $required]   -- not implemented
+    [$slot styles, $unique]    -- not implemented
+]

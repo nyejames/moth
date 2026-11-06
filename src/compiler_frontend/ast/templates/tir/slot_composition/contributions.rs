@@ -1,7 +1,7 @@
 //! TIR-native slot contribution routing.
 //!
 //! WHAT: partitions fill-template content into the slot buckets declared by a
-//!       wrapper template's schema. Explicit `$insert(...)` helpers are routed
+//!       wrapper template's schema. Explicit `$in` helpers are routed
 //!       by target key; remaining loose content is coalesced into chunks and
 //!       assigned to positional slots first, then the default slot.
 //!
@@ -131,7 +131,7 @@ pub(crate) fn route_tir_fill_nodes_against_schema(
     let mut contributions = TirSlotContributions::default();
     let mut loose_nodes = Vec::new();
 
-    // Walk authored fill content exactly once. Explicit `$insert(...)` helpers
+    // Walk authored fill content exactly once. Explicit `$in` helpers
     // (either as `InsertContribution` nodes or as `ChildTemplate` references to
     // a `SlotInsert` helper) are bucketed by target key; everything else becomes
     // loose content that flows into positional or default slots.
@@ -145,7 +145,7 @@ pub(crate) fn route_tir_fill_nodes_against_schema(
         // Resolve an explicit slot-insert helper to its target key and body
         // template. Both `InsertContribution` nodes and `ChildTemplate`
         // references to a `SlotInsert` helper represent the same authored
-        // `$insert("name")` construct at different TIR construction stages.
+        // named `$in` construct at different TIR construction stages.
         let insert_info = match &child_node.kind {
             TemplateIrNodeKind::InsertContribution { template } => Some(*template),
             TemplateIrNodeKind::ChildTemplate { reference, .. } => {

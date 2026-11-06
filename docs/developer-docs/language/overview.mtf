@@ -118,8 +118,10 @@ observable semantics for their topics.
 Contributor routing for compiler and build handoffs lives in
 `docs/docs/directives/overview.mtf`. That file is not a public page import.
 Template-specific directive meanings stay in
-`docs/docs/templates/template-directives.mtf`. Exact `$project`, `$config`,
-`$html_builder` and `$page` signatures stay in the project-structure references.
+`docs/docs/templates/template-directives.mtf`. Exact `$project`, `$config` and
+`$html_builder` signatures stay in the project-structure references. A future
+`$entry` purpose and runtime title remain deferred; the earlier `$page` proposal
+is superseded.
 
 ### Constants and compile-time behaviour
 

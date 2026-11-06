@@ -74,7 +74,7 @@ impl<'a> HirBuilder<'a> {
                     self.register_function_declaration(name, signature, &node.span)?;
                 }
                 NodeKind::EntryStart(signature, _) => {
-                    self.register_entry_function(signature, node.scope, &node.span)?;
+                    self.register_entry_function(signature, &node.span)?;
                 }
                 _ => {}
             }
@@ -509,13 +509,11 @@ impl<'a> HirBuilder<'a> {
     /// Register the module's compiler-owned entry body as one ordinary HIR function.
     ///
     /// WHAT: allocates the entry's single `FunctionId` before any body lowering and stores it on
-    ///       the module alongside the root file that owns the body. The entry gains no name-table
-    ///       entry and no callable path.
+    ///       the module. The entry gains no name-table entry and no callable path.
     /// WHY: later stages identify the entry by HIR identity and `EntryStart` origin alone.
     fn register_entry_function(
         &mut self,
         signature: &FunctionSignature,
-        source_file: PathId,
         span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         if self.module.start_function.is_some() {
@@ -527,7 +525,6 @@ impl<'a> HirBuilder<'a> {
 
         let function_id = self.allocate_function(signature, span)?;
         self.module.start_function = Some(function_id);
-        self.module.start_source_file = Some(source_file);
         Ok(())
     }
 

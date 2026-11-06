@@ -101,7 +101,7 @@ Classification happens in one place. `prepare_tir_view` validates structurally r
 - runtime conditional and loop bodies stay available for lazy lowering
 - runtime slot plans prepare sources and sites
 - helper-only artefacts drop away
-- top-level page fragments emit **folded metadata** with insertion indexes
+- top-level page fragments emit **folded metadata** with insertion indexes and body or builder-slot destinations
 - runtime templates become **neutral owned handoff payloads**
 
 Compile-time fragments never live in HIR. HIR receives ordinary string and control-flow work for runtime pieces only. The TIR store drops before the completed AST leaves the stage. It is temporary scaffolding, not permanent structure. No TIR id tours a public interface or backend.

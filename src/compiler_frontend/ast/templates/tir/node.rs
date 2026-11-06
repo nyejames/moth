@@ -214,7 +214,7 @@ pub(crate) enum TemplateIrNodeKind {
     /// Structural slot placeholder awaiting composition.
     Slot { placeholder: TirSlotPlaceholder },
 
-    /// Content contributed by an `$insert("name")` directive.
+    /// Content contributed by an `$in` directive.
     InsertContribution { template: TemplateIrId },
 
     /// One conditional selector and its selected body.

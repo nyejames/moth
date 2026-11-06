@@ -2,7 +2,7 @@
 //!
 //! Slot schema and placeholder occurrence facts come from `tir/slot_layout.rs`.
 //! This directory routes fill content, expands placeholders, composes head
-//! chains and owned `$children(..)` wrapper trees.
+//! chains and owned child-wrapper trees.
 //!
 //! ```text
 //! slot_composition/
@@ -10,7 +10,7 @@
 //! ├── schema.rs         Placeholder expansion
 //! ├── contributions.rs  Contribution bucket routing
 //! ├── head_chain.rs     Head-chain wrapper composition
-//! ├── child_wrappers.rs Owned `$children(..)` wrapper trees
+//! ├── child_wrappers.rs Owned child-wrapper trees
 //! └── helpers.rs        Shared types and store/diagnostic helpers
 //! ```
 

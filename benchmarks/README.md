@@ -716,7 +716,7 @@ allocation, lookup, folding, import, and lowering pressure.
 - `speed-test.moth`: broad baseline language and compiler exercise covering constant folding, templates, structs, receivers, collections, and control flow.
 - `benchmark-root-single-file.moth`: root-level single-file check case that
   exercises the non-project single-file path.
-- `template-stress.moth`: deeply nested template composition, slot usage, `$children` wrappers, and formatter directive stress.
+- `template-stress.moth`: deeply nested template composition, slot usage, before/after wrappers, and formatter directive stress.
 - `code-highlighter-stress.moth`: one large `$code("moth")` constant whose source-like body
   exercises the compile-time HTML code formatter over a realistic mix of tokens.
 - `type-stress.moth`: type and method-heavy source with structs, choices, aliases, receivers, and constructor patterns.
@@ -760,7 +760,7 @@ allocation, lookup, folding, import, and lowering pressure.
 - `adversarial/deep-scope-churn.moth`: nested functions, control blocks, loop scopes, and local
   declaration pressure for scope-frame creation and ancestor lookup.
 - `adversarial/template-render-plan-churn.moth`: nested template composition, slots, inserts,
-  `$children` wrappers, repeated slot replay, and runtime template rebuilding.
+  before/after wrappers, repeated slot replay, and runtime template rebuilding.
 - `adversarial/constant-dag-churn.moth`: large compile-time constant dependency DAGs, arithmetic
   folding, const records, and folded templates.
 - `adversarial/expression-rpn-churn.moth`: expression parsing and RPN lowering pressure through

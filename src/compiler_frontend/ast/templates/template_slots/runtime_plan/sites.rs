@@ -4,7 +4,7 @@
 //! one TIR render root per site from plan-qualified contribution markers.
 //!
 //! WHY: runtime applications must evaluate each source once while repeated slot
-//! placeholders can still carry different `$children(..)` and `$fresh`
+//! placeholders can still carry different child-wrapper and `$fresh`
 //! metadata. Ordinary contributions compose wrappers around the source marker;
 //! control-flow contributions attach them conditionally to the marker's fresh
 //! template root so a skipped source emits no wrapper. Named markers carry their
@@ -14,6 +14,7 @@
 //! named content stay resolved, and every child rebuilds only the implicit
 //! loose-fill path instead of descending the whole decorator composite again.
 
+use super::push_named_source_markers;
 use super::types::{RuntimeSlotContributionSourceDraft, RuntimeSlotSiteId};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
@@ -25,7 +26,7 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
 use crate::compiler_frontend::ast::templates::tir::{
     DerivedTemplateMetadata, TemplateIrId, TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind,
     TemplateIrStore, TemplateIrSummary, TemplateSlotPlanId, TemplateSlotSitePlan,
-    TemplateWrapperSetId, TirCopyState, TirSlotPlaceholder, TirSlotPlaceholderRef, TirSlotSchema,
+    TemplateWrapperSetId, TirCopyState, TirSlotPlaceholder, TirSlotPlaceholderRef,
     apply_slot_wrapper_sets_to_deferred_fill, attach_conditional_wrapper_set,
     collect_tir_slot_layout_from_root, collect_tir_slot_layout_with_context,
     conditional_wrapper_set_for_control_flow, copy_tir_subtree_with_active_slot_plan,
@@ -85,7 +86,7 @@ pub(super) struct PreparedRuntimeWrapper {
     /// prepared prefix and suffix edges instead of descending them per child.
     fill_paths: Rc<FxHashSet<TemplateIrNodeId>>,
     /// The plan-qualified named markers this application replays. Shared behind
-    /// one pointer because each fill applies them only to slot-owned `$children(..)`
+    /// one pointer because each fill applies them only to slot-owned child
     /// wrapper sets; the wrapper edges themselves were resolved once.
     named_fill: Option<Rc<NamedSlotMarkers>>,
     wrapper_ref: TemplateWrapperReference,
@@ -232,7 +233,7 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
         let shape = source.shape;
 
         // Source plans are distinct from site plans so repeated placeholders can
-        // apply their own `$children(..)` metadata without re-evaluating the source.
+        // apply their own child-wrapper metadata without re-evaluating the source.
         let (mut fill_root, wrapped_as_child) = match placeholder.child_wrapper_set {
             Some(child_wrapper_set)
                 if !shape.skips_parent_child_wrappers()
@@ -326,7 +327,7 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
     ///      structural root, and a wrapper value can contain nested decorated helpers.
     ///      The named fill must see the same exact reference context as the layout used
     ///      for routing; doing it once per application leaves only the implicit loose
-    ///      fill and slot-owned `$children(..)` wrappers for each child.
+    ///      fill and slot-owned child wrappers for each child.
     fn prepare_wrapper_reference(
         &mut self,
         wrapper_ref: TemplateWrapperReference,
@@ -369,7 +370,8 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
             .into());
         };
 
-        let named_fill = self.named_markers_for_schema(&layout.schema)?;
+        let named_fill =
+            push_named_source_markers(self.store, self.slot_plan_id, self.sources, &layout.schema);
 
         // Resolve every named occurrence and composition-owned child-edge overlay
         // once. Slot-owned wrapper sets stay with the per-fill pass: they wrap this
@@ -426,7 +428,7 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
         }
 
         // The wrapper's fixed direct children keep their occurrence-keyed overlay context,
-        // so the same named markers must also reach the `$children(..)` sets stored there.
+        // so the same named markers must also reach the child-wrapper sets stored there.
         // Reusing the markers keeps one plan source per named contribution while still
         // replaying it at every wrapper occurrence this application owns.
         let wrapper_ref = TemplateWrapperReference::new(
@@ -490,7 +492,7 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
             fill_root,
         }];
 
-        // A target slot's own `$children(..)` set wraps this child, so it still
+        // A target slot's own wrapper set wraps this child, so it still
         // receives the application's named markers while the fill is applied. The
         // map is shared with the prepared snapshot rather than cloned per fill.
         let empty_named_fill: NamedSlotMarkers = FxHashMap::default();
@@ -518,34 +520,17 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
         self.push_composed_wrapper_child(wrapper_ref, injected.root, summary, wrapper_span)
     }
 
-    /// Builds one contribution-source marker per routed named slot the schema declares.
-    ///
-    /// WHAT: matches the plan's named contribution sources against the wrapper's own
-    ///       named schema and returns freshly pushed markers carrying their authored
-    ///       shape and control-flow class.
-    /// WHY: a wrapper occurrence inside a runtime slot application must replay the
-    ///       receiver's named content. Markers keep one evaluation per source while
-    ///       still rendering the value at every occurrence, and the carried facts let
-    ///       every later structural composition classify them exactly as the authored
-    ///       contribution.
-    fn named_markers_for_schema(
-        &mut self,
-        schema: &TirSlotSchema,
-    ) -> Result<FxHashMap<StringId, Vec<TemplateIrNodeId>>, TemplateError> {
-        named_markers_for_schema(self.store, self.slot_plan_id, self.sources, schema)
-    }
-
     /// Derives each wrapper in a set with its own named slot markers filled.
     ///
     /// WHAT: builds markers per wrapper from that wrapper's declared names, fills that
     ///       wrapper's structural occurrences, slot-owned wrapper sets and wrapper-local
     ///       direct-child overlay, and returns the replacement set. Resolutions are
-    ///       memoised in the caller's per-application cache.
+    ///       memoised in the caller's per-site wrapper-set map.
     /// WHY: conditional wrapper application stores only wrapper references, and its
     ///       injection happens at runtime handoff after the store becomes read-only.
     ///       Keeping the fill per wrapper prevents two wrappers that declare the same name
     ///       from replaying each other's markers inside one occurrence. A wrapper's fixed
-    ///       direct children carry nested `$children(..)` sets in its reference context,
+    ///       direct children carry nested wrapper sets in its reference context,
     ///       and wrappers stored on its slots are applied only once a runtime child is
     ///       injected, so both paths need the markers before handoff begins.
     fn fill_named_markers_in_wrapper_set(
@@ -691,7 +676,7 @@ fn apply_fill_summary(
 /// WHAT: carries the plan's flattened named markers and the expression, constant and
 ///       string owners that wrapper composition needs.
 /// WHY: the injected fill is a plan-qualified marker, so the slot's own
-///      `$children(..)` wrappers cannot be inferred from the injected site root.
+///      child wrappers cannot be inferred from the injected site root.
 ///      Site-gated fills keep the existing unconditional application contract
 ///      because their site planning already gated them; named markers stay
 ///      available to the nested wrappers a receiving slot applies.
@@ -702,67 +687,25 @@ struct RuntimeSlotFillWrappers<'a> {
     string_table: &'a StringTable,
 }
 
-/// Builds one contribution-source marker per routed named slot the schema declares.
-///
-/// WHAT: matches the plan's named contribution sources against the receiver's named
-///       schema and returns freshly pushed markers carrying their authored shape and
-///       control-flow class.
-/// WHY: a wrapper occurrence inside a runtime slot application must replay the
-///       receiver's named content. Markers keep one evaluation per source while the
-///       carried facts let every occurrence classify them exactly as the authored
-///       contribution.
-fn named_markers_for_schema(
-    store: &mut TemplateIrStore,
-    slot_plan_id: TemplateSlotPlanId,
-    sources: &[RuntimeSlotContributionSourceDraft],
-    schema: &TirSlotSchema,
-) -> Result<FxHashMap<StringId, Vec<TemplateIrNodeId>>, TemplateError> {
-    let mut fills: FxHashMap<StringId, Vec<TemplateIrNodeId>> = FxHashMap::default();
-    if schema.named_slots.is_empty() {
-        return Ok(fills);
-    }
-
-    for draft in sources {
-        let SlotKey::Named(name) = draft.source.target else {
-            continue;
-        };
-        if !schema.named_slots.contains(&name) {
-            continue;
-        }
-
-        let marker = push_runtime_slot_contribution_source(
-            store,
-            slot_plan_id,
-            draft.source.source,
-            draft.shape,
-            draft.control_flow,
-            draft.source.span,
-        );
-        fills.entry(name).or_default().push(marker);
-    }
-
-    Ok(fills)
-}
-
 /// Derives each wrapper in a set with its own named slot markers filled.
 ///
 /// WHAT: builds markers per wrapper from that wrapper's declared names, fills that
 ///       wrapper's structural occurrences, slot-owned wrapper sets and wrapper-local
 ///       direct-child overlay, and returns the replacement set. One resolution per
-///       distinct set is memoised in the caller's receiving-application cache.
+///       distinct set is memoised in the caller's per-site wrapper-set map.
 /// WHY: conditional wrapper application stores only wrapper references, and its
 ///       injection happens at runtime handoff after the store becomes read-only.
 ///       Keeping the fill per wrapper prevents two wrappers that declare the same name
 ///       from replaying each other's markers inside one occurrence. A wrapper's fixed
-///       direct children carry nested `$children(..)` sets in its reference context,
+///       direct children carry nested wrapper sets in its reference context,
 ///       and wrappers stored on its slots are applied only once a runtime child is
 ///       injected, so both paths need the markers before handoff begins. Sibling
-///       sources and repeated slot occurrences replay one set against the same
-///       sources, and every repeat fill would otherwise publish equivalent derived
-///       templates and wrapper sets that the store cannot deduplicate by identity.
+///       sources of one site replay the same set against the same sources, and every
+///       repeat fill within that site would otherwise publish equivalent derived
+///       templates that the store cannot deduplicate by identity.
 #[allow(
     clippy::too_many_arguments,
-    reason = "resolving a set needs the store, plan sources, expression/constant/string owners, the application cache and the set ID"
+    reason = "resolving a set needs the store, plan sources, expression/constant/string owners, the per-site resolution map and the set ID"
 )]
 fn fill_named_markers_in_wrapper_set(
     store: &mut TemplateIrStore,
@@ -801,7 +744,7 @@ fn fill_named_markers_in_wrapper_set(
     let mut changed = false;
     for wrapper in wrappers {
         let layout = collect_tir_slot_layout_with_context(store, wrapper.root, wrapper.context)?;
-        let named_fill = named_markers_for_schema(store, slot_plan_id, sources, &layout.schema)?;
+        let named_fill = push_named_source_markers(store, slot_plan_id, sources, &layout.schema);
         let (filled_root, filled_context) = if named_fill.is_empty() {
             (None, wrapper.context)
         } else {
@@ -918,7 +861,7 @@ fn collect_fill_paths(
     Ok(contains_target)
 }
 
-/// Injects slot fills and applies each receiving slot's own `$children(..)` wrappers.
+/// Injects slot fills and applies each receiving slot's own child wrappers.
 ///
 /// WHAT: fills every matching occurrence, then applies the wrappers stored on the
 ///       matched placeholder before the surrounding wrapper template renders the
@@ -927,7 +870,7 @@ fn collect_fill_paths(
 ///       subtrees that cannot contain the target, and an optional preserved key
 ///       keeps an occurrence out of this pass.
 /// WHY: a wrapper applied around a runtime contribution still owns its own
-///      `$children(..)` metadata. Deferring that metadata to handoff would require
+///      child-wrapper metadata. Deferring that metadata to handoff would require
 ///      deriving templates from an immutable store, so the site tree must carry the
 ///      wrappers structurally, exactly as authored slot expansion does, including
 ///      `$fresh` and conditional-emission behavior.

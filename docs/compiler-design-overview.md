@@ -157,17 +157,17 @@ Separate four consumer lanes:
 | `PublicSemanticInterface` | Complete canonical facts visible to semantic consumers, defined under `Public semantic interfaces`. |
 | `ModuleExecutable` | Module-local `TypeEnvironment`, validated HIR, borrow facts and local lifetime/escape facts, plus optional canonical integer proofs paired with the executable. |
 | `ModuleLinkFacts` | Backend-neutral per-function facts and generated materialisation requests, defined under `Per-function link facts`. |
-| `ModuleCompilerMetadata` | Dormant root activity, folded fragments and runtime insertion indexes, folded root metadata, documentation/API-index data, semantic resource origins and non-executable uses, site-root use. |
+| `ModuleCompilerMetadata` | Dormant root activity, folded fragments with body or builder-slot destinations and runtime insertion indexes, documentation/API-index data, semantic resource origins and non-executable uses, site-root use. |
 
 The local lanes share a publication lifetime. Other modules consume the public interface rather than donor-local semantic state. Linkers and lowerers may consume the validated executable and link lanes through explicit handoffs. Retained compact identities remain paired with their lookup context.
 
-Compile-time page fragments never live in HIR. The artefact validator checks folded fragment values, insertion indexes and their relationship to dormant root metadata. HIR validation checks executable fragment operations only.
+Compile-time page fragments never live in HIR. The artefact validator checks folded fragment values, builder-slot destinations, insertion indexes and their relationship to dormant root activity. HIR validation checks executable fragment operations only.
 
 ### Module root semantic roles
 
-A normal module may define declarations, dormant top-level runtime work and page fragments. Authored root runtime work or direct output requires an explicit purpose with an applicable consumer. `$page` supplies the HTML purpose. Compilation validates dormant work before publication. A dependency exposes declarations without activating that work or inserting fragments.
+A normal module may define declarations, dormant top-level runtime work and page fragments. The current HTML builder selects an entry from that activity. A future general `$entry` purpose will make the selection explicit; it is deferred and the earlier `$page` proposal is superseded. Compilation validates dormant work before publication. A dependency exposes declarations without activating that work or inserting fragments.
 
-Support surfaces and the project package surface are API-only. They permit ordinary declarations and runtime function bodies, but have no implicit entry, root runtime statements, page fragments, page purpose, route or builder artefact. Invalid root activity is diagnosed before executable HIR leaves the compiler.
+Support surfaces and the project package surface are API-only. They permit ordinary declarations and runtime function bodies, but have no implicit entry, root runtime statements, page fragments, root purpose, route or builder artefact. Invalid root activity is diagnosed before executable HIR leaves the compiler.
 
 The project package surface consumes build-supplied package visibility and produces an ordinary immutable module artefact. Its separate package assembly and project-wide assembly privilege remain build-owned.
 
@@ -175,7 +175,7 @@ Public visibility uses compiler-owned export metadata. `$export` is the accepted
 
 ### Normal-root entry
 
-The normal root's implicit entry is compiler-owned, non-exported and unavailable to dependency binding. Purpose directives create neither another entry nor a per-file compilation unit.
+The normal root's implicit entry is compiler-owned, non-exported and unavailable to dependency binding. A future root-purpose directive creates neither another entry nor a per-file compilation unit.
 
 The entry owns dormant root runtime work and produces runtime fragment strings in source order. Entry assembly activates it at most once for that entry after compilation. Dependency binding and compilation never activate it.
 
@@ -365,7 +365,7 @@ Each successful base module has five distinct fingerprint domains:
 |---|---|
 | Public interface | The complete canonical `PublicSemanticInterface`. Excludes private bodies, source locations, warnings, formatting metadata and non-public dormant root work. |
 | Implementation | Executable body semantics and non-interface implementation facts, including exported bodies whose public facts stay unchanged. Excludes dormant root work and generated sidecar bodies. |
-| Dormant root activity | Implicit entry, top-level runtime work, fragments and folded root-local entry metadata. |
+| Dormant root activity | Implicit entry, top-level runtime work, fragments, builder-slot destinations and folded root-local slot contributions. |
 | Runtime dependencies | Backend-neutral calls, helpers, capabilities, target-gated operations, glue requirements, resource uses and site-root requirements of executable functions/root work. |
 | Documentation | Public documentation, editor metadata and API-index data. |
 
@@ -419,13 +419,13 @@ Preparation is the sole owner of module-wide top-level declaration discovery. `P
 - dependency/re-export clauses, direct selections and aliases
 - declaration shells for constants, functions, structs, choices, aliases, traits and conformances
 - declaration modifiers, including `$config` input-contract shells
-- root metadata/purpose invocations and balanced argument ranges
+- root slot contributions and future root-purpose invocations with balanced argument ranges
 - dormant entry-body separation and compile-time fragment placement information
 - structural provider references and structural file references
 - conservative local declaration-ordering hints
 - diagnostics and identity/remap data
 
-Source-kind adapters may synthesise ordinary declarations. API-only root roles reject authored root runtime/output activity. Normal roots retain the corresponding dormant work and purpose facts.
+Source-kind adapters may synthesise ordinary declarations. API-only root roles reject authored root runtime/output activity. Normal roots retain the corresponding dormant work and activity facts; a future root purpose will add explicit purpose facts.
 
 Preparation neither checks executable bodies nor folds expressions. It retains directive arguments without parsing a parallel argument language. The shared argument owner parses them semantically once the receiving context is known. File classification reads the tokenizer's dense path rows, not surrounding expressions.
 
@@ -492,7 +492,7 @@ Stage 3 does not order modules or body-local declarations, inspect executable bo
 
 The typed abstract syntax tree (AST) stage consumes sorted shells and bound visibility. It resolves declarations and canonical types, parses/checks executable bodies, applies receiving-context rules, folds constants/templates, validates public surfaces and prepares active executable work for HIR.
 
-Its owners cover body-local declarations, generic inference/evidence, traits/conformances, casts, file values, Wiring contracts, TIR and folded root metadata. Root metadata enters the non-HIR lane through ordinary visibility, never through downstream constant-name scans.
+Its owners cover body-local declarations, generic inference/evidence, traits/conformances, casts, file values, Wiring contracts, TIR and builder root slot contributions. Root slot facts enter the non-HIR lane through ordinary visibility, never through downstream constant-name scans.
 
 The semantic order is:
 
@@ -665,7 +665,7 @@ One shared argument owner parses delimiters, commas, multiline whitespace, posit
 
 AST validates `~` on existing-place writes and on existing mutable places passed to mutable parameters, including named argument values. Each existing multi-bind target carries its own marker, and all incoming results are evaluated before updates. Mutable receivers separately require `~` on an existing mutable place. Fresh values, including `copy place`, enter ordinary mutable parameters unmarked. A mutable alias declaration uses `writer ~= source` without marking the source. These forms express access, not inferred transfer or type identity. Wire and Route retain their own receiving contracts.
 
-Template-specific slot labels, indices and helper categories retain their own meaning over this shared list syntax. Directive signatures require compile-time arguments, reject escaping/mutable evaluation and distinguish standalone invocations from declaration modifiers. Builders cannot turn the shared parser into an arbitrary source-transform API.
+Handler directive signatures require compile-time arguments, reject escaping/mutable evaluation and distinguish standalone invocations from declaration modifiers. Core template directives keep their own head syntax: `$slot` declarations with an optional compile-time String default, `$in` named targets, and assigned `$before`/`$after` values. Builders cannot turn the shared parser or directive registry into an arbitrary source-transform API.
 
 `assert` is a reserved statement intrinsic with compiler-owned expectations equivalent to:
 
@@ -796,7 +796,7 @@ AST finalisation:
 
 The TIR store is dropped before the completed AST leaves the stage.
 
-Root-local page and documentation metadata folds through this AST path into `ModuleCompilerMetadata`. TIR does not cross that boundary, and HIR does not recover metadata by scanning constant names.
+Root-local builder slot contributions and documentation metadata fold through this AST path into `ModuleCompilerMetadata`, retaining their destination, authored span and structural value. TIR does not cross that boundary, and HIR does not recover metadata by scanning constant names.
 
 No TIR store, ID, view, overlay, preparation type or registry crosses into a completed module, public interface, HIR or backend.
 
@@ -837,7 +837,7 @@ Direct content constants use retained local ordering edges. Actual content-depen
 
 A structural string is an ordinary `String` whose ordered pieces include Text, Resource or SiteRoot. The anchor pieces preserve identity until the builder supplies final characters. Such strings remain legal mutable values, parameters, returns, optionals, collection elements and exported constants. Their presence alone causes no rejection.
 
-One module-local folded-value owner supports the plain-text fast path and structural pieces. Its postorder visitor uses an explicit heap stack as the sole conversion route into public values, HIR constants and direct-template results. Public values retain independently owned outputs. Projection uses no memoisation, which preserves authored field order, provenance and independently owned repeated-child outputs. Consumers never reconstruct the string from AST expressions or TIR.
+One module-local folded-value owner supports the plain-text fast path and structural pieces. Its postorder visitor uses an explicit heap stack as the sole conversion route into public values and direct-template results. Public values retain independently owned outputs. Projection uses no memoisation, which preserves authored field order, provenance and independently owned repeated-child outputs. Consumers never reconstruct the string from AST expressions or TIR.
 
 Composition preserves pieces through assignment, copying, storage, interpolation, concatenation, slots/wrappers, export/re-export and calls/returns. Observation needs concrete characters: equality, length, search/prefix/suffix tests, parsing, String casts, hashing, compile-time map keys/duplicate checks and character-inspecting formatters or host operations.
 
@@ -889,7 +889,7 @@ All visitors, remappers, validators, side tables and lowerers consume the same s
 
 #### Lowering boundary
 
-HIR owns explicit control flow, local/place access, lexical regions and terminators, stable source/binding calls, concrete generated targets, runtime template construction, slot accumulation, map operations, numeric/cast operations, external finite-float checks, Wiring argument/capture facts, module constants and function origins.
+HIR owns explicit control flow, local/place access, lexical regions and terminators, stable source/binding calls, concrete generated targets, runtime template construction, slot accumulation, map operations, numeric/cast operations, external finite-float checks, Wiring argument/capture facts and function origins.
 
 Effectful expression work is linearised into ordered statement preludes and temporary locals before its final value is used. Plain binary expressions remain valid for booleans and comparisons. Scalar arithmetic and negation use explicit checked numeric operations. Template strings use explicit append operations. Validation rejects work left in the wrong representation.
 
@@ -1097,7 +1097,7 @@ The compiler records backend-neutral facts for each source and generated functio
 - resource uses in deterministic source order and a separate site-root-use fact
 - per-function project-context provenance
 
-Generated-function requests accompany module link data as materialisation dependencies. They remain distinct from runtime-dependency fingerprint contents. Non-executable fragments and root metadata carry their own resource/site-root/provenance facts in the metadata lane.
+Generated-function requests accompany module link data as materialisation dependencies. They remain distinct from runtime-dependency fingerprint contents. Non-executable fragments, including named builder slot contributions, carry their own resource/site-root/provenance facts in the metadata lane.
 
 These per-function facts are the linking authority. Module-wide summaries are derived indexes only. Reachability follows stable call edges recorded from already-specialised HIR, without rescanning HIR for link facts, folding constants, choosing branches, mutating HIR, inspecting borrow facts or choosing targets/output. Some target checks also inspect the paired semantic type environment rather than reconstructing types from syntax.
 

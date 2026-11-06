@@ -205,7 +205,7 @@ Later articles assign exact diagnostic ownership. Here only the families matter:
 
 - **Accepted design:** a staged compiler library plus a build-owned project pipeline.
 - **Current implementation:** follow the progress matrix. Do not treat transitional backend handoff details as permanent law.
-- **Queued work:** the mixed JavaScript/Wasm backend plan and the accepted general-directive/config and HTML page-purpose migrations. Canonical module compilation and scoped packages already landed.
+- **Queued work:** the mixed JavaScript/Wasm backend plan, the accepted general-directive/config migration and the deferred `$entry` purpose and runtime-title plan. Canonical module compilation and scoped packages already landed.
 - **Deferred or outside scope:** this article does not teach a universal compiler taxonomy for every language.
 
 ## Exit state

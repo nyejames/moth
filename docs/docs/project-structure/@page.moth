@@ -39,8 +39,9 @@ init_docs_sidebar()!
 
     Normal module roots start with `@`. Support and package-facade roots start
     with `+`. The rest of the filename stays cosmetic. `export:` currently
-    defines the public API. `$page` will declare HTML artefacts; today the
-    builder still selects entries from implemented root activity.
+    defines the public API. The HTML builder currently selects entries from
+    implemented root activity; a general `$entry` purpose is deferred and the
+    earlier `$page` proposal is superseded.
 ]
 
 #[section:
@@ -116,7 +117,7 @@ init_docs_sidebar()!
 #[section:
     [doc_level:
         [$in key:entry-config]
-        [$in title:Entry metadata and page directives]
+        [$in title:Entry metadata and builder slots]
         [$in advanced:[entry_config]]
 
         [entry_config_basic]

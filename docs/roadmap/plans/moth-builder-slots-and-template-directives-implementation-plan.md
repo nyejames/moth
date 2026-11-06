@@ -1,9 +1,9 @@
 # Builder slots and template directive redesign - implementation plan
 
 Status: Active on `builder-slots`
-Current slice: Phase 5 cleanup, documentation and performance
+Current slice: Final review and closeout
 Blockers: None identified
-Next action: Complete documentation, performance checks and the final validation gate.
+Next action: Complete the final independent review and retire this plan.
 Scope: Core template syntax and composition, builder-defined top-level const slots, HTML metadata and stylesheet assembly
 
 ## Purpose
@@ -434,5 +434,5 @@ These exclusions must remain visible in the roadmap where they affect unsettled 
 - [x] `head` deduplicates only identical fully rendered complete contributions and is emitted after dedicated content.
 - [x] Old `page_*` reserved behaviour, `$insert(...)`, parenthesised `$slot(...)` and `$children(...)` are gone.
 - [x] JS/Wasm output parity, resource preflight, mixed const/runtime ordering and import isolation have regression coverage.
-- [ ] Docs and roadmap reflect approved design and explicit deferrals, without introducing stale `$page` or `$stylesheet` claims.
-- [ ] Validation and benchmarks are recorded, and no unnecessary parallel representation or legacy compatibility code remains.
+- [x] Docs and roadmap reflect approved design and explicit deferrals, without introducing stale `$page` or `$stylesheet` claims.
+- [x] Validation and benchmarks are recorded, and no unnecessary parallel representation or legacy compatibility code remains.

@@ -798,7 +798,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         Ok(current)
     }
 
-    /// Applies a slot occurrence's own `$children(..)` wrappers to injected child content.
+    /// Applies a slot occurrence's own child wrappers to injected child content.
     ///
     /// WHAT: wraps the injected child handoff in the slot's `child_wrapper_set`, then in
     ///       its `applied_child_wrapper_set` unless the placeholder skips parent wrappers.
@@ -945,7 +945,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
     ///       child at the wrapper's loose-fill slot or appends it after wrapper
     ///       content when the schema has no loose-fill target (slot-less or
     ///       named-only wrappers).
-    ///       Runtime slot-plan wrappers are rejected because inherited `$children(..)`
+    ///       Runtime slot-plan wrappers are rejected because inherited child
     ///       wrappers must be ordinary render templates.
     /// WHY: this produces the same owned shape as TIR wrapper composition
     ///      without exposing TIR identity across the HIR boundary.

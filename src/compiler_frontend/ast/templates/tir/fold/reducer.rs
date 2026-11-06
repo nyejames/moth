@@ -58,7 +58,7 @@ use super::wrappers::{
     append_template_result_to_buffer, apply_wrapper_context_overlay_to_child_emission,
     fold_conditional_child_wrappers_around_emission,
 };
-/// Rejects `$insert(...)` helper templates at the exact fold boundary where
+/// Rejects `$in` helper templates at the exact fold boundary where
 /// they would otherwise render as ordinary string content.
 ///
 /// WHAT: every effective template source enters one of the fold-owned template

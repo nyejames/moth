@@ -108,6 +108,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 - [canonical_type_identity.rs](src/compiler_frontend/canonical_type_identity.rs): owned cross-module identities and fallible `TypeId` projection for builtin, source nominal, binding-backed opaque, constructed and exported generic-parameter type shapes.
 - [public_interface/](src/compiler_frontend/public_interface/): declaration-centric direct-interface model, export/type/receiver/trait/evidence projection and post-borrow local finalization. kw: `DirectExportSeed`, `CallableSeed`, `PublicInterfaceDraft`, `LocalPublicInterface`.
 - [folded_value.rs](src/compiler_frontend/folded_value.rs): one owned backend-neutral folded-value vocabulary and converter shared by exported constants and retained defaults.
+- [builder_root_slots.rs](src/compiler_frontend/builder_root_slots.rs): builder-registered root slot schema and folded contribution handoff.
 - [module_metadata.rs](src/compiler_frontend/module_metadata.rs): named HIR-lowering result, resolved documentation metadata, structural resource handoff and non-HIR metadata validation.
 - [external_packages](src/compiler_frontend/external_packages/): virtual package registry, external IDs. kw: @core, @web, opaque.
 - [builtins](src/compiler_frontend/builtins/): compiler-owned types/ops/casts/runtime error metadata.

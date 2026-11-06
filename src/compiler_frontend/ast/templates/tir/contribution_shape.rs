@@ -2,7 +2,7 @@
 //!
 //! `ContributionShape` classifies a single TIR contribution node as a
 //! potential child-template contribution, capturing whether it represents
-//! child output and whether it opts out of parent `$children(..)` wrappers.
+//! child output and whether it opts out of parent child wrappers.
 //! Control-flow-root classification stays alongside these contribution facts
 //! so slot composition and runtime sites share the same decision.
 //!

@@ -1,4 +1,4 @@
-//! TIR-native owned `$children(..)` wrapper-tree construction.
+//! TIR-native owned child-wrapper tree construction.
 //!
 //! Wrapper-context overlays own direct-child inherited wrappers. This module
 //! remains only for transforms that need a store-local owned wrapper tree,

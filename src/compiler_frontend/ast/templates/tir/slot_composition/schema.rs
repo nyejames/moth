@@ -473,7 +473,7 @@ fn expand_tir_slot_placeholders_from_node(
             // The derived template is a structural version of this same occurrence, so it
             // keeps the occurrence identity. Retained wrapper-context overlays are keyed by
             // occurrence; a fresh key would silently drop the occurrence's inherited
-            // `$children(..)` context for every consumer of the reference's view context.
+            // child-wrapper context for every consumer of the reference's view context.
             let expanded_reference = reference
                 .with_root(expanded_child_template_id)
                 .with_context(filled_context);
@@ -591,7 +591,7 @@ fn expand_tir_slot_placeholders_from_node(
     }
 }
 
-/// Applies a module-local `$children(..)` wrapper set to a single TIR node.
+/// Applies a module-local child-wrapper set to a single TIR node.
 ///
 /// WHAT: resolves the wrapper set into module-local wrapper template IDs and
 ///       delegates to `wrap_tir_node_in_wrappers_into`, which composes each
@@ -623,7 +623,7 @@ fn apply_tir_wrapper_set_to_node(
     )
 }
 
-/// Resolves one wrapper set while guarding against recursive `$children(..)` graphs.
+/// Resolves one wrapper set while guarding against recursive wrapper graphs.
 ///
 /// WHAT: fills each wrapper's structural named occurrences, slot-owned wrapper sets and
 ///       wrapper-local direct-child overlay, sharing one in-progress set across the
@@ -631,7 +631,7 @@ fn apply_tir_wrapper_set_to_node(
 /// WHY: wrapper sets store only wrapper references, so deferred applications (conditional
 ///       contribution wrappers and direct-child overlays) must carry the named content in
 ///       the wrapper templates themselves. A wrapper may itself own fixed direct children,
-///       whose nested `$children(..)` sets live in the wrapper reference's overlay context
+///       whose nested child-wrapper sets live in the wrapper reference's overlay context
 ///       rather than its structural tree; those sets are filled through the same
 ///       immediate-receiver overlay path so their named occurrences resolve too. A wrapper
 ///       context may inherit the very set being resolved (directly or through another
@@ -1051,7 +1051,7 @@ fn fill_slot_wrapper_set(
 
 /// Resolves routed named content into a receiving application's direct-child wrapper overlay.
 ///
-/// WHAT: rewrites every occurrence context that inherits a `$children(..)` wrapper set so the
+/// WHAT: rewrites every occurrence context that inherits a child-wrapper set so the
 ///       set's wrappers carry the receiving application's named contributions at their declared
 ///       named occurrences, then returns the view context with the replacement overlay.
 /// WHY: a receiver's fixed direct children keep their occurrence-keyed overlay context while
@@ -1202,7 +1202,7 @@ fn fill_direct_child_wrapper_names_inner(
     }))
 }
 
-/// Applies both inherited and applied `$children(..)` wrapper sets to a single
+/// Applies both inherited and applied child-wrapper sets to a single
 /// non-control-flow contribution node.
 ///
 /// WHAT: classifies the contribution, applies `child_wrapper_set` when the
@@ -1252,7 +1252,7 @@ fn apply_tir_wrapper_sets_to_contribution(
     Ok(current_node_id)
 }
 
-/// Applies a slot occurrence's own `$children(..)` wrapper sets around a deferred fill.
+/// Applies a slot occurrence's own child-wrapper sets around a deferred fill.
 ///
 /// WHAT: wraps the fill in `child_wrapper_set`, then in `applied_child_wrapper_set` unless
 ///       the placeholder skips parent wrappers.
@@ -1304,7 +1304,7 @@ pub(crate) fn apply_slot_wrapper_sets_to_deferred_fill(
     Ok(current_node_id)
 }
 
-/// Attaches a conditional `$children(..)` wrapper set to a control-flow node.
+/// Attaches a conditional child-wrapper set to a control-flow node.
 ///
 /// WHAT: for a `ChildTemplate` reference to a control-flow template, copies the
 ///       template, merges the wrapper set into its existing

@@ -87,7 +87,7 @@ struct TirBodyRootInput<'a> {
 /// plus the parsed body root.
 ///
 /// WHAT: formats the body, combines it with the owning template's head prefix,
-///       and composes the shared head chain. Inherited `$children(..)` wrappers
+///       and composes the shared head chain. Inherited child wrappers
 ///       stay on the wrapper-context overlay attached after composition.
 /// WHY: concrete and retained conditional positions use the same TIR composition
 ///      authority without rebuilding a second template representation.

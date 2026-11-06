@@ -7208,3 +7208,34 @@ The three small opt-level 0 cases the maintainer accepted on 2026-11-01 are unaf
 ### Validation
 
 `just validate` and `just validate-full` passed on the follow-up tree.
+
+## Builder slots and template directives (2026-11-06)
+
+The pre-refactor compiler at `919ec4e50` and the implementation after the runtime
+slot fast-path correction were measured on macOS Apple Silicon with
+`just bench-frontend-check` and `just bench-check`. Each used one preflight and
+10 measured iterations. Both trees were dirty with admitted work.
+
+| Workload | Baseline mean ms | Candidate mean ms |
+| --- | ---: | ---: |
+| Frontend template stress | 23.300 | 25.280 |
+| Frontend render-plan churn | 21.243 | 19.881 |
+| CLI template stress | 9.966 | 9.650 |
+| CLI render-plan churn | 9.186 | 9.032 |
+| External-JS imports build | 11.500 | 10.390 |
+| Module-root stress build | 12.004 | 10.450 |
+| External-import churn build | 15.809 | 13.884 |
+
+These are not controlled like-for-like comparisons: the cutover migrated
+template syntax, builder slots, common packages and documentation. The benchmark
+runner reported changed workload fingerprints for 39 frontend and 13 CLI cases,
+including template stress and render-plan churn. The table records the observed
+means, not a regression verdict for those changed inputs. The runtime audit also
+removed an unconditional named-marker allocation and context walk on applications
+without inherited wrapper contexts; a focused cost regression bounds retained
+markers on that path.
+
+Validation: `just validate-full` passed, including 17 standard feature lanes,
+the integration suite, performance checks and the no-timer release-artifact
+check. The isolated release documentation build and builder-slot title smoke
+also passed.

@@ -4,13 +4,13 @@ Compilation and activation are different verbs.
 
 A module can compile completely, including its dormant top-level work, and still do nothing at runtime until an **entry** selects it. The seed can be fully formed and still sleep. Dependencies do not secretly run initialisers because someone mentioned a name.
 
-Current Alpha HTML selection still uses root runtime activity or fragments with reserved page metadata. The accepted queued design makes the root-only `$page` directive the HTML entry declaration: a metadata-only page is valid, while runtime work or fragments alone do not select an entry. The dormant entry and non-activating dependency rules below remain part of both paths.
+Current Alpha HTML selection uses root runtime activity or fragments, so a metadata-only root carrying a direct builder slot becomes a page. The accepted future design gives the root-only `$entry` directive the explicit entry declaration; even a metadata-only root will need that purpose. A declaration-only root selects no entry. The dormant entry and non-activating dependency rules below remain part of both paths. The earlier `$page` proposal is superseded.
 
 ## Compile versus activate
 
 Every normal root may carry dormant top-level runtime work and page fragments. That work is parsed, type-checked, lowered and borrow-validated **before** any entry activates it. Local lifetime-region and escape analysis belongs to the same accepted sequence, but its implementation is still deferred.
 
-Under the accepted root-purpose policy, authored executable work or direct output requires a recognised purpose; `$page` is the only initial purpose. An unmarked root must not disappear merely because HTML entry filtering now selects explicit pages.
+Under the deferred root-purpose policy, authored executable work or direct output will require a recognised `$entry` purpose. An unmarked root must not disappear merely because HTML entry filtering selects explicit entries. Until that cutover, root activity selects HTML entries as described above.
 
 The compiler synthesises an implicit **entry** for a normal root. The entry has no source-level name, so `start` remains an ordinary identifier. Properties that matter:
 
@@ -87,13 +87,13 @@ Fragments split into useful kinds:
 
 Dependency modules do not run their root work merely because a consumer bound a function. Activation is explicit and entry-scoped.
 
-For an accepted HTML entry, fragments belong to a root selected by `$page`; fragments alone do not select a page.
+For a current HTML entry, fragments belong to an active root; fragments select the entry through root activity. A future `$entry` purpose will make that selection explicit.
 
 The paragraph in `@page.moth` enters through fragment metadata and, if needed, runtime production. It does not require the backend to re-read the `.moth` file.
 
 ## Entry assembly
 
-The build system selects **entry candidates** from retained root-purpose facts and builds an **`EntryAssembly`** from existing facts: which root activates, which fragments apply, which metadata the builder needs. In the accepted HTML path, each root with `$page` is a candidate, including a metadata-only page; root activity or fragments alone are not candidates.
+The build system selects **entry candidates** from retained root activity and builds an **`EntryAssembly`** from existing facts: which root activates, which fragments apply, which builder slot destinations the builder needs. Under the deferred `$entry` design, explicit purpose facts replace activity as the candidate source. A metadata-only root with a direct builder slot contribution remains a candidate today.
 
 Contrast **`ProjectPackageAssembly`**, which carries project-wide assembly privilege for the facade. Different job, shared taste for explicit data.
 
@@ -133,7 +133,7 @@ Link planning consumes published artefacts, so the failures it owns are narrow:
 - a required module blocked by its own diagnostics
 - an unresolved link identity, which signals a broken internal invariant rather than an author mistake
 
-Failures that feel like linking but land earlier: invalid root purpose or a missing command-required entry candidate are Stage 0 or early frontend concerns, and fragment and root metadata is validated before an artefact is ever published.
+Failures that feel like linking but land earlier: a future invalid root purpose or a missing command-required entry candidate are Stage 0 or early frontend concerns, and fragment destinations and builder slot values are validated before an artefact is ever published.
 
 Target capability failures wait for the next article even when they appear adjacent in real builds.
 
@@ -145,13 +145,13 @@ Target capability failures wait for the next article even when they appear adjac
 
 **Benefit:** dependencies remain predictable and entry planning stays data-driven.
 
-**Cost:** the builder must carry explicit root and fragment metadata.
+**Cost:** the builder must carry explicit root activity, fragment destinations and builder slot values.
 
 ## Roadmap and current status
 
 - **Accepted design:** typed entry selection, entry assembly and exact reachable union.
 - **Current implementation:** selected normal modules compile their dormant entry work, and entry assembly activates the selected entry exactly once. Imported and API-only roots expose interfaces without activating anything.
-- **Queued work:** `html-page-directives-and-runtime-title-plan.md` carries the `$page` purpose, metadata cutover and runtime-title work.
+- **Queued work:** `html-page-directives-and-runtime-title-plan.md` carries the general `$entry` purpose and runtime-title work. Builder slots own initial document metadata; the earlier `$page` proposal is superseded.
 - **Deferred or outside scope:** link-time deferred source compilation.
 
 ## Exit state

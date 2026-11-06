@@ -59,7 +59,7 @@ init_docs_sidebar()!
         [data:
             [$md:`new html`]
             [: Creates the current HTML project scaffold.]
-            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates a minimal grouped parenthesised config with an explicit valid name, a conventional root-level `@page.moth`, output manifests and an optional .gitignore. It does not yet emit the accepted `$config`/`$project`/`$html_builder` starter or a live `$page` declaration. Use structural `+*.moth` packages under the selected source root for project-local packages.]
+            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates a minimal grouped parenthesised config with an explicit valid name, a conventional root-level `@page.moth` with direct builder slot metadata, output manifests and an optional .gitignore. It does not yet emit the accepted `$config`/`$project`/`$html_builder` starter or an explicit `$entry` declaration. Use structural `+*.moth` packages under the selected source root for project-local packages.]
         ]
 
         [data:
@@ -151,14 +151,17 @@ init_docs_sidebar()!
     To supply a version explicitly, add an earlier `$config` contract or a fixed
     literal to `$project`. The selected directory is the source root.
 
-    A normal module root can supply HTML metadata with builder slots:
+    A normal module root can supply HTML metadata with direct const builder
+    slots. That contribution counts as root activity, so a metadata-only root
+    still produces a page:
 
     [codeblock, $code("moth"):
         #[$in title:Welcome]
     ]
 
     `moth new` emits the current grouped parenthesised config and builder slots.
-    Explicit root purpose remains future work.
+    A general `$entry` root purpose remains deferred; the earlier `$page`
+    proposal is superseded and is not current syntax.
 
     Start a new project:
 
@@ -229,7 +232,7 @@ init_docs_sidebar()!
 
     - `_dev/` and `_release/` are hidden output folders.
     - `.moth_manifest` files are build-system metadata for safe stale-output cleanup.
-    - `@page.moth` is the current conventional module root at the selected project root. The filename is cosmetic; it does not mean that the accepted root-only `$page` syntax is implemented.
+    - `@page.moth` is the current conventional module root at the selected project root. The filename is cosmetic; it does not mean that a root-purpose directive is present. Entries are selected from root activity, and a direct builder slot contribution is activity.
     - Use structural `+*.moth` packages under the selected source root for project-local packages.
 
     ### Using --force

@@ -28,6 +28,7 @@ use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::module_metadata::ModuleDocFragmentKind;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_node, make_test_variable, node, runtime_template_handoff_expr,
@@ -214,11 +215,6 @@ fn registers_declarations_and_allocates_the_entry_function() {
         None,
         "the compiler-owned entry must not gain a callable name path"
     );
-    assert_eq!(
-        module.start_source_file,
-        Some(entry_path),
-        "the entry must record the root source file that owns its body"
-    );
 }
 
 #[test]
@@ -400,30 +396,40 @@ fn repeated_lowering_and_path_remap_keep_the_entry_identity() {
     let (first, mut path_fork, mut string_table) = lower();
     let (second, _, _) = lower();
     assert_eq!(first.start_function, second.start_function);
-    assert_eq!(first.start_source_file, second.start_source_file);
     let entry = first.start_function.expect("the entry is present");
     assert_eq!(
         second.function_origins.get(&entry),
         first.function_origins.get(&entry)
     );
 
-    let old_scope = first
-        .start_source_file
-        .expect("the entry records its source file");
-    let new_scope = super::symbol("remapped.moth", &mut path_fork, &mut string_table);
+    // The entry deliberately has no callable path, so remap coverage uses the authored
+    // function's side-table name.
+    let authored_id = first
+        .functions
+        .iter()
+        .find(|function| function.id != entry)
+        .expect("the authored start function is present")
+        .id;
+    let old_name = first
+        .side_table
+        .function_name_path(authored_id)
+        .expect("the authored function keeps its callable name path");
+    let new_name = super::symbol("remapped_start", &mut path_fork, &mut string_table);
     let mut mapped = Vec::with_capacity(path_fork.len());
     for index in 0..path_fork.len() {
         mapped.push(
-            crate::compiler_frontend::symbols::path_interner::PathId::try_from_index(index)
-                .expect("fixture path table addresses its own nodes"),
+            PathId::try_from_index(index).expect("fixture path table addresses its own nodes"),
         );
     }
-    mapped[old_scope.index()] = new_scope;
-    let remap = crate::compiler_frontend::symbols::path_interner::PathIdRemap::from_full(mapped);
+    mapped[old_name.index()] = new_name;
+    let remap = PathIdRemap::from_full(mapped);
     let mut first = first;
     first.remap_path_ids(&remap);
 
-    assert_eq!(first.start_source_file, Some(new_scope));
+    assert_eq!(
+        first.side_table.function_name_path(authored_id),
+        Some(new_name)
+    );
     assert_eq!(
         first.function_origins.get(&entry),
         Some(&HirFunctionOrigin::EntryStart)

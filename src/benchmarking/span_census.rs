@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 pub const CANDIDATE_LENGTH_BITS: [u32; 5] = [8, 9, 10, 11, 12];
 
 /// Corpus roots for the source-size census: benchmarks, documentation sources and test cases.
-const CORPUS_ROOTS: [&str; 3] = ["benchmarks", "docs/src", "tests"];
+pub const CORPUS_ROOTS: [&str; 3] = ["benchmarks", "docs", "tests"];
 
 const MOTH_EXTENSION: &str = "moth";
 const MTF_EXTENSION: &str = "mtf";
@@ -346,6 +346,7 @@ fn collect_corpus_files(
     js_files: &mut Vec<PathBuf>,
 ) -> Result<(), SpanCensusError> {
     let mut pending = vec![root.to_path_buf()];
+    let docs_root = root.file_name().is_some_and(|name| name == "docs");
 
     while let Some(directory) = pending.pop() {
         let entries = fs::read_dir(&directory).map_err(|error| {
@@ -365,6 +366,14 @@ fn collect_corpus_files(
             })?;
 
             if metadata.is_dir() {
+                if docs_root
+                    && directory == root
+                    && path
+                        .file_name()
+                        .is_some_and(|name| name == "_dev" || name == "_release")
+                {
+                    continue;
+                }
                 pending.push(path);
                 continue;
             }

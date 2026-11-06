@@ -3,10 +3,10 @@
 ## Status
 
 - Status: queued. The earlier `$page` metadata and entry-purpose proposal is superseded.
-- Prerequisites: shared directive recognition and project configuration, plus the active [builder slots plan](./moth-builder-slots-and-template-directives-implementation-plan.md).
+- Prerequisites: shared directive recognition and project configuration, plus direct const root builder-slot metadata.
 - Next action: refresh the branch, authorities and baseline when this plan becomes active.
 
-The builder slots plan owns the metadata cutover. HTML metadata belongs to direct const root slot contributions, not `$page` arguments. The former `$page(head = ...)` design has no successor directive argument. This plan does not restore `page_*` scanning or introduce another metadata path.
+HTML metadata belongs to direct const root slot contributions, not `$page` arguments; `docs/docs/project-structure/entry-config.mtf` owns the current contract. The former `$page(head = ...)` design has no successor directive argument. This plan does not restore `page_*` scanning or introduce another metadata path.
 
 ## Purpose
 

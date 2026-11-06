@@ -9,14 +9,27 @@ A constant template is finished during compilation.
 ]
 
 Direct top-level const templates contribute to an active root. The Alpha
-compiler uses activity-based entry selection and direct inserts for builder
-metadata. General `$entry` purpose validation remains queued.
+compiler uses activity-based entry selection. A direct const root `$in` insert
+supplies builder metadata, while an ordinary const fragment renders into the
+body. General `$entry` purpose validation remains queued, and the former `$page`
+metadata design is superseded by builder slots.
 
 [codeblock, $code("moth"):
+    #[$in title:About]
+    #[$in stylesheets:[@styles/site.css]]
+
     #[$md:
         # Compile-time heading
     ]
 ]
+
+Only a direct root insert reaches builder routing. Nested and stored inserts
+remain ordinary template composition. Scalar builder values concatenate, and
+each stylesheet insert needs one tracked CSS resource. The HTML builder
+deduplicates stylesheets by resource origin.
+
+Runtime top-level named builder inserts are not supported, and their final
+design remains unsettled.
 
 Assigned or returned templates remain ordinary values, not direct page fragments.
 

@@ -184,13 +184,9 @@ fn exposes_function_name_map_for_runtime_fragments() {
 fn nameless_entry_lowers_to_a_generated_callable() {
     let mut expressions = HirExpressionStore::default();
     expressions.freeze();
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let string_table = StringTable::new();
+    let path_fork = PathInternerFork::empty();
     let (type_environment, _) = build_type_environment();
-    let entry_path = path_fork
-        .try_intern_portable_path("main.moth", &mut string_table)
-        .expect("test path fits");
-
     let block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
@@ -203,7 +199,6 @@ fn nameless_entry_lowers_to_a_generated_callable() {
     module.expressions = expressions;
     module.blocks = vec![block];
     module.start_function = Some(FunctionId(0));
-    module.start_source_file = Some(entry_path);
     module.functions = vec![HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),

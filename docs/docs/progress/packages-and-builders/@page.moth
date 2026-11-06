@@ -380,14 +380,14 @@ init_docs_sidebar()!
             [: General [$html:<code>$entry</code>] purpose]
             [: Deferred]
             [: None]
-            [: Explicit root-purpose and command-specific no-entry rules remain queued. Current HTML entries use root activity.]
+            [: Explicit root-purpose and command-specific no-entry rules remain queued. Current HTML entries use root activity. The earlier [$html:<code>$page</code>] proposal is superseded; a future general [$html:<code>$entry</code>] directive owns explicit purpose. Runtime named builder slots are unsettled.]
         ]
 
         [data:
             [: HTML builder root slots]
             [: Supported]
-            [: Direct const root inserts supply document metadata and tracked stylesheet resources.]
-            [: Scalar metadata concatenates, stylesheet origins deduplicate and complete head contributions deduplicate after URL rendering. Reserved [$html:<code>page_*</code>] constants have no implicit effect.]
+            [: Direct root routing, metadata-only entries, body interleaving, imported/helper/API-only isolation, unknown and nonconstant target rejection, resource liveness, scalar metadata, favicon sources, title fallback/concat, stylesheet validation and origin dedup, head dedup, and equivalent JavaScript and HTML-Wasm documents.]
+            [: Direct const root inserts supply document metadata, tracked stylesheet resources and additional head HTML. The compiler validates registered destinations without knowing HTML names. Scalar metadata concatenates, an explicit empty value stays supplied, title falls back through route then project name with prefix/postfix, and title/attribute values are escaped. Each [$html:<code>stylesheets</code>] insert must contain one tracked CSS origin; the first origin wins. Complete head contributions deduplicate after URL rendering and are emitted last. Runtime named builder slots are unsettled. Reserved [$html:<code>page_*</code>] constants have no implicit effect.]
         ]
 
         [data:

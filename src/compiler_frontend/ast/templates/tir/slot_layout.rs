@@ -1,8 +1,10 @@
 //! Slot-layout owner for one TIR wrapper tree.
 //!
-//! One cycle-guarded walk records unique schema targets and every placeholder
-//! occurrence. Schema discovery, placeholder collection and the structural
-//! slot-presence probe share this walk. It is not a generic TIR visitor.
+//! A cycle-guarded walk over the wrapper root records unique structural schema
+//! targets and every placeholder occurrence. Schema discovery additionally
+//! recurses into slot-attached decorator wrappers and inherited child-edge
+//! overlays through their wrapper references, so collection is not a single
+//! flat TIR traversal.
 //!
 //! A placeholder's attached `$before`/`$after` decorator wrappers contribute their named slots
 //! to the same schema: the wrapper application created for that placeholder's
@@ -51,6 +53,16 @@ pub(crate) struct TirSlotSchema {
     pub(crate) has_default_slot: bool,
     pub(crate) named_slots: FxHashSet<StringId>,
     pub(crate) positional_slots: BTreeSet<usize>,
+    /// Whether the layout saw an applicable inherited wrapper context.
+    ///
+    /// WHAT: set while layout collection reads a reference or child-edge overlay
+    ///       and finds a non-skipped inherited wrapper set.
+    /// WHY: runtime slot planning must resolve plan-qualified markers into those
+    ///      overlays before the handoff store becomes read-only. Structural named
+    ///      occurrences and slot-attached wrapper sets are served by ordinary site
+    ///      planning, so planners use this fact to keep applications without
+    ///      inherited wrapper contexts free of named-marker nodes and context fills.
+    pub(crate) has_inherited_wrapper_contexts: bool,
 }
 
 impl TirSlotSchema {
@@ -259,7 +271,7 @@ pub(crate) fn collect_tir_slot_layout_from_root(
     collect_layout_from_root(store, root_node_id, TemplateViewContext::default())
 }
 
-/// Schema-only convenience over the one layout walk.
+/// Schema-only convenience over the shared layout collection.
 #[cfg(test)]
 pub(crate) fn collect_tir_slot_schema(
     store: &TemplateIrStore,
@@ -268,7 +280,7 @@ pub(crate) fn collect_tir_slot_schema(
     Ok(collect_tir_slot_layout(store, template_id)?.schema)
 }
 
-/// Schema-only convenience over the context-aware layout walk.
+/// Schema-only convenience over the context-aware layout collection.
 pub(crate) fn collect_tir_slot_schema_with_context(
     store: &TemplateIrStore,
     template_id: TemplateIrId,
@@ -596,13 +608,16 @@ fn collect_wrapper_reference_named_slots(
 
 /// Records named slots of wrapper sets inherited at a reference's fixed-child occurrences.
 ///
-/// WHAT: reads the reference's wrapper-context overlay and adds the named schema of
-///       every inherited set that still applies at its occurrence.
+/// WHAT: reads the reference's wrapper-context overlay, records that an applicable
+///       inherited set exists, and adds the named schema of every inherited set that
+///       still applies at its occurrence.
 /// WHY: nested `$before`/`$after` values keep their decorators in these overlays.
 ///      The enclosing named fill resolves into the same sets, so their named
 ///      occurrences are addressable even though no structural node in the referenced
 ///      template declares them. Only named targets are collected: the fixed child owns
-///      the inherited wrappers' default and positional insertion points.
+///      the inherited wrappers' default and positional insertion points. The recorded
+///      presence lets runtime slot planning skip marker construction and context
+///      fills when no occurrence can consume them.
 fn collect_reference_context_named_slots(
     store: &TemplateIrStore,
     context: TemplateViewContext,
@@ -623,6 +638,15 @@ fn collect_reference_context_named_slots(
         // not addressable through this reference even if a stale set id is present.
         if wrapper_context.skip_parent_child_wrappers {
             continue;
+        }
+
+        // An applicable inherited set means this reference has decorator state that
+        // only an overlay fill can resolve. Record the fact even when the set's
+        // wrappers declare no names: a named contribution can still be replayed by a
+        // nested wrapper in the same reference tree, and the planner cannot inspect
+        // that tree again after handoff.
+        if wrapper_context.inherited_wrapper_set.is_some() {
+            schema.has_inherited_wrapper_contexts = true;
         }
 
         collect_wrapper_named_slots(

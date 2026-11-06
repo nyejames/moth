@@ -31,7 +31,7 @@ use super::head_chain::HeadChainResolutionInputs;
 
 type SlotCompositionResult<T> = Result<T, TemplateError>;
 
-/// One `$insert(...)` contribution stored under an insert-only carrier template.
+/// One `$in` contribution stored under an insert-only carrier template.
 ///
 /// WHAT: keeps the helper root together with the authored insertion span and constant name.
 /// WHY: flattening an insert-only carrier must preserve the authored site so later diagnostics
@@ -49,7 +49,7 @@ pub(super) fn internal_infrastructure_failure(message: &str) -> TemplateError {
     InfrastructureFailure::internal(CompilerStage::AstConstruction, message).into()
 }
 
-/// Builds the diagnostic for an `$insert(...)` helper that targets a slot the
+/// Builds the diagnostic for an `$in` helper that targets a slot the
 /// wrapper does not declare.
 ///
 /// WHAT: builds the shared unknown-slot-target diagnostic using the
@@ -302,7 +302,7 @@ pub(super) fn compose_wrapper_application(
             inputs.string_table,
         )?;
 
-        // Direct-child `$children(..)` wrappers are occurrence-keyed overlay state, so the
+        // Direct-child wrappers are occurrence-keyed overlay state, so the
         // receiver's named contributions must be resolved into that overlay here; expanding
         // slot placeholders cannot reach a fixed child authored before the slot.
         let composed_context = super::schema::fill_direct_child_wrapper_names_into(

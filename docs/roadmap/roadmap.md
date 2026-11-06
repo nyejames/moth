@@ -88,6 +88,15 @@ This roadmap owns the normal serial order. A plan owns its own work and nothing 
 
 This is a bunch of notes for work that will likely be picked up in the future, but has no set design plan yet.
 
+## Builder slot and template constraints
+
+Runtime top-level named builder slots remain unsettled. The current contract
+routes direct const root inserts only; it does not register runtime resources.
+`$required` is a much later candidate whose value and exact behaviour need
+reconsideration; `$unique` is also deferred. Neither is accepted or implemented.
+Loop-level uniqueness is excluded, and const-function implementation is outside
+the builder slots work.
+
 ## Compiler data-layout follow-ups
 
 Revisit these compiler representation and tooling capabilities only when their stated evidence or design prerequisite is met. Remaining source-facing diagnostic wording issues are collected in the bad-diagnostics log. The compiler-identity serialisation capability is distinct from persistent build artefact formats and precompiled package caches listed under genuinely deferred items below.

@@ -251,7 +251,7 @@ pub(crate) fn copy_tir_subtree_with_active_slot_plan(
 ///       names the source template's `conditional_child_wrapper_set` when the
 ///       copied node will become the root of a structurally derived template
 ///       that preserves it.
-/// WHY: occurrence-keyed overlays (notably `wrapper_context` for `$children(..)`
+/// WHY: occurrence-keyed overlays (notably `wrapper_context` for child
 ///      wrappers) describe the *source* root. A runtime slot application replaces
 ///      that root with a scratch copy whose child occurrences are fresh, so the
 ///      receiver's context must move to the copied keys or fixed direct children

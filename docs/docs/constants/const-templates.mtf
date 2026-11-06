@@ -1,4 +1,7 @@
-The Alpha compiler selects HTML entries from authored root activity. Direct const root inserts supply builder metadata. General `$entry` purpose validation remains queued.
+The Alpha compiler selects HTML entries from authored root activity. Direct
+const root inserts supply builder metadata. General `$entry` purpose validation
+remains queued, and the former `$page` metadata design is superseded by builder
+slots.
 
 A template can be required to finish during compilation.
 
@@ -21,7 +24,7 @@ returned from a function remains a value and does not become a page fragment by 
 
 Direct root const-template fragments use the current activity-based entry
 selection policy. A future general `$entry` purpose is separate from metadata
-and is not implemented yet.
+and is not implemented.
 
 [codeblock, $code("moth"):
     #[$md:
@@ -36,6 +39,73 @@ The direct form on an active root:
 - records its position relative to runtime fragments
 - is handed to the project builder
 - never becomes HIR runtime code
+
+### Builder slot contributions
+
+A builder can register named destinations for direct top-level const inserts.
+The HTML builder registers `title`, `description`, `lang`, `favicon`,
+`body_style`, `stylesheets` and `head`. Ordinary direct const fragments still
+render into the body. A root with only direct named const inserts still counts
+as an output-producing entry where the builder's entry rules allow it.
+
+[codeblock, $code("moth"):
+    #[$in title:Moth]
+    #[$in description:A language for creating reliable software]
+    #[$in lang:en]
+    #[$in favicon:[@assets/favicon.svg]]
+    #[$in stylesheets:[@styles/site.css]]
+    #[$in head:<meta name="theme-color" content="#ffffff">]
+
+    #[:<main>Hello Moth</main>]
+]
+
+The HTML destinations are:
+
+- `title`: escaped title text, with the builder's route then project-name fallback
+- `description`: escaped meta description text, omitted when absent
+- `lang`: escaped `<html lang>` value, with the builder default when absent
+- `favicon`: escaped icon URL from a tracked resource or a permitted String
+- `body_style`: escaped body style attribute, with the builder default when absent
+- `stylesheets`: one tracked local CSS resource per insert, linked in first-origin order
+- `head`: raw additional head HTML, appended after the builder's dedicated head content
+- the implicit default destination: ordered body fragments
+
+A direct named insert must fold to a compile-time value. A nonconstant
+contribution and a name the builder has not registered are diagnosed at their
+authored source. Nested, stored and aliased inserts remain ordinary template
+composition and never become builder messages. Ordinary template slots are
+owned by @../templates/#template-slots (Template slots). Helper files, imported
+roots and API-only roots cannot contribute to the selected entry.
+
+The builder interprets each registered destination. Scalar metadata
+contributions concatenate in source order and a supplied empty value stays
+present, even for `title`. There is no scalar cardinality error. Template body
+whitespace remains part of each value, including a space immediately after the
+body colon. A missing value uses the builder fallback, which is separate from an
+ordinary slot occurrence default. An absent title uses the route then project
+name with the configured prefix and postfix. An absent description emits no
+element. Other absent scalar values use the builder defaults. The builder
+escapes scalar metadata and never treats it as raw HTML.
+
+Each `stylesheets` contribution must contain exactly one tracked local CSS
+resource. Plain paths, external URLs, site-root values, non-CSS files and
+combined resources are invalid. Use `head` for an external stylesheet. The
+builder keeps the first contribution for each stable resource origin and renders
+the link relative to each output page. `head` is raw HTML emitted after the
+builder's dedicated head content and deduplicated only when complete
+contributions render identically in the page URL context. It never replaces or
+bypasses scalar escaping.
+The full HTML contract is owned by
+@../project-structure/#entry-config (Entry metadata and builder slots).
+
+Named contributions keep their structural resources live, including on a page
+with no runtime work. The former `page_title`, `page_description`, `page_lang`,
+`page_favicon`, `page_body_style` and `page_head` names are ordinary constants
+with no implicit document effect.
+
+Runtime top-level named builder inserts are not part of the current contract.
+Their final design remains unsettled. `$required`, `$unique`, loop-level
+uniqueness and const function syntax are not implemented.
 
 ### Const template `if`
 

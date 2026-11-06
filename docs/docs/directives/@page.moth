@@ -9,7 +9,7 @@
     init_docs_sidebar
 
 #[$in title:["Directives"]]
-#[$in description:["General compiler and builder directives in Moth, including configuration, pages and shared argument rules."]]
+#[$in description:["General compiler and builder directives in Moth, including configuration, builder slots and shared argument rules."]]
 #[$in head:[language_theme_head]]
 
 #[navbar]
@@ -20,10 +20,12 @@ init_docs_sidebar()!
 
     `$` introduces a registered compiler or builder directive. Template
     formatters already use this marker. The accepted general family extends it
-    to configuration, page metadata and later compiler-owned blocks.
+    to configuration, future root purpose and later compiler-owned blocks.
+    HTML document metadata uses direct const root inserts through builder slots.
 
     Template directives are implemented. The general non-template family is
-    accepted design and is not yet available in the Alpha compiler.
+    accepted design and is not yet available in the Alpha compiler. The earlier
+    `$page` proposal is superseded; general `$entry` remains deferred.
 ]
 
 #[section:

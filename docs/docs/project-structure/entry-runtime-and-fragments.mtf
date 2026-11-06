@@ -1,38 +1,43 @@
-**Current support versus accepted design.** The Alpha builder still treats authored runtime work and fragments as HTML entry activity. The accepted queued design requires an explicit root purpose. Initially, only root-only `$page` supplies the HTML purpose. Dependency roots remain non-activating in both designs.
+**Current support.** An HTML entry is selected from implemented activity on a normal module root: a non-trivial root body, a direct const top-level fragment or a runtime fragment. A general `$entry` root purpose is deferred; the earlier `$page` proposal is superseded and is not implemented. Dependency roots remain non-activating.
 
 Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-owned entry. Entry assembly activates that module-owned entry exactly once for a selected page. A dependency exposes declarations without activating its root.
 
-### Explicit root purpose for active roots
+### Current entry activity and future root purpose
 
-Top-level executable work or direct output requires a recognised purpose with an
-applicable consumer. `$page` is the initial and only HTML purpose in the
-accepted design:
+The Alpha HTML builder selects a page from authored root activity. Any of these
+makes a normal root an entry candidate:
 
-[codeblock, $code("moth"):
-    $page
-]
+- a non-trivial top-level runtime body
+- a direct const top-level fragment
+- a runtime top-level fragment
 
-The purpose applies to the whole normal root rather than to statements after
-the directive. A root with only functions, types, constants or other API
-declarations remains valid without a page. An unmarked root with authored
-runtime work, direct output or fragments still needs a purpose even when an
-optimisation could prove the work unreachable. A static `if false`, an empty
-direct fragment and an immutable runtime binding do not erase the authored
-role.
+A direct named builder contribution such as a const root `$in title` is a const
+fragment, so a root with only metadata still counts as output-producing
+activity and emits a complete document.
 
-Future `$test` may provide a non-page purpose for a separate testing consumer.
-It is deferred and cannot make a root valid today. A metadata directive also
-cannot authorise runtime work merely because it appears in the file.
+The accepted future direction is a general `$entry` root purpose. It is deferred
+and must not be used in source today. The earlier `$page` proposal is
+superseded: `$page` is not an accepted directive and offers no metadata
+arguments. `$entry` will make entry selection explicit while preserving
+directory-derived routes, one page per normal root and dependency
+non-activation. Future `$test` remains a separate non-page purpose. Neither
+future purpose is a metadata path; initial document metadata belongs to builder
+slots.
+
+Only a direct top-level const `$in` on the active entry root reaches the
+builder. A nested or aliased insert remains ordinary template composition, and
+runtime top-level templates still contribute only to the default body lane.
+Runtime named builder slots are unsettled final design and are not supported.
 
 ### Comment and documentation exemptions
 
 Semantically classified `$doc`, `$note` and `$todo` templates are
-documentation/comment processing. They do not need a root purpose and do not
-create an HTML entry by themselves. This exemption follows the template's
-semantic category, not whether its rendered output happens to be empty.
+documentation/comment processing. They do not create an HTML entry by
+themselves. This exemption follows the template's semantic category, not
+whether its rendered output happens to be empty.
 
 Assigned or returned template values are ordinary values, not direct output.
-Their containing runtime code follows the normal purpose rule.
+Their containing runtime code follows the normal root placement rules.
 
 ### Entry-activated root runtime
 
@@ -69,10 +74,10 @@ three startup categories and invocation-local reporting, is owned by
 
 ### Metadata-only pages
 
-A root with only `$page` metadata still emits a complete page with default
-document metadata. A page containing only resource-bearing metadata also emits
-the complete document and the resources it uses. It does not need non-empty
-executable HIR, an artificial fragment or generated runtime code.
+A root with only direct const builder slot contributions still emits a complete
+document. A page containing only resource-bearing metadata also emits the
+resources it uses without non-empty executable HIR, an artificial fragment or
+generated runtime code.
 
 ### Dependency roots
 
@@ -80,10 +85,9 @@ Dependency module roots never activate their root runtime. When a module is
 bound for its public API, its top-level runtime code, entry body and page
 fragments remain dormant. Only exported declarations remain available.
 
-The purpose policy still applies when a root is compiled as a provider. A
-consumer cannot make invalid unpurposed runtime work legal by keeping it
-dormant. Valid dependency access and `check` remain non-activating, but neither
-operation suppresses a purpose diagnostic.
+A consumer cannot make a dependency's root work or fragments part of its own
+entry, and imported module roots do not contribute named builder slots to the
+consumer. Valid dependency access and `check` remain non-activating.
 
 ### Do not put page fragments in helper files
 
@@ -94,5 +98,5 @@ root only. An ordinary file cannot become a page by containing a fragment.
 ### Concepts related to runtime fragments
 
 - For module identity and root filenames see @#module-roots (Module roots).
-- For page metadata and command policy see @#entry-config (Entry metadata and page directives).
+- For builder slots and command policy see @#entry-config (Entry metadata and builder slots).
 - For routes and synthetic single-file pages see @#html-routing-and-artifacts (HTML routing and artefacts).

@@ -116,6 +116,6 @@ forever.
 ### Concepts related to the public API
 
 - For module root rules see @#module-roots (Module roots).
-- For entry purpose and page fragments see @#entry-runtime-and-fragments (Active-root runtime and fragments).
+- For entry activity and page fragments see @#entry-runtime-and-fragments (Active-root runtime and fragments).
 - For re-export syntax see @../packages/#public-reexports (Public re-exports).
 - For visibility rules see @../packages/#module-visibility (Module visibility).

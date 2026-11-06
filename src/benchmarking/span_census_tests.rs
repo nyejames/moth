@@ -236,3 +236,33 @@ fn the_census_tokenizes_an_html_template_that_built_ins_reject() {
     )
     .expect_err("built-ins alone must reject $html, which is why the census merges the project's");
 }
+
+#[test]
+fn census_reads_current_docs_sources_but_skips_generated_outputs() {
+    let workspace = tempfile::tempdir().expect("temporary corpus");
+    for path in [
+        "benchmarks",
+        "tests",
+        "docs/developer-docs",
+        "docs/_dev",
+        "docs/_release",
+    ] {
+        std::fs::create_dir_all(workspace.path().join(path)).expect("corpus directory");
+    }
+    std::fs::write(
+        workspace.path().join("docs/developer-docs/guide.mtf"),
+        "[:guide]",
+    )
+    .expect("documentation source");
+    std::fs::write(workspace.path().join("docs/_dev/generated.js"), "generated")
+        .expect("development output");
+    std::fs::write(
+        workspace.path().join("docs/_release/generated.js"),
+        "generated",
+    )
+    .expect("release output");
+    let census = super::span_census::run_span_census(workspace.path()).expect("census succeeds");
+    assert_eq!(census.files_tokenized, 1);
+    assert!(census.tokenize_failures.is_empty());
+    assert_eq!(census.excluded_js.file_count, 0);
+}

@@ -1,7 +1,7 @@
-**Current versus accepted.** Alpha emits HTML from root activity and expects a
-homepage at the selected project root. The accepted design keeps directory
-routes but requires explicit root-only `$page` pages and command-specific
-no-page rules.
+**Current support.** Alpha emits HTML from root activity and expects a
+homepage at the selected project root. A deferred general `$entry` purpose will
+keep directory routes and add command-specific no-page rules. The earlier
+`$page` proposal is superseded and is not current syntax.
 
 ### Directory routes
 
@@ -15,19 +15,21 @@ Routes come from directory position, not from the `@` filename:
 The root filename is cosmetic. An ordinary file and `index.moth` have no page
 meaning.
 
-### Page and command rules
+### Activity and future entry rules
 
-After the cutover, a normal root needs an explicit page purpose:
+Today a normal root becomes an HTML entry when it has a non-trivial root body,
+a direct const fragment or a runtime fragment. A direct builder slot
+contribution is a const fragment, so this still emits a complete document:
 
 [codeblock, $code("moth"):
-    $page
+    #[$in title:Welcome]
 ]
 
-`check` accepts a valid zero-page project but still rejects unpurposed
-runtime work. HTML `build` and `dev` need a page somewhere below the selected
-project root, not necessarily at its root. Single-file HTML output requires
-`$page` on its synthetic root. A metadata-only page still emits a complete
-document.
+The deferred `$entry` design will make the purpose explicit and let `check`
+accept a zero-entry project. HTML `build` and `dev` will then need an entry
+somewhere below the selected project root, not necessarily at its root, and
+single-file HTML output will need one on its selected root. Until that cutover,
+the homepage requirement and activity-based selection still apply.
 
 The builder does not invent a homepage or scan arbitrary `.moth` files.
 Generated `_dev/` and `_release/` folders remain output, not source.

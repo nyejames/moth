@@ -198,7 +198,7 @@ Do not re-teach diagnostic transport here. The semantic rejection is the point.
 
 - **Accepted design:** AST owns constants, generic inference, traits, casts and concrete requests.
 - **Implementation coverage:** the @../../../docs/progress (Progress matrix) records constants, casts, generics, trait evidence and backend support.
-- **Queued work:** the accepted general-directive/config and HTML page-purpose migrations.
+- **Queued work:** the accepted general-directive/config migration and the deferred `$entry` purpose and runtime-title plan.
 - **Deferred or outside scope:** structural `$feature` selection, trait objects and broad runtime reflection.
 
 ## Exit state

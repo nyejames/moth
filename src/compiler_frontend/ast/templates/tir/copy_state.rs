@@ -171,7 +171,7 @@ impl TirCopyState {
         self.update_depth();
     }
 
-    /// Records an `$insert("name")` contribution node.
+    /// Records a named `$in` contribution node.
     pub(crate) fn record_insert_contribution(&mut self) {
         self.summary.record_insert_contribution();
         self.update_depth();

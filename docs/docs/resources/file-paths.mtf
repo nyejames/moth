@@ -58,7 +58,7 @@ That resolves to `images/logo.svg`.
 
 Each physical-target-bearing file path is resolved once. Repeating it in the same module reuses the already resolved result. A `SourceKindNoFileValue` occurrence has no physical target and is not resolved.
 
-### Page metadata uses ordinary resource paths
+### Builder slot metadata uses ordinary resource paths
 
 Root builder slots use the same file-path expressions as other source code.
 A tracked favicon remains a resource-bearing `String`:

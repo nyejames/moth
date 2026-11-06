@@ -16,10 +16,18 @@ They begin with `$`.
 
 Common directives include:
 
+- `$slot` for `$slot`, `$slot name` and `$slot 1` declarations
+- `$in name:` to fill one named slot
+- `$before = ...` and `$after = ...` to wrap direct children
+- `$fresh` to skip one parent wrapper
 - `$md` for Moth Markdown
 - `$raw` for unformatted text
 - `$note` and `$todo` for ignored template notes
 - `$html`, `$css` and `$code` in HTML projects
+
+A slot declaration occupies its head alone. Each `$in` directive fills one named
+slot. See @../templates/#template-slots (Template slots) and
+@../templates/#child-wrappers (Child wrappers) for composition details.
 
 Builders may add constrained template-formatting directives only.
 

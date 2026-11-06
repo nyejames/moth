@@ -64,7 +64,7 @@ use slot_plans::SlotPlanSlot;
 //  Side-table types
 // -------------------------
 
-/// A reusable set of `$children(..)` wrapper template refs.
+/// A reusable set of child-wrapper template refs.
 ///
 /// Wrapper sets store effective wrapper references (root, phase and
 /// value-carried context). A wrapper's effective identity is not only its
@@ -126,10 +126,10 @@ pub(crate) struct TemplateIrStore {
     /// WHY: every reference to one constant must share one TIR root, so the rebuild runs once per
     ///      `ConstValueId` per module build instead of once per reference.
     rebuilt_const_template_roots: FxHashMap<ConstValueId, TemplateIrId>,
-    /// Authored name of an `$insert(...)` contribution that came from a named constant.
+    /// Authored name of an `$in` contribution that came from a named constant.
     ///
     /// WHAT: maps one `InsertContribution` node to the source-visible name the author wrote.
-    /// WHY: a contribution references the reusable `$insert` helper template, so the authored
+    /// WHY: a contribution references the reusable `$in` helper template, so the authored
     ///      name is not recoverable from the node or its helper. Diagnostics that reject an
     ///      escaped insert name the authored constant instead of the helper definition.
     insert_contribution_names: FxHashMap<TemplateIrNodeId, StringId>,
@@ -480,7 +480,7 @@ impl TemplateIrStore {
         id
     }
 
-    /// Pushes an `$insert(...)` contribution node and records its authored name.
+    /// Pushes an `$in` contribution node and records its authored name.
     ///
     /// WHAT: appends the contribution node, then stores the source-visible name when the
     ///       contribution came from one named constant.

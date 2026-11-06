@@ -3864,7 +3864,7 @@ fn named_only_fill_preserves_child_occurrence_wrapper_context() {
     );
 }
 
-/// Builds a receiver whose named slot declares a `$children(..)` wrapper set.
+/// Builds a receiver whose named slot declares a child-wrapper set.
 fn build_named_slot_receiver_with_slot_wrappers(
     store: &mut TemplateIrStore,
     string_table: &mut StringTable,
@@ -4338,7 +4338,7 @@ fn receiver_direct_child_wrapper_replays_named_contribution() {
     )]);
 
     // Receiver: one fixed direct child followed by the default slot that carries the
-    // receiver's own `$children(..)` wrapper set.
+    // receiver's own child-wrapper set.
     let fixed_template = build_single_text_template(&mut store, &mut string_table, "fixed");
     let fixed_node = {
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -4541,7 +4541,7 @@ fn runtime_receiver_rebases_fixed_direct_child_wrapper_context_and_names() {
     )]);
 
     // Receiver: one fixed direct child followed by the default slot that carries the
-    // receiver's own `$children(..)` wrapper set.
+    // receiver's own child-wrapper set.
     let fixed_template = build_single_text_template(&mut store, &mut string_table, "fixed");
     let fixed_node = {
         let mut builder = TemplateIrBuilder::new(&mut store);

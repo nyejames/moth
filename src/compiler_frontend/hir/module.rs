@@ -31,7 +31,7 @@ use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
 };
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
+use crate::compiler_frontend::symbols::path_interner::PathIdRemap;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use rustc_hash::FxHashMap;
@@ -102,12 +102,6 @@ pub struct HirModule {
 
     /// Compiler-synthesised entry point for normal roots.
     pub start_function: Option<FunctionId>,
-    /// Logical source-file path of the root file that owns the implicit entry body.
-    ///
-    /// WHAT: source ownership for the entry body, whose HIR function has no declaration path.
-    /// WHY: root-scoped facts are authored beside the entry body, so consumers need the owning
-    ///      file without inventing a synthetic entry name.
-    pub start_source_file: Option<PathId>,
     /// Classification for every function in the module.
     ///
     /// WHY: backends/builders need explicit semantic role tagging to keep
@@ -189,7 +183,6 @@ impl HirModule {
             choices: vec![],
             side_table: HirSideTable::default(),
             start_function: None,
-            start_source_file: None,
             function_origins: FxHashMap::default(),
             function_ids_by_origin: FxHashMap::default(),
             function_ids_by_private_origin: FxHashMap::default(),
@@ -209,9 +202,6 @@ impl HirModule {
 
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         self.side_table.remap_path_ids(remap);
-        if let Some(path) = self.start_source_file {
-            self.start_source_file = Some(remap.get(path));
-        }
     }
 
     /// Rebuild function provenance from retained HIR construction blocks.

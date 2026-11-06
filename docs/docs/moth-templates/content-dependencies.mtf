@@ -64,7 +64,7 @@ A `.mtf` file can be depended on from a module root, a normal source file, or bo
 
 ### Bound content does not become a page fragment
 
-Binding a `.mtf` file and inserting its content into a template does not create a page fragment. The caller controls where the content appears. Only direct top-level templates in the entry-selected module root become page fragments.
+Binding a `.mtf` file and inserting its content into a template does not create a page fragment. The caller controls where the content appears. Only direct top-level templates in the entry-selected module root contribute page output or builder metadata.
 
 ### Visibility and module boundary
 

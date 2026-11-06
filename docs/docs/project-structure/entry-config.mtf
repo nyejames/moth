@@ -1,4 +1,9 @@
-HTML pages currently become entries from root runtime work or fragments. Direct const root inserts supply builder metadata. A general `$entry` purpose and capability-checked `io.set_title` remain queued. See @../progress (Progress) and @../progress/packages-and-builders (Packages and builders).
+HTML pages currently become entries from root activity: a non-trivial top-level
+runtime body, a direct const fragment or a runtime fragment. Direct const root
+inserts supply builder metadata. A general `$entry` purpose and
+capability-checked `io.set_title` remain queued; the earlier `$page` proposal is
+superseded. See @../progress (Progress) and
+@../progress/packages-and-builders (Packages and builders).
 
 This page describes entry metadata and its relationship to project configuration.
 
@@ -42,6 +47,18 @@ fragments render into the body. A nested or aliased `$in` remains a template
 composition helper, not a builder message. Helper files and imported roots do
 not contribute to the selected entry.
 
+A root with only these direct const contributions still counts as
+output-producing root activity and emits a complete document. Runtime top-level
+templates contribute only to the default body lane. Runtime named builder slots
+are unsettled design and are not supported.
+
+The compiler accepts the active builder's read-only destination schema. It
+validates that a direct root insert targets a registered name and folds the
+contribution to a structural value; it does not know HTML slot meaning. The
+builder validates slot-specific content and assembles the document. Both the
+JavaScript and HTML-Wasm paths consume the same builder slot plan, so metadata
+fallbacks, stylesheet order and body output remain equivalent.
+
 Repeated `title`, `description`, `lang`, `favicon` and `body_style`
 contributions concatenate in source order. Template body whitespace remains
 part of each value, including a space immediately after `:`. A supplied empty
@@ -70,7 +87,11 @@ document effect.
 ### Future entry purpose and runtime title
 
 General `$entry` purpose validation and `io.set_title` remain queued. They do
-not replace builder slots or change the current active-root policy.
+not replace builder slots. Until `$entry` lands, root activity selects entries;
+it will then make entry selection explicit, and a metadata-only root will need
+that purpose. The earlier `$page` proposal is superseded: `$page` is not a directive and accepts no
+metadata arguments. Runtime top-level templates do not gain named builder slots
+under the current contract.
 
 ### Concepts related to entry metadata
 

@@ -57,7 +57,7 @@ pub(crate) enum AstCounter {
     TemplateTirHeadChainCompositionCalls,
     TemplateTirHeadChainCompositionHits,
 
-    // TIR-native `$children(..)` wrapper application counters.
+    // TIR-native child-wrapper application counters.
     TemplateTirChildWrapperCalls,
     TemplateTirChildWrapperHits,
 

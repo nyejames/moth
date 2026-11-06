@@ -57,7 +57,6 @@ use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::{
     HirAssertionMessageEvaluation, HirFallibleOperation, HirJumpArgument, HirTerminator,
 };
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -6103,13 +6102,18 @@ fn validator_owns_pending_catch_handler_edges_and_rejects_dangling_or_cross_func
 }
 
 #[test]
-fn validator_rejects_a_missing_entry_source_owner() {
+fn validator_rejects_a_start_function_outside_the_module_functions() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    assert!(
-        module.start_source_file.is_some(),
-        "the fixture must start from a complete entry contract"
+    let missing = FunctionId(
+        module
+            .functions
+            .iter()
+            .map(|function| function.id.0)
+            .max()
+            .expect("the fixture has an entry function")
+            + 1,
     );
-    module.start_source_file = None;
+    module.start_function = Some(missing);
 
     let error = validate_module_for_tests(
         &module,
@@ -6117,63 +6121,12 @@ fn validator_rejects_a_missing_entry_source_owner() {
         &type_environment,
         &ExternalPackageRegistry::new(),
     )
-    .expect_err("an entry without a source owner must fail validation");
+    .expect_err("an entry id outside the module's functions must fail validation");
 
     assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
     assert!(
-        error.message.contains("requires a start_source_file owner"),
-        "error should name the missing entry ownership, got: {}",
-        error.message
-    );
-}
-
-#[test]
-fn validator_rejects_an_entry_source_owner_without_an_entry() {
-    let mut path_fork = PathInternerFork::empty();
-    let mut string_table = StringTable::new();
-    let declaration_path = super::symbol("exported_value", &mut path_fork, &mut string_table);
-    let declaration = function_node(
-        declaration_path,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![],
-        None,
-    );
-    let mut ast = build_ast_with_registered_types(
-        vec![declaration],
-        AstExpressionBuilder::new().unwrap(),
-        ConstValueStore::default(),
-        TypeEnvironment::new(),
-    );
-    ast.root_role = ModuleRootRole::Support;
-
-    let (mut module, type_environment) = lower_ast(
-        ast,
-        &mut string_table,
-        &mut path_fork,
-        &ExternalPackageRegistry::new(),
-    )
-    .expect("API-only HIR lowering should succeed");
-    assert_eq!(module.start_function, None);
-    assert_eq!(module.start_source_file, None);
-    module.start_source_file = Some(declaration_path);
-
-    let error = validate_module_for_tests(
-        &module,
-        &string_table,
-        &type_environment,
-        &ExternalPackageRegistry::new(),
-    )
-    .expect_err("a source owner without an entry must fail validation");
-
-    assert_eq!(error.kind, InfrastructureFailureKind::HirTransformation);
-    assert!(
-        error
-            .message
-            .contains("start_source_file owner requires a start_function"),
-        "error should name the orphaned entry owner, got: {}",
+        error.message.contains("is not present in module functions"),
+        "error should name the missing entry function, got: {}",
         error.message
     );
 }

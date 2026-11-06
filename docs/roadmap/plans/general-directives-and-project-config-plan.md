@@ -48,7 +48,7 @@ This plan delivers:
 5. Updated generated config, migrated first-party config inputs and truthful documentation/status.
 6. Targeted recognition of the agreed deferred directive names, without their semantics.
 
-The later entry work delivers general `$entry` purpose enforcement and runtime title mutation. The active builder slots plan owns HTML metadata, independently of that directive. This plan may recognise `$entry` as unavailable, but cannot make it a working or no-op directive.
+The later entry work delivers general `$entry` purpose enforcement and runtime title mutation. Direct const root builder slots own HTML metadata independently of that directive; `docs/docs/project-structure/entry-config.mtf` owns the current contract. This plan may recognise `$entry` as unavailable, but cannot make it a working or no-op directive.
 
 ## 1. Directive vocabulary and ownership
 

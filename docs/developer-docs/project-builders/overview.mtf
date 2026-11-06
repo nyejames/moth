@@ -13,8 +13,8 @@ crate placement doesn't change compiler, builder or runtime ownership.
 - Builder lifecycle and public API: `creating-a-builder.mtf`
 - Source packages, Rust attributes, supported signatures, resources and context:
   `host-packages.mtf`
-- Configuration, metadata directives, formatters, source adapters and import
-  providers: `capabilities-and-directives.mtf`
+- Configuration, metadata directives, builder root slot destinations, formatters,
+  source adapters and import providers: `capabilities-and-directives.mtf`
 - Assemblies, template fragments, entry errors, lifecycles, lowering, resources,
   output and testing: `assemblies-and-runtime.mtf`
 

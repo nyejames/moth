@@ -242,15 +242,19 @@ Teardown is explicit. Host garbage collection doesn't define when a handle stops
 `String`, returns no source-visible value and has no recoverable error channel.
 
 [codeblock, $code("moth"):
-    $page(title = "Initial title")
+    #[$in title:Initial title]
 
     io.set_title("Loaded")
 ]
 
 The call sets the title of the current user-facing host surface to exactly the
 supplied String content. HTML-JS realises it as the live document title. It does
-not reapply the initial title prefix or postfix, mutate `$page` metadata, change
-the route or rewrite the static output file.
+not reapply the initial title prefix or postfix, mutate builder slot metadata,
+change the route or rewrite the static output file.
+
+Initial document metadata comes from a direct root builder slot, not from
+`io.set_title`. The earlier `$page` proposal is superseded and has no runtime
+title argument.
 
 A stable binding identity carries a title-capability requirement in
 per-function link facts. HTML-JS will supply that capability through the browser
