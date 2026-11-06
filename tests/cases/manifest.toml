@@ -18845,3 +18845,66 @@ path = "template_runtime_child_plan_outer_slot_success"
 tags = ["integration", "templates", "slots", "runtime"]
 contract = "language.templates.runtime_child_plan_outer_named_target_acceptance"
 role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_body_interleave"
+path = "html_builder_root_slot_body_interleave"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots"]
+contract = "backend.html.builder_root_slot_direct_body_interleave"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_unknown_target_rejected"
+path = "html_builder_root_slot_unknown_target_rejected"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "diagnostics"]
+contract = "backend.html.builder_root_slot_unknown_target_rejected"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_nested_insert_rejected"
+path = "html_builder_root_slot_nested_insert_rejected"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "diagnostics"]
+contract = "backend.html.builder_root_slot_nested_insert_rejected"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_non_root_helper_rejected"
+path = "html_builder_root_slot_non_root_helper_rejected"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "diagnostics"]
+contract = "backend.html.builder_root_slot_non_root_helper_rejected"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_imported_root_isolated"
+path = "html_builder_root_slot_imported_root_isolated"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "imports"]
+contract = "backend.html.builder_root_slot_imported_root_isolated"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_api_only_root_rejected"
+path = "html_builder_root_slot_api_only_root_rejected"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "diagnostics"]
+contract = "backend.html.builder_root_slot_api_only_root_rejected"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_nonconstant_contribution_rejected"
+path = "html_builder_root_slot_nonconstant_contribution_rejected"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "diagnostics"]
+contract = "backend.html.builder_root_slot_nonconstant_contribution_rejected"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_metadata_only_entry"
+path = "html_builder_root_slot_metadata_only_entry"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots"]
+contract = "backend.html.builder_root_slot_metadata_only_entry"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_resource_liveness"
+path = "html_builder_root_slot_resource_liveness"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "resources"]
+contract = "backend.html.builder_root_slot_resource_liveness"
+role = "primary"

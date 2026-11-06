@@ -10,6 +10,7 @@ use crate::builder_surface::external_import_providers::provider::BuilderRuntimeP
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::ResolvedBuildConfigMap;
+use crate::compiler_frontend::builder_root_slots::BuilderRootSlotSchema;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::module_compilation::generated::ProviderMaterialisationRegistry;
 use crate::compiler_frontend::module_compilation::options::FrontendOptions;
@@ -56,4 +57,9 @@ pub(crate) struct ModuleCompilationContext<'a> {
     /// Declaring-module generic templates already published in this compilation boundary.
     pub(crate) provider_materialisations: &'a ProviderMaterialisationRegistry,
     pub(crate) builder_runtime_packages: &'a [BuilderRuntimePackageMetadata],
+    /// Named destinations the active builder registers for direct top-level const contributions.
+    ///
+    /// `None` when the caller has no builder surface (config-only or generated-only AST work).
+    /// The frontend reads this schema without knowing any builder's destination names.
+    pub(crate) builder_root_slots: Option<&'a BuilderRootSlotSchema>,
 }

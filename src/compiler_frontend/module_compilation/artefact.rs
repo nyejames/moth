@@ -12,6 +12,7 @@ use crate::builder_surface::external_import_providers::provider::{
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
+use crate::compiler_frontend::builder_root_slots::ConstFragmentDestination;
 use crate::compiler_frontend::datatypes::environment::{
     TypeEnvironment, TypeEnvironmentRemapCache,
 };
@@ -159,8 +160,9 @@ pub(crate) struct ModuleLinkFacts {
 
 /// Non-HIR compiler and builder-facing metadata for one compiled module.
 ///
-/// WHAT: owns the resolved root-local entry path, resolved const top-level fragments,
-///       header-derived root activity, and resolved documentation fragments.
+/// WHAT: owns the resolved root-local entry path, resolved const top-level fragments with their
+///       body/named destinations and authored spans, header-derived root activity, and resolved
+///       documentation fragments.
 /// WHY: these are compiler-metadata lanes, not executable HIR state or link facts. Consolidating
 ///      them into one owned lane on the `Module` payload keeps HIR limited to executable/semantic
 ///      IR and gives backend assembly a single metadata owner.
@@ -194,9 +196,9 @@ impl ModuleCompilerMetadata {
         }
     }
 
-    /// WHY: every retained field remaps exactly once. Const-fragment spans are global and carry
-    ///      no interned identity, values are already owned folded strings, root activity has no
-    ///      interned fields, and the entry path is a `PathBuf`.
+    /// WHY: every retained field remaps exactly once. Const-fragment spans are global, values are
+    ///      already owned folded strings, destinations are owned builder names, root activity has
+    ///      no interned fields, and the entry path is a `PathBuf`.
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         if let Some(context) = &mut self.materialisation_context {
             Arc::make_mut(context).remap_path_ids(remap);
@@ -225,16 +227,21 @@ impl ModuleRootActivity {
     }
 }
 
-/// A resolved const top-level fragment: an owned folded string, its authored source span and
-/// runtime insertion index.
+/// A resolved const top-level fragment: an owned folded string, its destination, its authored
+/// source span and runtime insertion index.
 ///
-/// WHAT: carries the fully resolved module-local structural string value plus the authored source
-/// span, when available, and the count of runtime fragments that precede it in source order.
-/// WHY: builders merge const strings with the runtime fragment list using the insertion index to
-/// reconstruct source-order interleaving, while resolving structural pieces at their boundary.
+/// WHAT: carries the fully resolved module-local structural string value, the validated default
+///       body or named builder destination, the authored source span when available, and the
+///       count of runtime fragments that precede it in source order.
+/// WHY: builders merge body fragments with the runtime fragment list using the insertion index
+///      to reconstruct source-order interleaving. Named destinations stay out of body rendering
+///      but remain in the module artefact for builder-specific interpretation and resource
+///      liveness.
 pub(crate) struct ResolvedConstFragment {
     /// Number of runtime fragments preceding this const fragment in source order.
     pub runtime_insertion_index: usize,
+    /// Default body lane or one builder-registered named destination.
+    pub destination: ConstFragmentDestination,
     /// The authored source span of this const fragment, when available.
     pub span: Option<SourceSpan>,
     /// The owned structural string value of this const fragment.

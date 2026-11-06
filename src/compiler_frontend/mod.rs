@@ -48,6 +48,7 @@ pub(crate) mod style_directives;
 pub(crate) mod tokenizer;
 
 pub(crate) mod build_config;
+pub(crate) mod builder_root_slots;
 pub(crate) mod builtins;
 pub(crate) mod canonical_type_identity;
 pub(crate) mod folded_value;

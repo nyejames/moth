@@ -509,6 +509,7 @@ define_stable_reason_keys! {
         &InvalidTemplateStructureCode::TemplateConditionalLoopConstTrue => "invalid_template_structure.template_conditional_loop_const_true",
         &InvalidTemplateStructureCode::TemplateLoopBodyNotConst => "invalid_template_structure.template_loop_body_not_const",
         &InvalidTemplateStructureCode::TemplateConstLoopExpansionLimitExceeded => "invalid_template_structure.template_const_loop_expansion_limit_exceeded",
+        &InvalidTemplateStructureCode::BuilderRootSlotNotRegistered => "invalid_template_structure.builder_root_slot_not_registered",
     },
 
     InvalidSignatureMemberReason => {

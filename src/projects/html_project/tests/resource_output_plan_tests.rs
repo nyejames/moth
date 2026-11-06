@@ -1,6 +1,7 @@
 use super::*;
 use crate::build_system::resource_unions::ResourceOriginUnion;
 use crate::builder_surface::PackageOrigin;
+use crate::compiler_frontend::builder_root_slots::ConstFragmentDestination;
 use crate::compiler_frontend::compiler_errors::{CompilationOutcome, CompilationResult};
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
@@ -873,6 +874,7 @@ fn fragment_and_metadata_uses_keep_authored_spans_with_hir_use() {
         .intern_origin(origin.clone(), Some(intern_span));
     module.metadata.const_top_level_fragments = vec![ResolvedConstFragment {
         runtime_insertion_index: 0,
+        destination: ConstFragmentDestination::Body,
         span: Some(fragment_span),
         value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Resource(origin.clone())]),
     }];

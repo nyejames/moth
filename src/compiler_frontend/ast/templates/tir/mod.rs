@@ -180,7 +180,8 @@ pub(crate) use subtree_copy::{
 pub(crate) use expression_constness::tir_node_is_const_evaluable_value;
 
 pub(crate) use fold::{
-    FoldedConstTemplatePiece, fold_prepared_const_template_pattern, fold_prepared_template,
+    FoldedConstTemplatePiece, fold_prepared_const_template_pattern, fold_prepared_root_slot,
+    fold_prepared_template,
 };
 pub(crate) use handoff_materialization::{
     owned_runtime_slot_handoff_for_prepared_view, owned_runtime_template_handoff_for_prepared_view,

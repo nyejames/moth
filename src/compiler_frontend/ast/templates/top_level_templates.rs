@@ -13,6 +13,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionB
 use crate::compiler_frontend::ast::templates::doc_fragments;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
+use crate::compiler_frontend::builder_root_slots::ConstFragmentDestination;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -31,37 +32,49 @@ use std::rc::Rc;
 
 /// A top-level const template that has been folded to a string at compile time.
 ///
-/// WHAT: carries the folded string value, including any unresolved structural pieces, and its
-/// insertion index relative to runtime fragments.
+/// WHAT: carries the folded string value, including any unresolved structural pieces, its
+///       insertion index relative to runtime fragments, its authored span and its builder
+///       destination.
 /// WHY: builders merge const fragments with the runtime fragment list using the insertion index
-/// to reconstruct source-order interleaving, while resolving structural pieces at their boundary.
+///      to reconstruct source-order interleaving, while named builder contributions stay out of
+///      the body lane and retain their authored provenance for builder interpretation.
 #[derive(Clone, Debug)]
 pub struct AstConstTopLevelFragment {
     /// Number of runtime fragments preceding this const fragment in source order.
     pub runtime_insertion_index: usize,
+    /// Exact authored source span of this const fragment.
+    pub span: SourceSpan,
+    /// Default body lane or one builder-registered named destination.
+    pub destination: ConstFragmentDestination,
     pub value: ConstStringValue,
 }
 
 /// Folded value for a top-level const template.
 ///
 /// WHAT: carries the already-folded string value produced from the template's
-///       shared TIR authority, including unresolved structural pieces.
-/// WHY: top-level fragment collection is keyed by source file and consumes the
-///      folded value after AST emission has already validated and folded the
-///      template.
+///       shared TIR authority, including unresolved structural pieces, and the validated
+///       destination the emitter assigned.
+/// WHY: top-level fragment collection is keyed by source file and consumes the folded value
+///      after AST emission has already validated and folded the template.
 #[derive(Clone, Debug)]
 pub(crate) struct FoldedConstTemplateResult {
     value: ConstStringValue,
+    destination: ConstFragmentDestination,
 }
 
 impl FoldedConstTemplateResult {
-    pub(crate) fn new(value: ConstStringValue) -> Self {
-        Self { value }
+    pub(crate) fn new(value: ConstStringValue, destination: ConstFragmentDestination) -> Self {
+        Self { value, destination }
     }
 
     /// Returns a copy of the folded string value.
     pub(crate) fn value(&self) -> ConstStringValue {
         self.value.clone()
+    }
+
+    /// Returns the validated fragment destination.
+    pub(crate) fn destination(&self) -> ConstFragmentDestination {
+        self.destination.clone()
     }
 }
 
@@ -96,9 +109,8 @@ pub(crate) fn collect_const_top_level_fragments(
     let mut result = Vec::with_capacity(top_level_const_fragments.len());
 
     for fragment in top_level_const_fragments {
-        let value = const_templates_by_path
+        let folded = const_templates_by_path
             .get(&fragment.header_path)
-            .map(FoldedConstTemplateResult::value)
             .ok_or_else(|| {
                 InfrastructureFailure::internal(CompilerStage::AstConstruction,
                     "Top-level const fragment has no corresponding folded template value. This is a compiler bug.",
@@ -107,7 +119,9 @@ pub(crate) fn collect_const_top_level_fragments(
 
         result.push(AstConstTopLevelFragment {
             runtime_insertion_index: fragment.runtime_insertion_index,
-            value,
+            span: fragment.span,
+            destination: folded.destination(),
+            value: folded.value(),
         });
     }
 

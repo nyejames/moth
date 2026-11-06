@@ -821,6 +821,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             global_string_table: Some(self.global_string_table),
             global_path_table: Some(global_path_table),
             builder_runtime_packages: &self.boundary.builder_surface.builder_runtime_packages,
+            builder_root_slots: Some(self.boundary.builder_surface.builder_root_slots()),
         };
 
         // The typed semantic boundary already classified user diagnostics from infrastructure

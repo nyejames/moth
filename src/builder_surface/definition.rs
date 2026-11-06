@@ -21,11 +21,13 @@ use crate::builder_surface::source_file_kind_registry::SourceFileKindRegistry;
 use crate::compiler_frontend::build_config::{
     BuildInputName, BuilderConfigGlobalError, BuilderConfigGlobalSet, PrimitiveBuildValue,
 };
+use crate::compiler_frontend::builder_root_slots::BuilderRootSlotSchema;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// The complete builder surface a backend exposes to a project.
 ///
@@ -50,6 +52,12 @@ pub struct BuilderSurface {
     /// WHY: only the active builder owns the contract that connects a source package to the
     ///      synthetic `.mtf` constant scope.
     pub implicit_template_scope_source_packages: BTreeSet<String>,
+    /// Statically known named destinations for direct top-level const contributions.
+    ///
+    /// WHAT: read-only builder input to frontend root-fragment routing.
+    /// WHY: the compiler validates `#[$in name: ...]` targets and assigns the destination without
+    ///      knowing any builder's slot names.
+    builder_root_slots: BuilderRootSlotSchema,
 }
 /// Validation failures for a complete builder surface.
 #[derive(Debug)]
@@ -79,6 +87,7 @@ impl BuilderSurface {
             builder_runtime_packages: Vec::new(),
             source_file_kinds: SourceFileKindRegistry::new(),
             implicit_template_scope_source_packages: BTreeSet::new(),
+            builder_root_slots: BuilderRootSlotSchema::default(),
         }
     }
 
@@ -152,6 +161,16 @@ impl BuilderSurface {
     ) {
         self.implicit_template_scope_source_packages
             .insert(package_prefix.into());
+    }
+
+    /// Register one statically known named destination for direct top-level const contributions.
+    pub fn register_root_slot(&mut self, name: impl Into<Arc<str>>) {
+        self.builder_root_slots.register(name);
+    }
+
+    /// Read-only named destination schema handed to frontend module compilation.
+    pub(crate) fn builder_root_slots(&self) -> &BuilderRootSlotSchema {
+        &self.builder_root_slots
     }
     /// Typed primitive globals this surface contributes while compiler config constants fold.
     pub(crate) fn config_globals(&self) -> &BuilderConfigGlobalSet {

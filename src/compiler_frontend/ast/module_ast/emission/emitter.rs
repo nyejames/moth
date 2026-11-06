@@ -34,15 +34,17 @@ use crate::compiler_frontend::ast::statements::functions::{
 };
 use crate::compiler_frontend::ast::templates::create_template_node::PreparedTemplateConstruction;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::template::Template;
+use crate::compiler_frontend::ast::templates::template::{SlotKey, Template, TemplateType};
 use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplatePreparationOutcome, TemplateTirPhase, TirView, fold_prepared_template,
+    TemplatePreparationOutcome, TemplateTirPhase, TirView, fold_prepared_root_slot,
+    fold_prepared_template,
 };
 use crate::compiler_frontend::ast::templates::top_level_templates::FoldedConstTemplateResult;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::builder_root_slots::ConstFragmentDestination;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
 use crate::compiler_frontend::compiler_errors::{InfrastructureErrors, InfrastructureFailure};
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -1512,6 +1514,90 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             reference.context,
         )
         .map_err(|error| self.error_messages(error, string_table))?;
+
+        // A direct active-root `#[$in name: ...]` is a builder contribution, not an escaped
+        // template-composition helper. Recognise only this exact shallow shape before the
+        // ordinary helper rejection below; nested and stored helpers keep their existing paths.
+        // The template-kind lookup is skipped entirely when no builder schema is present, so the
+        // ordinary const-fragment fast path keeps its existing work.
+        if let Some(schema) = self.context.builder_root_slots {
+            let direct_root_name = match &view
+                .root_template()
+                .map_err(|error| self.error_messages(error, string_table))?
+                .kind
+            {
+                TemplateType::SlotInsert(SlotKey::Named(name)) => Some(*name),
+                _ => None,
+            };
+            if let Some(name) = direct_root_name {
+                let authored_name = string_table.resolve(name);
+                let Some(slot_name) = schema.resolve(authored_name) else {
+                    let available_names = schema
+                        .names()
+                        .map(|available| string_table.intern(available))
+                        .collect();
+                    let diagnostic = templates::builder_root_slot_not_registered(
+                        name,
+                        available_names,
+                        template.span,
+                    );
+                    return Err(self.diagnostic_messages(diagnostic, string_table));
+                };
+                if preparation.facts.has_unresolved_slot_occurrences {
+                    return Err(self.diagnostic_messages(
+                        templates::invalid_template_structure(
+                            InvalidTemplateStructureReason::NonFoldableConstTemplate,
+                            template.span,
+                        ),
+                        string_table,
+                    ));
+                }
+                match preparation.outcome {
+                    TemplatePreparationOutcome::SlotInsertHelper => {}
+                    TemplatePreparationOutcome::Runtime(_) => {
+                        return Err(self.diagnostic_messages(
+                            templates::invalid_template_structure(
+                                InvalidTemplateStructureReason::NonFoldableConstTemplate,
+                                template.span,
+                            ),
+                            string_table,
+                        ));
+                    }
+                    TemplatePreparationOutcome::Foldable => crate::compiler_bug!(
+                        CompilerStage::AstConstruction,
+                        "a direct top-level slot insert prepared as an ordinary foldable template"
+                    ),
+                }
+                let mut fold_context = context.new_tir_fold_context(
+                    string_table,
+                    &mut self.context.expression_builder,
+                    &mut self.context.const_values,
+                );
+                let mut result =
+                    match fold_prepared_root_slot(&preparation, view, &mut fold_context) {
+                        Ok(result) => result,
+                        Err(error) => {
+                            drop(fold_context);
+                            return Err(self.template_error_messages(error, string_table));
+                        }
+                    };
+                if let Some(diagnostic) = result.take_required_diagnostic() {
+                    drop(fold_context);
+                    return Err(self.diagnostic_messages(diagnostic, string_table));
+                }
+                let value = match result.emission {
+                    TemplateEmission::Output(value) => value,
+                    TemplateEmission::NoOutput => {
+                        ConstStringValue::Text(fold_context.string_table.intern(""))
+                    }
+                };
+                return Ok(FoldedConstTemplateResult::new(
+                    value,
+                    ConstFragmentDestination::Named(slot_name),
+                ));
+            }
+        }
+
         if !matches!(preparation.outcome, TemplatePreparationOutcome::Foldable) {
             return Err(self.diagnostic_messages(
                 match preparation.outcome {
@@ -1564,7 +1650,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             }
         };
 
-        let result = FoldedConstTemplateResult::new(value);
+        let result = FoldedConstTemplateResult::new(value, ConstFragmentDestination::Body);
 
         Ok(result)
     }

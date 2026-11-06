@@ -1,0 +1,23 @@
+entry = "."
+
+# Named const contributions alone keep the entry active. Phase 4 will assemble them into
+# metadata; phase 3 must only emit a valid document without placing their values in the body.
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["<html lang=\"en\">", "</html>"]
+must_not_contain = ["Metadata-only"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["<html lang=\"en\">", "</html>"]
+must_not_contain = ["Metadata-only"]

@@ -1,0 +1,4 @@
+-- Resources referenced only by named builder contributions stay in the build output.
+#[$in stylesheets: [@styles/docs.css]]
+#[$in favicon: [@static/dot.svg]]
+#[:<p>resource liveness body</p>]

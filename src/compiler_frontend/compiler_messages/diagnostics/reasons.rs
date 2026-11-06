@@ -1053,11 +1053,15 @@ pub enum InvalidTemplateStructureReason {
     NonFoldableConstTemplate,
     NonFoldableDocComment,
     FallibleValueInTemplateHead,
-    UnsupportedTypeInTemplateHead { type_id: TypeId },
+    UnsupportedTypeInTemplateHead {
+        type_id: TypeId,
+    },
     RuntimeTemplateInConst,
     RuntimeValueInConstTemplateHead,
     EmptyPathInTemplateHead,
-    IncompatibleHeadItem { conflict: TemplateHeadConflict },
+    IncompatibleHeadItem {
+        conflict: TemplateHeadConflict,
+    },
     HelperOutsideWrapperSlot,
     RuntimeControlFlowUnresolvedInsert,
     MissingCommaBeforeControlFlowSuffix,
@@ -1077,7 +1081,11 @@ pub enum InvalidTemplateStructureReason {
     TemplateLoopConditionNotConst,
     TemplateConditionalLoopConstTrue,
     TemplateLoopBodyNotConst,
-    TemplateConstLoopExpansionLimitExceeded { limit: usize },
+    TemplateConstLoopExpansionLimitExceeded {
+        limit: usize,
+    },
+    /// A direct top-level `$in name` target is not registered by the active builder.
+    BuilderRootSlotNotRegistered,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

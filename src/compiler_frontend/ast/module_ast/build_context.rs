@@ -173,6 +173,12 @@ pub(in crate::compiler_frontend) struct AstBuildContext<'a> {
     /// Immutable project/package source `#Config` values resolved before AST construction.
     pub build_config_values: Arc<ResolvedBuildConfigMap>,
 
+    /// Named destinations the active builder registers for direct top-level const contributions.
+    ///
+    /// `None` for AST work with no builder input, such as config-only or generated-only builds.
+    pub builder_root_slots:
+        Option<&'a crate::compiler_frontend::builder_root_slots::BuilderRootSlotSchema>,
+
     /// Per-loop expansion limit for compile-time template loops.
     pub template_const_loop_iteration_limit: usize,
 
@@ -208,6 +214,9 @@ pub(crate) struct AstPhaseContext<'a> {
     pub(crate) config_resolution: Option<Rc<ConfigResolutionServices>>,
     /// Immutable project/package source `#Config` values resolved before AST construction.
     pub(crate) build_config_values: Arc<ResolvedBuildConfigMap>,
+    /// Named destinations the active builder registers for direct top-level const contributions.
+    pub(crate) builder_root_slots:
+        Option<&'a crate::compiler_frontend::builder_root_slots::BuilderRootSlotSchema>,
     /// Names of source `#Config` contracts declared by this module.
     pub(crate) source_build_config_contract_names: Arc<FxHashSet<BuildInputName>>,
     pub(crate) root_role: ModuleRootRole,
@@ -254,6 +263,7 @@ impl<'a> AstPhaseContext<'a> {
             file_value_resolution,
             config_resolution,
             build_config_values,
+            builder_root_slots,
             template_const_loop_iteration_limit,
             capacity_estimate,
             #[cfg(feature = "timers")]
@@ -276,6 +286,7 @@ impl<'a> AstPhaseContext<'a> {
                 file_value_resolution,
                 config_resolution,
                 build_config_values,
+                builder_root_slots,
                 source_build_config_contract_names,
                 template_const_loop_iteration_limit,
                 capacity_estimate,

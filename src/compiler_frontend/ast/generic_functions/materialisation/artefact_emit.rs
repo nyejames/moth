@@ -371,6 +371,7 @@ impl GenericTemplateArtefact {
             file_value_resolution: Some(file_value_resolution),
             config_resolution: None,
             build_config_values: Arc::new(Default::default()),
+            builder_root_slots: None,
             template_const_loop_iteration_limit,
             capacity_estimate: FrontendArenaCapacityEstimate::default(),
             #[cfg(feature = "timers")]

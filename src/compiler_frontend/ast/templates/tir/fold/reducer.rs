@@ -425,9 +425,33 @@ pub(crate) fn fold_prepared_template(
     view: TirView<'_>,
     fold_context: &mut TirFoldContext<'_>,
 ) -> Result<TemplateFoldResult, TemplateError> {
-    if prepared.identity != view.identity()
-        || !matches!(prepared.outcome, TemplatePreparationOutcome::Foldable)
-    {
+    fold_prepared_emission(prepared, view, fold_context, false)
+}
+
+/// Folds a validated direct root insert without constructing an unused slot projection.
+pub(crate) fn fold_prepared_root_slot(
+    prepared: &TemplatePreparation,
+    view: TirView<'_>,
+    fold_context: &mut TirFoldContext<'_>,
+) -> Result<TemplateFoldResult, TemplateError> {
+    fold_prepared_emission(prepared, view, fold_context, true)
+}
+
+fn fold_prepared_emission(
+    prepared: &TemplatePreparation,
+    view: TirView<'_>,
+    fold_context: &mut TirFoldContext<'_>,
+    root_slot: bool,
+) -> Result<TemplateFoldResult, TemplateError> {
+    let allowed = if root_slot {
+        matches!(
+            prepared.outcome,
+            TemplatePreparationOutcome::SlotInsertHelper
+        ) && !prepared.facts.has_unresolved_slot_occurrences
+    } else {
+        matches!(prepared.outcome, TemplatePreparationOutcome::Foldable)
+    };
+    if prepared.identity != view.identity() || !allowed {
         return Err(InfrastructureFailure::internal(
             CompilerStage::AstConstruction,
             "TIR fold preparation root/phase/context identity does not match the supplied view.",
@@ -447,7 +471,11 @@ pub(crate) fn fold_prepared_template(
         .into());
     }
 
-    fold_exact_view(&view, fold_context)
+    if root_slot {
+        fold_exact_view_with_projection(&view, fold_context, false, Some(view.root_ref()))
+    } else {
+        fold_exact_view(&view, fold_context)
+    }
 }
 
 /// Folds a prepared const-template value while preserving unresolved slot positions.

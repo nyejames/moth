@@ -508,6 +508,9 @@ pub(crate) fn invalid_template_structure_message(reason: InvalidTemplateStructur
                 limit
             )
         }
+        InvalidTemplateStructureReason::BuilderRootSlotNotRegistered => {
+            "A direct top-level `$in name: ...` contribution targets a builder destination that the active builder does not register.".to_string()
+        }
     }
 }
 
@@ -519,7 +522,7 @@ pub(crate) fn render_invalid_template_structure(
     facts: &InvalidTemplateStructureView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
-    let message = match facts.reason {
+    let (message, guidance) = match facts.reason {
         InvalidTemplateStructureCode::UnsupportedTypeInTemplateHead => {
             let type_id = facts
                 .type_id
@@ -529,23 +532,57 @@ pub(crate) fn render_invalid_template_structure(
                 context.string_table,
                 context.path_table(),
             );
-            unsupported_template_head_type_message(&type_name)
+            (
+                unsupported_template_head_type_message(&type_name),
+                Vec::new(),
+            )
         }
         InvalidTemplateStructureCode::IncompatibleHeadItem => {
             let conflict = facts
                 .head_conflict
                 .expect("the incompatible-head-item code stores its conflict");
-            incompatible_template_head_item_message(conflict, diagnostic, context.string_table)
+            (
+                incompatible_template_head_item_message(conflict, diagnostic, context.string_table),
+                Vec::new(),
+            )
+        }
+        InvalidTemplateStructureCode::BuilderRootSlotNotRegistered => {
+            let (message, guidance) =
+                builder_root_slot_not_registered_message(diagnostic, context.string_table);
+            (message, guidance)
         }
         reason => {
             let reason = reason
                 .to_reason(None, facts.limit)
                 .expect("the template-structure code stores the data its reason names");
-            invalid_template_structure_message(reason)
+            (invalid_template_structure_message(reason), Vec::new())
         }
     };
-    RenderedPayload {
-        message,
-        guidance: Vec::new(),
-    }
+    RenderedPayload { message, guidance }
+}
+
+/// Renders the rejected builder destination and the names the active builder did register.
+fn builder_root_slot_not_registered_message(
+    diagnostic: &DiagnosticView<'_>,
+    string_table: &dyn StringTableResolver,
+) -> (String, Vec<String>) {
+    let string_ids = diagnostic.string_ids();
+    let (target, available) = string_ids
+        .split_first()
+        .expect("the builder-root-slot code stores its authored target");
+    let target = string_table.resolve(*target);
+    let message = format!(
+        "`$in {target}: ...` targets a builder destination that the active builder does not register."
+    );
+    let guidance = if available.is_empty() {
+        "This builder registers no named root destinations. Use an ordinary top-level const template for the default body destination.".to_string()
+    } else {
+        let names = available
+            .iter()
+            .map(|name| format!("`{}`", string_table.resolve(*name)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("Registered builder destinations: {names}.")
+    };
+    (message, vec![guidance])
 }

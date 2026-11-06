@@ -368,9 +368,12 @@ pub(crate) fn render_entry_fragments(
     let mut slot_ids: Vec<String> = Vec::new();
     let mut runtime_index = 0usize;
 
-    // Sort const fragments by runtime_insertion_index to handle them in order.
+    // Sort body fragments by runtime_insertion_index to handle them in order. Named builder
+    // contributions remain in the module artefact for builder interpretation but never render
+    // into the default body lane.
     let mut sorted_const: Vec<(usize, String)> = const_fragments
         .iter()
+        .filter(|fragment| fragment.destination.is_body())
         .map(|fragment| {
             structural_url_renderer
                 .render_owned(&fragment.value)

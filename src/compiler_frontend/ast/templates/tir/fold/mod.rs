@@ -13,5 +13,6 @@ mod reducer;
 mod wrappers;
 
 pub(crate) use reducer::{
-    FoldedConstTemplatePiece, fold_prepared_const_template_pattern, fold_prepared_template,
+    FoldedConstTemplatePiece, fold_prepared_const_template_pattern, fold_prepared_root_slot,
+    fold_prepared_template,
 };

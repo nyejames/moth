@@ -1,0 +1,5 @@
+#[$in head: <meta name="api-only" content="api-only head sentinel">]
+
+export:
+    api_value #= "helper value"
+;

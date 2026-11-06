@@ -1,0 +1,45 @@
+entry = "."
+
+# Phase 3 routes direct named builder contributions out of the body lane. HTML metadata
+# assembly belongs to phase 4, so the named values stay absent from the document here.
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain_in_order = [
+    "<p>body alpha</p>",
+    "moth-slot-0",
+    "<p>body beta</p>",
+    "<aside>nested body note</aside>",
+    "<p>body gamma</p>",
+]
+must_not_contain = [
+    "Builder direct title sentinel",
+    "Builder direct title tail",
+    "Builder direct description sentinel",
+    "builder-root-head-sentinel",
+]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain_in_order = [
+    "<p>body alpha</p>",
+    "moth-slot-0",
+    "<p>body beta</p>",
+    "<aside>nested body note</aside>",
+    "<p>body gamma</p>",
+]
+must_not_contain = [
+    "Builder direct title sentinel",
+    "Builder direct title tail",
+    "Builder direct description sentinel",
+    "builder-root-head-sentinel",
+]

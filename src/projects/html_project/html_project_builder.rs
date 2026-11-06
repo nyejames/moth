@@ -479,6 +479,20 @@ impl BackendBuilder for HtmlProjectBuilder {
 
         Self::register_html_config_keys(&mut builder_surface);
 
+        // HTML metadata and document slots are builder-owned names. The compiler validates the
+        // destination set without knowing which names this builder registers.
+        for root_slot in [
+            "title",
+            "description",
+            "lang",
+            "favicon",
+            "body_style",
+            "stylesheets",
+            "head",
+        ] {
+            builder_surface.register_root_slot(root_slot);
+        }
+
         builder_surface.source_file_kinds.register(
             SourceFileKind::MothTemplate.extension(),
             SourceFileKind::MothTemplate,

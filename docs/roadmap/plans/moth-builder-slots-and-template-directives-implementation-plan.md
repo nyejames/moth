@@ -1,9 +1,9 @@
 # Builder slots and template directive redesign - implementation plan
 
 Status: Active on `builder-slots`
-Current slice: Phase 3 builder root slot routing
+Current slice: Phase 4 HTML metadata and stylesheet assembly
 Blockers: None identified
-Next action: Route direct const root inserts through the builder-owned slot schema.
+Next action: Assemble HTML metadata and structural stylesheet contributions from builder slots.
 Scope: Core template syntax and composition, builder-defined top-level const slots, HTML metadata and stylesheet assembly
 
 ## Purpose
@@ -428,7 +428,7 @@ These exclusions must remain visible in the roadmap where they affect unsettled 
 - [x] Pre-refactor named-slot-inside-`$children` regression is installed, executed and retained through the migration.
 - [x] `$slot`, `$in` and per-occurrence defaults match the approved syntax and routing behaviour.
 - [x] `$before`/`$after` accept constant wrappers with named slots, reject their default/positional slots and preserve `$fresh` and runtime no-output semantics.
-- [ ] Root named inserts route only when direct and const, with builder schema independence and accurate source provenance.
+- [x] Root named inserts route only when direct and const, with builder schema independence and accurate source provenance.
 - [ ] HTML metadata uses slots only, with existing fallbacks and escaping intact.
 - [ ] `stylesheets` validates one tracked CSS origin per insert and deduplicates by stable origin.
 - [ ] `head` deduplicates only identical fully rendered complete contributions and is emitted after dedicated content.

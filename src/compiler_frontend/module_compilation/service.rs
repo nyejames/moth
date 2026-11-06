@@ -817,7 +817,8 @@ fn run_semantic_stages(
                 )
                 .map(|value| ResolvedConstFragment {
                     runtime_insertion_index: fragment.runtime_insertion_index,
-                    span: None,
+                    destination: fragment.destination.clone(),
+                    span: Some(fragment.span),
                     value,
                 })
             })
@@ -1133,6 +1134,7 @@ fn build_ast_with_registered_types(
             module_origin,
             public_source_trait_origins,
             build_config_values: Arc::clone(&context.build_config_values),
+            builder_root_slots: context.builder_root_slots,
         },
         #[cfg(feature = "timers")]
         timing_context,

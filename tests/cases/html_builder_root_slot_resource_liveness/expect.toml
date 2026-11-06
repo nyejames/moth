@@ -1,0 +1,39 @@
+entry = "."
+
+# Phase 3 keeps structural resources referenced by named contributions live. Phase 4 owns
+# stylesheet links and favicon emission, so the document must not contain either URL yet.
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["<p>resource liveness body</p>"]
+must_not_contain = ["docs.css", "dot.svg"]
+
+[[backends.html.artifact_assertions]]
+path = "styles/docs.css"
+kind = "binary"
+
+[[backends.html.artifact_assertions]]
+path = "static/dot.svg"
+kind = "binary"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["<p>resource liveness body</p>"]
+must_not_contain = ["docs.css", "dot.svg"]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "styles/docs.css"
+kind = "binary"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "static/dot.svg"
+kind = "binary"

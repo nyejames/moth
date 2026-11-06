@@ -1,0 +1,6 @@
+#[$in title: Imported title sentinel]
+#[:<p>imported root body sentinel</p>]
+
+export:
+    widget_label #= "<span>imported widget</span>"
+;

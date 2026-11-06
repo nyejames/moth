@@ -21,6 +21,7 @@ use crate::build_system::create_project_modules::resource_inputs::ResourceInputR
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
+use crate::compiler_frontend::builder_root_slots::ConstFragmentDestination;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
@@ -268,6 +269,7 @@ fn synthetic_module(
                 .enumerate()
                 .map(|(runtime_insertion_index, origin)| ResolvedConstFragment {
                     runtime_insertion_index,
+                    destination: ConstFragmentDestination::Body,
                     span: None,
                     value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Resource(
                         origin,

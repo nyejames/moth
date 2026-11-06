@@ -318,6 +318,7 @@ fn compile_prepared_config_source(
             file_value_resolution: None,
             config_resolution: Some(std::rc::Rc::clone(&config_resolution)),
             build_config_values: std::sync::Arc::new(Default::default()),
+            builder_root_slots: None,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             capacity_estimate: Default::default(),
             #[cfg(feature = "timers")]

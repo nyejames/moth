@@ -8,6 +8,7 @@ use crate::build_system::resource_unions::{
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
+use crate::compiler_frontend::builder_root_slots::{BuilderRootSlotName, ConstFragmentDestination};
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -102,7 +103,7 @@ fn reachable_resource_use_reads_only_live_origins_through_its_table() {
 }
 
 #[test]
-fn entry_union_includes_const_fragment_resource_without_executable_use() {
+fn entry_union_includes_named_const_fragment_resource_without_executable_use() {
     let fragment_resource = origin("assets/fragment.svg");
     let mut module = module_with_resource_table(ModuleResourceTable::new());
     module
@@ -110,6 +111,7 @@ fn entry_union_includes_const_fragment_resource_without_executable_use() {
         .const_top_level_fragments
         .push(ResolvedConstFragment {
             runtime_insertion_index: 0,
+            destination: ConstFragmentDestination::Named(BuilderRootSlotName::new("stylesheets")),
             span: None,
             value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Resource(
                 fragment_resource.clone(),

@@ -1,0 +1,7 @@
+-- A direct root contribution must fold to a compile-time value.
+runtime_title || -> String:
+    return "runtime title"
+;
+
+#[$in title: [runtime_title()]]
+#[:<p>body kept</p>]

@@ -1,0 +1,33 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0022"]
+message_contains = [
+    "sidebar",
+    "`head`",
+    "`title`",
+]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+reason = "invalid_template_structure.builder_root_slot_not_registered"
+path = "input/@page.moth"
+line = 2
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0022"]
+message_contains = [
+    "sidebar",
+    "`head`",
+    "`title`",
+]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0022"
+reason = "invalid_template_structure.builder_root_slot_not_registered"
+path = "input/@page.moth"
+line = 2

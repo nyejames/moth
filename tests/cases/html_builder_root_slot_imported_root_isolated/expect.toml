@@ -1,0 +1,21 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["<p>entry body</p>", "moth-slot-0"]
+must_not_contain = ["Imported title sentinel", "imported root body sentinel"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["<p>entry body</p>", "moth-slot-0"]
+must_not_contain = ["Imported title sentinel", "imported root body sentinel"]

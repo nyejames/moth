@@ -1,0 +1,2 @@
+-- Ordinary helper files do not contribute entry-root builder slots.
+#[$in title: Helper title sentinel]

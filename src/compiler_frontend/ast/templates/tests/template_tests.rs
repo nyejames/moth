@@ -18,6 +18,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateTirReference, TemplateViewContext, format_tir_template,
 };
 use crate::compiler_frontend::ast::templates::top_level_templates::FoldedConstTemplateResult;
+use crate::compiler_frontend::builder_root_slots::{BuilderRootSlotName, ConstFragmentDestination};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
@@ -354,7 +355,10 @@ fn collects_const_top_level_fragments_from_tir_result_record() {
     let mut results = FxHashMap::default();
     results.insert(
         path,
-        FoldedConstTemplateResult::new(ConstStringValue::Text(value)),
+        FoldedConstTemplateResult::new(
+            ConstStringValue::Text(value),
+            ConstFragmentDestination::Body,
+        ),
     );
 
     let fragments = vec![TopLevelConstFragment {
@@ -368,6 +372,8 @@ fn collects_const_top_level_fragments_from_tir_result_record() {
 
     assert_eq!(collected.len(), 1);
     assert_eq!(collected[0].runtime_insertion_index, 0);
+    assert_eq!(collected[0].span, fragments[0].span);
+    assert_eq!(collected[0].destination, ConstFragmentDestination::Body);
     assert_eq!(collected[0].value, ConstStringValue::Text(value));
 }
 
@@ -383,7 +389,10 @@ fn collects_const_top_level_fragments_from_folded_value() {
     let mut results = FxHashMap::default();
     results.insert(
         path,
-        FoldedConstTemplateResult::new(ConstStringValue::Text(value)),
+        FoldedConstTemplateResult::new(
+            ConstStringValue::Text(value),
+            ConstFragmentDestination::Body,
+        ),
     );
 
     let fragments = vec![TopLevelConstFragment {
@@ -417,11 +426,17 @@ fn collects_mixed_const_top_level_fragments_in_source_order() {
     let mut results = FxHashMap::default();
     results.insert(
         first_path,
-        FoldedConstTemplateResult::new(ConstStringValue::Text(first_value)),
+        FoldedConstTemplateResult::new(
+            ConstStringValue::Text(first_value),
+            ConstFragmentDestination::Body,
+        ),
     );
     results.insert(
         second_path,
-        FoldedConstTemplateResult::new(ConstStringValue::Text(second_value)),
+        FoldedConstTemplateResult::new(
+            ConstStringValue::Text(second_value),
+            ConstFragmentDestination::Named(BuilderRootSlotName::new("sidebar")),
+        ),
     );
 
     let fragments = vec![
@@ -442,8 +457,14 @@ fn collects_mixed_const_top_level_fragments_in_source_order() {
 
     assert_eq!(collected.len(), 2);
     assert_eq!(collected[0].runtime_insertion_index, 1);
+    assert_eq!(collected[0].destination, ConstFragmentDestination::Body);
     assert_eq!(collected[0].value, ConstStringValue::Text(first_value));
     assert_eq!(collected[1].runtime_insertion_index, 3);
+    assert_eq!(
+        collected[1].destination,
+        ConstFragmentDestination::Named(BuilderRootSlotName::new("sidebar"))
+    );
+    assert_eq!(collected[1].span, fragments[1].span);
     assert_eq!(collected[1].value, ConstStringValue::Text(second_value));
 }
 
@@ -500,15 +521,18 @@ fn collects_piece_bearing_and_plain_const_top_level_fragments_unchanged() {
     let mut results = FxHashMap::default();
     results.insert(
         piece_path,
-        FoldedConstTemplateResult::new(piece_value.clone()),
+        FoldedConstTemplateResult::new(piece_value.clone(), ConstFragmentDestination::Body),
     );
     results.insert(
         all_text_path,
-        FoldedConstTemplateResult::new(all_text_value.clone()),
+        FoldedConstTemplateResult::new(all_text_value.clone(), ConstFragmentDestination::Body),
     );
     results.insert(
         text_path,
-        FoldedConstTemplateResult::new(ConstStringValue::Text(plain_text)),
+        FoldedConstTemplateResult::new(
+            ConstStringValue::Text(plain_text),
+            ConstFragmentDestination::Body,
+        ),
     );
 
     let fragments = vec![
