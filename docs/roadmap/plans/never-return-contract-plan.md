@@ -12,10 +12,10 @@ This plan also replaces the current duplicated terminality logic with one AST-ow
 
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/never-return-contract-plan.md
-STATUS: queued
-CURRENT_SLICE: Phase 0 - refresh callable, terminality, HIR, analysis and backend owners
-BLOCKERS: compact typed expressions, dense HIR and native result channels are prerequisites; runtime anonymous records must then be delivered first
-NEXT_ACTION: activate after the named capabilities and runtime anonymous records, record the live repository state and rerun the owner inventory
+STATUS: active on the never-returns branch
+CURRENT_SLICE: Phase 2 - consolidate control-flow exits (runs before Phase 1)
+BLOCKERS: none
+NEXT_ACTION: accept Phase 2, then Phase 1a ordinary return-shape normalisation
 ```
 
 Keep this block concise. Establish the active revision, branch, worktree state and validation baseline in untracked working notes when implementation starts. Do not pin a queued plan to a commit.
@@ -33,6 +33,21 @@ terminality. It does not rebuild the old unit/tuple/fallible-carrier representat
 implementation into the expression refactor.
 
 At closeout, delete this plan and remove its roadmap entry in the same commit. Keep the delivered capability before the Wasm implementation in the roadmap order.
+
+## Activation decisions
+
+Recorded at activation. These correct the plan where the compiler moved after it was written.
+
+- Activated ahead of runtime anonymous records by explicit decision. Never semantics do not depend on them.
+- The ordinary callable return shape was not yet a compact owner. Phase 1 is split: Phase 1a normalises ordinary return contracts, Phase 1b adds `Returns | Never`.
+- Phase 2 runs before Phase 1. Neither depends on the other.
+- Implicit built-in failure that can escape a `-> !` body is a closed-boundary diagnostic, like an exported callable without an error slot. The body handles it locally. `NeverCall` has no failure successor.
+- Moth source has no function values. Never on function types is internal only: interning, equality, substitution and display, covered by datatype unit tests. No source function-value coverage.
+- Function types have no canonical cross-module identity, so no canonical projection changes.
+- `PublicCallSummary` keeps parameter effects only. Never comes from the callable contract beside it.
+- No standalone lifetime analysis owner exists. Lifetime work uses the region-exit, drop-site and last-use owners plus Boracle.
+- `HirValueList` is the delivered `HirValueRange`. `CallTarget::External` is the binding-backed target.
+- Validation follows `validation.mtf`: targeted checks during a slice, `just validate` (and `just boracle` where named) before each phase commit, `just validate-full` at closeout.
 
 ## Hard prerequisites
 
@@ -655,65 +670,120 @@ just validate
 - [ ] Separate pre-existing failures from task-created failures.
 - [ ] Commit only if the plan needs factual corrections.
 
-# Phase 1 - Introduce callable return-contract data models
+# Phase 1a - Normalise ordinary callable return contracts
 
 ## Goal
 
-Extend the delivered ordinary callable return shape with explicit `Returns` versus `Never`
-vocabulary through every semantic layer while preserving ordinary source behaviour. Public `-> !`
-syntax remains inactive until the representation is complete.
+Replace the mixed success/error channel lists and duplicated `returns` plus `error_return` pairs with compact, explicit ordinary return representations. Behaviour is unchanged. No Never vocabulary enters this phase.
+
+## Accepted representation
+
+One datatypes-owned shape serves every owner whose slots are `TypeId`s in the module's type environment:
+
+```rust
+// src/compiler_frontend/datatypes/callable_returns.rs
+pub(crate) enum SuccessSlots {
+    Zero,
+    One(TypeId),
+    Multiple(Box<[TypeId]>), // at least two entries
+}
+
+pub(crate) struct CallableReturnShape {
+    success: SuccessSlots,
+    error: Option<TypeId>,
+}
+```
+
+Its users are the AST `FunctionSignature`, `FunctionTypeKey` and `FunctionTypeDefinition`, the imported-callable contract, `ResolvedTraitRequirement`, `HirFunction` and the HIR non-local call-contract map. `HirCallResultContract` is deleted and the map stores the shape.
+
+Owners with another slot type keep local structs: public interfaces (`CanonicalTypeIdentity`), trait surfaces (`TraitSurfaceTypeIdentity`), sidecar blueprints and external ABI slots with return aliases. External bindings already have the target shape and stay unchanged. Callable metadata never reuses expression-store `SuccessShape` or `TypeRange`.
+
+Keep these representations:
+
+- authored `FunctionSignatureSyntax` keeps the ordered mixed list, because its authored order and per-slot spans own the `ErrorSlotNotLast` and `MultipleErrorReturnSlots` diagnostics
+- the construction-only `UnresolvedFunctionSignature` keeps `Option<TypeId>` for deferrable nominal and capacity resolution
+- `Option<TypeId>` on the error channel stays. It is the fallibility fact, not an unresolved state
+
+Delete these:
+
+- `ReturnSlot` and the resolved `Option<TypeId>`
+- every channel-tagged resolved list (`ResolvedTraitReturn`, `ResolvedTraitReturnFact`, `StablePrivateTraitReturn`, `PublicTraitRequirementReturn`)
+- the `ReturnChannel` enum
+- the allocating `success_return_type_ids()` accessor family and the duplicated `MaterialisedFunctionSignature` projection fields
+- the unreachable unresolved-slot and multiple-error re-checks downstream of signature resolution
+
+Trait conformance keeps `ReturnCountMismatch`, `ReturnChannelMismatch { return_index }` and `ReturnTypeMismatch { return_index }` with unchanged indices.
+
+## Measured basis
+
+Measured at activation with `size_of` probes, frontend benchmark counters over the benchmark workloads and a census of 7,004 source files:
+
+- 96.7 % of explicit contracts have exactly one success slot, 2.8 % two or more, 0.4 % zero
+- builds retain about 10² to 10³ contracts. `generic-scaling-160` has 165 authored and 960 HIR functions
+- `SuccessSlots` is 24 bytes and `CallableReturnShape` 32 bytes. Embedding records grow by 8 bytes (`FunctionSignature` 48 to 56, `FunctionTypeKey` and `FunctionTypeDefinition` 40 to 48, `HirFunction` 56 to 64)
+- zero and one success slots need no heap allocation. Today each contract allocates one or two return boxes and `success_return_type_ids()` allocates a `Vec` at 30 call sites
+- a sentinel-packed error slot would save 4 bytes per contract but needs a codec. It is rejected at these counts
+
+## Slices
+
+- [ ] 1a.0 Add the shape owner with normalisation, slice view, `map_type_ids` and unit tests.
+- [ ] 1a.1 Cut over the AST resolved signature and every reader and fixture.
+- [ ] 1a.2 Cut over function-type keys, definitions, interning, substitution and display.
+- [ ] 1a.3 Cut over HIR functions, delete `HirCallResultContract`, the private failure lane, validation and both backends.
+- [ ] 1a.4 Cut over trait requirements, conformance matching and trait sidecars.
+- [ ] 1a.5 Cut over public function, receiver and trait return projections.
+- [ ] 1a.6 Cut over imported contracts, generic templates, sidecar signatures and substitution.
+- [ ] 1a.7 Delete `ReturnChannel` and the remaining channel filters.
+
+Slices may merge when one cannot compile without the next.
+
+## Audit
+
+- [ ] Confirm no resolved owner retains a channel-tagged list or a per-slot `Option<TypeId>`.
+- [ ] Confirm `Multiple` never holds fewer than two slots, so interning has one key per contract.
+- [ ] Confirm no parallel shape type, forwarding accessor or compatibility constructor remains.
+- [ ] Confirm expression-store ranges are not reused for callable metadata.
+- [ ] Confirm trait diagnostics and indices are unchanged.
+- [ ] Complete the mandatory phase audit and Slice review.
+
+## Validation
+
+Run each slice's focused suites (`cargo test -p moth --lib <owner>`), then:
+
+```bash
+cargo run --quiet -- tests --audit
+just validate
+just bench-check
+```
+
+- [ ] Confirm ordinary source behaviour is unchanged: integration results match the baseline.
+- [ ] Record retained record sizes after the cut-over.
+- [ ] Run `just bench-check` on clean committed trees before and after. Investigate any regression before accepting.
+- [ ] Update `index.md` for the new module.
+
+# Phase 1b - Introduce callable return-contract enums
+
+## Goal
+
+Wrap each layer's ordinary representation in an explicit `Returns` versus `Never` contract while preserving ordinary source behaviour. `-> !` syntax stays inactive until Phase 3.
 
 ## Work
 
-### Neutral and AST signatures
-
-- [ ] Add neutral and resolved return-contract enums.
-- [ ] Reuse the delivered ordinary slot owner inside `Returns`, retaining compact shape and accessors.
-- [ ] Preserve current success/error rules inside `Returns`.
-- [ ] Add named queries for success slots, error slot, ordinary no-value completion and Never.
-- [ ] Make ordinary-return queries reject or explicitly handle Never rather than returning empty collections.
-- [ ] Thread the shape through declaration shells, remapping, rebinding, ordering hints and signature resolution.
-
-### Function types
-
-- [ ] Extend canonical callable type metadata with an ordinary-shape versus Never return contract.
-- [ ] Keep the containing function type's ordinary `TypeId`.
-- [ ] Include the return-contract variant in function-type interning, equality, hashing and cache keys.
-- [ ] Preserve it through generic substitution and inherited generated environments.
-- [ ] Render Never function signatures without inventing a type name.
-- [ ] Include it in canonical function-type projection if the current interface uses one.
-- [ ] Add named function-value tests for exact Never signature identity.
-
-### Public, trait and generated vocabulary
-
-- [ ] Add explicit public function and receiver-method return contracts.
-- [ ] Add explicit trait requirement return contracts.
-- [ ] Add explicit external function return contracts.
-- [ ] Thread ordinary `Returns` through public projection, import projection, generic templates, generated materialisation, receiver catalogues and conformance matching.
-- [ ] Include the variant in equality and fingerprint inputs.
-
-### HIR function metadata
-
-- [ ] Extend the delivered native HIR return shape with `HirFunctionReturnContract`.
-- [ ] Thread `Returns(HirReturnShape)` through HIR registration, validation, display, fixtures and
-  backend ABI queries, retaining separate success slots and error-channel facts.
-- [ ] Add a dormant `Never` variant without mapping it to `None`.
-- [ ] Remove superseded direct fields and ambiguous compatibility accessors without restoring a
-  unit, tuple or fallible-carrier transport type.
-
-### External metadata
-
-- [ ] Extend the binding-backed ordinary result contract with explicit Never, keeping one owner.
-- [ ] Preserve readable builder construction for ordinary functions without parallel legacy constructors.
-- [ ] Make return aliases impossible on Never.
-- [ ] Update registry, clone accounting, provider conversion and tests.
+- [ ] Add `FunctionReturnContractSyntax { Returns(Vec<ReturnSlotSyntax>), Never { location } }` on `FunctionSignatureSyntax`.
+- [ ] Add `FunctionReturnContract { Returns(CallableReturnShape), Never { location } }` on `FunctionSignature` and the imported-callable contract, with `is_never` and ordinary queries that never map Never to empty slots.
+- [ ] Add a fieldless `FunctionTypeReturnContract { Returns(CallableReturnShape), Never }` to function-type keys and definitions. Interning, equality, hashing, substitution and display include the variant. Display renders `-> !` without a type name. The containing function type keeps its ordinary `TypeId`.
+- [ ] Add trait requirement, trait sidecar, public function, receiver-method and trait-surface contracts with a Never variant that carries no type identity.
+- [ ] Add `ExternalFunctionReturnContract { Returns { success, error }, Never }`. Return aliases are impossible on Never. Keep readable builder construction for ordinary functions.
+- [ ] Add `HirFunctionReturnContract { Returns(CallableReturnShape), Never }` to `HirFunction` and the non-local call-contract map. The private failure lane never installs an error channel on Never.
+- [ ] Rename the resulting fields to `return_contract`.
+- [ ] Variants without a producer before Phase 3 or Phase 4 use `#[expect(dead_code, reason = ...)]` as named migration bridges. Phase 3 deletes the frontend bridges and Phase 4 the HIR bridges.
+- [ ] Add datatype unit tests for exact Never function-type identity.
 
 ## Audit
 
 - [ ] Confirm every layer uses an enum and no duplicate boolean.
 - [ ] Confirm `TypeEnvironment` gained no Never type definition. Any change is confined to existing function-signature payloads.
 - [ ] Confirm ordinary no-value functions remain ordinary `Returns`.
-- [ ] Confirm all old direct return fields are cut over or deleted.
 - [ ] Confirm fixtures construct the real shape.
 - [ ] Complete the mandatory phase audit and Slice review.
 
@@ -722,14 +792,11 @@ syntax remains inactive until the representation is complete.
 Run focused signature, datatype, public-interface, trait, external-package, HIR and backend tests, then:
 
 ```bash
-cargo fmt --all
-cargo test --workspace --quiet -- --format terse
 cargo run --quiet -- tests --audit
 just validate
 ```
 
 - [ ] Confirm ordinary source behaviour is unchanged.
-- [ ] Confirm benchmark history is unchanged.
 
 # Phase 2 - Consolidate control-flow exits
 
@@ -1437,7 +1504,8 @@ git diff --check
 | Phase | Change class | Required final gate |
 |---|---|---|
 | Phase 0 | read-only or plan correction | baseline commands, then the gate matching any tracked edit |
-| Phase 1 | code-bearing | focused data-model tests plus `just validate` |
+| Phase 1a | code-bearing representation | focused owner tests, `just validate`, before/after `just bench-check` and record sizes |
+| Phase 1b | code-bearing | focused data-model tests plus `just validate` |
 | Phase 2 | code-bearing | control-flow tests plus `just validate` |
 | Phase 3 | code-bearing | frontend/interface tests plus `just validate` |
 | Phase 4 | code-bearing and HIR | HIR tests, `just boracle` and `just validate` |

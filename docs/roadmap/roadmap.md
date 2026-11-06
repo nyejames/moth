@@ -37,7 +37,7 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 - [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md) - Queued: consume delivered shared MON syntax, exact numeric types and bounded known-leaf inference. Wait for the required compact typed-expression and ordinary-struct construction capabilities. Support recursive local anonymous records through ordinary hidden nominal structs, with explicit nominal children and transitive escape checks.
 
-- [Never return contracts](./plans/never-return-contract-plan.md)
+- [Never return contracts](./plans/never-return-contract-plan.md) **ACTIVE** on the `never-returns` branch, ahead of the serial order above by explicit decision.
 
 - [Reusable generics, type-parametric Core bindings and file-backed JS/WAT](./plans/generics-core-bindings-and-file-backed-js-wat-plan.md) - Queued: file-private reusable generic declarations, closed numeric-family limits, bounded nested-call context, trusted scalar-parametric Core bindings and file-backed JS/WAT implementations. Deliver generic min, max, clamp and uniformly fallible abs. Consume exact numeric semantics and existing backend capabilities without waiting for the later mixed-Wasm implementation.
 
