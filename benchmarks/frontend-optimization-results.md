@@ -7242,9 +7242,12 @@ also passed.
 
 ### Merge-audit follow-up
 
-On Apple M1 Pro, 16 GiB, rustc 1.99.0, the dev-profile
+On Apple M1 Pro, 16 GiB, rustc 1.99.0 and revision `2b2acc088`, the dev-profile
 `data_layout_memory_probe` measured deterministic conditional-wrapper projects in alternating
-order. Nine runs of 64 receiving sites with nested named decorators had a 343.880 ms median,
+order. It was built with
+`cargo build -p moth --bin data_layout_memory_probe --features data_layout_memory_probe` and
+run as `target/debug/data_layout_memory_probe <project>`.
+Nine runs of 64 receiving sites with nested named decorators had a 343.880 ms median,
 195 schema walks and 8.81 MiB peak allocator growth. The no-wrapper control was 57.550 ms,
 two walks and 1.16 MiB. A 16-site, 16-child case took 1,050.519 ms and 123.96 MiB over seven
 runs; a 64-site, 16-child case took 12,445.933 ms and 1,571.84 MiB over five. These are
@@ -7264,6 +7267,10 @@ The large synthetic case instead showed substantial TIR preparation and borrow-a
 Its peak-memory ownership was not directly attributed; blocks-times-locals borrow-state storage
 is an investigation candidate, not a proven cause. Release behaviour and ordinary-project impact
 remain unmeasured.
+The 64-site case spent most of its time in AST emission and module-constant finalisation;
+the gap from the no-wrapper control remains unexplained. Increasing the combined workload from
+16 to 64 sites at 16 children grew time by 11.8 times and peak allocator growth by 12.7 times,
+an open synthetic scaling risk rather than proof of the same behaviour in production.
 
 For the preceding project-structure change, release timer builds of `41f7993ee` and
 `2b2acc088` checked identical copied source files in alternating order for 25 measured pairs.
@@ -7279,6 +7286,8 @@ matching directories, each containing a non-source file, gave 14.609 to 10.430 m
 directional measurements across the stated revision range, which includes changes after the
 project-structure refactor, not an isolated estimate of discovery changes. They do not show
 the suspected slowdown on these inputs.
+These inputs contain no excluded or aliased directories or non-source trees formerly outside
+the `src` boundary, so they do not exercise the added boundary and skip-policy cases.
 
 The non-recording `just bench-frontend-check` and `just bench-check` passed on `2b2acc088`
 with one preflight and ten measured iterations per case. Several workload fingerprints differed
