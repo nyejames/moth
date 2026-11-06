@@ -24,7 +24,9 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::builder_root_slots::BuilderRootSlotSchema;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use moth_lexical::identifier::is_identifier;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::words::classify_source_word;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -93,10 +95,17 @@ impl BuilderSurface {
 
     /// Validates the complete surface after the selected builder finishes registering.
     ///
-    /// WHAT: checks project-section storage compatibility and output ownership, then rejects
+    /// WHAT: checks root-slot spellings, project-section storage and output ownership, then rejects
     /// overlapping source-backed and binding-backed package paths.
     /// WHY: definition errors must fail before authored config or project source is compiled.
     pub(crate) fn validate(&self) -> Result<(), BuilderSurfaceValidationError> {
+        for name in self.builder_root_slots.names() {
+            if name == "_" || !is_identifier(name) || classify_source_word(name).is_some() {
+                return Err(BuilderSurfaceValidationError::InvalidDefinition(format!(
+                    "Builder root slot {name:?} is not an addressable source symbol."
+                )));
+            }
+        }
         self.config_schemas
             .validate()
             .map_err(BuilderSurfaceValidationError::Infrastructure)?;
@@ -164,6 +173,8 @@ impl BuilderSurface {
     }
 
     /// Register one statically known named destination for direct top-level const contributions.
+    ///
+    /// The name must tokenize as a source symbol; invalid names fail surface validation.
     pub fn register_root_slot(&mut self, name: impl Into<Arc<str>>) {
         self.builder_root_slots.register(name);
     }

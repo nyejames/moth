@@ -686,3 +686,36 @@ fn surface_accepts_storable_sections_and_rich_entry_schemas() {
         .validate()
         .expect("HTML surface remains valid");
 }
+
+#[test]
+fn surface_root_slots_require_addressable_symbols() {
+    let mut surface = BuilderSurface::with_mandatory_core();
+    for name in ["title", "page_title", "_if", "Δ", "IF", "title"] {
+        surface.register_root_slot(name);
+    }
+    surface
+        .validate()
+        .expect("symbol names and duplicates are valid");
+
+    for name in [
+        "",
+        "_",
+        " ",
+        "page title",
+        "1",
+        "1title",
+        "if",
+        "true",
+        "String",
+    ] {
+        let mut surface = BuilderSurface::with_mandatory_core();
+        surface.register_root_slot(name);
+        let error = surface.validate().expect_err("unaddressable root slot");
+        match error {
+            BuilderSurfaceValidationError::InvalidDefinition(message) => {
+                assert!(message.contains(&format!("{name:?}")), "{message}");
+            }
+            other => panic!("unexpected error for {name:?}: {other:?}"),
+        }
+    }
+}
