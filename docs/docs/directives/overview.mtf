@@ -1,37 +1,23 @@
 # Compiler-facing directive routing
 
-This index routes contributors to the accepted general-directive contract and the compiler and build sections that consume it. It is not a second semantic reference and is not imported by the public Directives page.
+This index routes contributors to the canonical directive contract and its compiler/build owners. It does not define a second language surface.
 
-## Canonical language reference
+## Canonical references
 
-- `docs/docs/directives/directives.mtf` owns general marker, ownership, context, arguments, attachment and unknown/unavailable/placement rules.
-- `docs/docs/directives/directives-basic.mtf` teaches the short accepted surface.
-- Template-specific meanings stay in `docs/docs/templates/template-directives.mtf`.
-- Exact `$project`, `$config` and `$html_builder` signatures stay in the project-structure references. A future `$entry` purpose and runtime title remain deferred.
+- `docs/docs/directives/directives.mtf` owns the three attachment locations, one-operand grammar, validation and diagnostics.
+- `docs/docs/directives/directives-basic.mtf` presents the short accepted surface.
+- `docs/docs/templates/template-directives.mtf` owns the existing template-head composition and formatting semantics.
+- `docs/docs/project-structure/project-config.mtf` owns named config records. `docs/docs/project-structure/build-inputs.mtf` owns the future `$config` input contract. `docs/docs/project-structure/entry-config.mtf` owns HTML builder slots and current activity-based entry selection.
 
-## Compiler handoffs
+## Compiler and build handoffs
 
-Read `docs/compiler-design-overview.md`:
+- `docs/compiler-design-overview.md` owns Stage 1 tokenization, Stage 2 header syntax, Stage 4 semantics and entry metadata. Directive recognition must retain a known name and precise authored span before context validation.
+- `docs/build-system-design.md` owns selected configuration, module-root eligibility facts and builder entry selection.
+- `docs/roadmap/plans/general-directives-plan.md` implements `$config` and `$entry` and moves existing HTML formatters into compiler ownership. Root-only `$entry` is first in the root file. Source modifiers have contiguous next-construct attachment; template directives use the containing template.
+- Placement errors must distinguish known invalid contexts, unknown names, deferred features, invalid operands, duplicate modifiers and attachment broken by an empty physical line. Use existing compiler diagnostic owners and avoid a second lexer/header grammar.
 
-- `Architectural invariants` for shared call syntax and configuration versus future `$feature`.
-- `Compiler input and result boundary` for retained directive syntax and non-HIR metadata.
-- `Frontend stages > Stage 1: tokenization` for registered-surface recognition.
-- `Frontend stages > Stage 2: header syntax and interface binding` for declaration-prefix metadata and the project config compilation service.
-- `Frontend stages > Stage 4: AST semantics > Call-shaped syntax and assertion intrinsics` for directive consumers of the one parser and router.
-- `Frontend stages > Stage 4: AST semantics > Constants, build configuration and const records` for `$config` spelling, explicit-only contracts and bootstrap versus source timing.
+## Status
 
-## Build-system handoffs
-
-Read `docs/build-system-design.md`:
-
-- `Selected command and capability surface` for owned directive signatures and config-only contexts.
-- `Project bootstrap` for `$project`, `$html_builder`, bootstrap `$config` and the closed project-directive table.
-- `Source contracts and static specialisation` under bootstrap for matching, precedence and both-branches frontend validation.
-- `Builder slots and future root purpose` for direct const builder metadata, `$entry` deferral and root activity.
-- `Entry candidates and selection` and `Command and tooling policies` for current entry selection and deferred zero-entry rules.
-
-## Status and sequencing
-
-- `docs/docs/progress/@page.moth` owns current support.
-- `docs/roadmap/roadmap.md` owns implementation order.
-- Design-scope files under `docs/docs/design-scope/` own accepted, deferred and excluded boundaries.
+- `docs/docs/progress/@page.moth` reports what actually works.
+- `docs/roadmap/roadmap.md` owns implementation sequencing.
+- `docs/docs/design-scope/` owns accepted, deferred and excluded boundaries.
