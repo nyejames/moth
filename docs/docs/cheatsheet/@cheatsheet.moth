@@ -19,4 +19,8 @@ init_docs_sidebar()!
 
 #[section, cheatsheet_content]
 
-#[section, reserved_names_list]
+#[section:
+    # Reserved names and directives
+    
+    [reserved_names_list]
+]

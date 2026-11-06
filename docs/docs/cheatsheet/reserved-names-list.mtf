@@ -1,5 +1,3 @@
-## Reserved names and directives
-
 Moth reserves words for syntax, builtin types and compiler-owned symbols. Keywords are case-sensitive in source, but user identifiers can't
 reclaim reserved words by changing ASCII case or adding leading underscores.
 

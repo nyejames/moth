@@ -21,17 +21,15 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Ongoing in parallel 
 
-- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md). Partially complete and underway - active on `packages-work` branch. **ACTIVE IN PARALLEL.**
+- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md). Partially complete and underway. **ACTIVE IN PARALLEL.**
 
-- [Boracle research](./plans/boracle-next-research-plans) and [production borrow checker development](./plans/production-borrow-checker.md): Ongoing parallel record and production follow-ups on `borrow-checker-and-boracle-development`. Research precision and migration wait for the merged typed-expression/native-result capabilities and explicit activation. Current status, accepted implementation decisions and borrow/Boracle issues live in the production companion. **ONGOING, RESEARCH RESTART PAUSED**
+- [Boracle research](./plans/boracle-next-research-plans) and [production borrow checker development](./plans/production-borrow-checker.md): Research precision and migration wait for the merged typed-expression/native-result capabilities and explicit activation. Current status, accepted implementation decisions and borrow/Boracle issues live in the production companion. **ONGOING, RESEARCH RESTART PAUSED**
 
 - [Collecting bad diagnostics examples to be improved later](./plans/bad-diagnostics-log.md): **ONGOING**
 
 ## Sequenced work
 
-- [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: consume the shared MON argument owner, all fixed numeric input types and delivered destination-aware command literal materialisation for general directives, explicit $config contracts and strict $project/$html_builder configuration
-
-- [Explicit entries and runtime title](./plans/html-page-directives-and-runtime-title-plan.md) - Queued: general `$entry` root purpose and capability-checked browser title mutation. Builder slots own initial metadata.
+- [General compiler directives](./plans/general-directives-plan.md) **NEXT**
 
 - [Const functions and shared compile-time evaluation](./plans/const-functions-plan.md) - explicit `#|...|` compile-time-only callable contracts, a unified constant/function dependency graph, bounded shared function evaluation, cross-module const body publication, release-only ordinary function folding and low-priority budget suggestions. The first active slice is the Stage 4 ownership and early-HIR feasibility gate.
 

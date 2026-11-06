@@ -254,22 +254,32 @@ sidebar #= [$html:
             aria-label="Documentation pages"
             data-page-links
         >
-            <p class="docs-sidebar__group" style="[sidebar_group_style]">Learn Moth</p>
+            <p class="docs-sidebar__group" style="[sidebar_group_style]">Intro to Moth</p>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/getting-started/">Getting started</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/language-overview/">Language basics</a>
+
+            <p class="docs-sidebar__group" style="[sidebar_group_style]">Basic Values and Types</p>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/bindings/">Values and bindings</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/numbers/">Numbers</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/casts/">Casts</a>
+
+            <p class="docs-sidebar__group" style="[sidebar_group_style]">Functions and Control Flow</p>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/functions/">Functions</a>
-            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/branching/">Branching</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/branching/">If statements and pattern matching</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/loops/">Loops</a>
+
+            <p class="docs-sidebar__group" style="[sidebar_group_style]">Advanced Types</p>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/structs/">Structs</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/choices/">Choices</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/errors/">Errors and options</a>
+
+            <p class="docs-sidebar__group" style="[sidebar_group_style]">Advanced Values</p>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/collections/">Collections and maps</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/templates/">Templates</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/constants/">Constants</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/aliases/">Aliases</a>
+
+            <p class="docs-sidebar__group" style="[sidebar_group_style]">Advanced Moth</p>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/generics/">Generics</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/traits/">Traits</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/wiring/">Wiring</a>
@@ -285,22 +295,23 @@ sidebar #= [$html:
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/moth-templates/">Moth template files</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/markdown/">Markdown</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/mon/">MON format</a>
-            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/design-scope/">Design scope</a>
 
             <p class="docs-sidebar__group" style="[sidebar_group_style]">Reference</p>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/cheatsheet/">Language cheatsheet</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/progress/">Compiler progress</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/progress/packages-and-builders/">Packages and builders</a>
 
-            <p class="docs-sidebar__group" style="[sidebar_group_style]">Compiler internals</p>
+            <p class="docs-sidebar__group" style="[sidebar_group_style]">Moth's design and internals</p>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]developer-docs/">Developer docs</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]developer-docs/compiler-design/">Compiler design</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]developer-docs/memory-management/">Memory management</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]developer-docs/style-guide/">Development standards</a>
+            <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/design-scope/">Design scope</a>
 
             <p class="docs-sidebar__group" style="[sidebar_group_style]">Future design</p>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/async/">Async</a>
             <a class="docs-sidebar__link" style="[sidebar_link_style]" href="[@/]docs/lappet/">Lappet</a>
+
         </nav>
     </aside>
     [sidebar_script]
