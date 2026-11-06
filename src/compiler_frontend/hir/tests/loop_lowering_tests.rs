@@ -16,6 +16,7 @@ use crate::compiler_frontend::builtins::error_type::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
@@ -198,7 +199,7 @@ fn lower_range_loop_fixture(
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![range_loop],
     );
@@ -288,7 +289,7 @@ fn lower_collection_loop_with_step_fixture(
     );
 
     let returns = match failure {
-        CollectionLoopFixtureFailure::Trap => vec![],
+        CollectionLoopFixtureFailure::Trap => CallableReturnShape::from_slots([], None),
         CollectionLoopFixtureFailure::BuiltinError => {
             let error_path = builtin_error_type_path(&mut path_fork, &mut string_table);
             let manifest = register_builtin_error_types(&mut path_fork, &mut string_table);
@@ -317,7 +318,7 @@ fn lower_collection_loop_with_step_fixture(
                     error_type_id,
                 )
                 .expect("the fixture registers the canonical Error identity once");
-            vec![error_return_slot(error_type_id)]
+            error_return_slot(error_type_id)
         }
     };
 
@@ -551,7 +552,7 @@ fn lowers_range_loop_with_new_syntax() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![range_loop],
     );
@@ -899,7 +900,7 @@ fn lowers_range_loop_without_user_bindings() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![range_loop],
     );
@@ -973,7 +974,7 @@ fn lowers_range_loop_with_index_binding() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![range_loop],
     );
@@ -1103,7 +1104,7 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![step_decl, range_loop],
     );
@@ -1177,7 +1178,7 @@ fn lowers_collection_loop_to_explicit_cfg() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![collection_loop],
     );
@@ -1815,7 +1816,7 @@ fn lowers_collection_loop_without_user_bindings() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![collection_loop],
     );
@@ -1886,7 +1887,7 @@ fn lowers_collection_loop_item_binding_from_indexed_place() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![collection_loop],
     );
@@ -1976,7 +1977,7 @@ fn lowers_collection_loop_optional_index_binding() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![collection_loop],
     );
@@ -2077,7 +2078,7 @@ fn lowers_range_loop_user_bindings_as_immutable_locals() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![range_loop],
     );
@@ -2141,7 +2142,7 @@ fn lowers_collection_loop_user_bindings_as_immutable_locals() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![collection_loop],
     );
@@ -2237,7 +2238,7 @@ fn break_targets_exit_block_in_collection_loop() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![flag_decl, collection_loop],
     );
@@ -2320,7 +2321,7 @@ fn direct_break_in_collection_loop_does_not_leave_unreachable_step_block() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![collection_loop],
     );
@@ -2384,7 +2385,7 @@ fn direct_break_in_range_loop_does_not_leave_unreachable_step_block() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![range_loop],
     );
@@ -2438,7 +2439,7 @@ fn continue_targets_step_block_in_collection_loop() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![collection_loop],
     );
@@ -2538,7 +2539,7 @@ fn nested_loop_targets_remain_correct() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![outer_loop],
     );

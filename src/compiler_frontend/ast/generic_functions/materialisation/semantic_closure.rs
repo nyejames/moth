@@ -16,12 +16,13 @@ use super::visibility::collect_namespace_source_paths;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionBody;
 use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment;
-use crate::compiler_frontend::ast::statements::functions::{ParameterContract, ReturnChannel};
+use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::{CompilerStage, PreparedFailure};
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -38,7 +39,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, Path
 use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::traits::definitions::{
-    ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement, ResolvedTraitReturn,
+    ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement,
     TraitReceiverRequirement, TraitVisibility,
 };
 use crate::compiler_frontend::traits::environment::trait_this_name;
@@ -161,8 +162,18 @@ struct StablePrivateTraitRequirement {
     name: String,
     receiver_mutable: bool,
     parameters: Box<[StablePrivateTraitParameter]>,
-    returns: Box<[StablePrivateTraitReturn]>,
+    returns: StableTraitReturns,
     span: Option<crate::compiler_frontend::source::SourceSpan>,
+}
+
+/// Frozen ordinary return contract of one private trait requirement.
+///
+/// WHAT: the ordered success blueprints and the independent error blueprint. Stored locally
+/// because the slot type is a trait-blueprint resolver, not a shared `TypeId`.
+#[derive(Clone)]
+struct StableTraitReturns {
+    success: Box<[StableTraitTypeBlueprint]>,
+    error: Option<StableTraitTypeBlueprint>,
 }
 
 #[derive(Clone)]
@@ -203,13 +214,6 @@ impl StablePrivateTraitParameter {
     fn semantic_type_blueprints(&self) -> impl Iterator<Item = &StableTraitTypeBlueprint> {
         std::iter::once(&self.parameter_type).chain(self.contract.input_blueprint())
     }
-}
-
-#[derive(Clone)]
-struct StablePrivateTraitReturn {
-    return_type: StableTraitTypeBlueprint,
-    channel: ReturnChannel,
-    span: Option<crate::compiler_frontend::source::SourceSpan>,
 }
 
 #[derive(Clone)]
@@ -283,10 +287,10 @@ impl StableFunctionSignature {
                 });
             }
         }
-        for returned in &self.returns {
+        for returned in &self.returns.success {
             returned.collect_nominal_identities(identities);
         }
-        if let Some(error_return) = &self.error_return {
+        if let Some(error_return) = &self.returns.error {
             error_return.collect_nominal_identities(identities);
         }
     }
@@ -415,13 +419,14 @@ pub(super) fn install_private_semantic_closure(
                     })
                 })
                 .collect::<Result<Vec<_>, PreparedFailure>>()?;
-            let returns = stable_requirement
-                .returns
-                .iter()
-                .map(|returned| {
-                    Ok(ResolvedTraitReturn {
-                        type_id: intern_stable_trait_type(
-                            &returned.return_type,
+            let returns = CallableReturnShape::from_slots(
+                stable_requirement
+                    .returns
+                    .success
+                    .iter()
+                    .map(|returned| {
+                        intern_stable_trait_type(
+                            returned,
                             this_type,
                             nominal_source,
                             &mut environment.type_environment,
@@ -429,12 +434,27 @@ pub(super) fn install_private_semantic_closure(
                             template_ir_store,
                             string_table,
                             path_fork,
-                        )?,
-                        channel: returned.channel,
-                        span: returned.span,
+                        )
                     })
-                })
-                .collect::<Result<Vec<_>, PreparedFailure>>()?;
+                    .collect::<Result<Vec<_>, PreparedFailure>>()?,
+                stable_requirement
+                    .returns
+                    .error
+                    .as_ref()
+                    .map(|returned| {
+                        intern_stable_trait_type(
+                            returned,
+                            this_type,
+                            nominal_source,
+                            &mut environment.type_environment,
+                            external_package_registry,
+                            template_ir_store,
+                            string_table,
+                            path_fork,
+                        )
+                    })
+                    .transpose()?,
+            );
             requirements.push(ResolvedTraitRequirement {
                 id: requirement_id,
                 name: string_table.intern(&stable_requirement.name),
@@ -727,20 +747,23 @@ impl ModuleMaterialisationCapture {
                             })
                         })
                         .collect::<Result<Box<[_]>, InfrastructureFailure>>()?;
-                    let returns = requirement
-                        .returns
-                        .iter()
-                        .map(|returned| {
-                            Ok(StablePrivateTraitReturn {
-                                return_type: self.stable_trait_type(
-                                    returned.type_id,
-                                    definition.this_type,
-                                )?,
-                                channel: returned.channel,
-                                span: returned.span,
+                    let returns = StableTraitReturns {
+                        success: requirement
+                            .returns
+                            .success()
+                            .iter()
+                            .map(|type_id| {
+                                self.stable_trait_type(*type_id, definition.this_type)
                             })
-                        })
-                        .collect::<Result<Box<[_]>, InfrastructureFailure>>()?;
+                            .collect::<Result<Box<[_]>, InfrastructureFailure>>()?,
+                        error: requirement
+                            .returns
+                            .error()
+                            .map(|type_id| {
+                                self.stable_trait_type(type_id, definition.this_type)
+                            })
+                            .transpose()?,
+                    };
                     let receiver_mutable = matches!(
                         requirement.receiver,
                         crate::compiler_frontend::traits::definitions::TraitReceiverRequirement::Mutable { .. }
@@ -1168,8 +1191,13 @@ impl ModuleMaterialisationCapture {
                         }
                     }
                 }
-                for returned in &requirement.returns {
-                    if let StableTraitTypeBlueprint::Type(blueprint) = &returned.return_type {
+                for returned in requirement
+                    .returns
+                    .success
+                    .iter()
+                    .chain(requirement.returns.error.iter())
+                {
+                    if let StableTraitTypeBlueprint::Type(blueprint) = returned {
                         blueprint.collect_nominal_identities(&mut identities);
                     }
                 }

@@ -932,7 +932,7 @@ fn retained_call_slots(call: RetainedTerminalCall<'_>) -> MultiBindResult<Vec<Mu
             .map(|shape| MultiBindSlot::Generic(*shape))
             .collect());
     }
-    let Some(slots) = call.success_return_type_ids() else {
+    let Some(slots) = call.success_types() else {
         return Err(InfrastructureFailure::internal(
             CompilerStage::AstConstruction,
             "a non-generic retained call reported no parsed success slot types",
@@ -940,8 +940,8 @@ fn retained_call_slots(call: RetainedTerminalCall<'_>) -> MultiBindResult<Vec<Mu
         .into());
     };
     Ok(slots
-        .into_iter()
-        .map(|type_id| MultiBindSlot::Known(Some(type_id)))
+        .iter()
+        .map(|type_id| MultiBindSlot::Known(Some(*type_id)))
         .collect())
 }
 

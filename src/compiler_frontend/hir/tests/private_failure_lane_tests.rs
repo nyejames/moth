@@ -167,8 +167,8 @@ fn start_narrowing_drops_only_a_non_escaping_error_channel() {
             .iter()
             .find(|function| function.id == start)
             .expect("start must have a function record");
-        let success_slots = function.returns.clone();
-        let error_slot = function.error_return;
+        let success_slots = function.returns.success().to_vec();
+        let error_slot = function.returns.error();
         assert!(
             error_slot.is_some(),
             "lowering retains the AST builtin Error slot"
@@ -184,11 +184,12 @@ fn start_narrowing_drops_only_a_non_escaping_error_channel() {
             .find(|function| function.id == start)
             .expect("installation must retain start");
         assert_eq!(
-            function.returns, success_slots,
+            function.returns.success(),
+            success_slots.as_slice(),
             "success slots remain unchanged"
         );
         assert_eq!(
-            function.error_return,
+            function.returns.error(),
             if escapes { error_slot } else { None }
         );
     }

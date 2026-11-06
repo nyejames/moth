@@ -266,14 +266,14 @@ pub(crate) fn parse_function_call_expression(
 
     let call = HandledFallibleCall {
         name: id.to_owned(),
-        result_type_ids: signature.success_return_type_ids(),
+        result_type_ids: signature.returns.success().to_vec(),
         args,
         call_span,
     };
 
     finish_function_call_expression(
         call,
-        signature.error_return_type_id(),
+        signature.returns.error(),
         CallFinishContext {
             token_stream,
             context,
@@ -344,9 +344,9 @@ fn retain_numeric_source_call(
         allow_boundary_catch,
     } = input;
 
-    let error_return_type_id = signature.error_return_type_id();
+    let error_return_type_id = signature.returns.error();
     let error_return = error_return_type_id.map(GenericErrorReturn::Concrete);
-    let success_result_type_ids = signature.success_return_type_ids();
+    let success_result_type_ids = signature.returns.success();
     // ------------------------
     //  Operand postfix `!`
     // ------------------------
@@ -361,7 +361,7 @@ fn retain_numeric_source_call(
         type_interner,
         expression_builder,
         const_values,
-        success_result_type_ids: &success_result_type_ids,
+        success_result_type_ids,
         error_return,
         authored_failure_lane: context.source_call_has_private_failure_lane(*function_path),
         value_required,
@@ -375,7 +375,7 @@ fn retain_numeric_source_call(
     Ok(retained_pending_call_operand(
         retained_source_call_record(
             function_path,
-            success_result_type_ids,
+            success_result_type_ids.to_vec(),
             error_return_type_id,
             expectations,
             arguments,

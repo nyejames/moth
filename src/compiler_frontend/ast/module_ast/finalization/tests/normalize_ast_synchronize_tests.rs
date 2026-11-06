@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 
 // ---------------------------------------------------------------------------
@@ -15,7 +16,7 @@ fn function_node(path: PathId) -> AstNode {
             path,
             FunctionSignature {
                 parameters: Vec::new(),
-                returns: Vec::new(),
+                returns: CallableReturnShape::from_slots([], None),
             },
             Vec::new(),
         ),

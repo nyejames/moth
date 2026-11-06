@@ -10,6 +10,7 @@ use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::functions::{
@@ -40,7 +41,7 @@ fn function_node(
             name,
             FunctionSignature {
                 parameters: vec![],
-                returns: vec![],
+                returns: CallableReturnShape::from_slots([], None),
             },
             vec![node(NodeKind::Return(vec![]), span)],
         ),
@@ -75,7 +76,7 @@ fn classifies_entry_start_and_normal_functions() {
             super::entry_start_node(
                 FunctionSignature {
                     parameters: vec![],
-                    returns: vec![],
+                    returns: CallableReturnShape::from_slots([], None),
                 },
                 vec![node(NodeKind::Return(vec![]), None)],
             ),
@@ -140,7 +141,7 @@ fn lowers_exact_stable_origin_to_local_function_id() {
             super::entry_start_node(
                 FunctionSignature {
                     parameters: vec![],
-                    returns: vec![],
+                    returns: CallableReturnShape::from_slots([], None),
                 },
                 vec![node(NodeKind::Return(vec![]), None)],
             ),
@@ -226,7 +227,7 @@ fn rejects_unused_concrete_origin_seed() {
             super::entry_start_node(
                 FunctionSignature {
                     parameters: vec![],
-                    returns: vec![],
+                    returns: CallableReturnShape::from_slots([], None),
                 },
                 vec![node(NodeKind::Return(vec![]), None)],
             ),
@@ -291,7 +292,7 @@ fn hir_validation_rejects_two_origins_for_one_local_function() {
             super::entry_start_node(
                 FunctionSignature {
                     parameters: vec![],
-                    returns: vec![],
+                    returns: CallableReturnShape::from_slots([], None),
                 },
                 vec![node(NodeKind::Return(vec![]), None)],
             ),

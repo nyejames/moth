@@ -930,10 +930,10 @@ impl<'hir> JsEmitter<'hir> {
                     "JavaScript backend: missing current function"
                 )
             });
-        if expressions.len() != function.returns.len()
+        if expressions.len() != function.returns.success().len()
             || expressions
                 .iter()
-                .zip(function.returns.iter())
+                .zip(function.returns.success())
                 .any(|(value, ty)| self.hir.expressions.expression(*value).ty != *ty)
         {
             crate::compiler_bug!(
@@ -941,7 +941,7 @@ impl<'hir> JsEmitter<'hir> {
                 "JavaScript backend: Return slots mismatch"
             );
         }
-        let fallible = function.error_return.is_some();
+        let fallible = function.returns.is_fallible();
         let values = expressions
             .iter()
             .map(|value| self.lower_moth_return_value(*value))
@@ -982,7 +982,7 @@ impl<'hir> JsEmitter<'hir> {
                     "JavaScript backend: current function {function_id:?} is missing"
                 )
             });
-        let Some(error_type) = function.error_return else {
+        let Some(error_type) = function.returns.error() else {
             crate::compiler_bug!(
                 CompilerStage::BackendLowering,
                 "JavaScript backend: ReturnError emitted in a non-fallible function"

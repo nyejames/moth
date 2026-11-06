@@ -10,7 +10,6 @@
 //!      summaries produced after borrow validation. Local finalization creates the completed
 //!      type once, and this module gives projection and finalization one vocabulary owner.
 
-use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
     ExportedGenericParameterIdentity, StableTraitRequirementIdentity,
@@ -102,6 +101,17 @@ impl PublicParameterTypeSlot {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct PublicReturnTypeSlot {
     pub(crate) type_identity: CanonicalTypeIdentity,
+}
+
+/// Ordinary return contract of one public function or receiver method.
+///
+/// WHAT: the ordered success slots and the independent error channel, as canonical identities.
+/// WHY: canonical identities are not `TypeId`s, so this owner keeps its own local shape instead
+///      of borrowing the frontend's `CallableReturnShape`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct PublicCallableReturns {
+    pub(crate) success: Vec<PublicReturnTypeSlot>,
+    pub(crate) error: Option<CanonicalTypeIdentity>,
 }
 
 /// One generic parameter with its ordered canonical trait bound identities in a public
@@ -216,11 +226,16 @@ impl PublicTraitRequirementParameter {
     }
 }
 
-/// One return slot in a trait requirement surface.
+/// Ordinary return contract of one trait requirement surface.
+///
+/// WHAT: the ordered success identities and the independent error identity. Trait `This` stays a
+/// separate `TraitSurfaceTypeIdentity` variant.
+/// WHY: a trait-surface slot is not a `CanonicalTypeIdentity`, so the public trait layer keeps
+///      its own local shape.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PublicTraitRequirementReturn {
-    pub(crate) channel: ReturnChannel,
-    pub(crate) type_identity: TraitSurfaceTypeIdentity,
+pub(crate) struct PublicTraitReturns {
+    pub(crate) success: Vec<TraitSurfaceTypeIdentity>,
+    pub(crate) error: Option<TraitSurfaceTypeIdentity>,
 }
 
 /// One method requirement in a trait surface, in authored order.
@@ -229,7 +244,7 @@ pub(crate) struct PublicTraitRequirementSurface {
     pub(crate) name: String,
     pub(crate) receiver_access: PublicTraitReceiverAccess,
     pub(crate) parameters: Vec<PublicTraitRequirementParameter>,
-    pub(crate) returns: Vec<PublicTraitRequirementReturn>,
+    pub(crate) returns: PublicTraitReturns,
 }
 
 // ===========================================================================
@@ -303,8 +318,7 @@ pub(crate) struct PublicFunctionSemantics {
     /// receive exactly one summary after borrow validation; generic declarations do not.
     pub(crate) category: PublicFunctionCategory,
     pub(crate) parameters: Vec<PublicParameterTypeSlot>,
-    pub(crate) returns: Vec<PublicReturnTypeSlot>,
-    pub(crate) error_return: Option<CanonicalTypeIdentity>,
+    pub(crate) returns: PublicCallableReturns,
 }
 
 /// The explicit callable category for one exported receiver method.
@@ -335,8 +349,7 @@ pub(crate) struct PublicReceiverMethodSemantics {
     /// The callable category: concrete-local or generic-template.
     pub(crate) category: PublicReceiverMethodCategory,
     pub(crate) parameters: Vec<PublicParameterTypeSlot>,
-    pub(crate) returns: Vec<PublicReturnTypeSlot>,
-    pub(crate) error_return: Option<CanonicalTypeIdentity>,
+    pub(crate) returns: PublicCallableReturns,
 }
 
 /// The semantic facts for one exported nominal struct: generic parameters/bounds, fields and
@@ -400,8 +413,9 @@ impl PublicTraitSemantics {
                     .flat_map(|parameter| parameter.semantic_type_identities());
                 let return_identities = requirement
                     .returns
+                    .success
                     .iter()
-                    .map(|return_slot| &return_slot.type_identity);
+                    .chain(requirement.returns.error.iter());
                 parameter_identities.chain(return_identities)
             })
             .filter_map(|identity| match identity {

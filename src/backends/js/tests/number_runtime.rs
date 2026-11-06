@@ -3,6 +3,7 @@
 use super::support::*;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
@@ -371,8 +372,7 @@ fn lower_number_operation_source(scale: NumberScale) -> String {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
     let module = build_module(
         expressions,

@@ -14,7 +14,7 @@
 
 use super::model::{
     PublicTraitParameterContract, PublicTraitReceiverAccess, PublicTraitRequirementParameter,
-    PublicTraitRequirementReturn, PublicTraitRequirementSurface, PublicTraitSemantics,
+    PublicTraitRequirementSurface, PublicTraitReturns, PublicTraitSemantics,
     TraitSurfaceTypeIdentity,
 };
 use super::type_projection::project_trait_source_fact_to_canonical_identity;
@@ -419,22 +419,33 @@ fn project_trait_requirement(
         })
         .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
 
-    let returns = requirement
-        .returns
-        .iter()
-        .map(|return_slot| {
-            let type_identity = project_trait_surface_type_identity(
-                return_slot.type_id,
-                owning_this_type,
-                type_environment,
-                context,
-            )?;
-            Ok(PublicTraitRequirementReturn {
-                channel: return_slot.channel,
-                type_identity,
+    let returns = PublicTraitReturns {
+        success: requirement
+            .returns
+            .success()
+            .iter()
+            .map(|type_id| {
+                project_trait_surface_type_identity(
+                    *type_id,
+                    owning_this_type,
+                    type_environment,
+                    context,
+                )
             })
-        })
-        .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
+            .collect::<Result<Vec<_>, InfrastructureFailure>>()?,
+        error: requirement
+            .returns
+            .error()
+            .map(|type_id| {
+                project_trait_surface_type_identity(
+                    type_id,
+                    owning_this_type,
+                    type_environment,
+                    context,
+                )
+            })
+            .transpose()?,
+    };
 
     Ok(PublicTraitRequirementSurface {
         name,

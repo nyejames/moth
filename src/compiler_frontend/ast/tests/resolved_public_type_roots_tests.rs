@@ -17,13 +17,12 @@ use super::scope_context::{ReceiverMethodCatalog, ReceiverMethodEntry};
 use crate::compiler_frontend::ast::ResolvedTraitSourceFact;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot,
-};
+use crate::compiler_frontend::ast::statements::functions::{FunctionParameter, FunctionSignature};
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAlias,
 };
 use crate::compiler_frontend::compiler_errors::{InfrastructureFailure, InfrastructureFailureKind};
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, StructTypeDefinition,
@@ -130,15 +129,11 @@ fn resolved_free_signature(int_type_id: TypeId) -> ResolvedFunctionSignature {
         binding_span: None,
         contract: crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
     };
-    let return_slot = ReturnSlot {
-        type_id: Some(int_type_id),
-        channel: ReturnChannel::Success,
-    };
     ResolvedFunctionSignature {
         receiver: None,
         signature: FunctionSignature {
             parameters: vec![parameter],
-            returns: vec![return_slot],
+            returns: CallableReturnShape::from_slots([int_type_id], None),
         },
     }
 }
@@ -154,7 +149,7 @@ fn receiver_signature(int_type_id: TypeId) -> FunctionSignature {
     };
     FunctionSignature {
         parameters: vec![parameter],
-        returns: vec![],
+        returns: CallableReturnShape::from_slots([], None),
     }
 }
 
@@ -358,8 +353,8 @@ fn retains_every_public_root_category_in_sorted_header_order() {
     };
     assert_eq!(signature.parameters.len(), 1);
     assert_eq!(signature.parameters[0].type_id, int_type_id);
-    assert_eq!(signature.returns.len(), 1);
-    assert_eq!(signature.returns[0].type_id, Some(int_type_id));
+    assert_eq!(signature.returns.success().len(), 1);
+    assert_eq!(signature.returns.success()[0], int_type_id);
 
     assert_eq!(table.roots[2].path, choice_path);
     assert!(matches!(

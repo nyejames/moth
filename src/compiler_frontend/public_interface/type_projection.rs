@@ -35,7 +35,7 @@
 
 use super::direct_projection::{FoldedValueJoinContext, PublicInterfaceDraftBuildFailure};
 use super::model::{
-    PublicChoiceVariantSurface, PublicFieldTypeSlot, PublicFunctionCategory,
+    PublicCallableReturns, PublicChoiceVariantSurface, PublicFieldTypeSlot, PublicFunctionCategory,
     PublicFunctionSemantics, PublicGenericParameterSurface, PublicGenericTemplateDescriptor,
     PublicParameterContract, PublicParameterTypeSlot, PublicReturnTypeSlot,
 };
@@ -45,7 +45,7 @@ use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ParameterContract, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, ParameterContract,
 };
 use crate::compiler_frontend::ast::{
     ResolvedPublicTypeRoot, ResolvedPublicTypeRootKind, ResolvedPublicTypeRootTable,
@@ -61,6 +61,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::generics
 use crate::compiler_frontend::compiler_messages::{
     InvalidGenericParameterReason, InvalidReceiverDeclarationReason,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantPayloadDefinition, StructTypeDefinition, TypeDefinition,
@@ -94,8 +95,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ProjectedReceiverMethodSignature {
     pub(super) parameters: Vec<PublicParameterTypeSlot>,
-    pub(super) returns: Vec<PublicReturnTypeSlot>,
-    pub(super) error_return: Option<CanonicalTypeIdentity>,
+    pub(super) returns: PublicCallableReturns,
     pub(super) default_provenance: SyntheticInterfaceProvenance,
     /// The generic parameter surfaces (with bounds) of a generic-template method; empty for a
     /// concrete-local method.
@@ -910,8 +910,7 @@ pub(super) fn project_free_function_semantics(
         })
         .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
 
-    let (returns, error_return) =
-        project_return_slots(&signature.returns, type_environment, context)?;
+    let returns = project_callable_returns(&signature.returns, type_environment, context)?;
 
     let category = if generic_parameters.is_empty() {
         PublicFunctionCategory::ConcreteLocal
@@ -925,7 +924,6 @@ pub(super) fn project_free_function_semantics(
         category,
         parameters,
         returns,
-        error_return,
     })
 }
 
@@ -1137,45 +1135,27 @@ pub(super) fn project_constant_type_identity(
 //  Shared leaf projection helpers
 // ---------------------------------------------------------------------------
 
-/// Project success and error return slots, returning them separately.
-///
-/// A resolved public signature slot missing `TypeId` is `InfrastructureFailure`; no slot is omitted.
-pub(super) fn project_return_slots(
-    return_slots: &[ReturnSlot],
+/// Project one callable's success slots and independent error channel.
+pub(super) fn project_callable_returns(
+    returns: &CallableReturnShape,
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
-) -> Result<(Vec<PublicReturnTypeSlot>, Option<CanonicalTypeIdentity>), InfrastructureFailure> {
-    let mut returns = Vec::new();
-    let mut error_return = None;
+) -> Result<PublicCallableReturns, InfrastructureFailure> {
+    let success = returns
+        .success()
+        .iter()
+        .map(|type_id| {
+            project_type_id_to_canonical_identity(*type_id, type_environment, context)
+                .map(|type_identity| PublicReturnTypeSlot { type_identity })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
-    for slot in return_slots {
-        let type_id = slot.type_id.ok_or_else(|| {
-            InfrastructureFailure::internal(
-                CompilerStage::AstConstruction,
-                "defined public type-surface projection: a resolved public signature return \
-                 slot has no TypeId; the signature was not fully resolved before projection",
-            )
-        })?;
+    let error = returns
+        .error()
+        .map(|type_id| project_type_id_to_canonical_identity(type_id, type_environment, context))
+        .transpose()?;
 
-        let type_identity =
-            project_type_id_to_canonical_identity(type_id, type_environment, context)?;
-
-        match slot.channel {
-            ReturnChannel::Success => returns.push(PublicReturnTypeSlot { type_identity }),
-            ReturnChannel::Error => {
-                if error_return.is_some() {
-                    return Err(InfrastructureFailure::internal(
-                        CompilerStage::AstConstruction,
-                        "defined public type-surface projection: a public signature carries \
-                         multiple error-channel return slots",
-                    ));
-                }
-                error_return = Some(type_identity);
-            }
-        }
-    }
-
-    Ok((returns, error_return))
+    Ok(PublicCallableReturns { success, error })
 }
 
 /// Total-join retained struct field declarations against the canonical

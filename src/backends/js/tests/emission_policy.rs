@@ -5,6 +5,7 @@
 //! calls is what requests generated glue and runtime assets.
 
 use super::support::*;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -115,7 +116,7 @@ fn start_fallibility_metadata_uses_only_the_emitted_hir_error_channel() {
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let mut module = module_with_unreachable_function(&mut path_fork, &mut string_table, None);
-    module.functions[0].error_return = Some(types.string);
+    module.functions[0].returns.set_error(Some(types.string));
     let lower = |module: &crate::compiler_frontend::hir::module::HirModule, config| {
         lower_hir_to_js(
             module,
@@ -147,7 +148,7 @@ fn start_fallibility_metadata_uses_only_the_emitted_hir_error_channel() {
     assert!(!lower(&module, default_config()).start_is_fallible);
 
     module.start_function = Some(FunctionId(0));
-    module.functions[0].error_return = None;
+    module.functions[0].returns.set_error(None);
     assert!(!lower(&module, default_config()).start_is_fallible);
 }
 
@@ -193,8 +194,7 @@ fn function(function_id: u32, entry_block_id: u32) -> HirFunction {
         id: FunctionId(function_id),
         entry: BlockId(entry_block_id),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     }
 }
 

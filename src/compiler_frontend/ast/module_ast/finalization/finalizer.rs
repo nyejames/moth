@@ -829,7 +829,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                     string_table,
                 ));
             }
-            let custom_error = match signature.error_return_type_id() {
+            let custom_error = match signature.returns.error() {
                 Some(error_type) if Some(error_type) == builtin_error_type => continue,
                 Some(error_type) => Some(error_type),
                 None if authored_path.is_some_and(|path| {

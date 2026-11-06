@@ -1285,8 +1285,8 @@ fn synthetic_start_keeps_ast_builtin_error_slot_before_hir_narrowing() {
             })
             .expect("executable root must synthesize the entry start");
 
-        assert_eq!(signature.error_return_type_id(), Some(error_type));
-        assert_eq!(signature.success_return_type_ids().len(), 1);
+        assert_eq!(signature.returns.error(), Some(error_type));
+        assert_eq!(signature.returns.success().len(), 1);
     }
 }
 
@@ -1706,7 +1706,7 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
             ));
         }
         assert_eq!(
-            function.error_return,
+            function.returns.error(),
             type_environment.type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
                 CanonicalBuiltinType::Error
             )),
@@ -2141,7 +2141,8 @@ fn private_failure_lane_preserves_unrelated_fatal_fallible_edge() {
         .iter()
         .find(|function| function.id == function_id)
         .expect("private function must remain installed")
-        .error_return
+        .returns
+        .error()
         .expect("private failure lane must be fallible");
     assert_eq!(error.ty, error_type);
     assert_eq!(
@@ -3778,10 +3779,7 @@ fn implicit_failure_error_alias_is_canonical_but_lookalike_is_not() {
             _ => None,
         })
         .expect("Error alias function");
-    assert_eq!(
-        signature.returns.last().expect("error slot").type_id,
-        Some(error_type_id)
-    );
+    assert_eq!(signature.returns.error(), Some(error_type_id));
     let expression = initializer(&ast, &named_function_body(&project, &ast, "recover")[0]);
     let block = assert_catch_contract(expression, true, Some(error_type_id), error_type_id);
     let FallibleHandling::Handler { body, .. } = &block.handler else {

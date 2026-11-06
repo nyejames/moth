@@ -102,7 +102,7 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     pub(crate) fn function_is_fallible(&self, function: &HirFunction) -> bool {
-        function.error_return.is_some()
+        function.returns.is_fallible()
     }
 
     fn emit_parameter_binding_setup(

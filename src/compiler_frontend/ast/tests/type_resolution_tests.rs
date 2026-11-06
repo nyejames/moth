@@ -1326,9 +1326,7 @@ make || -> {capacity I32}:
             _ => None,
         })
         .expect("make signature should be registered");
-    let return_type_id = signature.returns[0]
-        .type_id
-        .expect("return slot should have a TypeId");
+    let return_type_id = signature.returns.success()[0];
 
     assert_eq!(
         ast.type_environment
@@ -1469,9 +1467,7 @@ use_maps |scores StringScores, direct {Bool = {String = I32}}| -> {Char = String
         builtins.bool,
         scores_type_id,
     );
-    let return_type_id = signature.returns[0]
-        .type_id
-        .expect("map return should have a TypeId");
+    let return_type_id = signature.returns.success()[0];
     assert_map_shape(&ast, return_type_id, builtins.char, scores_type_id);
 
     let payload_type_id = nominal_type_id(&ast, &mut string_table, &mut path_fork, "Payload");

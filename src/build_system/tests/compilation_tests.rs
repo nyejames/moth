@@ -34,6 +34,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulat
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::SuccessfulWarningBoundary;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
@@ -266,8 +267,7 @@ fn generated_sidecar(
         id: FunctionId(0),
         entry: BlockId(0),
         params: Vec::new(),
-        returns: Box::new([]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots([], None),
     });
     module
         .executable

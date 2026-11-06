@@ -28,7 +28,6 @@ use crate::compiler_frontend::ast::module_ast::environment::{
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodEntry;
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionParameter, FunctionSignature, MaterialisedFunctionSignature, ParameterContract,
-    ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, intern_resolved_function_signature,
@@ -42,6 +41,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -783,8 +783,6 @@ impl GenericTemplateArtefact {
             let MaterialisedFunctionSignature {
                 signature,
                 function_type_id,
-                success_return_type_ids: returns,
-                error_return_type_id: error_return,
             } = method.signature.materialise(
                 &method_path,
                 &mut StableFunctionMaterialisationContext {
@@ -862,8 +860,7 @@ impl GenericTemplateArtefact {
                             "Concrete receiver method has no retained call summary",
                         )
                     })?,
-                    returns,
-                    error_return,
+                    returns: signature.returns.clone(),
                 },
             );
         }
@@ -1537,68 +1534,61 @@ impl StableFunctionSignature {
                 contract,
             });
         }
-        let mut returns =
-            Vec::with_capacity(self.returns.len() + usize::from(self.error_return.is_some()));
-        let mut success_type_ids = Vec::with_capacity(self.returns.len());
-        for returned in &self.returns {
-            let type_id = intern_materialisation_type_blueprint(
-                returned,
-                context.generic_parameter_type_ids,
-                context.nominal_source,
-                context.type_environment,
-                context.external_package_registry,
-                context.string_table,
-                context.path_fork,
-            )
-            .map_err(|error| {
-                const_store_error_into_prepared_failure(
-                    error,
+        let success_type_ids = self
+            .returns
+            .success
+            .iter()
+            .map(|returned| {
+                intern_materialisation_type_blueprint(
+                    returned,
+                    context.generic_parameter_type_ids,
+                    context.nominal_source,
+                    context.type_environment,
+                    context.external_package_registry,
                     context.string_table,
-                    Some(context.type_environment),
+                    context.path_fork,
                 )
-            })?;
-            returns.push(ReturnSlot {
-                type_id: Some(type_id),
-                channel: ReturnChannel::Success,
-            });
-            success_type_ids.push(type_id);
-        }
-        let error_return = if let Some(error) = &self.error_return {
-            let type_id = intern_materialisation_type_blueprint(
-                error,
-                context.generic_parameter_type_ids,
-                context.nominal_source,
-                context.type_environment,
-                context.external_package_registry,
-                context.string_table,
-                context.path_fork,
-            )
-            .map_err(|error| {
-                const_store_error_into_prepared_failure(
+                .map_err(|error| {
+                    const_store_error_into_prepared_failure(
+                        error,
+                        context.string_table,
+                        Some(context.type_environment),
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let error_return = self
+            .returns
+            .error
+            .as_ref()
+            .map(|error| {
+                intern_materialisation_type_blueprint(
                     error,
+                    context.generic_parameter_type_ids,
+                    context.nominal_source,
+                    context.type_environment,
+                    context.external_package_registry,
                     context.string_table,
-                    Some(context.type_environment),
+                    context.path_fork,
                 )
-            })?;
-            returns.push(ReturnSlot {
-                type_id: Some(type_id),
-                channel: ReturnChannel::Error,
-            });
-            Some(type_id)
-        } else {
-            None
-        };
+                .map_err(|error| {
+                    const_store_error_into_prepared_failure(
+                        error,
+                        context.string_table,
+                        Some(context.type_environment),
+                    )
+                })
+            })
+            .transpose()?;
         let signature = FunctionSignature {
             parameters,
-            returns,
+            returns: CallableReturnShape::from_slots(success_type_ids, error_return),
         };
         let function_type_id =
             intern_resolved_function_signature(&signature, context.type_environment);
         Ok(MaterialisedFunctionSignature {
             signature,
             function_type_id,
-            success_return_type_ids: success_type_ids,
-            error_return_type_id: error_return,
         })
     }
 }
@@ -1617,8 +1607,6 @@ impl super::stable_types::StableCallableBinding {
         let MaterialisedFunctionSignature {
             signature,
             function_type_id,
-            success_return_type_ids: returns,
-            error_return_type_id: error_return,
         } = self.signature.materialise(
             &local_path,
             &mut StableFunctionMaterialisationContext {
@@ -1649,6 +1637,7 @@ impl super::stable_types::StableCallableBinding {
                 path_fork,
             )?;
         }
+        let contract_returns = signature.returns.clone();
         Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
             local_path,
             ResolvedFunctionSignature {
@@ -1660,8 +1649,7 @@ impl super::stable_types::StableCallableBinding {
         Ok(AstImportedFunctionContract {
             target: self.target.materialise(local_path),
             summary: self.summary.clone(),
-            returns,
-            error_return,
+            returns: contract_returns,
         })
     }
 

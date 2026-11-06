@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 
 use crate::build_system::BuildProfile;
 use crate::build_system::create_project_modules::ProjectFrontendCompilation;
@@ -110,8 +111,7 @@ fn link_facts_for_calls(targets: Vec<CallTarget>) -> HirModuleLinkFacts {
         id: FunctionId(0),
         entry: BlockId(0),
         params: Vec::new(),
-        returns: Box::new([]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots([], None),
     });
     module
         .function_provenance
@@ -152,8 +152,7 @@ fn base_hir(
             id: FunctionId(index as u32),
             entry: BlockId(0),
             params: Vec::new(),
-            returns: Box::new([]),
-            error_return: None,
+            returns: CallableReturnShape::from_slots([], None),
         });
         hir.function_provenance
             .insert(FunctionId(index as u32), Default::default());
@@ -2008,7 +2007,8 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
             .iter()
             .find(|function| function.id == load)
             .expect("the typed producer survives the service")
-            .error_return
+            .returns
+            .error()
             .expect("load retains its custom failure channel");
         let diagnostic = type_mismatch(
             custom_type,
@@ -2168,7 +2168,8 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
                 .iter()
                 .find(|function| function.id == operand_root)
                 .expect("the concrete operand retains its native contract")
-                .error_return
+                .returns
+                .error()
                 .is_none()
         );
         let sidecar = sidecars
@@ -2212,7 +2213,8 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
             .iter()
             .find(|function| function.id == root)
             .expect("the generated root remains executable")
-            .error_return
+            .returns
+            .error()
             .expect("the generated private lane returns builtin failure");
         assert_eq!(
             sidecar
@@ -2534,7 +2536,7 @@ fn final_generated_failure_lanes_keep_external_candidates_without_validation_onl
             .find(|function| function.id == root)
             .expect("the selected generated root should survive convergence");
         assert!(
-            root_function.error_return.is_some(),
+            root_function.returns.error().is_some(),
             "the private helper's inferred failure must rewrite the generated root's call lane"
         );
         assert!(hir.blocks.iter().any(|block| matches!(

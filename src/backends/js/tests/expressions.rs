@@ -3,6 +3,7 @@
 use super::support::*;
 use crate::backends::structural_string::StructuralStringUrlMap;
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirMapEntry, HirVariantCarrier, HirVariantField, ValueKind,
@@ -65,8 +66,7 @@ fn explicit_copy_emits_clone_value_wrapped_read() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -143,8 +143,7 @@ fn lowers_option_construct_expression() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -215,8 +214,7 @@ fn growable_collection_expression_lowers_to_array() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -289,8 +287,7 @@ fn fixed_collection_expression_lowers_to_wrapper() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -353,8 +350,7 @@ fn fixed_collection_empty_expression_lowers_to_wrapper() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -425,8 +421,7 @@ fn map_literal_with_entries_lowers_to_map_new() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -487,8 +482,7 @@ fn empty_map_literal_lowers_to_map_new_with_empty_array() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -558,8 +552,7 @@ fn lowers_structural_string_with_url_map_as_escaped_literal() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![types.string]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![types.string], None),
     };
     let module = build_module(
         expressions,

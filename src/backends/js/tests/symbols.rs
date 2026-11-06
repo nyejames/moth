@@ -3,6 +3,7 @@
 use super::support::*;
 use crate::backends::js::JsEmitter;
 use crate::backends::js::symbols::build_field_symbol_raw;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{BlockId, FieldId, FunctionId, RegionId, StructId};
@@ -125,15 +126,13 @@ fn exposes_function_name_map_for_runtime_fragments() {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            returns: vec![].into_boxed_slice(),
-            error_return: None,
+            returns: CallableReturnShape::from_slots([], None),
         },
         HirFunction {
             id: FunctionId(1),
             entry: BlockId(1),
             params: vec![],
-            returns: vec![].into_boxed_slice(),
-            error_return: None,
+            returns: CallableReturnShape::from_slots([], None),
         },
     ];
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
@@ -203,8 +202,7 @@ fn nameless_entry_lowers_to_a_generated_callable() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots([], None),
     }];
     module
         .function_origins

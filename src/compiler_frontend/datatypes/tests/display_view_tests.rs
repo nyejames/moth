@@ -7,6 +7,7 @@
 //! every classification and fallback here is a spelling fact that diagnostics depend on.
 //! OWNERSHIP: tests only. Each test builds its own environment, string table and path table.
 
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition,
     StructTypeDefinition,
@@ -94,8 +95,7 @@ fn view_classifies_each_definition_kind() {
     let option_type = environment.intern_option(i32_type);
     let function_type = environment.intern_function(FunctionTypeKey {
         parameters: Box::new([i32_type]),
-        returns: Box::new([bool_type]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots([bool_type], None),
     });
     let generic_type = environment.intern_generic_parameter(GenericParameterId(0), t_name);
     let anonymous_type = environment.anonymous_const_record_type();
@@ -241,8 +241,7 @@ fn view_lists_function_parameters_in_order() {
     let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let function_type = environment.intern_function(FunctionTypeKey {
         parameters: Box::new([string_type, i32_type]),
-        returns: Box::new([bool_type]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots([bool_type], None),
     });
     let parameters: Vec<TypeId> = environment.function_parameter_ids(function_type).collect();
     assert_eq!(parameters, vec![string_type, i32_type]);
@@ -256,8 +255,7 @@ fn view_keeps_error_return_out_of_success_returns() {
     let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let function_type = environment.intern_function(FunctionTypeKey {
         parameters: Box::new([i32_type]),
-        returns: Box::new([bool_type]),
-        error_return: Some(string_type),
+        returns: CallableReturnShape::from_slots([bool_type], Some(string_type)),
     });
     let returns: Vec<TypeId> = environment.function_return_ids(function_type).collect();
     assert_eq!(returns, vec![bool_type]);

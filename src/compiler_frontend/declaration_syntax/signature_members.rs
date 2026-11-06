@@ -88,7 +88,7 @@ pub struct SignatureMemberSyntax {
     pub span: Option<SourceSpan>,
 }
 
-/// Function return-channel syntax before it becomes an AST `ReturnChannel`.
+/// Authored function return-channel syntax, retained until signature resolution.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReturnChannelSyntax {
     Success,

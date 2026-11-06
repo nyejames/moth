@@ -27,6 +27,7 @@ use crate::compiler_frontend::traits::ids::TraitId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
+use super::callable_returns::CallableReturnShape;
 use super::definitions::{
     BuiltinTypeDefinition, ChoiceTypeDefinition, ChoiceVariantDefinition,
     ChoiceVariantPayloadDefinition, ConstructedTypeDefinition, ExternalTypeDefinition,
@@ -245,8 +246,7 @@ enum TypeSubstitutionSource {
     },
     Function {
         parameters: Box<[TypeId]>,
-        returns: Box<[TypeId]>,
-        error_return: Option<TypeId>,
+        returns: CallableReturnShape,
     },
     GenericInstance {
         base: NominalTypeId,
@@ -749,7 +749,6 @@ impl TypeEnvironment {
                 TypeSubstitutionSource::Function {
                     parameters,
                     returns: function.returns.clone(),
-                    error_return: function.error_return,
                 }
             }
 
@@ -778,8 +777,7 @@ impl TypeEnvironment {
             TypeSubstitutionSource::Function {
                 parameters,
                 returns,
-                error_return,
-            } => self.substitute_function_type(&parameters, &returns, error_return, mapping),
+            } => self.substitute_function_type(&parameters, &returns, mapping),
 
             TypeSubstitutionSource::GenericInstance { base, arguments } => {
                 self.substitute_generic_instance_type(base, &arguments, mapping)
@@ -809,8 +807,7 @@ impl TypeEnvironment {
     fn substitute_function_type(
         &mut self,
         parameters: &[TypeId],
-        returns: &[TypeId],
-        error_return: Option<TypeId>,
+        returns: &CallableReturnShape,
         mapping: &FxHashMap<GenericParameterId, TypeId>,
     ) -> TypeId {
         let substituted_parameters: Box<[TypeId]> = parameters
@@ -818,18 +815,12 @@ impl TypeEnvironment {
             .map(|parameter_type_id| self.substitute_type_id(*parameter_type_id, mapping))
             .collect();
 
-        let substituted_returns: Box<[TypeId]> = returns
-            .iter()
-            .map(|return_type_id| self.substitute_type_id(*return_type_id, mapping))
-            .collect();
-
-        let substituted_error =
-            error_return.map(|error_type_id| self.substitute_type_id(error_type_id, mapping));
+        let substituted_returns =
+            returns.map_type_ids(|return_type_id| self.substitute_type_id(return_type_id, mapping));
 
         self.intern_function(FunctionTypeKey {
             parameters: substituted_parameters,
             returns: substituted_returns,
-            error_return: substituted_error,
         })
     }
 
@@ -994,7 +985,6 @@ impl TypeEnvironment {
         let id = self.insert_definition(TypeDefinition::Function(FunctionTypeDefinition {
             parameters,
             returns: key.returns.clone(),
-            error_return: key.error_return,
         }));
 
         self.function_ids.insert(key, id);
@@ -1516,10 +1506,12 @@ impl TypeEnvironment {
                     .any(|parameter| self.contains_generic_parameter(parameter.type_id))
                     || function
                         .returns
+                        .success()
                         .iter()
                         .any(|returned| self.contains_generic_parameter(*returned))
                     || function
-                        .error_return
+                        .returns
+                        .error()
                         .is_some_and(|error| self.contains_generic_parameter(error))
             }
             _ => false,
@@ -1552,10 +1544,10 @@ impl TypeEnvironment {
                 for parameter in function.parameters.iter() {
                     self.collect_generic_parameters(parameter.type_id, out);
                 }
-                for returned in function.returns.iter() {
+                for returned in function.returns.success() {
                     self.collect_generic_parameters(*returned, out);
                 }
-                if let Some(error) = function.error_return {
+                if let Some(error) = function.returns.error() {
                     self.collect_generic_parameters(error, out);
                 }
             }
@@ -2170,9 +2162,10 @@ impl TypeEnvironment {
                 Some(TypeDefinition::Function(template_function)),
                 Some(TypeDefinition::Function(concrete_function)),
             ) if template_function.parameters.len() == concrete_function.parameters.len()
-                && template_function.returns.len() == concrete_function.returns.len()
-                && template_function.error_return.is_some()
-                    == concrete_function.error_return.is_some() =>
+                && template_function.returns.success().len()
+                    == concrete_function.returns.success().len()
+                && template_function.returns.is_fallible()
+                    == concrete_function.returns.is_fallible() =>
             {
                 for (template_parameter, concrete_parameter) in template_function
                     .parameters
@@ -2189,8 +2182,9 @@ impl TypeEnvironment {
                 }
                 for (template_return, concrete_return) in template_function
                     .returns
+                    .success()
                     .iter()
-                    .zip(concrete_function.returns.iter())
+                    .zip(concrete_function.returns.success())
                 {
                     if !self.collect_type_parameter_bindings_inner(
                         *template_return,
@@ -2201,8 +2195,8 @@ impl TypeEnvironment {
                     }
                 }
                 if let (Some(template_error), Some(concrete_error)) = (
-                    template_function.error_return,
-                    concrete_function.error_return,
+                    template_function.returns.error(),
+                    concrete_function.returns.error(),
                 ) && !self.collect_type_parameter_bindings_inner(
                     template_error,
                     concrete_error,

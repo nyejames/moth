@@ -615,7 +615,7 @@ fn retain_pending_fragment_catch(
 /// suffix parse.
 enum FragmentSuccess {
     Known(Vec<TypeId>),
-    /// One concrete slot of a generic call, kept inline.
+    /// One concrete success slot, kept inline.
     Single(TypeId),
     /// A generic call whose slot types all resolve at completion, at its declared arity.
     Pending {
@@ -684,8 +684,11 @@ fn terminal_call_success(
     call: RetainedTerminalCall<'_>,
     scope_context: &ScopeContext,
 ) -> FragmentSuccess {
-    if let Some(types) = call.success_return_type_ids() {
-        return FragmentSuccess::Known(types);
+    if let Some(types) = call.success_types() {
+        return match types {
+            [type_id] => FragmentSuccess::Single(*type_id),
+            types => FragmentSuccess::Known(types.to_vec()),
+        };
     }
     match call.generic_success_slots(scope_context) {
         GenericSuccessSlots::Single(type_id) => FragmentSuccess::Single(type_id),

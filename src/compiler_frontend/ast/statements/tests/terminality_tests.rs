@@ -21,6 +21,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_da
     InvalidReturnShapeCode, InvalidReturnShapeView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     fresh_success_returns, function_body_by_name, node, test_if_branch_metadata,
@@ -354,7 +355,7 @@ fn policy_selection_matches_signature_shape() {
 
     let unit_like_signature = FunctionSignature {
         parameters: vec![],
-        returns: vec![],
+        returns: CallableReturnShape::from_slots([], None),
     };
     assert_eq!(
         terminality_policy_for_signature(&unit_like_signature, false),

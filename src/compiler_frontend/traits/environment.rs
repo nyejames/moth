@@ -5,7 +5,7 @@
 //! WHY: source and compiler-owned trait contracts receive stable identities and share one
 //!      deterministic name-resolution path.
 
-use crate::compiler_frontend::ast::statements::functions::{ParameterContract, ReturnChannel};
+use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
 };
@@ -14,13 +14,14 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::definitions::{
-    ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement, ResolvedTraitReturn,
+    ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement,
     TraitReceiverRequirement, TraitVisibility,
 };
 use crate::compiler_frontend::traits::ids::{TraitId, TraitRequirementId};
@@ -141,21 +142,10 @@ impl TraitEnvironment {
         // the same convention because user receiver methods implement
         // `display |This| -> String` immutably.
         let receiver = TraitReceiverRequirement::Immutable { this_type };
-        let mut returns = vec![ResolvedTraitReturn {
-            type_id: success_type,
-            channel: ReturnChannel::Success,
-            span: None,
-        }];
-        if let Some(error_type) = error_return_type {
-            // Fallible core cast traits propagate the cast failure through a
-            // dedicated `Error!` return channel so the resolved expression
-            // keeps the user-authored source's existing `Error!` shape.
-            returns.push(ResolvedTraitReturn {
-                type_id: error_type,
-                channel: ReturnChannel::Error,
-                span: None,
-            });
-        }
+        // Fallible core cast traits propagate the cast failure through a dedicated `Error!`
+        // return channel so the resolved expression keeps the user-authored source's existing
+        // `Error!` shape.
+        let returns = CallableReturnShape::from_slots([success_type], error_return_type);
 
         let requirement = ResolvedTraitRequirement {
             id: requirement_id,

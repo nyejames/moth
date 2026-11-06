@@ -5,7 +5,7 @@
 //! cannot inspect: ordered trait requirements with immutable and mutable receivers,
 //! trait-local `SelfType` for direct `this_type` parameter and return occurrences,
 //! ordinary builtin and source-nominal concrete-type projection, `ValueMode` and
-//! `ReturnChannel` fact retention, the trait-receiver `this_type` invariant, totality
+//! success/error return fact retention, the trait-receiver `this_type` invariant, totality
 //! failures for missing, duplicate, unmatched, wrong-origin, builtin and wrong-name
 //! inputs, source-to-source and source-to-core incompatibility identity, stability
 //! across local `TraitId` allocation, duplicate and self-relation rejection, and the
@@ -26,11 +26,10 @@ use super::test_support::{
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
-use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::ast::{
     AstPublicInterfaceProjectionInput, ResolvedPublicTraitRoot, ResolvedPublicTypeRootTable,
     ResolvedTraitParameterFact, ResolvedTraitReceiverFact, ResolvedTraitRequirementFact,
-    ResolvedTraitReturnFact, ResolvedTraitSourceFact, TraitReceiverAccessKind,
+    ResolvedTraitSourceFact, TraitReceiverAccessKind,
 };
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
@@ -39,6 +38,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -60,7 +60,7 @@ fn requirement(
     name: &str,
     receiver: ResolvedTraitReceiverFact,
     parameters: Vec<ResolvedTraitParameterFact>,
-    returns: Vec<ResolvedTraitReturnFact>,
+    returns: CallableReturnShape,
     string_table: &mut StringTable,
 ) -> ResolvedTraitRequirementFact {
     ResolvedTraitRequirementFact {
@@ -98,10 +98,6 @@ fn param(
         type_id,
         contract: crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
     }
-}
-
-fn ret(type_id: TypeId, channel: ReturnChannel) -> ResolvedTraitReturnFact {
-    ResolvedTraitReturnFact { type_id, channel }
 }
 
 fn build_traits(
@@ -222,14 +218,14 @@ fn projects_trait_with_ordered_requirements_immutable_and_mutable_receivers() {
                 &mut string_table,
                 &mut path_fork,
             )],
-            vec![ret(bool_id, ReturnChannel::Success)],
+            CallableReturnShape::from_slots([bool_id], None),
             &mut string_table,
         ),
         requirement(
             "write",
             receiver_mutable(this_id),
             vec![],
-            vec![ret(bool_id, ReturnChannel::Success)],
+            CallableReturnShape::from_slots([bool_id], None),
             &mut string_table,
         ),
     ];
@@ -327,7 +323,7 @@ fn projects_self_type_for_direct_this_type_parameter_and_return_occurrences() {
             &mut string_table,
             &mut path_fork,
         )],
-        vec![ret(this_id, ReturnChannel::Success)],
+        CallableReturnShape::from_slots([this_id], None),
         &mut string_table,
     )];
 
@@ -362,7 +358,7 @@ fn projects_self_type_for_direct_this_type_parameter_and_return_occurrences() {
         TraitSurfaceTypeIdentity::SelfType
     );
     assert_eq!(
-        requirement.returns[0].type_identity,
+        requirement.returns.success[0],
         TraitSurfaceTypeIdentity::SelfType
     );
 }
@@ -393,7 +389,7 @@ fn projects_ordinary_builtin_and_source_nominal_types_as_concrete() {
             &mut string_table,
             &mut path_fork,
         )],
-        vec![ret(widget_id, ReturnChannel::Success)],
+        CallableReturnShape::from_slots([widget_id], None),
         &mut string_table,
     )];
 
@@ -435,7 +431,7 @@ fn projects_ordinary_builtin_and_source_nominal_types_as_concrete() {
         )))
     );
     assert!(matches!(
-        &requirement.returns[0].type_identity,
+        &requirement.returns.success[0],
         TraitSurfaceTypeIdentity::Concrete(canonical) if matches!(canonical.as_ref(), CanonicalTypeIdentity::SourceNominal(_))
     ));
 }
@@ -459,10 +455,7 @@ fn retains_value_mode_and_return_channel_facts() {
             &mut string_table,
             &mut path_fork,
         )],
-        vec![
-            ret(bool_id, ReturnChannel::Success),
-            ret(int_id, ReturnChannel::Error),
-        ],
+        CallableReturnShape::from_slots([bool_id], Some(int_id)),
         &mut string_table,
     )];
 
@@ -496,9 +489,8 @@ fn retains_value_mode_and_return_channel_facts() {
         requirement.parameters[0].value_mode,
         ValueMode::MutableOwned
     );
-    assert_eq!(requirement.returns.len(), 2);
-    assert_eq!(requirement.returns[0].channel, ReturnChannel::Success);
-    assert_eq!(requirement.returns[1].channel, ReturnChannel::Error);
+    assert_eq!(requirement.returns.success.len(), 1);
+    assert!(requirement.returns.error.is_some());
 }
 
 // ---------------------------------------------------------------------------
@@ -517,7 +509,7 @@ fn rejects_requirement_receiver_this_type_mismatch() {
         "read",
         receiver_immutable(other_id),
         vec![],
-        vec![],
+        CallableReturnShape::default(),
         &mut string_table,
     )];
 
@@ -565,7 +557,7 @@ fn rejects_mutable_receiver_this_type_mismatch() {
         "write",
         receiver_mutable(other_id),
         vec![],
-        vec![],
+        CallableReturnShape::default(),
         &mut string_table,
     )];
 
@@ -1270,7 +1262,7 @@ fn builder_carries_incompatibilities_on_trait_record() {
             &mut string_table,
             &mut path_fork,
         )],
-        vec![ret(env.builtins().bool, ReturnChannel::Success)],
+        CallableReturnShape::from_slots([env.builtins().bool], None),
         &mut string_table,
     );
     let trait_root = ResolvedPublicTraitRoot {

@@ -8,6 +8,7 @@ use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::expression_store::HirProjection;
@@ -60,7 +61,7 @@ fn emits_advisory_return_drop_sites() {
     let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
@@ -122,7 +123,7 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
     let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![
             node(

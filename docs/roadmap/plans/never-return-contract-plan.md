@@ -727,25 +727,25 @@ Measured at activation with `size_of` probes, frontend benchmark counters over t
 
 ## Slices
 
-- [ ] 1a.0 Add the shape owner with normalisation, slice view, `map_type_ids` and unit tests.
-- [ ] 1a.1 Cut over the AST resolved signature and every reader and fixture.
-- [ ] 1a.2 Cut over function-type keys, definitions, interning, substitution and display.
-- [ ] 1a.3 Cut over HIR functions, delete `HirCallResultContract`, the private failure lane, validation and both backends.
-- [ ] 1a.4 Cut over trait requirements, conformance matching and trait sidecars.
-- [ ] 1a.5 Cut over public function, receiver and trait return projections.
-- [ ] 1a.6 Cut over imported contracts, generic templates, sidecar signatures and substitution.
-- [ ] 1a.7 Delete `ReturnChannel` and the remaining channel filters.
+- [x] 1a.0 Add the shape owner with normalisation, slice view, `map_type_ids` and unit tests.
+- [x] 1a.1 Cut over the AST resolved signature and every reader and fixture.
+- [x] 1a.2 Cut over function-type keys, definitions, interning, substitution and display.
+- [x] 1a.3 Cut over HIR functions, delete `HirCallResultContract`, the private failure lane, validation and both backends.
+- [x] 1a.4 Cut over trait requirements, conformance matching and trait sidecars.
+- [x] 1a.5 Cut over public function, receiver and trait return projections.
+- [x] 1a.6 Cut over imported contracts, generic templates, sidecar signatures and substitution.
+- [x] 1a.7 Delete `ReturnChannel` and the remaining channel filters.
 
 Slices may merge when one cannot compile without the next.
 
 ## Audit
 
-- [ ] Confirm no resolved owner retains a channel-tagged list or a per-slot `Option<TypeId>`.
-- [ ] Confirm `Multiple` never holds fewer than two slots, so interning has one key per contract.
-- [ ] Confirm no parallel shape type, forwarding accessor or compatibility constructor remains.
-- [ ] Confirm expression-store ranges are not reused for callable metadata.
-- [ ] Confirm trait diagnostics and indices are unchanged.
-- [ ] Complete the mandatory phase audit and Slice review.
+- [x] Confirm no resolved owner retains a channel-tagged list or a per-slot `Option<TypeId>`.
+- [x] Confirm `Multiple` never holds fewer than two slots, so interning has one key per contract.
+- [x] Confirm no parallel shape type, forwarding accessor or compatibility constructor remains.
+- [x] Confirm expression-store ranges are not reused for callable metadata.
+- [x] Confirm trait diagnostics and indices are unchanged.
+- [x] Complete the mandatory phase audit and Slice review.
 
 ## Validation
 
@@ -757,10 +757,24 @@ just validate
 just bench-check
 ```
 
-- [ ] Confirm ordinary source behaviour is unchanged: integration results match the baseline.
-- [ ] Record retained record sizes after the cut-over.
+- [x] Confirm ordinary source behaviour is unchanged: integration results match the baseline.
+- [x] Record retained record sizes after the cut-over.
 - [ ] Run `just bench-check` on clean committed trees before and after. Investigate any regression before accepting.
-- [ ] Update `index.md` for the new module.
+- [x] Update `index.md` for the new module.
+
+Delivered measurements:
+
+| Record | Before (bytes) | After (bytes) |
+|---|---|---|
+| `SuccessSlots` | n/a | 24 |
+| `CallableReturnShape` | n/a | 32 |
+| `FunctionSignature` | 48 | 56 |
+| `FunctionTypeKey` and `FunctionTypeDefinition` | 40 | 48 |
+| `HirFunction` | 56 | 64 |
+| `ResolvedTraitRequirement` | 72 | 80 |
+| `PublicFunctionSemantics` | 208 | 208 |
+
+Inline success-slot copies fell from 20 to 9. Each remaining copy feeds an owner that stores its own list beyond the signature borrow.
 
 # Phase 1b - Introduce callable return-contract enums
 

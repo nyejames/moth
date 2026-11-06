@@ -26,6 +26,7 @@ use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::const_eval::{
     ConstantFoldOutcome, FoldRequirement, FoldServices,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowAnalysis;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
@@ -161,7 +162,7 @@ fn constant_root(
 fn empty_signature() -> FunctionSignature {
     FunctionSignature {
         parameters: vec![],
-        returns: vec![],
+        returns: CallableReturnShape::from_slots([], None),
     }
 }
 
@@ -508,7 +509,7 @@ fn builder_attaches_receiver_methods_to_struct_record() {
     let method_fn_path = path("render", &mut string_table, &mut path_fork);
     let signature = FunctionSignature {
         parameters: vec![],
-        returns: vec![],
+        returns: CallableReturnShape::from_slots([], None),
     };
     let entry = receiver_entry(
         method_fn_path,
@@ -627,7 +628,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
     };
     let method_signature = FunctionSignature {
         parameters: vec![receiver],
-        returns: vec![],
+        returns: CallableReturnShape::from_slots([], None),
     };
     let mut entry = receiver_entry(
         method_fn_path,
@@ -930,22 +931,19 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
         field_declaration_no_default("subject", string_id, &mut string_table, &mut path_fork),
     ];
 
-    let signature = FunctionSignature {
-        parameters: parameters
-            .into_iter()
-            .map(|declaration| {
-                crate::compiler_frontend::ast::statements::functions::FunctionParameter {
-                    id: declaration.id,
-                    type_id: declaration.type_id,
-                    value_mode: declaration.value_mode,
-                    default: declaration.value.default(),
-                    binding_span: declaration.binding_span,
-                    contract: crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
-                }
-            })
-            .collect(),
-        returns: vec![],
-    };
+    let signature = FunctionSignature { parameters: parameters
+        .into_iter()
+        .map(|declaration| {
+            crate::compiler_frontend::ast::statements::functions::FunctionParameter {
+                id: declaration.id,
+                type_id: declaration.type_id,
+                value_mode: declaration.value_mode,
+                default: declaration.value.default(),
+                binding_span: declaration.binding_span,
+                contract: crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
+            }
+        })
+        .collect(), returns: CallableReturnShape::from_slots([], None),  };
 
     let root = function_root("render", signature, &mut string_table, &mut path_fork);
     let root_table = ResolvedPublicTypeRootTable {
@@ -1303,7 +1301,7 @@ fn receiver_method_retains_folded_parameter_defaults() {
                     crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
             },
         ],
-        returns: vec![],
+        returns: CallableReturnShape::from_slots([], None),
     };
 
     let entry = receiver_entry(

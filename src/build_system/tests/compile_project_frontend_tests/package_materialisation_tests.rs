@@ -2409,7 +2409,7 @@ export:
         PublicFunctionCategory::GenericTemplate(_),
     ));
     assert_eq!(
-        product.error_return,
+        product.returns.error,
         Some(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error)),
         "product must keep its public Error! slot",
     );

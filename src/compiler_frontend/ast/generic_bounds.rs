@@ -121,11 +121,11 @@ fn validate_type_recursive(
                 validate_type_recursive(parameter.type_id, None, span, context, visited)?;
             }
 
-            for return_type in &definition.returns {
+            for return_type in definition.returns.success() {
                 validate_type_recursive(*return_type, None, span, context, visited)?;
             }
 
-            if let Some(error_type) = definition.error_return {
+            if let Some(error_type) = definition.returns.error() {
                 validate_type_recursive(error_type, None, span, context, visited)?;
             }
         }

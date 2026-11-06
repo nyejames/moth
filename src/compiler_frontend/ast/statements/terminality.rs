@@ -56,7 +56,7 @@ pub(crate) fn terminality_policy_for_signature(
         return FunctionTerminalityPolicy::EntryStartImplicitReturn;
     }
 
-    if signature.success_return_slot_count() == 0 {
+    if signature.returns.success().is_empty() {
         FunctionTerminalityPolicy::AllowImplicitUnit
     } else {
         FunctionTerminalityPolicy::RequireExplicitReturn

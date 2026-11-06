@@ -1,6 +1,7 @@
 //! Native result-channel emission tests and JavaScript ABI packing contracts.
 
 use super::support::*;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
@@ -101,8 +102,7 @@ fn nested_fallible_calls_emit_native_invoke_edges() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![types.string].into_boxed_slice(),
-        error_return: Some(types.string),
+        returns: CallableReturnShape::from_slots(vec![types.string], Some(types.string)),
     }];
     for caller in 1..=2 {
         let entry = 1 + (caller - 1) * 3;
@@ -156,8 +156,7 @@ fn nested_fallible_calls_emit_native_invoke_edges() {
             id: FunctionId(caller),
             entry: BlockId(entry),
             params: vec![],
-            returns: vec![types.string].into_boxed_slice(),
-            error_return: Some(types.string),
+            returns: CallableReturnShape::from_slots(vec![types.string], Some(types.string)),
         });
     }
     let module = result_module(
@@ -223,8 +222,7 @@ fn explicit_error_return_terminator_emits_err_envelope() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: Some(types.string),
+        returns: CallableReturnShape::from_slots(vec![], Some(types.string)),
     };
     let module = result_module(
         expressions,
@@ -324,15 +322,19 @@ fn multiple_success_return_slots_pack_at_js_abi() {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            returns: vec![types.string, types.i32].into_boxed_slice(),
-            error_return: Some(types.string),
+            returns: CallableReturnShape::from_slots(
+                vec![types.string, types.i32],
+                Some(types.string),
+            ),
         },
         HirFunction {
             id: FunctionId(1),
             entry: BlockId(1),
             params: vec![],
-            returns: vec![types.string, types.i32].into_boxed_slice(),
-            error_return: Some(types.string),
+            returns: CallableReturnShape::from_slots(
+                vec![types.string, types.i32],
+                Some(types.string),
+            ),
         },
     ];
     let module = result_module(
@@ -465,15 +467,13 @@ fn zero_success_invoke_emits_success_error_edges() {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![LocalId(0)],
-            returns: vec![].into_boxed_slice(),
-            error_return: Some(types.string),
+            returns: CallableReturnShape::from_slots(vec![], Some(types.string)),
         },
         HirFunction {
             id: FunctionId(1),
             entry: BlockId(3),
             params: vec![LocalId(1)],
-            returns: vec![types.boolean].into_boxed_slice(),
-            error_return: None,
+            returns: CallableReturnShape::from_slots(vec![types.boolean], None),
         },
     ];
     let module = result_module(
@@ -574,15 +574,13 @@ fn fallible_alias_return_defines_fresh_success_binding() {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![LocalId(0)],
-            returns: vec![types.string].into_boxed_slice(),
-            error_return: Some(types.string),
+            returns: CallableReturnShape::from_slots(vec![types.string], Some(types.string)),
         },
         HirFunction {
             id: FunctionId(1),
             entry: BlockId(1),
             params: vec![LocalId(1)],
-            returns: vec![types.string].into_boxed_slice(),
-            error_return: Some(types.string),
+            returns: CallableReturnShape::from_slots(vec![types.string], Some(types.string)),
         },
     ];
     let mut module = result_module(
@@ -680,15 +678,13 @@ fn infallible_call_defines_multiple_result_slots() {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            returns: vec![types.string, types.i32].into_boxed_slice(),
-            error_return: None,
+            returns: CallableReturnShape::from_slots(vec![types.string, types.i32], None),
         },
         HirFunction {
             id: FunctionId(1),
             entry: BlockId(1),
             params: vec![],
-            returns: vec![types.string, types.i32].into_boxed_slice(),
-            error_return: None,
+            returns: CallableReturnShape::from_slots(vec![types.string, types.i32], None),
         },
     ];
     let module = result_module(

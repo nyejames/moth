@@ -38,6 +38,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, DiagnosticCategory, DiagnosticSeverity, PreparedFailure,
     ProjectContextEscapeReason,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedValue,
@@ -63,10 +64,10 @@ use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
 };
 use crate::compiler_frontend::public_interface::{
-    PublicConstantSemantics, PublicDeclarationRecord, PublicDeclarationSemantics,
-    PublicFunctionCategory, PublicFunctionSemantics, PublicReceiverMethodCategory,
-    PublicReceiverMethodSemantics, PublicReturnTypeSlot, PublicSemanticInterface,
-    PublicStructSemantics,
+    PublicCallableReturns, PublicConstantSemantics, PublicDeclarationRecord,
+    PublicDeclarationSemantics, PublicFunctionCategory, PublicFunctionSemantics,
+    PublicReceiverMethodCategory, PublicReceiverMethodSemantics, PublicReturnTypeSlot,
+    PublicSemanticInterface, PublicStructSemantics,
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
@@ -223,8 +224,7 @@ fn synthetic_module(
             id: function_id,
             entry: block_id,
             params: Vec::new(),
-            returns: Box::new([]),
-            error_return: None,
+            returns: CallableReturnShape::from_slots([], None),
         });
         hir.function_origins.insert(
             function_id,
@@ -523,8 +523,10 @@ fn source_package_facade_rejects_project_context_reachable_private_helper() {
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
             category: PublicFunctionCategory::ConcreteLocal,
             parameters: Vec::new(),
-            returns: Vec::new(),
-            error_return: None,
+            returns: PublicCallableReturns {
+                success: Vec::new(),
+                error: None,
+            },
         }),
     };
     let root_interface = PublicSemanticInterface {
@@ -873,8 +875,10 @@ fn package_facade_rejects_project_context_reachable_private_helper() {
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
             category: PublicFunctionCategory::ConcreteLocal,
             parameters: Vec::new(),
-            returns: Vec::new(),
-            error_return: None,
+            returns: PublicCallableReturns {
+                success: Vec::new(),
+                error: None,
+            },
         }),
     };
     let mut facade_interface = empty_interface(facade_origin.clone());
@@ -1089,10 +1093,12 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
                 method_origin: render_origin.clone(),
                 category: PublicReceiverMethodCategory::ConcreteLocal,
                 parameters: Vec::new(),
-                returns: vec![PublicReturnTypeSlot {
-                    type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-                }],
-                error_return: None,
+                returns: PublicCallableReturns {
+                    success: vec![PublicReturnTypeSlot {
+                        type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+                    }],
+                    error: None,
+                },
             }],
         }),
     };
@@ -1102,10 +1108,12 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
             category: PublicFunctionCategory::ConcreteLocal,
             parameters: Vec::new(),
-            returns: vec![PublicReturnTypeSlot {
-                type_identity: CanonicalTypeIdentity::SourceNominal(card_origin),
-            }],
-            error_return: None,
+            returns: PublicCallableReturns {
+                success: vec![PublicReturnTypeSlot {
+                    type_identity: CanonicalTypeIdentity::SourceNominal(card_origin),
+                }],
+                error: None,
+            },
         }),
     };
     let mut declarations = vec![card_declaration, make_declaration];

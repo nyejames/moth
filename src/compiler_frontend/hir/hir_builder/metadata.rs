@@ -189,7 +189,7 @@ impl<'a> HirBuilder<'a> {
                     )
                 })?,
             };
-            let boundary = match signature.error_return_type_id() {
+            let boundary = match signature.returns.error() {
                 Some(error_type) if Some(error_type) == builtin_error_type => {
                     HirBuiltinFailureBoundary::BuiltinErrorSlot
                 }

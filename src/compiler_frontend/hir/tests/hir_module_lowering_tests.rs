@@ -17,6 +17,7 @@ use crate::compiler_frontend::ast::templates::{
 };
 use crate::compiler_frontend::ast::{AstDocFragment, AstDocFragmentKind};
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
@@ -179,7 +180,7 @@ fn registers_declarations_and_allocates_the_entry_function() {
     let mut start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![],
     );
@@ -349,7 +350,7 @@ fn rejects_an_entry_in_an_api_only_root() {
         vec![super::entry_start_node(
             FunctionSignature {
                 parameters: vec![],
-                returns: vec![],
+                returns: CallableReturnShape::from_slots([], None),
             },
             vec![],
         )],
@@ -442,7 +443,7 @@ fn rejects_more_than_one_compiler_owned_entry() {
     let mut string_table = StringTable::new();
     let signature = || FunctionSignature {
         parameters: vec![],
-        returns: vec![],
+        returns: CallableReturnShape::from_slots([], None),
     };
 
     let ast = build_ast_with_registered_types(
@@ -484,7 +485,7 @@ fn rejects_a_normal_root_without_its_compiler_owned_entry() {
             function_path,
             FunctionSignature {
                 parameters: vec![],
-                returns: vec![],
+                returns: CallableReturnShape::from_slots([], None),
             },
             vec![],
             None,
@@ -525,7 +526,7 @@ fn api_only_root_roles_lower_without_implicit_start() {
             declaration_path,
             FunctionSignature {
                 parameters: vec![],
-                returns: vec![],
+                returns: CallableReturnShape::from_slots([], None),
             },
             vec![],
             None,
@@ -577,7 +578,7 @@ fn start_function_can_reference_module_constant() {
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(NodeKind::ExpressionStatement(reference), None)],
     );
@@ -635,7 +636,7 @@ fn extracts_ast_doc_fragments_into_module_metadata() {
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![],
     );
@@ -694,7 +695,7 @@ fn structural_module_constant_reference_lowers_into_structural_expression() {
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(NodeKind::ExpressionStatement(reference), None)],
     );
@@ -814,7 +815,7 @@ fn runtime_template_handoff_resource_piece_lowers_through_the_module_resource_ta
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(NodeKind::ExpressionStatement(handoff_expr), None)],
     );
@@ -909,7 +910,7 @@ fn runtime_template_handoff_site_root_piece_lowers_through_the_module_resource_t
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(NodeKind::ExpressionStatement(handoff_expr), None)],
     );

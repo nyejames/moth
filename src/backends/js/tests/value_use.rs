@@ -5,6 +5,7 @@
 //! WHY: the value-use helper is the single point of truth for Load/Copy ABI policy.
 
 use super::support::*;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -70,8 +71,7 @@ fn plain_expression_load_and_copy_use_read_and_clone() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -183,8 +183,7 @@ fn load_and_copy_in_nonlocal_assignment_emit_concrete_values() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let mut module = build_module(
@@ -288,8 +287,7 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
         id: FunctionId(1),
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(2), LocalId(3)],
-        returns: (vec![types.i32]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![types.i32], None),
     };
 
     let call_stmt = statement(
@@ -344,8 +342,7 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
         id: FunctionId(0),
         entry: BlockId(1),
         params: vec![],
-        returns: (vec![types.i32]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![types.i32], None),
     };
 
     let mut module = HirModule::new();
@@ -485,8 +482,7 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -559,8 +555,7 @@ fn load_in_return_reads_value_without_cloning() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        returns: (vec![types.i32]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![types.i32], None),
     };
 
     let mut module = HirModule::new();
@@ -648,8 +643,7 @@ fn copy_in_return_value_emits_clone_value() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        returns: (vec![types.i32]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![types.i32], None),
     };
 
     let mut module = HirModule::new();
@@ -733,8 +727,7 @@ fn multiple_returns_preserve_return_value_handling_per_slot() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(1)],
-        returns: (vec![types.i32, types.string]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![types.i32, types.string], None),
     };
 
     let mut module = HirModule::new();

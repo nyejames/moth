@@ -11,6 +11,8 @@
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
+use super::callable_returns::CallableReturnShape;
+
 /// Dense module-local type identifier.
 ///
 /// Valid only with the `TypeEnvironment` that created it.
@@ -134,6 +136,5 @@ pub struct GenericInstanceKey {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FunctionTypeKey {
     pub parameters: Box<[TypeId]>,
-    pub returns: Box<[TypeId]>,
-    pub error_return: Option<TypeId>,
+    pub returns: CallableReturnShape,
 }

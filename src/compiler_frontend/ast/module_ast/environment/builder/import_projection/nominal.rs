@@ -15,10 +15,10 @@ fn collect_semantic_type_origins(
             for parameter in &function.parameters {
                 collect_parameter_type_origins(parameter, origins);
             }
-            for returned in &function.returns {
+            for returned in &function.returns.success {
                 collect_canonical_type_origins(&returned.type_identity, origins);
             }
-            if let Some(error) = &function.error_return {
+            if let Some(error) = &function.returns.error {
                 collect_canonical_type_origins(error, origins);
             }
         }
@@ -63,10 +63,10 @@ fn collect_receiver_method_type_origins(
     for parameter in &method.parameters {
         collect_parameter_type_origins(parameter, origins);
     }
-    for returned in &method.returns {
+    for returned in &method.returns.success {
         collect_canonical_type_origins(&returned.type_identity, origins);
     }
-    if let Some(error) = &method.error_return {
+    if let Some(error) = &method.returns.error {
         collect_canonical_type_origins(error, origins);
     }
 }

@@ -1,6 +1,7 @@
 //! Native map operation channel lowering tests for JavaScript output.
 
 use super::support::*;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp, ValueKind};
@@ -62,8 +63,7 @@ fn map_get_invoke_lowers_to_helper() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: Some(types.error),
+        returns: CallableReturnShape::from_slots(vec![], Some(types.error)),
     };
 
     let module = build_module(
@@ -152,8 +152,7 @@ fn map_set_invoke_without_success_results_checks_error_channel() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: Some(types.error),
+        returns: CallableReturnShape::from_slots(vec![], Some(types.error)),
     };
 
     let module = build_module(
@@ -261,8 +260,7 @@ fn map_infallible_ops_lower_to_plain_helpers() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -358,8 +356,7 @@ fn map_remove_invoke_lowers_to_helper() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: Some(types.error),
+        returns: CallableReturnShape::from_slots(vec![], Some(types.error)),
     };
 
     let module = build_module(

@@ -231,14 +231,14 @@ fn retain_generic_call(
         }
         GenericCallExpectedContext::None => None,
     };
-    let success_result_type_ids = template.signature.success_return_type_ids();
+    let success_result_type_ids = template.signature.returns.success();
     let authored_handling = parse_retained_call_authored_handling(RetainedCallHandlingInput {
         token_stream,
         context,
         type_interner,
         expression_builder,
         const_values,
-        success_result_type_ids: &success_result_type_ids,
+        success_result_type_ids,
         error_return: numeric_signature.error_return,
         authored_failure_lane: context.source_call_has_private_failure_lane(template.function_path),
         value_required,
@@ -361,7 +361,7 @@ fn parse_ready_instance_call(
     let call = HandledFallibleCall {
         name: inference.instance_path,
         args: arguments,
-        result_type_ids: inference.signature.success_return_type_ids(),
+        result_type_ids: inference.signature.returns.success().to_vec(),
         call_span,
     };
 
@@ -370,7 +370,7 @@ fn parse_ready_instance_call(
         context,
         call,
         declaration_path: template.function_path,
-        error_return_type_id: inference.signature.error_return_type_id(),
+        error_return_type_id: inference.signature.returns.error(),
         value_required,
         allow_boundary_catch,
         warnings,
@@ -459,7 +459,7 @@ fn validate_ready_template_call(
     let call = HandledFallibleCall {
         name: template.function_path,
         args: arguments,
-        result_type_ids: inference.signature.success_return_type_ids(),
+        result_type_ids: inference.signature.returns.success().to_vec(),
         call_span,
     };
 
@@ -468,7 +468,7 @@ fn validate_ready_template_call(
         context,
         call,
         declaration_path: template.function_path,
-        error_return_type_id: inference.signature.error_return_type_id(),
+        error_return_type_id: inference.signature.returns.error(),
         value_required,
         allow_boundary_catch,
         warnings,
@@ -623,14 +623,14 @@ fn complete_reserved_generic_call<'env, S: DeferredExpressionCompletion<'env> + 
     )?;
     verify_completed_error_return(
         error_return,
-        inference.signature.error_return_type_id(),
+        inference.signature.returns.error(),
         context,
         type_interner,
     )?;
     if let Some(GenericErrorReturn::Retained(_)) = error_return {
         verify_retained_propagation_error(
             &authored_handling,
-            inference.signature.error_return_type_id(),
+            inference.signature.returns.error(),
             context,
             type_interner.environment(),
         )?;
@@ -698,12 +698,12 @@ fn complete_reserved_generic_call<'env, S: DeferredExpressionCompletion<'env> + 
     let call = HandledFallibleCall {
         name: call_name,
         args: arguments,
-        result_type_ids: inference.signature.success_return_type_ids(),
+        result_type_ids: inference.signature.returns.success().to_vec(),
         call_span,
     };
     let expression = finish_retained_generic_call(
         call,
-        inference.signature.error_return_type_id(),
+        inference.signature.returns.error(),
         authored_handling,
         template.function_path,
         context,
@@ -1067,8 +1067,8 @@ fn infer_generic_function_call_with_expectations(
     let mut type_arguments =
         bindings.concrete_arguments_for(template.generic_parameter_list_id, type_environment);
     if type_arguments.is_none()
-        && let Some(expected_result_type_ids) = expected_context
-            .matching_success_results(template.signature.success_return_slot_count())
+        && let Some(expected_result_type_ids) =
+            expected_context.matching_success_results(template.signature.returns.success().len())
     {
         collect_expected_result_bindings(
             template,
@@ -1401,7 +1401,10 @@ fn collect_expected_result_bindings(
 
     for (template_return_type, expected_type) in template
         .signature
-        .success_return_type_ids_iter()
+        .returns
+        .success()
+        .iter()
+        .copied()
         .zip(expected_result_type_ids.iter())
     {
         collect_binding_evidence(
@@ -1501,11 +1504,9 @@ pub(crate) fn substitute_function_signature(
             *input = type_environment.substitute_type_id(*input, mapping);
         }
     }
-    for slot in &mut concrete.returns {
-        slot.type_id = slot
-            .type_id
-            .map(|type_id| type_environment.substitute_type_id(type_id, mapping));
-    }
+    concrete.returns = concrete
+        .returns
+        .map_type_ids(|type_id| type_environment.substitute_type_id(type_id, mapping));
     concrete
 }
 

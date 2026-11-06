@@ -46,8 +46,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::definitions::{
-    ResolvedTraitDefinition, ResolvedTraitRequirement, ResolvedTraitReturn,
-    TraitReceiverRequirement, TraitVisibility,
+    ResolvedTraitDefinition, ResolvedTraitRequirement, TraitReceiverRequirement, TraitVisibility,
 };
 use crate::compiler_frontend::traits::environment::{
     CoreTraitKind, TraitEnvironment, requirement_parameter_from_type, trait_this_name,
@@ -498,30 +497,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             ));
         }
 
-        let mut returns = Vec::with_capacity(resolved_signature.signature.returns.len());
-        for return_slot in &resolved_signature.signature.returns {
-            let Some(type_id) = return_slot.type_id else {
-                let diagnostic = generics_traits_api::unsupported_trait_feature(
-                    declaration.name,
-                    string_table.intern("unresolved requirement return"),
-                    requirement_span,
-                );
-                return Err(diagnostic.into());
-            };
-
-            returns.push(ResolvedTraitReturn {
-                type_id,
-                channel: return_slot.channel,
-                span: requirement_span,
-            });
-        }
-
         Ok(ResolvedTraitRequirement {
             id: requirement_id,
             name: requirement.name,
             receiver,
             parameters,
-            returns,
+            returns: resolved_signature.signature.returns,
             span: requirement_span,
         })
     }
@@ -795,12 +776,21 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
             }
 
-            for return_slot in &requirement.returns {
+            for type_id in requirement.returns.success() {
                 self.validate_public_trait_type(
                     trait_name,
-                    return_slot.type_id,
+                    *type_id,
                     public_root_file,
-                    return_slot.span,
+                    requirement.span,
+                    trait_environment,
+                )?;
+            }
+            if let Some(error_type_id) = requirement.returns.error() {
+                self.validate_public_trait_type(
+                    trait_name,
+                    error_type_id,
+                    public_root_file,
+                    requirement.span,
                     trait_environment,
                 )?;
             }

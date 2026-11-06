@@ -861,7 +861,7 @@ fn validate_wasm_fallible_control_flow(
     }
     if authored_occurrence.is_none() {
         for function in &hir.functions {
-            if !selection.contains_function(function.id) || function.error_return.is_none() {
+            if !selection.contains_function(function.id) || !function.returns.is_fallible() {
                 continue;
             }
             let occurrence = ReachableTypeOccurrence {
@@ -1604,9 +1604,10 @@ where
         if !selection.contains_function(function.id)
             || !function
                 .returns
+                .success()
                 .iter()
                 .copied()
-                .chain(function.error_return)
+                .chain(function.returns.error())
                 .any(&mut *search.is_unsupported)
         {
             continue;
@@ -2025,10 +2026,10 @@ impl<'environment> BackendTypeFacts<'environment> {
                 for parameter in function.parameters.iter() {
                     visit.merge(self.visit(parameter.type_id));
                 }
-                for returned in function.returns.iter() {
+                for returned in function.returns.success() {
                     visit.merge(self.visit(*returned));
                 }
-                if let Some(error_return) = function.error_return {
+                if let Some(error_return) = function.returns.error() {
                     visit.merge(self.visit(error_return));
                 }
             }

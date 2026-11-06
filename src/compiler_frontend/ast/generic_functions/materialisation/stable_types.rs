@@ -122,9 +122,19 @@ pub(super) struct StableGenericParameter {
 #[derive(Clone)]
 pub(super) struct StableFunctionSignature {
     pub(super) parameters: Box<[StableFunctionParameter]>,
-    pub(super) returns: Box<[MaterialisationTypeBlueprint]>,
-    pub(super) error_return: Option<MaterialisationTypeBlueprint>,
+    pub(super) returns: StableReturns,
 }
+
+/// Frozen ordinary return contract of one materialised function signature.
+///
+/// WHAT: the ordered success blueprints and the independent error blueprint. Stored locally
+/// because the slot type is a materialisation blueprint, not a shared `TypeId`.
+#[derive(Clone)]
+pub(super) struct StableReturns {
+    pub(super) success: Box<[MaterialisationTypeBlueprint]>,
+    pub(super) error: Option<MaterialisationTypeBlueprint>,
+}
+
 #[derive(Clone)]
 pub(super) enum StableParameterContract {
     Value,

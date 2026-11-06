@@ -11,6 +11,7 @@ use super::support::*;
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -82,8 +83,7 @@ fn lower_numeric_fixture(
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            returns: vec![return_type].into_boxed_slice(),
-            error_return: None,
+            returns: CallableReturnShape::from_slots(vec![return_type], None),
         },
         fixture.local_names,
     )
@@ -906,8 +906,7 @@ fn lower_recoverable_fixture(
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            returns: returns.into_boxed_slice(),
-            error_return: Some(types.error),
+            returns: CallableReturnShape::from_slots(returns, Some(types.error)),
         },
         names,
     )

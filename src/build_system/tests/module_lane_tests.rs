@@ -34,6 +34,7 @@ use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, DiagnosticDraft, DiagnosticSeverity,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE;
 use crate::compiler_frontend::external_packages::{
@@ -119,8 +120,7 @@ fn minimal_hir_module() -> HirModule {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: Box::new([]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots([], None),
     }];
     module.start_function = Some(FunctionId(0));
     module

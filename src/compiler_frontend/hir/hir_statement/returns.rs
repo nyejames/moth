@@ -23,7 +23,11 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<(), HirConstructionFailure> {
         let function_id = self.current_function_id_or_error()?;
 
-        let expected_count = self.function_by_id_or_error(function_id)?.returns.len();
+        let expected_count = self
+            .function_by_id_or_error(function_id)?
+            .returns
+            .success()
+            .len();
         let mut lowered_values = Vec::with_capacity(expected_count);
         for value in values {
             lowered_values
@@ -36,7 +40,7 @@ impl<'a> HirBuilder<'a> {
             .into());
         }
         for (index, value) in lowered_values.iter_mut().enumerate() {
-            let expected_type = self.function_by_id_or_error(function_id)?.returns[index];
+            let expected_type = self.function_by_id_or_error(function_id)?.returns.success()[index];
             *value = self.wrap_value_to_optional_type(*value, expected_type, span_ref)?;
             if self.module.expressions.expression(*value).ty != expected_type {
                 return Err(InfrastructureFailure::hir_transformation(
@@ -66,7 +70,7 @@ impl<'a> HirBuilder<'a> {
         authored_span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         let function_id = self.current_function_id_or_error()?;
-        let err = match self.function_by_id_or_error(function_id)?.error_return {
+        let err = match self.function_by_id_or_error(function_id)?.returns.error() {
             Some(err) => err,
             None => {
                 return Err(InfrastructureFailure::hir_transformation(

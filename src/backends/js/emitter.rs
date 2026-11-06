@@ -352,9 +352,11 @@ impl<'hir> JsEmitter<'hir> {
         for function in functions {
             if function
                 .returns
+                .success()
                 .iter()
-                .chain(function.error_return.iter())
-                .any(|ty| self.type_environment.is_map_type(*ty))
+                .copied()
+                .chain(function.returns.error())
+                .any(|ty| self.type_environment.is_map_type(ty))
             {
                 return Ok(true);
             }

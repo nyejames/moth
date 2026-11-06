@@ -6,7 +6,7 @@
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId};
 use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, OriginFunctionId,
@@ -172,6 +172,5 @@ pub struct HirFunction {
     pub entry: BlockId,
     /// Locals defined by entering this function under its call ABI contract.
     pub params: Vec<LocalId>,
-    pub returns: Box<[TypeId]>,
-    pub error_return: Option<TypeId>,
+    pub returns: CallableReturnShape,
 }

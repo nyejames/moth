@@ -17,6 +17,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
@@ -238,10 +239,7 @@ impl<'a> HirBuilder<'a> {
         if self.call_target_requires_result_projection(&target) {
             self.module.call_result_contracts.insert(
                 target.clone(),
-                crate::compiler_frontend::hir::module::HirCallResultContract {
-                    returns: types.as_slice().into(),
-                    error_return: None,
-                },
+                CallableReturnShape::from_slots(types.iter().copied(), None),
             );
         }
         let mut results = Vec::with_capacity(types.len());

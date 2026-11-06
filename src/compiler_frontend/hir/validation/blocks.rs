@@ -784,10 +784,10 @@ impl<'a> HirValidator<'a> {
                 let function_id = self.statement_function_id(block_id)?;
                 let function = self.module.functions.iter().find(|function| function.id == function_id)
                     .ok_or_else(|| self.error_with_hir("Return owner function is missing"))?;
-                if values.len() != function.returns.len() {
+                if values.len() != function.returns.success().len() {
                     return Err(self.error_with_hir("Return success slot arity does not match function signature"));
                 }
-                for (value, expected) in values.iter().zip(function.returns.iter()) {
+                for (value, expected) in values.iter().zip(function.returns.success()) {
                     self.validate_expression(*value, anchor)?;
                     if self.expression_row(*value)?.ty != *expected {
                         return Err(self.error_with_hir("Return success slot type does not match function signature"));
@@ -800,7 +800,7 @@ impl<'a> HirValidator<'a> {
                 let function_id = self.statement_function_id(block_id)?;
                 let function = self.module.functions.iter().find(|function| function.id == function_id)
                     .ok_or_else(|| self.error_with_hir("ReturnError owner function is missing"))?;
-                if function.error_return != Some(self.expression_row(*value)?.ty) {
+                if function.returns.error() != Some(self.expression_row(*value)?.ty) {
                     return Err(self.error_with_hir("ReturnError value type does not match function error slot"));
                 }
             }

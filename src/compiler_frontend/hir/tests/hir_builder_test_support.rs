@@ -13,6 +13,7 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     StructTypeDefinition,
@@ -237,8 +238,7 @@ impl<'a> HirBuilder<'a> {
             id,
             entry,
             params: vec![],
-            returns: returns.into_boxed_slice(),
-            error_return,
+            returns: CallableReturnShape::from_slots(returns, error_return),
         };
         if let Some(index) = self.function_index_by_id.get(&id).copied() {
             self.module.functions[index] = function;

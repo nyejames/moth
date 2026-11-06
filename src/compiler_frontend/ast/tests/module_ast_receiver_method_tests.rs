@@ -17,6 +17,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::names_de
     InvalidDeclarationCode, InvalidDeclarationView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
@@ -55,7 +56,7 @@ fn empty_receiver_entry(
         value_carried: true,
         signature: FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
     }
 }

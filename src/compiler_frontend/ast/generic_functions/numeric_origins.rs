@@ -208,9 +208,9 @@ pub(crate) fn link_generic_numeric_signature(
     }
     linker.reconcile_witnesses();
 
-    let returns = template.signature.success_return_type_ids();
+    let returns = template.signature.returns.success();
     if let GenericCallExpectedContext::ImmediateResult(expected) = expected_context {
-        linker.apply_expected_results(&returns, expected, &owned_producers)?;
+        linker.apply_expected_results(returns, expected, &owned_producers)?;
     }
 
     let missing = linker.unbound_parameter_names();
@@ -229,7 +229,7 @@ pub(crate) fn link_generic_numeric_signature(
         .iter()
         .map(|declared| linker.envelope(*declared))
         .collect::<Result<Vec<_>, _>>()?;
-    let error_return = linker.error_return(template.signature.error_return_type_id())?;
+    let error_return = linker.error_return(template.signature.returns.error())?;
 
     Ok(GenericNumericSignature {
         result_shapes,

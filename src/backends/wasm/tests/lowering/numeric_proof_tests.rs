@@ -21,6 +21,7 @@ use crate::backends::wasm::lir::instructions::{
 };
 use crate::backends::wasm::request::WasmBackendRequest;
 use crate::compiler_frontend::analysis::numeric_proofs::{NumericProofs, analyse_numeric_proofs};
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
@@ -397,8 +398,7 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![fixture_locals::A, fixture_locals::B, fixture_locals::D],
-        returns: vec![i32_type].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![i32_type], None),
     };
 
     // Isolated-width exports: each width's proven alias chain must be consumer-visible exactly,
@@ -437,8 +437,7 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
         id: FunctionId(1),
         entry: BlockId(1),
         params: vec![],
-        returns: vec![i64_type].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![i64_type], None),
     };
     let isolated_u64_block = HirBlock {
         id: BlockId(2),
@@ -473,8 +472,7 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
         id: FunctionId(2),
         entry: BlockId(2),
         params: vec![],
-        returns: vec![u64_type].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![u64_type], None),
     };
 
     let isolated_i64_path = intern_path(&mut path_fork, &mut string_table, "run_i64");

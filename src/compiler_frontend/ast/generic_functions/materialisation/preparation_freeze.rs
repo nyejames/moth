@@ -9,7 +9,7 @@ use super::stable_types::{
     GenericTemplateArtefact, MaterialisationNominalOriginResolver, MaterialisationNominalSource,
     StableCallableBinding, StableFunctionParameter, StableFunctionSignature, StableFunctionTarget,
     StableGenericCallableContract, StableGenericParameter, StableNominalBinding,
-    StableParameterContract, StableReceiverKey,
+    StableParameterContract, StableReceiverKey, StableReturns,
 };
 use super::visibility::{
     StableExternalSymbol, StableFileVisibility, StableNamespaceBinding, StableReceiverMethod,
@@ -1231,29 +1231,22 @@ impl ModuleMaterialisationCapture {
                 })
             })
             .collect::<Result<Box<[_]>, InfrastructureFailure>>()?;
-        let mut returns = Vec::new();
-        let mut error_return = None;
-        for returned in &signature.returns {
-            let type_id = returned.type_id.ok_or_else(|| {
-                InfrastructureFailure::internal(
-                    CompilerStage::GenericMaterialisation,
-                    "Materialisation function return has no resolved type",
-                )
-            })?;
-            let blueprint = self.materialisation_type_blueprint(type_id, parameter_slots)?;
-            match returned.channel {
-                crate::compiler_frontend::ast::statements::functions::ReturnChannel::Success => {
-                    returns.push(blueprint);
-                }
-                crate::compiler_frontend::ast::statements::functions::ReturnChannel::Error => {
-                    error_return = Some(blueprint);
-                }
-            }
-        }
+        let returns = StableReturns {
+            success: signature
+                .returns
+                .success()
+                .iter()
+                .map(|&type_id| self.materialisation_type_blueprint(type_id, parameter_slots))
+                .collect::<Result<Box<[_]>, InfrastructureFailure>>()?,
+            error: signature
+                .returns
+                .error()
+                .map(|type_id| self.materialisation_type_blueprint(type_id, parameter_slots))
+                .transpose()?,
+        };
         Ok(StableFunctionSignature {
             parameters,
-            returns: returns.into_boxed_slice(),
-            error_return,
+            returns,
         })
     }
 
@@ -1630,8 +1623,7 @@ impl ModuleMaterialisationCapture {
                 AstImportedFunctionContract {
                     target,
                     summary: bootstrap_call_summary_from_signature(&resolved.signature),
-                    returns: resolved.signature.success_return_type_ids(),
-                    error_return: resolved.signature.error_return_type_id(),
+                    returns: resolved.signature.returns.clone(),
                 },
             );
         }

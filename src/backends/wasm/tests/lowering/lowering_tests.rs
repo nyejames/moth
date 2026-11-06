@@ -22,6 +22,7 @@ use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
 use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailureKind;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -143,8 +144,7 @@ fn assertion_failure_module(
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
     let block = HirBlock {
         id: BlockId(0),
@@ -285,8 +285,7 @@ fn wasm_write_definition_and_update_have_the_same_physical_lowering() {
             id: FunctionId(0),
             entry: BlockId(0),
             params: if is_update { vec![LocalId(0)] } else { vec![] },
-            returns: vec![].into_boxed_slice(),
-            error_return: None,
+            returns: CallableReturnShape::from_slots(vec![], None),
         };
         let module = build_module(
             &mut path_fork,
@@ -336,8 +335,7 @@ fn wasm_parallel_jump_cycle_uses_explicit_destinations() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
     let source_block = HirBlock {
         id: BlockId(0),
@@ -522,8 +520,7 @@ fn native_multiple_call_results_preserve_types_and_destinations_through_lowering
                 id: FunctionId(0),
                 entry: BlockId(0),
                 params: vec![],
-                returns: types.to_vec().into_boxed_slice(),
-                error_return: None,
+                returns: CallableReturnShape::from_slots(types.to_vec(), None),
             },
             callee_path,
             HirFunctionOrigin::Normal,
@@ -533,8 +530,7 @@ fn native_multiple_call_results_preserve_types_and_destinations_through_lowering
                 id: FunctionId(1),
                 entry: BlockId(1),
                 params: vec![],
-                returns: types.to_vec().into_boxed_slice(),
-                error_return: None,
+                returns: CallableReturnShape::from_slots(types.to_vec(), None),
             },
             caller_path,
             HirFunctionOrigin::EntryStart,
@@ -711,15 +707,13 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
         id: FunctionId(0),
         entry: BlockId(10),
         params: vec![],
-        returns: vec![int_type].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![int_type], None),
     };
     let main = HirFunction {
         id: FunctionId(1),
         entry: BlockId(30),
         params: vec![],
-        returns: vec![int_type].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![int_type], None),
     };
 
     let module = build_module(
@@ -852,8 +846,7 @@ fn lowers_runtime_template_with_literal_and_handle_chunks_in_order() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        returns: vec![types.string].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![types.string], None),
     };
 
     let module = build_module(
@@ -997,8 +990,7 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![types.string].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![types.string], None),
     };
 
     let module = build_module(
@@ -1083,8 +1075,7 @@ fn lowers_internal_string_append_as_buffer_concat() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        returns: vec![types.string].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![types.string], None),
     };
     let module = build_module(
         &mut path_fork,
@@ -1166,8 +1157,7 @@ fn lowers_internal_string_append_with_i64_chunk_via_string_from_i64() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        returns: vec![types.string].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![types.string], None),
     };
     let module = build_module(
         &mut path_fork,
@@ -1278,8 +1268,7 @@ fn lowers_string_equality_by_content_comparison_operations() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(1)],
-        returns: vec![types.boolean].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![types.boolean], None),
     };
     let module = build_module(
         &mut path_fork,
@@ -1400,8 +1389,7 @@ fn lowers_ordered_comparison_and_control_flow() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![int_type].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![int_type], None),
     };
     let module = build_module(
         &mut path_fork,
@@ -1522,8 +1510,7 @@ fn integer_range_candidate_lowers_independent_carriers_and_widened_scratch() {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            returns: Box::new([]),
-            error_return: None,
+            returns: CallableReturnShape::from_slots([], None),
         };
         let module = build_module(
             &mut path_fork,
@@ -1657,8 +1644,7 @@ fn deduplicates_static_utf8_segments() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -1704,8 +1690,7 @@ fn maps_advisory_drop_sites_to_drop_if_owned_statements() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
     let module = build_module(
         &mut path_fork,
@@ -1781,8 +1766,7 @@ fn synthesizes_export_wrappers_with_stable_names() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![int_type].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![int_type], None),
     };
     let module = build_module(
         &mut path_fork,
@@ -1875,15 +1859,13 @@ fn exported_f16_parameters_are_rounded_before_the_internal_call() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![int_type].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![int_type], None),
     };
     let exported_function = HirFunction {
         id: FunctionId(1),
         entry: BlockId(1),
         params: vec![LocalId(10)],
-        returns: vec![f16_type].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![f16_type], None),
     };
     let start_value = i32_expression(0, RegionId(0), &mut expressions);
     let exported_value = load_local(&mut expressions, LocalId(10), f16_type, RegionId(0));
@@ -2011,8 +1993,7 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![int_type].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![int_type], None),
     };
     let module = build_module(
         &mut path_fork,
@@ -2082,8 +2063,7 @@ fn validate_float_test_module(
                     id: FunctionId(0),
                     entry: BlockId(0),
                     params: vec![],
-                    returns: vec![int_type].into_boxed_slice(),
-                    error_return: None,
+                    returns: CallableReturnShape::from_slots(vec![int_type], None),
                 },
                 start_path,
                 HirFunctionOrigin::EntryStart,
@@ -2093,8 +2073,7 @@ fn validate_float_test_module(
                     id: FunctionId(1),
                     entry: BlockId(1),
                     params: vec![LocalId(10)],
-                    returns: vec![validated_type].into_boxed_slice(),
-                    error_return: None,
+                    returns: CallableReturnShape::from_slots(vec![validated_type], None),
                 },
                 validator_path,
                 HirFunctionOrigin::Normal,
@@ -2460,8 +2439,7 @@ fn format_float_test_module(
                     id: FunctionId(0),
                     entry: BlockId(0),
                     params: vec![],
-                    returns: vec![int_type].into_boxed_slice(),
-                    error_return: None,
+                    returns: CallableReturnShape::from_slots(vec![int_type], None),
                 },
                 start_path,
                 HirFunctionOrigin::EntryStart,
@@ -2471,8 +2449,7 @@ fn format_float_test_module(
                     id: FunctionId(1),
                     entry: BlockId(1),
                     params: vec![],
-                    returns: vec![string_type].into_boxed_slice(),
-                    error_return: None,
+                    returns: CallableReturnShape::from_slots(vec![string_type], None),
                 },
                 formatter_path,
                 HirFunctionOrigin::Normal,
@@ -2668,8 +2645,10 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
                         id: FunctionId(0),
                         entry: BlockId(0),
                         params: vec![],
-                        returns: vec![fixed_scalar_type(FixedScalar::I32)].into_boxed_slice(),
-                        error_return: None,
+                        returns: CallableReturnShape::from_slots(
+                            vec![fixed_scalar_type(FixedScalar::I32)],
+                            None,
+                        ),
                     },
                     start_path,
                     HirFunctionOrigin::EntryStart,
@@ -2679,8 +2658,7 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
                         id: FunctionId(1),
                         entry: BlockId(1),
                         params: vec![],
-                        returns: vec![types.string].into_boxed_slice(),
-                        error_return: None,
+                        returns: CallableReturnShape::from_slots(vec![types.string], None),
                     },
                     formatter_path,
                     HirFunctionOrigin::Normal,
@@ -2816,8 +2794,7 @@ fn lowers_every_exact_integer_scalar_with_its_own_carrier() {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            returns: vec![int_type].into_boxed_slice(),
-            error_return: None,
+            returns: CallableReturnShape::from_slots(vec![int_type], None),
         };
         let module = build_module(
             &mut path_fork,
@@ -2889,8 +2866,7 @@ fn rejects_unsupported_host_call_with_diagnostic() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
     let module = build_module(
         &mut path_fork,
@@ -2971,15 +2947,13 @@ fn selected_function_policy_ignores_unselected_host_calls_and_assertions() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
     let unused_function = HirFunction {
         id: FunctionId(1),
         entry: BlockId(10),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
     let module = build_module(
         &mut path_fork,
@@ -3089,8 +3063,7 @@ fn lower_type_to_abi_maps_all_hir_types_correctly() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![fixed_scalar_type(FixedScalar::I32)].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![fixed_scalar_type(FixedScalar::I32)], None),
     };
     let module = build_module(
         &mut path_fork,
@@ -3242,8 +3215,7 @@ fn multi_fragment_template_produces_all_push_operations() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(1)],
-        returns: vec![types.string].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![types.string], None),
     };
 
     let module = build_module(
@@ -3315,8 +3287,7 @@ fn debug_name_uses_source_name_when_available() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![int_type].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![int_type], None),
     };
     let module = build_module(
         &mut path_fork,
@@ -3397,8 +3368,7 @@ fn io_console_functions_are_unsupported_in_wasm() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -3447,8 +3417,7 @@ fn nameless_entry_function_retains_a_debug_name() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
     let block = HirBlock {
         id: BlockId(0),

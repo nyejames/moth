@@ -213,10 +213,11 @@ impl<'a> HirDisplayContext<'a> {
         if self.options.include_types {
             let mut slots = function
                 .returns
+                .success()
                 .iter()
                 .map(|ty| self.type_label(*ty))
                 .collect::<Vec<_>>();
-            if let Some(error) = function.error_return {
+            if let Some(error) = function.returns.error() {
                 slots.push(format!("{}!", self.type_label(error)));
             }
             let _ = write!(out, " -> {}", slots.join(", "));
@@ -968,8 +969,6 @@ impl<'a> HirDisplayContext<'a> {
             TypeDefinition::Function(FunctionTypeDefinition {
                 parameters,
                 returns,
-                error_return,
-                ..
             }) => {
                 let params = parameters
                     .iter()
@@ -983,12 +982,13 @@ impl<'a> HirDisplayContext<'a> {
                     .collect::<Vec<_>>()
                     .join(", ");
 
-                let returns = if returns.is_empty() {
+                let success = returns.success();
+                let rendered_returns = if success.is_empty() {
                     "()".to_owned()
-                } else if returns.len() == 1 {
-                    self.render_type_with_environment(type_environment, returns[0], depth + 1)
+                } else if success.len() == 1 {
+                    self.render_type_with_environment(type_environment, success[0], depth + 1)
                 } else {
-                    let joined = returns
+                    let joined = success
                         .iter()
                         .map(|ret| {
                             self.render_type_with_environment(type_environment, *ret, depth + 1)
@@ -998,7 +998,7 @@ impl<'a> HirDisplayContext<'a> {
                     format!("({joined})")
                 };
 
-                let error = error_return.map(|err| {
+                let error = returns.error().map(|err| {
                     format!(
                         " throws {}",
                         self.render_type_with_environment(type_environment, err, depth + 1)
@@ -1006,8 +1006,8 @@ impl<'a> HirDisplayContext<'a> {
                 });
 
                 match error {
-                    Some(error) => format!("fn({params})->{returns}{error}"),
-                    None => format!("fn({params})->{returns}"),
+                    Some(error) => format!("fn({params})->{rendered_returns}{error}"),
+                    None => format!("fn({params})->{rendered_returns}"),
                 }
             }
             TypeDefinition::Constructed(ConstructedTypeDefinition {

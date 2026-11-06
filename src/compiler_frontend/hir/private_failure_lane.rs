@@ -159,13 +159,13 @@ impl LaneInstaller<'_> {
             if !self.lane_functions.contains(&function.id) {
                 continue;
             }
-            if function.error_return.is_some() {
+            if function.returns.is_fallible() {
                 return Err(InfrastructureFailure::internal(
                     CompilerStage::HirConstruction,
                     "private internal failure lane cannot coexist with a source error slot",
                 ));
             }
-            function.error_return = Some(error_type);
+            function.returns.set_error(Some(error_type));
         }
         Ok(())
     }
@@ -319,7 +319,7 @@ impl LaneInstaller<'_> {
                         "private failure lane call is missing its nonlocal result contract",
                     )
                 })?;
-            contract.error_return = Some(error_type);
+            contract.set_error(Some(error_type));
         }
         let old_terminator = std::mem::replace(
             &mut self.hir.blocks[block_id.0 as usize].terminator,
@@ -564,7 +564,7 @@ impl LaneInstaller<'_> {
             return Ok(false);
         };
         let function_index = self.function_index(function_id)?;
-        if self.hir.functions[function_index].error_return.is_none() {
+        if !self.hir.functions[function_index].returns.is_fallible() {
             return Ok(false);
         }
         let entry = self.hir.functions[function_index].entry;
@@ -578,7 +578,7 @@ impl LaneInstaller<'_> {
             return Ok(false);
         }
 
-        self.hir.functions[function_index].error_return = None;
+        self.hir.functions[function_index].returns.set_error(None);
         Ok(true)
     }
 
@@ -589,7 +589,9 @@ impl LaneInstaller<'_> {
         if self.lane_functions.contains(&function_id) {
             return Ok(true);
         }
-        let error_type = self.hir.functions[self.function_index(function_id)?].error_return;
+        let error_type = self.hir.functions[self.function_index(function_id)?]
+            .returns
+            .error();
         Ok(error_type.is_some() && self.builtin_error == error_type)
     }
 

@@ -7,6 +7,7 @@
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -1280,8 +1281,7 @@ fn function(id: FunctionId, entry: BlockId) -> HirFunction {
         id,
         entry,
         params: vec![],
-        returns: Box::new([]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots([], None),
     }
 }
 

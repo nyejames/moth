@@ -852,8 +852,8 @@ fn validate_signature(
             })?;
         }
     }
-    validate_type_ids(&signature.success_return_type_ids(), context)?;
-    if let Some(error_return_type_id) = signature.error_return_type_id() {
+    validate_type_ids(signature.returns.success(), context)?;
+    if let Some(error_return_type_id) = signature.returns.error() {
         validate_type_id(error_return_type_id, context)?;
     }
     Ok(())

@@ -143,9 +143,7 @@ pub(crate) use module_ast::environment::{
     ResolvedPublicTypeRoot, ResolvedPublicTypeRootKind, ResolvedTraitSourceFact,
 };
 #[cfg(test)]
-pub(crate) use module_ast::environment::{
-    ResolvedTraitParameterFact, ResolvedTraitReceiverFact, ResolvedTraitReturnFact,
-};
+pub(crate) use module_ast::environment::{ResolvedTraitParameterFact, ResolvedTraitReceiverFact};
 pub(crate) use module_ast::scope_context::ScopeDeclarationRef;
 pub use module_ast::scope_context::{ContextKind, ScopeContext};
 pub(crate) use module_ast::scope_context::{FileValueResolutionServices, Stage0ResolutionFacts};
@@ -182,8 +180,8 @@ use crate::compiler_frontend::ast::generic_functions::{
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, DiagnosticDraft, PreparedFailure,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -277,8 +275,7 @@ pub struct Ast {
 pub(crate) struct AstImportedFunctionContract {
     pub(crate) target: crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget,
     pub(crate) summary: crate::compiler_frontend::public_call_summary::PublicCallSummary,
-    pub(crate) returns: Vec<TypeId>,
-    pub(crate) error_return: Option<TypeId>,
+    pub(crate) returns: CallableReturnShape,
 }
 
 /// Closed typed AST construction result carrying executable `Ast` and the three semantic

@@ -1,5 +1,6 @@
 //! Unit tests for the `datatypes` module.
 
+mod callable_returns_tests;
 mod display_view_tests;
 mod environment_tests;
 mod fixed_scalar_tests;

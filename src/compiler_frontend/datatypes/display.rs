@@ -198,7 +198,7 @@ impl TypeDisplayView for TypeEnvironment {
                 }
             },
             TypeDefinition::Function(function) => TypeDisplayShape::Function {
-                error_return: function.error_return,
+                error_return: function.returns.error(),
             },
             TypeDefinition::External(external) => TypeDisplayShape::External(external.type_id.0),
             TypeDefinition::GenericParameter(parameter) => TypeDisplayShape::GenericParameter {
@@ -239,7 +239,7 @@ impl TypeDisplayView for TypeEnvironment {
                 "function returns are read only after the shape reports a function"
             );
         };
-        function.returns.iter().copied()
+        function.returns.success().iter().copied()
     }
 
     fn choice_variants(&self, type_id: TypeId) -> impl Iterator<Item = ChoiceVariantShape> {

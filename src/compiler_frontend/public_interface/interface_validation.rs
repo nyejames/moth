@@ -11,9 +11,8 @@ use super::model::{
     PublicDeclarationSemantics, PublicEvidenceRecord, PublicFunctionCategory,
     PublicParameterContract, PublicReceiverMethodCategory, PublicReceiverMethodSemantics,
     PublicSemanticInterface, PublicTraitParameterContract, PublicTraitReceiverAccess,
-    PublicTraitRequirementReturn, PublicTraitRequirementSurface, TraitSurfaceTypeIdentity,
+    PublicTraitRequirementSurface, PublicTraitReturns, TraitSurfaceTypeIdentity,
 };
-use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
 };
@@ -509,20 +508,14 @@ fn core_trait_requirement(
         }
     };
 
-    let mut returns = vec![PublicTraitRequirementReturn {
-        channel: ReturnChannel::Success,
-        type_identity: TraitSurfaceTypeIdentity::Concrete(Box::new(
+    let returns = PublicTraitReturns {
+        success: vec![TraitSurfaceTypeIdentity::Concrete(Box::new(
             CanonicalTypeIdentity::Builtin(success_type),
-        )),
-    }];
-    if let Some(error_type) = error_type {
-        returns.push(PublicTraitRequirementReturn {
-            channel: ReturnChannel::Error,
-            type_identity: TraitSurfaceTypeIdentity::Concrete(Box::new(
-                CanonicalTypeIdentity::Builtin(error_type),
-            )),
-        });
-    }
+        ))],
+        error: error_type.map(|error_type| {
+            TraitSurfaceTypeIdentity::Concrete(Box::new(CanonicalTypeIdentity::Builtin(error_type)))
+        }),
+    };
 
     Ok(PublicTraitRequirementSurface {
         name: requirement_name.to_owned(),
@@ -600,33 +593,20 @@ fn validate_evidence_method_shape(
         }
     }
 
-    let required_success = requirement
-        .returns
-        .iter()
-        .filter(|returned| returned.channel == ReturnChannel::Success)
-        .collect::<Vec<_>>();
-    if required_success.len() != method.returns.len() {
+    let required_success = &requirement.returns.success;
+    if required_success.len() != method.returns.success.len() {
         return Err(evidence_shape_error(evidence_identity, requirement, method));
     }
-    for (required, actual) in required_success.iter().zip(&method.returns) {
-        if !trait_surface_type_matches(
-            &required.type_identity,
-            &receiver.type_identity,
-            &actual.type_identity,
-        ) {
+    for (required, actual) in required_success.iter().zip(&method.returns.success) {
+        if !trait_surface_type_matches(required, &receiver.type_identity, &actual.type_identity) {
             return Err(evidence_shape_error(evidence_identity, requirement, method));
         }
     }
 
-    let required_errors = requirement
-        .returns
-        .iter()
-        .filter(|returned| returned.channel == ReturnChannel::Error)
-        .collect::<Vec<_>>();
-    let error_matches = match (required_errors.as_slice(), &method.error_return) {
-        ([], None) => true,
-        ([required], Some(actual)) => {
-            trait_surface_type_matches(&required.type_identity, &receiver.type_identity, actual)
+    let error_matches = match (&requirement.returns.error, &method.returns.error) {
+        (None, None) => true,
+        (Some(required), Some(actual)) => {
+            trait_surface_type_matches(required, &receiver.type_identity, actual)
         }
         _ => false,
     };
@@ -861,12 +841,7 @@ fn visit_declaration_type_identities(
 ) {
     match &declaration.semantics {
         PublicDeclarationSemantics::Function(function) => {
-            visit_callable_type_identities(
-                &function.parameters,
-                &function.returns,
-                function.error_return.as_ref(),
-                visitor,
-            );
+            visit_callable_type_identities(&function.parameters, &function.returns, visitor);
         }
         PublicDeclarationSemantics::Struct(structure) => {
             for field in &structure.fields {
@@ -876,12 +851,7 @@ fn visit_declaration_type_identities(
                 }
             }
             for method in &structure.receiver_methods {
-                visit_callable_type_identities(
-                    &method.parameters,
-                    &method.returns,
-                    method.error_return.as_ref(),
-                    visitor,
-                );
+                visit_callable_type_identities(&method.parameters, &method.returns, visitor);
             }
         }
         PublicDeclarationSemantics::Choice(choice) => {
@@ -891,12 +861,7 @@ fn visit_declaration_type_identities(
                 }
             }
             for method in &choice.receiver_methods {
-                visit_callable_type_identities(
-                    &method.parameters,
-                    &method.returns,
-                    method.error_return.as_ref(),
-                    visitor,
-                );
+                visit_callable_type_identities(&method.parameters, &method.returns, visitor);
             }
         }
         PublicDeclarationSemantics::TransparentAlias(alias) => {
@@ -916,8 +881,7 @@ fn visit_declaration_type_identities(
 
 fn visit_callable_type_identities(
     parameters: &[super::model::PublicParameterTypeSlot],
-    returns: &[super::model::PublicReturnTypeSlot],
-    error_return: Option<&CanonicalTypeIdentity>,
+    returns: &super::model::PublicCallableReturns,
     visitor: &mut impl FnMut(&CanonicalTypeIdentity),
 ) {
     for parameter in parameters {
@@ -928,10 +892,10 @@ fn visit_callable_type_identities(
             default.visit_type_identities(visitor);
         }
     }
-    for returned in returns {
+    for returned in &returns.success {
         returned.type_identity.visit(visitor);
     }
-    if let Some(error_return) = error_return {
+    if let Some(error_return) = &returns.error {
         error_return.visit(visitor);
     }
 }

@@ -14,6 +14,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::CallTarget;
@@ -585,8 +586,10 @@ fn borrow_problem_hir_extractor_reads_the_returned_value_before_scope_exit() {
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: vec![local],
-        returns: Box::new([builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(
+            [builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+            None,
+        ),
     };
     let problem = from_hir(&module, &function, None, None).expect("returning HIR should extract");
 
@@ -943,8 +946,10 @@ fn borrow_problem_hir_extractor_seeds_parameter_origins() {
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: vec![local],
-        returns: Box::new([builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(
+            [builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+            None,
+        ),
     };
     let problem = from_hir(&module, &function, None, None).expect("parameter HIR should extract");
 
@@ -1733,7 +1738,7 @@ fn borrow_problem_hir_extractor_preserves_native_map_get_alias_and_error_provena
     );
     let mut function = function_for(HirBlockId(0));
     function.params = vec![map_local];
-    function.error_return = Some(error_type);
+    function.returns.set_error(Some(error_type));
     let problem = from_hir(&module, &function, None, None)
         .expect("native map Get should normalize without a public call summary");
     let effects = problem
@@ -1842,8 +1847,11 @@ fn borrow_problem_hir_extractor_preserves_invoke_edge_definitions_and_return_cha
         expressions,
     );
     let mut function = function_for(HirBlockId(0));
-    function.returns = Box::new([builtin_type_ids::fixed_scalar(FixedScalar::I32); 2]);
-    function.error_return = Some(error_type);
+    function.returns = CallableReturnShape::from_slots(
+        [builtin_type_ids::fixed_scalar(FixedScalar::I32); 2],
+        None,
+    );
+    function.returns.set_error(Some(error_type));
     let mut summaries = rustc_hash::FxHashMap::default();
     summaries.insert(
         FunctionId(9),
@@ -2234,8 +2242,7 @@ fn hir_structural_string_return_fixture(value_kind: ValueKind) -> (HirModule, Hi
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: Vec::new(),
-        returns: Box::new([builtin_type_ids::STRING]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots([builtin_type_ids::STRING], None),
     };
     (module, function)
 }
@@ -2317,8 +2324,10 @@ fn hir_literal_fixture() -> (HirModule, HirFunction) {
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: vec![],
-        returns: Box::new([builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(
+            [builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+            None,
+        ),
     };
     (module, function)
 }
@@ -2426,8 +2435,10 @@ fn function_for(entry: HirBlockId) -> HirFunction {
         id: FunctionId(0),
         entry,
         params: vec![],
-        returns: Box::new([builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(
+            [builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+            None,
+        ),
     }
 }
 

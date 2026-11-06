@@ -15,7 +15,6 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::expressions::expression_types::{
     FallibleExpressionHandling, FallibleHandling,
 };
-use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
@@ -368,12 +367,12 @@ fn parses_function_parameters_and_return_types() {
             .map(|id| string_table.resolve(id)),
         Some("right")
     );
-    assert_eq!(signature.returns.len(), 1);
+    assert_eq!(signature.returns.success().len(), 1);
     assert_eq!(
-        signature.returns[0].type_id,
-        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
+        signature.returns.success()[0],
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     );
-    assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
+    assert!(!signature.returns.is_fallible());
 }
 
 #[test]
@@ -383,24 +382,23 @@ fn parses_final_error_return_slot_in_function_signature() {
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
 
-    assert_eq!(signature.returns.len(), 2);
+    assert_eq!(signature.returns.success().len(), 1);
     assert_eq!(
-        signature.returns[0].type_id,
-        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
+        signature.returns.success()[0],
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     );
-    assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
     assert!(
         matches!(
             ast.type_environment.get(
-                signature.returns[1]
-                    .type_id
+                signature
+                    .returns
+                    .error()
                     .expect("Error return type should be resolved")
             ),
             Some(TypeDefinition::Struct(_))
         ),
         "builtin Error should resolve to a struct type"
     );
-    assert_eq!(signature.returns[1].channel, ReturnChannel::Error);
 }
 
 #[test]
@@ -410,16 +408,16 @@ fn parses_optional_final_error_return_slot() {
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
 
-    assert_eq!(signature.returns.len(), 2);
+    assert_eq!(signature.returns.success().len(), 1);
     assert_eq!(
         ast.type_environment.option_inner_type(
-            signature.returns[1]
-                .type_id
+            signature
+                .returns
+                .error()
                 .expect("optional error return should be resolved")
         ),
         Some(ast.type_environment.builtins().string)
     );
-    assert_eq!(signature.returns[1].channel, ReturnChannel::Error);
 }
 
 #[test]
@@ -988,8 +986,8 @@ fn resolves_named_struct_type_in_function_returns() {
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "clone");
     assert_eq!(
-        signature.returns[0].type_id,
-        Some(signature.parameters[0].type_id),
+        signature.returns.success()[0],
+        signature.parameters[0].type_id,
         "the named return should resolve to the parameter's semantic type"
     );
     assert!(matches!(
@@ -1694,12 +1692,12 @@ fn parses_valid_single_return_without_trailing_comma() {
         parse_single_file_ast("compute |x I32| -> I32:\n    return 42\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
-    assert_eq!(signature.returns.len(), 1);
+    assert_eq!(signature.returns.success().len(), 1);
     assert_eq!(
-        signature.returns[0].type_id,
-        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
+        signature.returns.success()[0],
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     );
-    assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
+    assert!(!signature.returns.is_fallible());
 }
 
 #[test]
@@ -1708,17 +1706,16 @@ fn parses_valid_multiple_returns_without_trailing_comma() {
         parse_single_file_ast("compute |x I32| -> I32, String:\n    return 42, \"result\"\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
-    assert_eq!(signature.returns.len(), 2);
+    assert_eq!(signature.returns.success().len(), 2);
     assert_eq!(
-        signature.returns[0].type_id,
-        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
+        signature.returns.success()[0],
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     );
-    assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
     assert_eq!(
-        signature.returns[1].type_id,
-        Some(ast.type_environment.builtins().string)
+        signature.returns.success()[1],
+        ast.type_environment.builtins().string
     );
-    assert_eq!(signature.returns[1].channel, ReturnChannel::Success);
+    assert!(!signature.returns.is_fallible());
 }
 
 #[test]

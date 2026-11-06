@@ -115,6 +115,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
     - [member_rules.rs](src/compiler_frontend/builtins/member_rules.rs): shared allocation-free collection/map argument, success-slot and fallibility rules for AST construction and HIR validation.
 - [style_directives](src/compiler_frontend/style_directives/): frontend+builder template directive registry.
 - [datatypes](src/compiler_frontend/datatypes/): TypeEnvironment/TypeId semantic identity; authored type syntax lives in [parsed.rs](src/compiler_frontend/datatypes/parsed.rs).
+    - [callable_returns.rs](src/compiler_frontend/datatypes/callable_returns.rs): compact ordinary callable return contract shared by AST signatures, function types, trait requirements and HIR — allocation-free zero/one success slots plus the independent error channel.
     - [number.rs](src/compiler_frontend/datatypes/number.rs): immutable `NumberValue` Dec coefficients, exact receiving materialisation, arbitrary-precision arithmetic and integer/rescale conversion. Shared scale and allocation-free decimal text facts live in `moth-lexical`.
     - [numeric_power.rs](src/compiler_frontend/datatypes/numeric_power.rs): portable binary64 power for constant folding.
 - [type_coercion](src/compiler_frontend/type_coercion/): compatibility/contextual/string coercion.

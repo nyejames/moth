@@ -2,6 +2,7 @@
 
 use super::support::*;
 use crate::backends::js::ENTRY_FAILURE_NOTICE;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
@@ -63,8 +64,7 @@ fn host_io_reads_the_underlying_value_before_logging() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -133,8 +133,7 @@ fn auto_invokes_start_function_when_enabled() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -220,8 +219,7 @@ fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            returns: (vec![types.i32]).into_boxed_slice(),
-            error_return: Some(types.string),
+            returns: CallableReturnShape::from_slots(vec![types.i32], Some(types.string)),
         };
         let module = build_module(
             expressions,

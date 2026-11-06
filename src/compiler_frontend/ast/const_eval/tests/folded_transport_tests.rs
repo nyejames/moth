@@ -32,6 +32,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::{
@@ -85,7 +86,7 @@ fn entry_path(path_fork: &mut PathInternerFork, string_table: &mut StringTable) 
 fn no_returns() -> FunctionSignature {
     FunctionSignature {
         parameters: vec![],
-        returns: vec![],
+        returns: CallableReturnShape::from_slots([], None),
     }
 }
 

@@ -14,12 +14,12 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::nominal::imported_nominal_path;
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionParameter, FunctionSignature, MaterialisedFunctionSignature, ParameterContract,
-    ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::type_resolution::intern_resolved_function_signature;
 use crate::compiler_frontend::canonical_type_identity::GenericDeclarationOrigin;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
-use crate::compiler_frontend::public_interface::PublicParameterContract;
+use crate::compiler_frontend::public_interface::{PublicCallableReturns, PublicParameterContract};
 use crate::compiler_frontend::semantic_identity::{GeneratedDeclarationIdentity, OriginFunctionId};
 
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -60,13 +60,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let MaterialisedFunctionSignature {
                 signature,
                 function_type_id,
-                success_return_type_ids: returns,
-                error_return_type_id: error_return,
             } = self.project_imported_callable_signature(
                 &local_path,
                 &function.parameters,
                 &function.returns,
-                function.error_return.as_ref(),
                 string_table,
             )?;
             let declaration = Declaration {
@@ -154,8 +151,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 "Imported concrete function has no shared call summary",
                             )
                         })?,
-                    returns,
-                    error_return,
+                    returns: signature.returns.clone(),
                 },
             );
         }
@@ -268,18 +264,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .path_fork
                     .try_intern_child(imported_type_path, method_name)
                     .ok_or_else(token_lexical::logical_path_capacity)?;
-                let MaterialisedFunctionSignature {
-                    signature,
-                    success_return_type_ids: returns,
-                    error_return_type_id: error_return,
-                    ..
-                } = self.project_imported_callable_signature(
-                    &method_path,
-                    &method.parameters,
-                    &method.returns,
-                    method.error_return.as_ref(),
-                    string_table,
-                )?;
+                let MaterialisedFunctionSignature { signature, .. } = self
+                    .project_imported_callable_signature(
+                        &method_path,
+                        &method.parameters,
+                        &method.returns,
+                        string_table,
+                    )?;
                 self.resolved_function_signatures_by_path.insert(
                     method_path,
                     ResolvedFunctionSignature {
@@ -361,8 +352,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 let contract = self.projected_imported_receiver_method_contract(
                     method_path,
                     &method.method_origin,
-                    returns,
-                    error_return,
+                    signature.returns.clone(),
                 )?;
                 if self
                     .projected_imported_receiver_methods_by_local_path
@@ -401,8 +391,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &self,
         method_path: PathId,
         method_origin: &OriginFunctionId,
-        returns: Vec<TypeId>,
-        error_return: Option<TypeId>,
+        returns: CallableReturnShape,
     ) -> Result<AstImportedFunctionContract, InfrastructureFailure> {
         let header_contract = self
             .binding_environment
@@ -433,7 +422,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             target,
             summary,
             returns,
-            error_return,
         })
     }
 
@@ -463,8 +451,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &mut self,
         function_path: &PathId,
         parameter_surfaces: &[PublicParameterTypeSlot],
-        return_surfaces: &[PublicReturnTypeSlot],
-        error_surface: Option<&CanonicalTypeIdentity>,
+        return_surfaces: &PublicCallableReturns,
         string_table: &mut StringTable,
     ) -> Result<MaterialisedFunctionSignature, ExpressionParseError> {
         let mut parameters = Vec::with_capacity(parameter_surfaces.len());
@@ -508,39 +495,27 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             });
         }
 
-        let mut returns = Vec::new();
-        let mut return_type_ids = Vec::new();
-        for returned in return_surfaces {
-            let type_id = self.intern_imported_canonical_type(&returned.type_identity)?;
-            returns.push(ReturnSlot {
-                type_id: Some(type_id),
-                channel: ReturnChannel::Success,
-            });
-            return_type_ids.push(type_id);
-        }
+        let success_type_ids = return_surfaces
+            .success
+            .iter()
+            .map(|returned| self.intern_imported_canonical_type(&returned.type_identity))
+            .collect::<Result<Vec<_>, _>>()?;
 
-        let error_return = if let Some(error_identity) = error_surface {
-            let type_id = self.intern_imported_canonical_type(error_identity)?;
-            returns.push(ReturnSlot {
-                type_id: Some(type_id),
-                channel: ReturnChannel::Error,
-            });
-            Some(type_id)
-        } else {
-            None
-        };
+        let error_return = return_surfaces
+            .error
+            .as_ref()
+            .map(|error_identity| self.intern_imported_canonical_type(error_identity))
+            .transpose()?;
 
         let signature = FunctionSignature {
             parameters,
-            returns,
+            returns: CallableReturnShape::from_slots(success_type_ids, error_return),
         };
         let function_type_id =
             intern_resolved_function_signature(&signature, &mut self.type_environment);
         Ok(MaterialisedFunctionSignature {
             signature,
             function_type_id,
-            success_return_type_ids: return_type_ids,
-            error_return_type_id: error_return,
         })
     }
 }

@@ -161,6 +161,7 @@ impl<'a> HirBuilder<'a> {
         if self
             .function_by_id_or_error(function_id)?
             .returns
+            .success()
             .is_empty()
         {
             self.emit_terminator(

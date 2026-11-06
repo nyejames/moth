@@ -22,6 +22,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, DiagnosticDraft, UnsupportedBackendFeatureReason,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     StructTypeDefinition,
@@ -1497,8 +1498,10 @@ fn wasm_feature_validation_rejects_fallible_control_flow_with_authored_span_and_
     let mut branch_module = hir_module_with_expressions(
         FunctionId(0),
         vec![HirFunction {
-            returns: vec![builtin_type_ids::STRING].into_boxed_slice(),
-            error_return: Some(custom_error_type),
+            returns: CallableReturnShape::from_slots(
+                vec![builtin_type_ids::STRING],
+                Some(custom_error_type),
+            ),
             ..function(FunctionId(0), BlockId(0))
         }],
         vec![
@@ -1569,7 +1572,7 @@ fn wasm_feature_validation_rejects_fallible_control_flow_with_authored_span_and_
         let mut module = hir_module_with_expressions(
             FunctionId(0),
             vec![HirFunction {
-                error_return: Some(custom_error_type),
+                returns: CallableReturnShape::from_slots([], Some(custom_error_type)),
                 ..function(FunctionId(0), BlockId(0))
             }],
             vec![block(BlockId(0), vec![], terminator)],
@@ -1616,12 +1619,14 @@ fn wasm_feature_validation_keeps_spanless_fallible_sites_and_ignores_unreachable
         FunctionId(0),
         vec![
             HirFunction {
-                error_return: Some(custom_error_type),
+                returns: CallableReturnShape::from_slots([], Some(custom_error_type)),
                 ..function(FunctionId(0), BlockId(0))
             },
             HirFunction {
-                returns: vec![builtin_type_ids::STRING].into_boxed_slice(),
-                error_return: Some(error_type),
+                returns: CallableReturnShape::from_slots(
+                    vec![builtin_type_ids::STRING],
+                    Some(error_type),
+                ),
                 ..function(FunctionId(1), BlockId(1))
             },
         ],
@@ -1688,7 +1693,7 @@ fn wasm_feature_validation_keeps_spanless_fallible_sites_and_ignores_unreachable
         vec![
             function(FunctionId(0), BlockId(0)),
             HirFunction {
-                error_return: Some(error_type),
+                returns: CallableReturnShape::from_slots([], Some(error_type)),
                 ..function(FunctionId(1), BlockId(1))
             },
         ],
@@ -1742,8 +1747,7 @@ fn wasm_feature_validation_preserves_numeric_and_cast_precedence_over_fallible_f
     let numeric_module = hir_module_with_expressions(
         FunctionId(0),
         vec![HirFunction {
-            returns: vec![numeric_result_type].into_boxed_slice(),
-            error_return: Some(error_type),
+            returns: CallableReturnShape::from_slots(vec![numeric_result_type], Some(error_type)),
             ..function(FunctionId(0), BlockId(0))
         }],
         blocks,
@@ -1778,8 +1782,7 @@ fn wasm_feature_validation_preserves_numeric_and_cast_precedence_over_fallible_f
     let fallible_cast_module = hir_module_with_expressions(
         FunctionId(0),
         vec![HirFunction {
-            returns: vec![cast_result_type].into_boxed_slice(),
-            error_return: Some(error_type),
+            returns: CallableReturnShape::from_slots(vec![cast_result_type], Some(error_type)),
             ..function(FunctionId(0), BlockId(0))
         }],
         blocks,
@@ -1868,7 +1871,7 @@ fn backend_feature_validation_allows_ordered_native_call_results() {
             vec![
                 function(FunctionId(0), BlockId(0)),
                 HirFunction {
-                    returns: slot_types[..count].to_vec().into_boxed_slice(),
+                    returns: CallableReturnShape::from_slots(slot_types[..count].to_vec(), None),
                     ..function(FunctionId(1), BlockId(1))
                 },
             ],
@@ -2823,12 +2826,10 @@ fn function_with_signature(
         id,
         entry,
         params,
-        returns: if return_type == builtin_type_ids::NONE {
-            Box::new([])
-        } else {
-            vec![return_type].into_boxed_slice()
-        },
-        error_return: None,
+        returns: CallableReturnShape::from_slots(
+            (return_type != builtin_type_ids::NONE).then_some(return_type),
+            None,
+        ),
     }
 }
 
@@ -3369,8 +3370,7 @@ fn module_with_result_channels(
     let mut module = hir_module_with_expressions(
         FunctionId(0),
         vec![HirFunction {
-            returns: returns.to_vec().into_boxed_slice(),
-            error_return: Some(error_return),
+            returns: CallableReturnShape::from_slots(returns.to_vec(), Some(error_return)),
             ..function(FunctionId(0), BlockId(0))
         }],
         vec![block(

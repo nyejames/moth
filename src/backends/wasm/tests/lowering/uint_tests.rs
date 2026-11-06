@@ -19,6 +19,7 @@ use crate::backends::wasm::lir::instructions::{
 use crate::backends::wasm::lir::types::WasmAbiType;
 use crate::backends::wasm::request::WasmBackendRequest;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -80,8 +81,7 @@ fn lower_entry_returning(
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![return_type].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![return_type], None),
     };
     let module = build_module(
         path_fork,
@@ -223,8 +223,7 @@ fn uint_params_locals_and_results_use_the_exact_carrier() {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![LocalId(0)],
-            returns: vec![scalar_type].into_boxed_slice(),
-            error_return: None,
+            returns: CallableReturnShape::from_slots(vec![scalar_type], None),
         };
         let module = build_module(
             &mut path_fork,
@@ -632,8 +631,7 @@ fn uint_trap_arithmetic_selects_unsigned_operation_kinds() {
                 id: FunctionId(0),
                 entry: BlockId(0),
                 params: vec![],
-                returns: vec![fixed_scalar_type(scalar)].into_boxed_slice(),
-                error_return: None,
+                returns: CallableReturnShape::from_slots(vec![fixed_scalar_type(scalar)], None),
             };
             let module = build_module(
                 &mut path_fork,

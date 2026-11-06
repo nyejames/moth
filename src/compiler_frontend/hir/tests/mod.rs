@@ -7,6 +7,7 @@ use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -173,7 +174,7 @@ pub(super) fn minimal_lowered_hir_module() -> (StringTable, HirModule, TypeEnvir
     let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );

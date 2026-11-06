@@ -52,7 +52,7 @@ use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
 use crate::compiler_frontend::public_interface::{
-    ConcreteCallSummaryRecord, ProviderDependencyKind, PublicBindingExport,
+    ConcreteCallSummaryRecord, ProviderDependencyKind, PublicBindingExport, PublicCallableReturns,
     PublicConstantSemantics, PublicDeclarationRecord, PublicDeclarationSemantics,
     PublicEvidenceOwnership, PublicEvidenceRecord, PublicReceiverMethodCategory,
     PublicReceiverMethodSemantics, PublicSemanticInterface, PublicStructSemantics,
@@ -2150,8 +2150,10 @@ fn struct_provider_with_receiver_method() -> PublicSemanticInterface {
                     method_origin: method_origin.clone(),
                     category: PublicReceiverMethodCategory::ConcreteLocal,
                     parameters: Vec::new(),
-                    returns: Vec::new(),
-                    error_return: None,
+                    returns: PublicCallableReturns {
+                        success: Vec::new(),
+                        error: None,
+                    },
                 }],
             }),
         }],

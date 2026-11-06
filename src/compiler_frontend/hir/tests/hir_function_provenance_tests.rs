@@ -19,6 +19,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 };
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -338,7 +339,7 @@ fn retains_direct_provenance_per_function() {
             super::entry_start_node(
                 FunctionSignature {
                     parameters: vec![],
-                    returns: vec![],
+                    returns: CallableReturnShape::from_slots([], None),
                 },
                 start_body,
             ),
@@ -346,7 +347,7 @@ fn retains_direct_provenance_per_function() {
                 helper_name,
                 FunctionSignature {
                     parameters: vec![],
-                    returns: vec![],
+                    returns: CallableReturnShape::from_slots([], None),
                 },
                 helper_body,
                 None,
@@ -416,7 +417,7 @@ fn empty_function_has_explicit_empty_provenance() {
         vec![super::entry_start_node(
             FunctionSignature {
                 parameters: vec![],
-                returns: vec![],
+                returns: CallableReturnShape::from_slots([], None),
             },
             start_body,
         )],
@@ -456,7 +457,7 @@ fn validation_rejects_missing_provenance_coverage() {
         vec![super::entry_start_node(
             FunctionSignature {
                 parameters: vec![],
-                returns: vec![],
+                returns: CallableReturnShape::from_slots([], None),
             },
             vec![node(NodeKind::Return(vec![]), None)],
         )],
@@ -499,7 +500,7 @@ fn validation_rejects_extra_provenance_entry() {
         vec![super::entry_start_node(
             FunctionSignature {
                 parameters: vec![],
-                returns: vec![],
+                returns: CallableReturnShape::from_slots([], None),
             },
             vec![node(NodeKind::Return(vec![]), None)],
         )],
@@ -544,7 +545,7 @@ fn validation_rejects_replaced_out_of_range_provenance_key() {
         vec![super::entry_start_node(
             FunctionSignature {
                 parameters: vec![],
-                returns: vec![],
+                returns: CallableReturnShape::from_slots([], None),
             },
             vec![node(NodeKind::Return(vec![]), None)],
         )],
@@ -769,8 +770,7 @@ fn finalized_provenance_preserves_direct_construction_without_block_projection()
         id: function_id,
         entry: BlockId(0),
         params: Vec::new(),
-        returns: Box::new([]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots([], None),
     });
     let direct_provenance =
         SyntheticInterfaceProvenance::single(provenance_member("source-config", "direct"));

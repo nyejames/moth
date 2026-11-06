@@ -1,5 +1,6 @@
 //! Unit tests for generic parameter metadata and TypeId-native generic helpers.
 
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::{StructTypeDefinition, TypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -637,8 +638,10 @@ fn substitute_type_id_rewrites_constructed_function_and_nominal_instances() {
     );
     let function_with_parameter = type_environment.intern_function(FunctionTypeKey {
         parameters: Box::new([box_of_parameter, collection_of_parameter]),
-        returns: Box::new([parameter_type_id, option_of_parameter]),
-        error_return: Some(parameter_type_id),
+        returns: CallableReturnShape::from_slots(
+            [parameter_type_id, option_of_parameter],
+            Some(parameter_type_id),
+        ),
     });
 
     let mut mapping = FxHashMap::default();
@@ -686,10 +689,10 @@ fn substitute_type_id_rewrites_constructed_function_and_nominal_instances() {
         Some(int_type_id)
     );
     assert_eq!(
-        function_definition.returns.as_ref(),
+        function_definition.returns.success(),
         &[int_type_id, substituted_option]
     );
-    assert_eq!(function_definition.error_return, Some(int_type_id));
+    assert_eq!(function_definition.returns.error(), Some(int_type_id));
 }
 
 #[test]

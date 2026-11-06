@@ -4,6 +4,7 @@ use super::*;
 use crate::compiler_frontend::ast::ast_nodes::IfBranchMetadata;
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOp;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueLexicalScope;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::source::SourceSpan;
@@ -351,7 +352,7 @@ fn authored_start_and_entry_record_provenance_under_distinct_identities() {
         entry_start_node(
             FunctionSignature {
                 parameters: vec![],
-                returns: vec![],
+                returns: CallableReturnShape::from_slots([], None),
             },
             vec![entry_if],
         ),

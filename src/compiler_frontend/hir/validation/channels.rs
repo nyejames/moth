@@ -143,24 +143,24 @@ impl HirValidator<'_> {
                 .ok_or_else(|| {
                     self.error_with_hir("Nonlocal call has no resolved result contract")
                 })?;
-            if contract.error_return.is_some() != fallible {
+            if contract.is_fallible() != fallible {
                 return Err(self.error_with_hir(
                     "Call channel compatibility does not match resolved contract",
                 ));
             }
-            if results.len() != contract.returns.len() {
+            if results.len() != contract.success().len() {
                 return Err(
                     self.error_with_hir("Call result slot arity does not match resolved contract")
                 );
             }
-            for (result, expected) in results.zip(contract.returns.iter()) {
+            for (result, expected) in results.zip(contract.success()) {
                 self.require_local_id(result)?;
                 if self.local_types.get(&result) != Some(expected) {
                     return Err(self
                         .error_with_hir("Call result slot type does not match resolved contract"));
                 }
             }
-            return Ok(contract.error_return);
+            return Ok(contract.error());
         };
         let function = self
             .module
@@ -168,12 +168,13 @@ impl HirValidator<'_> {
             .iter()
             .find(|function| function.id == function_id)
             .ok_or_else(|| self.error_with_hir("Call references missing local function"))?;
-        if function.error_return.is_some() != fallible {
+        if function.returns.is_fallible() != fallible {
             return Err(
                 self.error_with_hir("Call channel compatibility does not match function signature")
             );
         }
-        if args.len() != function.params.len() || results.len() != function.returns.len() {
+        if args.len() != function.params.len() || results.len() != function.returns.success().len()
+        {
             return Err(self.error_with_hir(
                 "Call argument/result slot arity does not match function signature",
             ));
@@ -185,7 +186,7 @@ impl HirValidator<'_> {
                 );
             }
         }
-        for (result, expected) in results.zip(function.returns.iter()) {
+        for (result, expected) in results.zip(function.returns.success()) {
             self.require_local_id(result)?;
             if self.local_types.get(&result) != Some(expected) {
                 return Err(
@@ -193,7 +194,7 @@ impl HirValidator<'_> {
                 );
             }
         }
-        Ok(function.error_return)
+        Ok(function.returns.error())
     }
 
     pub(super) fn validate_invoke(

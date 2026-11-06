@@ -15,6 +15,7 @@
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -79,21 +80,12 @@ pub struct HirChoiceField {
 //  HIR Module Container
 // -------------------------
 
-/// Native result signature for imported or generated source calls whose defining
-/// function owner is unavailable to this HIR consumer. Local functions and binding-backed
-/// calls use their original function or registry signature instead of a mirrored record.
-#[derive(Debug, Clone)]
-pub(crate) struct HirCallResultContract {
-    pub returns: Box<[TypeId]>,
-    pub error_return: Option<TypeId>,
-}
-
 #[derive(Debug, Clone)]
 pub struct HirModule {
     pub expressions: HirExpressionStore,
     /// Only nonlocal source/generated targets lacking an accessible defining signature owner.
     /// Imported producer contracts supply these types in this module's TypeEnvironment.
-    pub(crate) call_result_contracts: FxHashMap<CallTarget, HirCallResultContract>,
+    pub(crate) call_result_contracts: FxHashMap<CallTarget, CallableReturnShape>,
     pub blocks: Vec<HirBlock>,
     pub functions: Vec<HirFunction>,
     pub structs: Vec<HirStruct>,

@@ -13,6 +13,7 @@ use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, 
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirProjection};
@@ -237,7 +238,7 @@ fn variable_declaration_emits_local_and_definition_write() {
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(x, init, &expressions)),
@@ -396,7 +397,7 @@ fn immutable_and_mutable_place_initializers_keep_place_classification() {
                     None,
                 ),
             ],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![
             node(
@@ -495,7 +496,7 @@ fn duplicate_local_declarations_in_same_scope_fail() {
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![
             node(
@@ -592,7 +593,7 @@ fn assignment_lowers_value_prelude_before_assign() {
                 true,
                 None,
             )],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![assignment],
     );
@@ -732,7 +733,7 @@ fn call_expression_statements_materialize_result_values() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![
             node(NodeKind::ExpressionStatement(callee_call), None),
@@ -837,7 +838,7 @@ fn multi_bind_assignment_reads_every_rhs_slot_before_updating_targets() {
                     None,
                 ),
             ],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(
             NodeKind::MultiBind {
@@ -1038,7 +1039,7 @@ fn mixed_multi_bind_preserves_definition_and_update_destination_tags() {
                 true,
                 None,
             )],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(
             NodeKind::MultiBind {
@@ -1196,7 +1197,7 @@ fn return_lowering_handles_zero_one_and_many_values() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );

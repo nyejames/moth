@@ -15,6 +15,7 @@ use crate::compiler_frontend::compiler_messages::diagnostic_types::type_display_
 use crate::compiler_frontend::compiler_messages::diagnostic_types::{
     TypeDisplayCapacityError, TypeDisplayId,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantDefinition, ChoiceVariantPayloadDefinition,
 };
@@ -80,8 +81,7 @@ fn snapshot_spelling_matches_live_for_every_shape() {
     let option_type = environment.intern_option(i32_type);
     let function_type = environment.intern_function(FunctionTypeKey {
         parameters: Box::new([i32_type]),
-        returns: Box::new([bool_type]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots([bool_type], None),
     });
     let external_type = environment.intern_external(ExternalTypeId(7));
     let generic_type = environment.intern_generic_parameter(GenericParameterId(0), t_name);
@@ -132,18 +132,15 @@ fn snapshot_spelling_matches_live_for_nested_combinations() {
 
     let inner_function = environment.intern_function(FunctionTypeKey {
         parameters: Box::new([i32_type]),
-        returns: Box::new([i32_type]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots([i32_type], None),
     });
     let higher_order = environment.intern_function(FunctionTypeKey {
         parameters: Box::new([inner_function, string_type]),
-        returns: Box::new([bool_type]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots([bool_type], None),
     });
     let fallible = environment.intern_function(FunctionTypeKey {
         parameters: Box::new([i32_type]),
-        returns: Box::new([config_type]),
-        error_return: Some(string_type),
+        returns: CallableReturnShape::from_slots([config_type], Some(string_type)),
     });
     let collection = environment.intern_collection(i32_type, Some(3));
     let optional_collection = environment.intern_option(collection);
@@ -153,8 +150,7 @@ fn snapshot_spelling_matches_live_for_nested_combinations() {
     let fixed_collection_of_option = environment.intern_collection(optional_element, Some(3));
     let dual_parameter_function = environment.intern_function(FunctionTypeKey {
         parameters: Box::new([box_of_i32, map_of_box]),
-        returns: Box::new([i32_type, bool_type]),
-        error_return: Some(string_type),
+        returns: CallableReturnShape::from_slots([i32_type, bool_type], Some(string_type)),
     });
 
     let cases: Vec<(TypeId, &str)> = vec![
@@ -187,23 +183,19 @@ fn snapshot_spelling_matches_live_for_callable_result_arities() {
     let i32_type = environment.intern_builtin_key(BuiltinTypeKey::FixedScalar(FixedScalar::I32));
     let no_results = environment.intern_function(FunctionTypeKey {
         parameters: Box::new([i32_type]),
-        returns: Box::new([]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots([], None),
     });
     let several_results = environment.intern_function(FunctionTypeKey {
         parameters: Box::new([i32_type]),
-        returns: Box::new([i32_type, bool_type]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots([i32_type, bool_type], None),
     });
     let error_only = environment.intern_function(FunctionTypeKey {
         parameters: Box::new([i32_type]),
-        returns: Box::new([]),
-        error_return: Some(string_type),
+        returns: CallableReturnShape::from_slots([], Some(string_type)),
     });
     let several_results_with_error = environment.intern_function(FunctionTypeKey {
         parameters: Box::new([i32_type]),
-        returns: Box::new([i32_type, bool_type]),
-        error_return: Some(string_type),
+        returns: CallableReturnShape::from_slots([i32_type, bool_type], Some(string_type)),
     });
 
     let cases: Vec<(TypeId, &str)> = vec![
@@ -518,8 +510,7 @@ fn appending_snapshot_offsets_records_and_child_arenas_without_deduplication() {
     let map_type = environment.intern_map(string_type, i32_type);
     let function_type = environment.intern_function(FunctionTypeKey {
         parameters: Box::new([map_type, choice_type]),
-        returns: Box::new([collection_type]),
-        error_return: Some(config_type),
+        returns: CallableReturnShape::from_slots([collection_type], Some(config_type)),
     });
 
     let left_types = [

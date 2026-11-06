@@ -13,6 +13,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
 use crate::compiler_frontend::compiler_messages::{
     CapacityResource, DiagnosticBag, DiagnosticSeverity, HirCapacityResource,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::expression_store::HirExpressionStoreTestLimits;
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
@@ -56,7 +57,7 @@ fn lower_hir_capacity_failure_keeps_error_without_warnings_and_captured_site() {
         vec![entry_start_node(
             FunctionSignature {
                 parameters: vec![],
-                returns: vec![],
+                returns: CallableReturnShape::from_slots([], None),
             },
             vec![node(
                 NodeKind::ExpressionStatement(literal.id()),

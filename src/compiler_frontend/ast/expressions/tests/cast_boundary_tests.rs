@@ -328,7 +328,7 @@ parse_count |text String| -> I32, Error!:
     let expression = returned_expression(&ast, &path_fork, &string_table, "parse_count");
     let cast = resolved_cast(expression);
 
-    assert!(signature.error_return_type_id().is_some());
+    assert!(signature.returns.error().is_some());
     assert_eq!(cast.fallibility, BuiltinCastFallibility::Fallible);
     assert!(matches!(
         &cast.evidence,

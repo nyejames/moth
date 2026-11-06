@@ -9,6 +9,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
+use super::callable_returns::CallableReturnShape;
 use super::ids::{
     BuiltinTypeKey, GenericParameterId, GenericParameterListId, NominalTypeId, TypeConstructor,
     TypeId,
@@ -107,8 +108,7 @@ pub struct ConstructedTypeDefinition {
 #[derive(Debug, Clone)]
 pub struct FunctionTypeDefinition {
     pub parameters: Box<[FunctionParameterDefinition]>,
-    pub returns: Box<[TypeId]>,
-    pub error_return: Option<TypeId>,
+    pub returns: CallableReturnShape,
 }
 
 /// Parameter inside a function type definition.

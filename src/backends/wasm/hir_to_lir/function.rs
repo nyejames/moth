@@ -139,6 +139,7 @@ fn lower_function_signature(
 
     let results = function
         .returns
+        .success()
         .iter()
         .map(|type_id| lower_type_to_abi(context, *type_id))
         .collect();

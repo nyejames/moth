@@ -5,7 +5,8 @@
 //! WHY: trait declarations and evidence have a focused lookup surface separate from value and
 //!      nominal type declarations.
 
-use crate::compiler_frontend::ast::statements::functions::{ParameterContract, ReturnChannel};
+use crate::compiler_frontend::ast::statements::functions::ParameterContract;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -32,7 +33,7 @@ pub(crate) struct ResolvedTraitRequirement {
     pub(crate) name: StringId,
     pub(crate) receiver: TraitReceiverRequirement,
     pub(crate) parameters: Vec<ResolvedTraitParameter>,
-    pub(crate) returns: Vec<ResolvedTraitReturn>,
+    pub(crate) returns: CallableReturnShape,
     pub(crate) span: Option<SourceSpan>,
 }
 
@@ -64,15 +65,6 @@ impl ResolvedTraitParameter {
     pub(crate) fn semantic_type_ids(&self) -> impl Iterator<Item = TypeId> + '_ {
         self.contract.semantic_type_ids(self.type_id)
     }
-}
-
-/// One requirement return slot.
-#[derive(Clone, Debug)]
-#[allow(dead_code)] // Return spans remain available for precise diagnostics.
-pub(crate) struct ResolvedTraitReturn {
-    pub(crate) type_id: TypeId,
-    pub(crate) channel: ReturnChannel,
-    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Complete resolved trait definition.

@@ -452,10 +452,10 @@ impl ClosureWork {
                 self.enqueue_folded_value(default);
             }
         }
-        for return_slot in &function.returns {
+        for return_slot in &function.returns.success {
             self.enqueue_type(&return_slot.type_identity);
         }
-        if let Some(error_return) = &function.error_return {
+        if let Some(error_return) = &function.returns.error {
             self.enqueue_type(error_return);
         }
         if let PublicFunctionCategory::GenericTemplate(template) = &function.category {
@@ -497,10 +497,10 @@ impl ClosureWork {
                 self.enqueue_folded_value(default);
             }
         }
-        for return_slot in &method.returns {
+        for return_slot in &method.returns.success {
             self.enqueue_type(&return_slot.type_identity);
         }
-        if let Some(error_return) = &method.error_return {
+        if let Some(error_return) = &method.returns.error {
             self.enqueue_type(error_return);
         }
         if let PublicReceiverMethodCategory::GenericTemplate(descriptor) = &method.category {

@@ -16,7 +16,7 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
     token_stream_starts_typed_propagation_suffix,
 };
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ParameterContract, ReturnSlot,
+    FunctionParameter, FunctionSignature, ParameterContract,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
@@ -204,22 +204,9 @@ pub(super) fn signature_from_trait_requirement(
         ));
     }
 
-    let returns = requirement
-        .returns
-        .iter()
-        .map(|return_slot| {
-            let type_id = replace_trait_this_type(
-                return_slot.type_id,
-                trait_definition.this_type,
-                receiver_type_id,
-            );
-
-            ReturnSlot {
-                type_id: Some(type_id),
-                channel: return_slot.channel,
-            }
-        })
-        .collect();
+    let returns = requirement.returns.map_type_ids(|type_id| {
+        replace_trait_this_type(type_id, trait_definition.this_type, receiver_type_id)
+    });
 
     Ok(FunctionSignature {
         parameters,

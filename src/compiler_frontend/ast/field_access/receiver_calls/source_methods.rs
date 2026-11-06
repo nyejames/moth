@@ -398,8 +398,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         },
     )?;
 
-    let method_call_expression = if let Some(error_return_type_id) =
-        call_signature.error_return_type_id()
+    let method_call_expression = if let Some(error_return_type_id) = call_signature.returns.error()
     {
         // Typed methods use the established handled-call shape, with their receiver in slot zero.
         // A raw MethodCall inside a carrier would bypass HIR's explicit error-channel call lowering.
@@ -426,7 +425,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
             full_arguments
                 .push(argument.with_parameter_slot(ParameterSlot::new(parameter_slot.index() + 1)));
         }
-        let result_type_ids = call_signature.success_return_type_ids();
+        let result_type_ids = call_signature.returns.success().to_vec();
         let value_required = !result_type_ids.is_empty();
         finish_function_call_expression(
             HandledFallibleCall {
@@ -451,7 +450,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         )?
     } else {
         let result_type_ids = receiver_result_type_ids_for_call(
-            call_signature.success_return_type_ids(),
+            call_signature.returns.success().to_vec(),
             token_stream,
             type_interner,
         )?;
@@ -695,7 +694,7 @@ impl DeferredReceiverCall {
     /// The exact single success type of a concrete record. A generic record has no exact type
     /// until its instance completes, so it reports none here.
     pub(crate) fn single_success_return_type_id(&self) -> Option<TypeId> {
-        self.concrete_signature()?.single_success_return_type_id()
+        self.concrete_signature()?.returns.single_success_slot()
     }
 
     /// The ordered result shapes of a generic-method record; `None` for a concrete record.
@@ -710,9 +709,9 @@ impl DeferredReceiverCall {
     pub(crate) fn error_return(&self) -> Option<GenericErrorReturn> {
         match &self.callee {
             DeferredReceiverCallee::Generic(generic) => generic.error_return,
-            DeferredReceiverCallee::Concrete(signature) => signature
-                .error_return_type_id()
-                .map(GenericErrorReturn::Concrete),
+            DeferredReceiverCallee::Concrete(signature) => {
+                signature.returns.error().map(GenericErrorReturn::Concrete)
+            }
         }
     }
 
@@ -764,7 +763,7 @@ fn retain_numeric_receiver_call(
     } = input;
 
     let signature = source_method.signature();
-    let success_result_type_ids = signature.success_return_type_ids();
+    let success_result_type_ids = signature.returns.success();
     let value_required = !success_result_type_ids.is_empty();
 
     // The resolved private-failure-lane fact of this call site: it is the method's own authored
@@ -793,10 +792,8 @@ fn retain_numeric_receiver_call(
                     type_interner,
                     expression_builder,
                     const_values,
-                    FallibleSuccessContract::Known(success_result_type_ids.as_slice()),
-                    signature
-                        .error_return_type_id()
-                        .map(GenericErrorReturn::Concrete),
+                    FallibleSuccessContract::Known(success_result_type_ids),
+                    signature.returns.error().map(GenericErrorReturn::Concrete),
                     private_failure_lane,
                     value_required,
                     member_span,
@@ -834,9 +831,8 @@ fn retain_numeric_receiver_call(
     .id();
 
     // A fallible method owns its error channel: only the plain call carries the private lane.
-    let private_failure_candidate = (private_failure_lane
-        && signature.error_return_type_id().is_none())
-    .then(|| source_method.method_path());
+    let private_failure_candidate = (private_failure_lane && signature.returns.error().is_none())
+        .then(|| source_method.method_path());
     let method_path = source_method.method_path();
     let receiver_mutable = source_method.receiver_mutable();
     let signature = match source_method {
@@ -1022,7 +1018,7 @@ fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> +
                     string_table: &mut *string_table,
                     path_fork: &mut *path_fork,
                 })?;
-            let completed_error = instantiation.signature.error_return_type_id();
+            let completed_error = instantiation.signature.returns.error();
             verify_completed_error_return(error_return, completed_error, context, type_interner)?;
             if matches!(error_return, Some(GenericErrorReturn::Retained(_))) {
                 verify_retained_propagation_error(
@@ -1118,8 +1114,8 @@ fn receiver_call_expression(
     authored_handling: DeferredCallHandling,
     expression_builder: &mut AstExpressionBuilder,
 ) -> Result<OwnedExpr, ExpressionParseError> {
-    let result_type_ids = signature.success_return_type_ids();
-    let Some(error_return_type_id) = signature.error_return_type_id() else {
+    let result_type_ids = signature.returns.success().to_vec();
+    let Some(error_return_type_id) = signature.returns.error() else {
         // Every receiver call here was resolved at its site without a `!`, so the success types are
         // the declared ones and the plain method call is the completed shape.
         let expression = expression_builder.method_call_with_typed_arguments(

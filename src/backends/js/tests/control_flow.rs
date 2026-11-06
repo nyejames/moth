@@ -1,6 +1,7 @@
 //! Structured and dispatcher-based JavaScript control-flow lowering tests.
 
 use super::support::*;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
@@ -92,8 +93,7 @@ fn emits_structured_if_without_dispatcher() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -399,8 +399,7 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
                 LocalId(7),
                 LocalId(9),
             ],
-            returns: vec![types.i32].into_boxed_slice(),
-            error_return: Some(types.string),
+            returns: CallableReturnShape::from_slots(vec![types.i32], Some(types.string)),
         };
         let mut module = build_module(
             expressions,
@@ -425,8 +424,7 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
             id: FunctionId(1),
             entry: BlockId(7),
             params: vec![LocalId(11), LocalId(12), LocalId(13)],
-            returns: vec![types.i32].into_boxed_slice(),
-            error_return: Some(types.string),
+            returns: CallableReturnShape::from_slots(vec![types.i32], Some(types.string)),
         });
         module
             .function_origins
@@ -616,8 +614,7 @@ fn emits_structured_match_without_inlining_synthetic_merge_arm() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -735,8 +732,7 @@ fn literal_match_uses_structured_lowering_when_cfg_is_acyclic() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -872,8 +868,7 @@ fn option_present_match_checks_some_tag_without_payload_comparison() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -991,8 +986,7 @@ fn literal_match_uses_dispatcher_when_cfg_contains_cycle() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -1164,8 +1158,7 @@ fn structured_match_merge_convergence_lowers_jump_arguments() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -1354,8 +1347,7 @@ fn dispatcher_match_merge_convergence_lowers_jump_arguments() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -1491,8 +1483,7 @@ fn match_guard_condition_emits_pattern_and_guard_conjunction() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -1596,8 +1587,7 @@ fn dispatcher_match_without_selected_arm_emits_no_arm_selected_fallback() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -1693,8 +1683,7 @@ fn falls_back_to_dispatcher_for_cfg_cycle() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -1777,8 +1766,7 @@ fn lowers_break_and_continue_terminators_with_dispatcher() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -1849,8 +1837,7 @@ fn jump_args_lower_block_to_block_value_transfer() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -1972,8 +1959,7 @@ fn structured_branch_merge_lowers_jump_arguments() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -2095,8 +2081,7 @@ fn dispatcher_loop_back_edge_lowers_jump_arguments() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -2216,8 +2201,7 @@ fn dispatcher_with_native_fallible_return_packs_success_at_abi() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![types.string].into_boxed_slice(),
-        error_return: Some(types.string),
+        returns: CallableReturnShape::from_slots(vec![types.string], Some(types.string)),
     };
 
     let module = build_module(
@@ -2475,8 +2459,7 @@ fn multiple_acyclic_if_blocks_stay_structured() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(

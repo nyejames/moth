@@ -37,19 +37,19 @@ impl<'a> HirValidator<'a> {
                     self.error_with_hir("Call result contract mirrors a reachable signature owner")
                 );
             }
-            for return_type in contract.returns.iter() {
+            for return_type in contract.success() {
                 self.require_type_id(*return_type)?;
             }
-            if let Some(error_type) = contract.error_return {
+            if let Some(error_type) = contract.error() {
                 self.require_type_id(error_type)?;
             }
         }
         for function in &self.module.functions {
             self.require_block_id(function.entry)?;
-            for return_type in function.returns.iter() {
+            for return_type in function.returns.success() {
                 self.require_type_id(*return_type)?;
             }
-            if let Some(error_type) = function.error_return {
+            if let Some(error_type) = function.returns.error() {
                 self.require_type_id(error_type)?;
             }
 

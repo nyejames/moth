@@ -482,7 +482,7 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<bool, HirConstructionFailure> {
         let current_function_id = self.current_function_id_or_error()?;
         let function = self.function_by_id_or_error(current_function_id)?;
-        let Some(error_type) = function.error_return else {
+        let Some(error_type) = function.returns.error() else {
             return Ok(false);
         };
         Ok(self.maybe_builtin_error_type_id() == Some(error_type))

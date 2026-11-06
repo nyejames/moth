@@ -19,9 +19,9 @@ use super::model::{
 };
 use super::type_projection::{
     ProjectedReceiverMethodSignature, RootIndex, origin_category_mismatch_error,
-    project_defaults_provenance, project_exported_generic_parameter_surfaces,
-    project_folded_default, project_parameter_access, project_parameter_contract,
-    project_return_slots,
+    project_callable_returns, project_defaults_provenance,
+    project_exported_generic_parameter_surfaces, project_folded_default, project_parameter_access,
+    project_parameter_contract,
 };
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::{
@@ -377,7 +377,7 @@ pub(crate) fn project_receiver_method_signatures(
             })
             .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
 
-        let (returns, error_return) = project_return_slots(
+        let returns = project_callable_returns(
             &entry.signature.returns,
             type_environment,
             canonical_context,
@@ -415,7 +415,6 @@ pub(crate) fn project_receiver_method_signatures(
                 ProjectedReceiverMethodSignature {
                     parameters,
                     returns,
-                    error_return,
                     default_provenance,
                     generic_parameters,
                 },
@@ -484,6 +483,5 @@ pub(super) fn receiver_method_semantics_from_seed(
         },
         parameters: signature.parameters.clone(),
         returns: signature.returns.clone(),
-        error_return: signature.error_return.clone(),
     })
 }

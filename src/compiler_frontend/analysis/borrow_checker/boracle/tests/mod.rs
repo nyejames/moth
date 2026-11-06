@@ -10,6 +10,7 @@ mod origin_relations;
 mod relations;
 mod service;
 use super::oracle::generator::generated_problem;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 
 use super::super::OriginOverlapDecision;
 use super::super::last_use::{FutureUseStatus, LastUseLocation, LastUseSubject};
@@ -886,8 +887,10 @@ fn hir_shared_subset(kind: SharedSubsetKind) -> (HirModule, HirFunction) {
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: Vec::new(),
-        returns: vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)].into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(
+            vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+            None,
+        ),
     };
     (module, function)
 }
@@ -2854,8 +2857,7 @@ fn hir_option_projection_problem_with_rebinding(rebind: bool) -> BorrowProblem {
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: Vec::new(),
-        returns: Box::new([scalar_type]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots([scalar_type], None),
     };
     super::super::problem::from_hir(&module, &function, None, None)
         .expect("option payload projection should extract")

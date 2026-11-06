@@ -20,6 +20,7 @@ use crate::compiler_frontend::ast::statements::value_production::{
     ProducedValues,
     types::{ValueBlock, ValueIfBlock},
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
@@ -33,8 +34,8 @@ use crate::compiler_frontend::hir::statements::{
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, fresh_success_returns, function_node, make_test_variable, node,
-    param_with_type_id, reference_expr_with_type_id, success_return_slot,
+    assignment_target, fresh_returns, fresh_success_returns, function_node, make_test_variable,
+    node, param_with_type_id, reference_expr_with_type_id,
 };
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     build_ast_with_registered_types, error_return_slot, lower_ast, multi_bind_target, runtime_expr,
@@ -113,7 +114,7 @@ fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge(
         can_fail_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![error_return_slot(builtin_type_ids::STRING)],
+            returns: error_return_slot(builtin_type_ids::STRING),
         },
         vec![node(NodeKind::ReturnError(boom), location)],
         location,
@@ -133,7 +134,7 @@ fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge(
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![error_return_slot(builtin_type_ids::STRING)],
+            returns: error_return_slot(builtin_type_ids::STRING),
         },
         vec![node(
             NodeKind::ExpressionStatement(propagated_call),
@@ -209,10 +210,10 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
         can_fail_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                success_return_slot(builtin_type_ids::STRING),
-                error_return_slot(builtin_type_ids::STRING),
-            ],
+            returns: fresh_returns(
+                vec![builtin_type_ids::STRING],
+                Some(builtin_type_ids::STRING),
+            ),
         },
         vec![node(NodeKind::Return(vec![ok_value]), location)],
         location,
@@ -234,10 +235,10 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
         forward_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                success_return_slot(builtin_type_ids::STRING),
-                error_return_slot(builtin_type_ids::STRING),
-            ],
+            returns: fresh_returns(
+                vec![builtin_type_ids::STRING],
+                Some(builtin_type_ids::STRING),
+            ),
         },
         vec![node(NodeKind::Return(vec![propagated_call]), location)],
         location,
@@ -246,7 +247,7 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(NodeKind::Return(vec![]), location)],
     );
@@ -358,10 +359,10 @@ fn direct_return_result_propagation_allows_alias_success_return() {
                 false,
                 location,
             )],
-            returns: vec![
-                success_return_slot(builtin_type_ids::STRING),
-                error_return_slot(builtin_type_ids::STRING),
-            ],
+            returns: fresh_returns(
+                vec![builtin_type_ids::STRING],
+                Some(builtin_type_ids::STRING),
+            ),
         },
         vec![node(NodeKind::Return(vec![source_input_ref]), location)],
         location,
@@ -399,10 +400,10 @@ fn direct_return_result_propagation_allows_alias_success_return() {
                 false,
                 location,
             )],
-            returns: vec![
-                success_return_slot(builtin_type_ids::STRING),
-                error_return_slot(builtin_type_ids::STRING),
-            ],
+            returns: fresh_returns(
+                vec![builtin_type_ids::STRING],
+                Some(builtin_type_ids::STRING),
+            ),
         },
         vec![node(NodeKind::Return(vec![propagated_call]), location)],
         location,
@@ -411,7 +412,7 @@ fn direct_return_result_propagation_allows_alias_success_return() {
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(NodeKind::Return(vec![]), location)],
     );
@@ -501,10 +502,10 @@ fn declaration_result_propagation_assigns_native_success_on_success_edge() {
         can_fail_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                success_return_slot(builtin_type_ids::STRING),
-                error_return_slot(builtin_type_ids::STRING),
-            ],
+            returns: fresh_returns(
+                vec![builtin_type_ids::STRING],
+                Some(builtin_type_ids::STRING),
+            ),
         },
         vec![node(NodeKind::Return(vec![ok_value]), location)],
         location,
@@ -534,10 +535,10 @@ fn declaration_result_propagation_assigns_native_success_on_success_edge() {
         forward_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                success_return_slot(builtin_type_ids::STRING),
-                error_return_slot(builtin_type_ids::STRING),
-            ],
+            returns: fresh_returns(
+                vec![builtin_type_ids::STRING],
+                Some(builtin_type_ids::STRING),
+            ),
         },
         vec![
             node(NodeKind::VariableDeclaration(declared_value), location),
@@ -549,7 +550,7 @@ fn declaration_result_propagation_assigns_native_success_on_success_edge() {
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(NodeKind::Return(vec![]), location)],
     );
@@ -656,11 +657,13 @@ fn multi_bind_result_propagation_binds_ordered_slots_on_success_edge() {
         pair_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                success_return_slot(builtin_type_ids::STRING),
-                success_return_slot(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
-                error_return_slot(builtin_type_ids::STRING),
-            ],
+            returns: fresh_returns(
+                vec![
+                    builtin_type_ids::STRING,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                ],
+                Some(builtin_type_ids::STRING),
+            ),
         },
         vec![node(NodeKind::Return(vec![ok_value, two]), location)],
         location,
@@ -699,11 +702,13 @@ fn multi_bind_result_propagation_binds_ordered_slots_on_success_edge() {
         forward_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                success_return_slot(builtin_type_ids::STRING),
-                success_return_slot(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
-                error_return_slot(builtin_type_ids::STRING),
-            ],
+            returns: fresh_returns(
+                vec![
+                    builtin_type_ids::STRING,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                ],
+                Some(builtin_type_ids::STRING),
+            ),
         },
         vec![
             node(
@@ -736,7 +741,7 @@ fn multi_bind_result_propagation_binds_ordered_slots_on_success_edge() {
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(NodeKind::Return(vec![]), location)],
     );
@@ -844,10 +849,10 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
         can_fail_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                success_return_slot(builtin_type_ids::STRING),
-                error_return_slot(builtin_type_ids::STRING),
-            ],
+            returns: fresh_returns(
+                vec![builtin_type_ids::STRING],
+                Some(builtin_type_ids::STRING),
+            ),
         },
         vec![node(NodeKind::Return(vec![ok_value]), location)],
         location,
@@ -869,7 +874,7 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
                 false,
                 location,
             )],
-            returns: vec![success_return_slot(builtin_type_ids::STRING)],
+            returns: fresh_success_returns(vec![builtin_type_ids::STRING]),
         },
         vec![node(NodeKind::Return(vec![consume_input_ref]), location)],
         location,
@@ -912,10 +917,10 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
         forward_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                success_return_slot(builtin_type_ids::STRING),
-                error_return_slot(builtin_type_ids::STRING),
-            ],
+            returns: fresh_returns(
+                vec![builtin_type_ids::STRING],
+                Some(builtin_type_ids::STRING),
+            ),
         },
         vec![
             node(NodeKind::VariableDeclaration(declared_value), location),
@@ -927,7 +932,7 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(NodeKind::Return(vec![]), location)],
     );
@@ -1037,10 +1042,10 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
         can_fail_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                success_return_slot(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
-                error_return_slot(builtin_type_ids::STRING),
-            ],
+            returns: fresh_returns(
+                vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+                Some(builtin_type_ids::STRING),
+            ),
         },
         vec![node(NodeKind::Return(vec![forty_one]), location)],
         location,
@@ -1079,10 +1084,10 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
         forward_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                success_return_slot(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
-                error_return_slot(builtin_type_ids::STRING),
-            ],
+            returns: fresh_returns(
+                vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+                Some(builtin_type_ids::STRING),
+            ),
         },
         vec![
             node(
@@ -1110,7 +1115,7 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(NodeKind::Return(vec![]), location)],
     );
@@ -1213,7 +1218,7 @@ fn return_bang_lowers_to_explicit_error_terminator() {
         can_fail_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![error_return_slot(builtin_type_ids::STRING)],
+            returns: error_return_slot(builtin_type_ids::STRING),
         },
         vec![node(NodeKind::ReturnError(boom), location)],
         location,
@@ -1222,7 +1227,7 @@ fn return_bang_lowers_to_explicit_error_terminator() {
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(NodeKind::Return(vec![]), location)],
     );
@@ -1279,10 +1284,10 @@ fn fallible_success_return_preserves_success_slots_and_error_signature() {
         can_succeed_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                success_return_slot(builtin_type_ids::STRING),
-                error_return_slot(builtin_type_ids::STRING),
-            ],
+            returns: fresh_returns(
+                vec![builtin_type_ids::STRING],
+                Some(builtin_type_ids::STRING),
+            ),
         },
         vec![node(NodeKind::Return(vec![ok_value]), location)],
         location,
@@ -1291,7 +1296,7 @@ fn fallible_success_return_preserves_success_slots_and_error_signature() {
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(NodeKind::Return(vec![]), location)],
     );
@@ -1321,11 +1326,11 @@ fn fallible_success_return_preserves_success_slots_and_error_signature() {
         .expect("fallible function entry block should exist");
 
     assert_eq!(
-        can_succeed_function.returns.as_ref(),
+        can_succeed_function.returns.success(),
         &[builtin_type_ids::STRING]
     );
     assert_eq!(
-        can_succeed_function.error_return,
+        can_succeed_function.returns.error(),
         Some(builtin_type_ids::STRING)
     );
     assert!(
@@ -1360,7 +1365,7 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
         can_fail_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![error_return_slot(builtin_type_ids::STRING)],
+            returns: error_return_slot(builtin_type_ids::STRING),
         },
         vec![node(NodeKind::ReturnError(boom), location)],
         location,
@@ -1407,7 +1412,7 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(
             NodeKind::ExpressionStatement(catch_expression.id()),
@@ -1546,7 +1551,7 @@ fn multi_bind_lowering_binds_ordered_slots_from_single_rhs_call() {
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![node(
             NodeKind::MultiBind {

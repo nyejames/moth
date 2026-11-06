@@ -9,6 +9,7 @@ use crate::build_system::build::{FileKind, OutputFile};
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering,
@@ -57,8 +58,7 @@ pub(crate) fn create_test_hir_module() -> HirModule {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: Box::new([]),
-        error_return: None,
+        returns: CallableReturnShape::from_slots([], None),
     }];
     module
         .function_provenance

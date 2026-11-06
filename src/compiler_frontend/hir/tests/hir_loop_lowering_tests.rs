@@ -9,6 +9,7 @@ use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -52,7 +53,7 @@ fn lowers_while_to_header_body_exit_shape() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![while_node],
     );
@@ -117,7 +118,7 @@ fn break_in_while_targets_loop_exit_block() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![while_node],
     );
@@ -192,7 +193,7 @@ fn folded_true_loop_without_break_has_no_exit_edge() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![while_node],
     );
@@ -262,7 +263,7 @@ fn folded_true_loop_stops_lowering_later_statements() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            returns: CallableReturnShape::from_slots([], None),
         },
         vec![while_node, later_break],
     );

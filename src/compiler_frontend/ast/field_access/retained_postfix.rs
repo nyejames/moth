@@ -447,12 +447,12 @@ pub(crate) enum RetainedTerminalCall<'a> {
 
 impl<'a> RetainedTerminalCall<'a> {
     /// The success slot types the call's signature declares, when that signature is concrete.
-    pub(crate) fn success_return_type_ids(self) -> Option<Vec<TypeId>> {
+    pub(crate) fn success_types(self) -> Option<&'a [TypeId]> {
         match self {
-            Self::Call(call) => call.success_return_type_ids(),
+            Self::Call(call) => call.success_types(),
             Self::Method(method) => method
                 .concrete_signature()
-                .map(|signature| signature.success_return_type_ids()),
+                .map(|signature| signature.returns.success()),
         }
     }
 
@@ -460,7 +460,7 @@ impl<'a> RetainedTerminalCall<'a> {
     pub(crate) fn declared_success_slot_count(self) -> usize {
         match self {
             Self::Call(call) => call.declared_success_slot_count(),
-            Self::Method(method) => method.declared_signature().success_return_slot_count(),
+            Self::Method(method) => method.declared_signature().returns.success().len(),
         }
     }
 
@@ -1049,7 +1049,7 @@ fn retain_deferred_call_propagation(
     // Only a single success slot can make the operand optional, so the `!` decision reads that one
     // declared type. Any other contract keeps its resolved slots, or classifies a generic call's
     // slots only when neither the declared single nor the resolved slots answer.
-    let resolved_success_types = call.success_return_type_ids();
+    let resolved_success_types = call.success_types();
     let declared_single_success_type_id = call.declared_single_success_return_type_id();
     let declared_slot_count = call.declared_success_slot_count();
     let generic_slots =
@@ -1071,7 +1071,7 @@ fn retain_deferred_call_propagation(
             value_required: declared_slot_count > 0,
             success_contract: retained_success_contract(
                 declared_single_success_type_id.as_ref(),
-                resolved_success_types.as_deref(),
+                resolved_success_types,
                 generic_slots.as_ref(),
             ),
             error_return: call.error_return(),
@@ -1111,10 +1111,9 @@ fn retain_receiver_method_propagation(
 
     let resolved_success_types = method
         .concrete_signature()
-        .map(|signature| signature.success_return_type_ids());
-    let declared_single_success_type_id =
-        method.declared_signature().single_success_return_type_id();
-    let declared_slot_count = method.declared_signature().success_return_slot_count();
+        .map(|signature| signature.returns.success());
+    let declared_single_success_type_id = method.declared_signature().returns.single_success_slot();
+    let declared_slot_count = method.declared_signature().returns.success().len();
     let generic_slots =
         if resolved_success_types.is_none() && declared_single_success_type_id.is_none() {
             Some(RetainedTerminalCall::Method(&*method).generic_success_slots(scope_context))
@@ -1134,7 +1133,7 @@ fn retain_receiver_method_propagation(
             value_required: declared_slot_count > 0,
             success_contract: retained_success_contract(
                 declared_single_success_type_id.as_ref(),
-                resolved_success_types.as_deref(),
+                resolved_success_types,
                 generic_slots.as_ref(),
             ),
             error_return: method.error_return(),
@@ -2522,7 +2521,7 @@ fn parse_retained_postfix_steps(
             let private_failure_lane =
                 scope_context.source_call_has_private_failure_lane(method_entry.function_path);
             let private_failure_candidate =
-                (private_failure_lane && signature.error_return_type_id().is_none()).then(|| {
+                (private_failure_lane && signature.returns.error().is_none()).then(|| {
                     if scope_context.generic_template_validation {
                         method_entry.function_path
                     } else {
@@ -2530,7 +2529,8 @@ fn parse_retained_postfix_steps(
                     }
                 });
             let step_result_shape = signature
-                .single_success_return_type_id()
+                .returns
+                .single_success_slot()
                 .map(|type_id| intern_concrete_shape(scope_context, type_id))
                 .transpose()?;
             // The concrete request takes its ledger slot here, after every fallible step above, so a

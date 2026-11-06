@@ -369,25 +369,15 @@ fn fallible_core_trait_appends_error_return_channel() {
         .first()
         .expect("fallible core trait must have a requirement");
     assert_eq!(
-        requirement.returns.len(),
+        requirement.returns.success().len() + usize::from(requirement.returns.is_fallible()),
         2,
         "fallible core trait requirement must carry the Error! return slot"
     );
-    assert!(requirement.returns.iter().any(|slot| matches!(
-        slot.channel,
-        crate::compiler_frontend::ast::statements::functions::ReturnChannel::Error
-    )));
     let error_return = requirement
         .returns
-        .iter()
-        .find(|slot| {
-            matches!(
-                slot.channel,
-                crate::compiler_frontend::ast::statements::functions::ReturnChannel::Error
-            )
-        })
+        .error()
         .expect("fallible core trait must have an Error! return slot");
-    assert_eq!(error_return.type_id, error_type_id);
+    assert_eq!(error_return, error_type_id);
 }
 
 #[test]
@@ -645,20 +635,14 @@ fn assert_registered_core_cast_trait(
         BuiltinCastFallibility::Infallible => 1,
         BuiltinCastFallibility::Fallible => 2,
     };
-    assert_eq!(requirement.returns.len(), expected_return_count);
-    assert_eq!(requirement.returns[0].type_id, target_type_id);
-    assert!(matches!(
-        requirement.returns[0].channel,
-        crate::compiler_frontend::ast::statements::functions::ReturnChannel::Success
-    ));
+    assert_eq!(
+        requirement.returns.success().len() + usize::from(requirement.returns.is_fallible()),
+        expected_return_count
+    );
+    assert_eq!(requirement.returns.success(), [target_type_id]);
 
     if fallibility == BuiltinCastFallibility::Fallible {
-        let error_return = &requirement.returns[1];
-        assert_eq!(error_return.type_id, error_type_id);
-        assert!(matches!(
-            error_return.channel,
-            crate::compiler_frontend::ast::statements::functions::ReturnChannel::Error
-        ));
+        assert_eq!(requirement.returns.error(), Some(error_type_id));
     }
 }
 

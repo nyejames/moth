@@ -13,13 +13,14 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::public_interface::{
     PublicGenericParameterSurface, PublicTraitParameterContract, PublicTraitReceiverAccess,
     TraitSurfaceTypeIdentity,
 };
 use crate::compiler_frontend::semantic_identity::{OriginFunctionId, OriginTraitId};
 use crate::compiler_frontend::traits::definitions::{
-    ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement, ResolvedTraitReturn,
+    ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement,
     TraitReceiverRequirement, TraitVisibility,
 };
 use crate::compiler_frontend::traits::evidence::environment::{
@@ -205,16 +206,19 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             });
         }
 
-        let mut returns = Vec::with_capacity(requirement.returns.len());
-        for returned in &requirement.returns {
-            let type_id =
-                self.project_imported_trait_surface_type(&returned.type_identity, this_type)?;
-            returns.push(ResolvedTraitReturn {
-                type_id,
-                channel: returned.channel,
-                span: None,
-            });
-        }
+        let success = requirement
+            .returns
+            .success
+            .iter()
+            .map(|identity| self.project_imported_trait_surface_type(identity, this_type))
+            .collect::<Result<Vec<_>, _>>()?;
+        let error = requirement
+            .returns
+            .error
+            .as_ref()
+            .map(|identity| self.project_imported_trait_surface_type(identity, this_type))
+            .transpose()?;
+        let returns = CallableReturnShape::from_slots(success, error);
 
         Ok(ResolvedTraitRequirement {
             id: requirement_id,

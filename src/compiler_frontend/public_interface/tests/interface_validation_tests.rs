@@ -8,10 +8,10 @@
 //! these failures belong at the publication boundary rather than in source dependency diagnostics.
 
 use super::super::model::{
-    ConcreteCallSummaryRecord, PublicBindingExport, PublicEvidenceOwnership, PublicEvidenceRecord,
-    PublicEvidenceRequirementMapping, PublicFieldTypeSlot, PublicFunctionSemantics,
-    PublicParameterTypeSlot, PublicReturnTypeSlot, PublicTraitReceiverAccess,
-    PublicTraitRequirementSurface,
+    ConcreteCallSummaryRecord, PublicBindingExport, PublicCallableReturns, PublicEvidenceOwnership,
+    PublicEvidenceRecord, PublicEvidenceRequirementMapping, PublicFieldTypeSlot,
+    PublicFunctionSemantics, PublicParameterTypeSlot, PublicReturnTypeSlot,
+    PublicTraitReceiverAccess, PublicTraitRequirementSurface, PublicTraitReturns,
 };
 use super::super::{
     LocalPublicInterface, PublicDeclarationRecord, PublicDeclarationSemantics,
@@ -93,8 +93,10 @@ fn evidence_interface(requirement_names: &[&str]) -> PublicSemanticInterface {
                 contract:
                     crate::compiler_frontend::public_interface::PublicParameterContract::Value,
             }],
-            returns: Vec::new(),
-            error_return: None,
+            returns: PublicCallableReturns {
+                success: Vec::new(),
+                error: None,
+            },
         });
         mappings.push(PublicEvidenceRequirementMapping {
             requirement_identity: StableTraitRequirementIdentity::new(
@@ -134,7 +136,10 @@ fn evidence_interface(requirement_names: &[&str]) -> PublicSemanticInterface {
                             name: (*name).to_owned(),
                             receiver_access: PublicTraitReceiverAccess::Immutable,
                             parameters: Vec::new(),
-                            returns: Vec::new(),
+                            returns: PublicTraitReturns {
+                                success: Vec::new(),
+                                error: None,
+                            },
                         })
                         .collect(),
                     incompatibilities: Vec::new(),
@@ -163,8 +168,10 @@ fn function_record(
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
             category,
             parameters: Vec::new(),
-            returns: Vec::new(),
-            error_return: None,
+            returns: PublicCallableReturns {
+                success: Vec::new(),
+                error: None,
+            },
         }),
     }
 }
@@ -411,18 +418,20 @@ fn accepts_external_type_with_same_stable_identity_and_different_local_ids() {
                     },
                 ),
                 parameters: Vec::new(),
-                returns: vec![PublicReturnTypeSlot {
-                    type_identity: CanonicalTypeIdentity::ExternalOpaque(
-                        ExternalOpaqueTypeIdentity::new(
-                            StablePackageIdentity::binding(
-                                crate::builder_surface::PackageOrigin::Builder,
-                                "@shared/api",
+                returns: PublicCallableReturns {
+                    success: vec![PublicReturnTypeSlot {
+                        type_identity: CanonicalTypeIdentity::ExternalOpaque(
+                            ExternalOpaqueTypeIdentity::new(
+                                StablePackageIdentity::binding(
+                                    crate::builder_surface::PackageOrigin::Builder,
+                                    "@shared/api",
+                                ),
+                                ExternalSymbolPath::from_single("Handle"),
                             ),
-                            ExternalSymbolPath::from_single("Handle"),
                         ),
-                    ),
-                }],
-                error_return: None,
+                    }],
+                    error: None,
+                },
             }),
         }],
         reusable_evidence: Vec::new(),
@@ -467,16 +476,18 @@ fn rejects_direct_private_nominal_before_interface_closure() {
                 generic_parameters: Vec::new(),
             }),
             parameters: Vec::new(),
-            returns: vec![PublicReturnTypeSlot {
-                type_identity: CanonicalTypeIdentity::ModulePrivateNominal(
-                    ModulePrivateNominalIdentity::new(
-                        module_origin(),
-                        "Hidden".to_owned(),
-                        OriginTypeCategory::Struct,
+            returns: PublicCallableReturns {
+                success: vec![PublicReturnTypeSlot {
+                    type_identity: CanonicalTypeIdentity::ModulePrivateNominal(
+                        ModulePrivateNominalIdentity::new(
+                            module_origin(),
+                            "Hidden".to_owned(),
+                            OriginTypeCategory::Struct,
+                        ),
                     ),
-                ),
-            }],
-            error_return: None,
+                }],
+                error: None,
+            },
         }),
     };
 
@@ -519,10 +530,12 @@ fn rejects_nested_private_generic_instance_before_publication() {
                     },
                 ),
                 parameters: Vec::new(),
-                returns: vec![PublicReturnTypeSlot {
-                    type_identity: CanonicalTypeIdentity::Option(Box::new(private_instance)),
-                }],
-                error_return: None,
+                returns: PublicCallableReturns {
+                    success: vec![PublicReturnTypeSlot {
+                        type_identity: CanonicalTypeIdentity::Option(Box::new(private_instance)),
+                    }],
+                    error: None,
+                },
             }),
         }],
         reusable_evidence: Vec::new(),
@@ -593,8 +606,10 @@ fn rejects_missing_concrete_receiver_summary() {
                 method_origin,
                 category: PublicReceiverMethodCategory::ConcreteLocal,
                 parameters: Vec::new(),
-                returns: Vec::new(),
-                error_return: None,
+                returns: PublicCallableReturns {
+                    success: Vec::new(),
+                    error: None,
+                },
             }],
         }),
     };
@@ -656,10 +671,12 @@ fn closes_provider_reexport_over_nested_nominal_without_adding_a_public_binding(
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
             category: PublicFunctionCategory::ConcreteLocal,
             parameters: Vec::new(),
-            returns: vec![PublicReturnTypeSlot {
-                type_identity: CanonicalTypeIdentity::SourceNominal(card_origin.clone()),
-            }],
-            error_return: None,
+            returns: PublicCallableReturns {
+                success: vec![PublicReturnTypeSlot {
+                    type_identity: CanonicalTypeIdentity::SourceNominal(card_origin.clone()),
+                }],
+                error: None,
+            },
         }),
     };
     let provider = PublicSemanticInterface {
@@ -774,9 +791,12 @@ fn accepts_source_owned_evidence_for_canonical_core_trait() {
     let PublicDeclarationSemantics::Struct(target) = &mut target_declaration.semantics else {
         unreachable!("target fixture is a struct");
     };
-    target.receiver_methods[0].returns = vec![PublicReturnTypeSlot {
-        type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-    }];
+    target.receiver_methods[0].returns = PublicCallableReturns {
+        success: vec![PublicReturnTypeSlot {
+            type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+        }],
+        error: None,
+    };
 
     interface
         .validate_for_publication()
@@ -942,8 +962,10 @@ fn rejects_reusable_evidence_method_on_another_receiver() {
                     contract:
                         crate::compiler_frontend::public_interface::PublicParameterContract::Value,
                 }],
-                returns: Vec::new(),
-                error_return: None,
+                returns: PublicCallableReturns {
+                    success: Vec::new(),
+                    error: None,
+                },
             }],
         }),
     });

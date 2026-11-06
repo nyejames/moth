@@ -1,6 +1,7 @@
 //! Runtime helper source and emitted behavior tests for JavaScript output.
 
 use super::support::*;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapEntry, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -180,8 +181,7 @@ fn collection_remove_call_is_not_wrapped_with_result_propagate() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -262,8 +262,7 @@ fn collection_length_call_is_not_wrapped_with_result_propagate() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
@@ -367,8 +366,7 @@ fn cast_float_to_int_uses_exact_i32_range_helper() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: Some(types.error),
+        returns: CallableReturnShape::from_slots(vec![], Some(types.error)),
     };
 
     let module = build_module(
@@ -693,8 +691,7 @@ fn lower_error_runtime_module() -> String {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
     let module = build_module(
         expressions,

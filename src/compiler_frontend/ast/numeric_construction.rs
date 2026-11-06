@@ -708,15 +708,13 @@ impl DeferredCall {
     ///       instead of a declared slot list that still names generic parameters.
     /// WHY: multi-bind targets and catch sites need exact slot types while the value is pending;
     ///      the external lane supplies its own host-signature projection.
-    pub(crate) fn success_return_type_ids(&self) -> Option<Vec<TypeId>> {
+    pub(crate) fn success_types(&self) -> Option<&[TypeId]> {
         Some(match self {
-            DeferredCall::Source(deferred) => deferred.success_result_type_ids.clone(),
-            DeferredCall::Receiver(deferred) => {
-                deferred.concrete_signature()?.success_return_type_ids()
-            }
-            DeferredCall::External(deferred) => deferred.result_type_ids.clone(),
-            DeferredCall::Struct(deferred) => vec![deferred.type_id],
-            DeferredCall::Choice(deferred) => vec![deferred.choice_type_id],
+            DeferredCall::Source(deferred) => &deferred.success_result_type_ids,
+            DeferredCall::Receiver(deferred) => deferred.concrete_signature()?.returns.success(),
+            DeferredCall::External(deferred) => &deferred.result_type_ids,
+            DeferredCall::Struct(deferred) => std::slice::from_ref(&deferred.type_id),
+            DeferredCall::Choice(deferred) => std::slice::from_ref(&deferred.choice_type_id),
             DeferredCall::Generic(_) | DeferredCall::GenericNominal(_) => return None,
         })
     }
@@ -731,15 +729,13 @@ impl DeferredCall {
         match self {
             DeferredCall::Source(deferred) => deferred.success_result_type_ids.len(),
             DeferredCall::Receiver(deferred) => {
-                deferred.declared_signature().success_return_slot_count()
+                deferred.declared_signature().returns.success().len()
             }
             DeferredCall::External(deferred) => deferred.result_type_ids.len(),
             DeferredCall::Struct(_) | DeferredCall::Choice(_) | DeferredCall::GenericNominal(_) => {
                 1
             }
-            DeferredCall::Generic(deferred) => {
-                deferred.template.signature.success_return_slot_count()
-            }
+            DeferredCall::Generic(deferred) => deferred.template.signature.returns.success().len(),
         }
     }
 
@@ -752,11 +748,11 @@ impl DeferredCall {
     pub(crate) fn declared_single_success_return_type_id(&self) -> Option<TypeId> {
         match self {
             DeferredCall::Generic(deferred) => {
-                deferred.template.signature.single_success_return_type_id()
+                deferred.template.signature.returns.single_success_slot()
             }
-            DeferredCall::Receiver(deferred) => deferred
-                .declared_signature()
-                .single_success_return_type_id(),
+            DeferredCall::Receiver(deferred) => {
+                deferred.declared_signature().returns.single_success_slot()
+            }
             other => other.single_success_return_type_id(),
         }
     }

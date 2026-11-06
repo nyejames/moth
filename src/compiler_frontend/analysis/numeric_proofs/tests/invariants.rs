@@ -11,6 +11,7 @@ use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
@@ -346,8 +347,7 @@ impl ProofFixture {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            returns: Box::new([]),
-            error_return: None,
+            returns: CallableReturnShape::from_slots([], None),
         });
         self.module
             .function_origins

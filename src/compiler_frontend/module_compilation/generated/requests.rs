@@ -245,8 +245,7 @@ pub(crate) fn install_generated_request_contracts<'a>(
             &mapping,
             &mut module_ast.type_environment,
         );
-        let returns = signature.success_return_type_ids();
-        let error_return = signature.error_return_type_id();
+        let returns = signature.returns.clone();
         identities.push(CanonicalGeneratedRequest {
             identity: identity.clone(),
             function_name: path_fork.component(request.key.function_path),
@@ -260,7 +259,6 @@ pub(crate) fn install_generated_request_contracts<'a>(
             },
             summary,
             returns,
-            error_return,
         };
 
         module_ast

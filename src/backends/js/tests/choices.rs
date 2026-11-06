@@ -1,6 +1,7 @@
 //! Choice construction and match lowering tests for JavaScript output.
 
 use super::support::*;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirVariantCarrier, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -83,8 +84,7 @@ fn choice_variant_construction_emits_tagged_carrier() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let mut module = build_module(
@@ -206,8 +206,7 @@ fn choice_match_lowers_to_structured_if_with_choice_tags() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let mut module = build_module(
@@ -322,8 +321,7 @@ fn choice_match_with_wildcard_arm_emits_true_condition() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let mut module = build_module(
@@ -478,8 +476,7 @@ fn relational_match_patterns_emit_correct_js_operators() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        returns: CallableReturnShape::from_slots(vec![], None),
     };
 
     let module = build_module(
