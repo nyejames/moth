@@ -2,12 +2,12 @@ A slot is a place where another template supplies content.
 
 [codeblock, $code("moth"):
     card = [:
-        <h1>[$slot("title")]</h1>
+        <h1>[$slot title = "Untitled"]</h1>
         <section>[$slot]</section>
     ]
 
     [card:
-        [$insert("title"): Welcome]
+        [$in title:Welcome]
         This is the card body.
     ]
 ]
@@ -16,4 +16,13 @@ The named `title` slot receives `Welcome`.
 
 The default slot receives the body text.
 
-Slots that receive no content become empty strings.
+Without an insert, `title` shows its `Untitled` default while an empty default
+slot renders nothing. Each slot occurrence owns its own compile-time `String`
+default, and an explicitly empty insert still suppresses it.
+
+Positional slots use `$slot 1` and are filled by loose head contributions. `$in`
+targets a named slot only and has no positional form. Slots that receive no
+content and have no default become empty strings.
+
+See @../templates/#template-slots (Template slots) for declaration forms,
+positional routing, stored inserts and runtime contributions.

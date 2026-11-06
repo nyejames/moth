@@ -1,14 +1,9 @@
 //! Tests for shared HTML shell rendering.
 
 use super::*;
-use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
+use crate::projects::html_project::html_slot_plan::{HtmlPageMetadata, HtmlSlotPlan};
 use crate::projects::html_project::output_plan::{CanonicalPageRoute, derive_logical_html_path};
-use crate::projects::html_project::page_metadata::HtmlPageMetadata;
-use crate::projects::html_project::resource_output_plan::{
-    HtmlResourceOutputPlan, ResourceUrlContext,
-};
-use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use crate::projects::html_project::tests::test_support::{
     assert_fragment_before_body_close, assert_has_basic_shell,
 };
@@ -20,20 +15,15 @@ fn root_route() -> CanonicalPageRoute {
 
 fn render_shell(
     config: &HtmlDocumentConfig,
-    page_metadata: &HtmlPageMetadata,
+    slot_plan: &HtmlSlotPlan,
     route: &CanonicalPageRoute,
     project_name: &str,
     body_html: &str,
     script_html: &str,
 ) -> String {
-    let output_plan = HtmlResourceOutputPlan::new(project_name);
-    let context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
-    let structural_url_renderer = StructuralUrlRenderer::new(&output_plan, &context, "/");
-
     render_html_document_shell(HtmlDocumentShellInput {
         config,
-        page_metadata,
-        structural_url_renderer: &structural_url_renderer,
+        slot_plan,
         route,
         project_name,
         body_html: body_html.to_owned(),
@@ -43,11 +33,19 @@ fn render_shell(
     .expect("document shell should render for valid route inputs")
 }
 
+/// Build a default slot plan with the supplied page metadata.
+fn slot_plan_with_metadata(metadata: HtmlPageMetadata) -> HtmlSlotPlan {
+    HtmlSlotPlan {
+        metadata,
+        ..HtmlSlotPlan::default()
+    }
+}
+
 #[test]
 fn renderer_outputs_full_document_shell() {
     let html = render_shell(
         &HtmlDocumentConfig::default(),
-        &HtmlPageMetadata::default(),
+        &HtmlSlotPlan::default(),
         &root_route(),
         "",
         "<h1>Hello</h1>\n",
@@ -62,7 +60,7 @@ fn renderer_outputs_full_document_shell() {
 fn renderer_uses_route_title_fallback_before_project_name() {
     let html = render_shell(
         &HtmlDocumentConfig::default(),
-        &HtmlPageMetadata::default(),
+        &HtmlSlotPlan::default(),
         &derive_logical_html_path(
             Path::new("src/docs/basics/@page.moth"),
             Some(Path::new("src")),
@@ -77,16 +75,97 @@ fn renderer_uses_route_title_fallback_before_project_name() {
 }
 
 #[test]
-fn renderer_escapes_all_html_sensitive_metadata_bytes() {
+fn empty_metadata_contributions_remain_supplied_and_suppress_fallbacks() {
     let metadata = HtmlPageMetadata {
-        title: Some(OwnedFoldedString::Text("A & < > \" '".to_owned())),
-        description: Some(OwnedFoldedString::Text("D & < > \" '".to_owned())),
-        lang: Some(OwnedFoldedString::Text("L & < > \" '".to_owned())),
+        title: Some(String::new()),
+        lang: Some(String::new()),
+        body_style: Some(String::new()),
         ..HtmlPageMetadata::default()
     };
+    let slot_plan = slot_plan_with_metadata(metadata);
+
     let html = render_shell(
         &HtmlDocumentConfig::default(),
-        &metadata,
+        &slot_plan,
+        &root_route(),
+        "Project",
+        "",
+        "",
+    );
+
+    assert!(html.contains("<title></title>"));
+    assert!(html.contains("<html lang=\"\">"));
+    assert!(html.contains("<body style=\"\">"));
+}
+
+#[test]
+fn stylesheet_links_precede_import_map_and_additional_head_content() {
+    let slot_plan = HtmlSlotPlan {
+        stylesheet_hrefs: vec![String::from("./styles/site.css")],
+        extra_head_html: String::from("<meta name=\"extension\">"),
+        ..HtmlSlotPlan::default()
+    };
+
+    let html = render_html_document_shell(HtmlDocumentShellInput {
+        config: &HtmlDocumentConfig::default(),
+        slot_plan: &slot_plan,
+        route: &root_route(),
+        project_name: "",
+        body_html: String::new(),
+        script_html: String::new(),
+        import_map_html: Some(String::from(
+            "<script type=\"importmap\">{\"imports\":{}}</script>\n",
+        )),
+    })
+    .expect("document shell should render");
+
+    let stylesheet = html
+        .find("    <link rel=\"stylesheet\" href=\"./styles/site.css\">\n")
+        .expect("stylesheet link should render");
+    let import_map = html
+        .find("<script type=\"importmap\">")
+        .expect("import map should render");
+    let additional_head = html
+        .find("<meta name=\"extension\">")
+        .expect("additional head content should render");
+    let head_close = html.find("  </head>").expect("head should close");
+
+    assert!(stylesheet < import_map);
+    assert!(import_map < additional_head);
+    assert!(additional_head < head_close);
+}
+
+#[test]
+fn stylesheet_hrefs_are_html_escaped() {
+    let slot_plan = HtmlSlotPlan {
+        stylesheet_hrefs: vec![String::from("styles/a&b.css")],
+        ..HtmlSlotPlan::default()
+    };
+
+    let html = render_shell(
+        &HtmlDocumentConfig::default(),
+        &slot_plan,
+        &root_route(),
+        "",
+        "",
+        "",
+    );
+
+    assert!(html.contains("href=\"styles/a&amp;b.css\""));
+}
+
+#[test]
+fn renderer_escapes_all_html_sensitive_metadata_bytes() {
+    let metadata = HtmlPageMetadata {
+        title: Some("A & < > \" '".to_owned()),
+        description: Some("D & < > \" '".to_owned()),
+        lang: Some("L & < > \" '".to_owned()),
+        ..HtmlPageMetadata::default()
+    };
+    let slot_plan = slot_plan_with_metadata(metadata);
+    let html = render_shell(
+        &HtmlDocumentConfig::default(),
+        &slot_plan,
         &root_route(),
         "",
         "",
@@ -105,7 +184,7 @@ fn renderer_keeps_script_inside_body() {
     let script = "<script>const message = `first\n    nested`;\nbootstrap(message)</script>\n";
     let html = render_shell(
         &HtmlDocumentConfig::default(),
-        &HtmlPageMetadata::default(),
+        &HtmlSlotPlan::default(),
         &root_route(),
         "",
         "<div>content</div>\n",
@@ -124,7 +203,7 @@ fn renderer_preserves_whitespace_sensitive_body_content() {
     let body = "<pre><code>first\n    nested\n</code></pre>";
     let html = render_shell(
         &HtmlDocumentConfig::default(),
-        &HtmlPageMetadata::default(),
+        &HtmlSlotPlan::default(),
         &root_route(),
         "",
         body,
@@ -139,7 +218,7 @@ fn renderer_preserves_whitespace_sensitive_body_content() {
 fn renderer_adds_only_missing_fragment_separator_newline() {
     let ending_with_newline = render_shell(
         &HtmlDocumentConfig::default(),
-        &HtmlPageMetadata::default(),
+        &HtmlSlotPlan::default(),
         &root_route(),
         "",
         "<span>one</span>\n",
@@ -150,7 +229,7 @@ fn renderer_adds_only_missing_fragment_separator_newline() {
 
     let without_newline = render_shell(
         &HtmlDocumentConfig::default(),
-        &HtmlPageMetadata::default(),
+        &HtmlSlotPlan::default(),
         &root_route(),
         "",
         "<span>two</span>",
@@ -163,7 +242,7 @@ fn renderer_adds_only_missing_fragment_separator_newline() {
 fn renderer_injects_codeblock_scroll_styles() {
     let html = render_shell(
         &HtmlDocumentConfig::default(),
-        &HtmlPageMetadata::default(),
+        &HtmlSlotPlan::default(),
         &root_route(),
         "",
         "<h1>Hello</h1>\n",
@@ -208,7 +287,7 @@ fn extract_css_rule<'a>(css: &'a str, selector: &str) -> &'a str {
 fn renderer_injects_every_shared_code_role_selector() {
     let html = render_shell(
         &HtmlDocumentConfig::default(),
-        &HtmlPageMetadata::default(),
+        &HtmlSlotPlan::default(),
         &root_route(),
         "",
         "<h1>Hello</h1>\n",
@@ -243,7 +322,7 @@ fn renderer_injects_every_shared_code_role_selector() {
 fn renderer_no_longer_emits_old_code_role_names() {
     let html = render_shell(
         &HtmlDocumentConfig::default(),
-        &HtmlPageMetadata::default(),
+        &HtmlSlotPlan::default(),
         &root_route(),
         "",
         "<h1>Hello</h1>\n",

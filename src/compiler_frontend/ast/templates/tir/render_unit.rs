@@ -291,11 +291,14 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_loop_aggregate_wrapp
         &head_prefix_nodes,
         template_ir_store,
     )?;
+    // The candidate root is the authored head prefix followed by the aggregate
+    // output marker, so its head boundary is the prefix length.
     let composed_root = compose_tir_head_chain_from_root(
         template_ir_store,
         expression_builder,
         const_values,
         aggregate_root,
+        head_prefix_nodes.len(),
         string_table,
         true,
         external_package_registry,

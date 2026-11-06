@@ -748,6 +748,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         source_provider_dependencies: &source_provider_dependencies,
         provider_materialisations: &provider_materialisations,
         builder_runtime_packages: &[],
+        builder_root_slots: None,
     };
 
     let generated_store = super::super::generated_store::BoundaryGeneratedFunctionStore::default();
@@ -956,6 +957,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         source_provider_dependencies: &source_provider_dependencies,
         provider_materialisations: &provider_materialisations,
         builder_runtime_packages: &[],
+        builder_root_slots: None,
     };
     let generated_store = super::super::generated_store::BoundaryGeneratedFunctionStore::default();
     #[cfg(feature = "timers")]
@@ -1148,6 +1150,7 @@ third || -> I32:
         source_provider_dependencies: &source_provider_dependencies,
         provider_materialisations: &provider_materialisations,
         builder_runtime_packages: &[],
+        builder_root_slots: None,
     };
     let generated_store = super::super::generated_store::BoundaryGeneratedFunctionStore::default();
     #[cfg(feature = "timers")]

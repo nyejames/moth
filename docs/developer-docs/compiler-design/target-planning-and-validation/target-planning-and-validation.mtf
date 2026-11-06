@@ -28,32 +28,32 @@ Some functions are born with **affinity**. A JavaScript-owned entry that must or
 Requirements **propagate backwards** along call edges. If a callee needs the DOM, callers that must reach it inherit the constraint under the accepted propagation rules. Neutral callees can still sit in Wasm when callers bridge correctly.
 
 [diagram:
-    [$insert("label"): A capability requirement travels backwards along call edges]
-    [$insert("caption"): The helper needs the DOM, so anything that must reach it inherits the requirement. Constraints climb towards callers, which is why a caller can be moved by a decision made three calls away.]
+    [$in label: A capability requirement travels backwards along call edges]
+    [$in caption: The helper needs the DOM, so anything that must reach it inherits the requirement. Constraints climb towards callers, which is why a caller can be moved by a decision made three calls away.]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Callee]
-            [$insert("title"): Touches the DOM]
+            [$in href: ./]
+            [$in eyebrow: Callee]
+            [$in title: Touches the DOM]
             This helper can only run where a DOM exists, so it is JavaScript-bound.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Caller]
-            [$insert("title"): Inherits the requirement]
+            [$in href: ./]
+            [$in eyebrow: Caller]
+            [$in title: Inherits the requirement]
             A caller that must reach the helper picks up the same constraint.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ../linking-entries-and-reachability/]
-            [$insert("eyebrow"): Root]
-            [$insert("title"): start lands in JavaScript]
+            [$in href: ../linking-entries-and-reachability/]
+            [$in eyebrow: Root]
+            [$in title: start lands in JavaScript]
             The requirement surfaces at the entry. Neutral callees stay in Wasm where callers bridge correctly.
         ]
     ]

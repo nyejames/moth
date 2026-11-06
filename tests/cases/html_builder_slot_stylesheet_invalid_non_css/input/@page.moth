@@ -1,0 +1,4 @@
+-- Only CSS resources are stylesheet links; SVG needs a manual head link.
+#[$in stylesheets: [@static/theme.svg]]
+
+#[:<main>invalid non-css stylesheet</main>]

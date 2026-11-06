@@ -1,4 +1,4 @@
-**Current support versus accepted design.** `@project` is implemented. `$page` is accepted queued design. Pages today still use reserved `page_title` and related names. See @../progress (Progress).
+`@project` and HTML builder slots are implemented. General `$entry` and runtime `io.set_title` remain queued. See @../progress (Progress).
 
 ### Using `@project`
 
@@ -12,19 +12,34 @@ Bind `@project` to read predefined project fields:
 
 `@project` is never implicitly injected.
 
-### Root-only `$page`
+### HTML metadata
 
-`$page` will be legal only on a normal module root, or on an explicitly selected synthetic single-file root. Helper files cannot declare pages.
+Direct const inserts on an active root set document metadata:
 
 [codeblock, $code("moth"):
-    $page(title = "About")
+    #[$in title:About]
+    #[$in stylesheets:[@styles/site.css]]
+    #[: <main>About this site</main>]
 ]
 
-Bare `$page` uses defaults. `$page()` is invalid. Title, description, language, favicon, body style and head content are optional compile-time arguments.
+HTML also accepts `description`, `lang`, `favicon`, `body_style` and `head`.
+Repeated scalar contributions concatenate. A supplied empty value differs from
+an absent slot. An absent title uses the route and then the project name with
+the configured prefix and postfix; absent description emits nothing and the
+other values use builder defaults. The builder escapes title text and attribute
+values. Each stylesheet insert needs one tracked CSS resource. The builder keeps
+the first contribution for each resource origin and renders its URL relative to
+the output page.
 
-`$page` is the initial document metadata. Runtime `io.set_title` is a later capability-checked call, not a rewrite of that metadata.
+`head` inserts raw HTML after built-in head content. Identical complete head
+contributions render once. Old `page_*` constants have no implicit metadata
+effect. JavaScript and HTML-Wasm documents use the same slot plan.
 
-HTML `build` and `dev` need a page somewhere under the selected project root. `check` can accept a valid project with no page. Future `$test` is a later non-page purpose.
+A metadata-only root still produces a page because a direct const contribution
+counts as root activity. Runtime top-level templates contribute only to the
+body; runtime named builder slots are unsettled and are not supported. General
+`$entry` root purpose and runtime title mutation remain separate future
+features. The earlier `$page` proposal is superseded and is not current syntax.
 
 ### Concepts related to entry basics
 

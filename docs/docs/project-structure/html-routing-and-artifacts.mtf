@@ -1,4 +1,4 @@
-**Current support versus accepted design.** The Alpha HTML builder currently emits routes for roots with authored runtime work or fragments and expects an artefact at the selected project root. The accepted queued page design selects only roots with an explicit `$page` purpose. It keeps directory routes and replaces activity-based emission and the mandatory homepage with command-specific no-page rules.
+**Current support.** The Alpha HTML builder emits routes for normal module roots with authored runtime work or fragments and requires a homepage at the selected project root for directory builds. The deferred `$entry` design will select entries by explicit purpose and replace the mandatory-homepage rule with command-specific no-page rules. It keeps directory routes and path-derived route names.
 
 ### Directory-based routes
 
@@ -13,51 +13,58 @@ selected project root:
     @api.moth               -> index.html
 ]
 
-The root module maps to the project index when it declares a page. A nested
+The root module maps to the project index when its activity selects an entry. A nested
 directory maps to a nested index route. The normal module-root filename
 (`@page.moth`, `@home.moth`, `@api.moth`) has no effect on the route name.
 
-An ordinary file cannot declare a page, and `index.moth` has no special meaning.
-The page migration adds no route override, filename-derived route, page alias or
+An ordinary file cannot supply an entry, and `index.moth` has no special meaning.
+The entry-purpose migration adds no route override, filename-derived route, page alias or
 new redirect. Existing `page_url_style` and `redirect_index_html` policies stay
 unchanged.
 
-### Explicit pages
+### Entry selection
 
-After the accepted cutover, a normal module root becomes an HTML artefact only
-when it declares the root-only `$page` purpose:
+Today, a normal module root becomes an HTML artefact when it has root activity:
+a non-trivial top-level runtime body, a direct const fragment or a runtime
+fragment. A direct named builder contribution is a const fragment, so a
+metadata-only root still produces a complete document:
 
 [codeblock, $code("moth"):
-    $page
+    #[$in title:Welcome]
 ]
 
-The root at the selected project directory may remain declaration-only while
-descendant roots declare pages. Each page candidate comes from the existing
-normal-module root inventory; the builder does not scan arbitrary `.moth` files.
-A metadata-only page and a page whose metadata uses resources both produce a
-complete document.
+One normal root produces at most one directory-derived route entry. The
+explicitly selected synthetic single-file root produces the single-file
+artefact when it has the required authored content.
 
-### Command-specific no-page rules
+The deferred general `$entry` purpose will make entry selection explicit. It is
+not current syntax, and the earlier `$page` proposal is superseded. Neither
+directive may be written today.
 
-The accepted command policy distinguishes checking from HTML output:
+### Deferred command-specific no-page rules
 
-- Directory-project `check` accepts a valid project with zero pages. It still rejects authored runtime or direct output without a purpose.
-- HTML application `build` and `dev` require at least one page anywhere below the selected project root. They do not require a homepage at that root.
-- Single-file `check` accepts a declaration-only synthetic root, but authored runtime or output still needs a purpose.
-- Single-file HTML output requires `$page` on the explicitly selected synthetic root.
+The `$entry` design keeps the current command distinction but changes selection
+policy once it lands:
 
-Do not fabricate `index.html` to satisfy development tooling. Serve descendant
-routes normally. If a tool needs a launch page, choose the real homepage when
-present or the lexicographically first normalised page route. That choice
-doesn't create a redirect or route alias. Requests to an absent site root
-retain ordinary missing-route behaviour.
+- Directory-project `check` will accept a valid project with no entries.
+- HTML application `build` and `dev` will require at least one entry anywhere
+  below the selected project root, not necessarily a homepage.
+- Single-file HTML output will require an explicit entry purpose on the
+  explicitly selected root.
+
+Until that cutover, activity-based selection and the directory-build homepage
+requirement remain in force. Do not fabricate `index.html` to satisfy
+development tooling. Serve descendant routes normally. If a tool needs a
+launch page, choose the real homepage when present or the lexicographically
+first normalised page route. That choice doesn't create a redirect or route
+alias. Requests to an absent site root retain ordinary missing-route behaviour.
 
 ### Builder ownership
 
 The HTML builder owns route and artefact policy. The frontend remains
 builder-neutral. The builder decides:
 
-- which `$page` roots produce HTML artefacts
+- which active roots produce HTML artefacts
 - how routes are derived
 - how output files are organised
 - whether to reject unsupported reachable features
@@ -88,5 +95,5 @@ file with embedded JavaScript.
 ### Concepts related to HTML routing and artefacts
 
 - For module identity and cosmetic root suffixes see @#module-roots (Module roots).
-- For root purpose, fragments and dependency non-activation see @#entry-runtime-and-fragments (Active-root runtime and fragments).
-- For page metadata and `io.set_title` see @#entry-config (Entry metadata and page directives).
+- For active-root runtime, fragments and dependency non-activation see @#entry-runtime-and-fragments (Active-root runtime and fragments).
+- For builder slots and runtime title status see @#entry-config (Entry metadata and builder slots).

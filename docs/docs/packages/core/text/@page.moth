@@ -8,9 +8,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Core text"
-page_description #= "Text helper functions for String values."
-page_head #= language_theme_head
+#[$in title:["Core text"]]
+#[$in description:["Text helper functions for String values."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -25,9 +25,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):text-helpers]
-        [$insert("title"):Text helpers]
-        [$insert("advanced"):[text_advanced]]
+        [$in key:text-helpers]
+        [$in title:Text helpers]
+        [$in advanced:[text_advanced]]
 
         [text_basic]
     ]
@@ -35,9 +35,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../math/]
-        [$insert("previous_title"):Core math]
-        [$insert("next_path"):../random/]
-        [$insert("next_title"):Core random]
+        [$in previous_path:../math/]
+        [$in previous_title:Core math]
+        [$in next_path:../random/]
+        [$in next_title:Core random]
     ]
 ]

@@ -8,7 +8,9 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
 };
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::template::{TemplateConstValueKind, TemplateType};
+use crate::compiler_frontend::ast::templates::template::{
+    SlotKey, TemplateConstValueKind, TemplateType,
+};
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader, collect_option_capture_binding_path,
     loop_body_const_evaluation_bindings,
@@ -68,7 +70,7 @@ pub(crate) enum TemplatePreparationMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TemplatePreparationFacts {
     pub(crate) is_const_evaluable_shape: bool,
-    pub(crate) has_unresolved_slot_occurrences: bool,
+    pub(crate) has_unfilled_slot_occurrences: bool,
     pub(crate) has_escaped_insert_helpers: bool,
     pub(crate) final_value_kind: TemplateConstValueKind,
 }
@@ -125,6 +127,19 @@ struct PreparationWalk<'scope> {
 struct PreparationFacts {
     const_evaluable: bool,
     has_unresolved_slots: bool,
+    /// Occurrences with neither a routed value nor a default in this exact view.
+    has_unfilled_slots: bool,
+    /// Named unfilled occurrences that an inherited wrapper cannot supply itself.
+    has_unfilled_named_slots: bool,
+    /// Named occurrences with no routing presence in this exact view.
+    ///
+    /// WHAT: separates names that an inherited wrapper application cannot fill during
+    ///       folding from default or positional loose fills.
+    /// WHY: folding an inherited wrapper fills its loose target with the wrapped child,
+    ///      but a named occurrence has no such fill. Propagating only unresolved names
+    ///      keeps ordinary inherited wrappers foldable while protecting authored named
+    ///      content from being dropped.
+    has_unresolved_named_slots: bool,
     has_resolved_slot_sources: bool,
     has_slot_insertions: bool,
     wrapper_foldable: bool,
@@ -133,6 +148,15 @@ struct PreparationFacts {
 struct WrapperSetFacts {
     foldable: bool,
     contains_slot_insert: bool,
+    /// Named occurrences that no routing resolves in this view.
+    ///
+    /// WHAT: reports names that belong to an applicable wrapper application but have no
+    ///       contribution source yet.
+    /// WHY: folding a wrapper whose named occurrence is still unresolved would silently
+    ///      drop the authored content. The enclosing template must keep wrapper-template
+    ///      identity instead of being reduced to a renderable String.
+    has_unresolved_named_slots: bool,
+    has_unfilled_named_slots: bool,
 }
 
 impl Default for PreparationFacts {
@@ -140,6 +164,9 @@ impl Default for PreparationFacts {
         Self {
             const_evaluable: false,
             has_unresolved_slots: false,
+            has_unfilled_slots: false,
+            has_unfilled_named_slots: false,
+            has_unresolved_named_slots: false,
             has_resolved_slot_sources: false,
             has_slot_insertions: false,
             wrapper_foldable: true,
@@ -155,11 +182,17 @@ struct PreparationTraversalRole {
 }
 
 impl PreparationTraversalRole {
-    fn virtual_wrapper(in_aggregate_wrapper: bool) -> Self {
+    /// Wrapper trees keep the enclosing view's plan ownership.
+    ///
+    /// WHAT: marks the traversal as wrapper-virtual while inheriting the active slot plan.
+    /// WHY: runtime site planning fills conditional wrapper sets with plan-qualified
+    ///      contribution markers, so clearing the plan here would report those markers as
+    ///      appearing outside their owning plan. Ownership validation still applies: a
+    ///      wrapper set reached with no active plan must not contain markers.
+    fn virtual_wrapper(role: PreparationTraversalRole) -> Self {
         Self {
             virtual_wrapper: true,
-            in_aggregate_wrapper,
-            active_slot_plan: None,
+            ..role
         }
     }
 }
@@ -175,6 +208,9 @@ impl PreparationFacts {
     fn merge(&mut self, other: Self) {
         self.const_evaluable &= other.const_evaluable;
         self.has_unresolved_slots |= other.has_unresolved_slots;
+        self.has_unfilled_slots |= other.has_unfilled_slots;
+        self.has_unfilled_named_slots |= other.has_unfilled_named_slots;
+        self.has_unresolved_named_slots |= other.has_unresolved_named_slots;
         self.has_resolved_slot_sources |= other.has_resolved_slot_sources;
         self.has_slot_insertions |= other.has_slot_insertions;
         self.wrapper_foldable &= other.wrapper_foldable;
@@ -352,7 +388,7 @@ fn prepare_tir_view_in_scope(
         identity: view.identity(),
         facts: TemplatePreparationFacts {
             is_const_evaluable_shape: facts.const_evaluable,
-            has_unresolved_slot_occurrences: facts.has_unresolved_slots,
+            has_unfilled_slot_occurrences: facts.has_unfilled_slots,
             has_escaped_insert_helpers: facts.has_slot_insertions,
             final_value_kind: const_value_kind,
         },
@@ -394,9 +430,12 @@ impl PreparationWalk<'_> {
                 .ok_or_else(|| missing_template_error(template_id))?;
 
             self.validate_template_identity(template_id, root, view)?;
+            let mut conditional_wrapper_unresolved = false;
+            let mut conditional_wrapper_unfilled = false;
             if let Some(wrapper_set_id) = conditional_child_wrapper_set {
-                let wrapper_facts =
-                    self.walk_wrapper_set(wrapper_set_id, view, role.in_aggregate_wrapper)?;
+                // The wrapper set keeps the caller's plan ownership because a conditional
+                // wrapper may replay plan-qualified markers created for the enclosing plan.
+                let wrapper_facts = self.walk_wrapper_set(wrapper_set_id, view, role)?;
                 if !wrapper_facts.foldable {
                     let reason = if wrapper_facts.contains_slot_insert {
                         RuntimeTemplateReason::SlotContribution
@@ -408,6 +447,8 @@ impl PreparationWalk<'_> {
                         self.record_runtime(reason);
                     }
                 }
+                conditional_wrapper_unresolved = wrapper_facts.has_unresolved_named_slots;
+                conditional_wrapper_unfilled = wrapper_facts.has_unfilled_named_slots;
             }
             let mut node_role = role;
             let runtime_slot_plan_facts = if let Some(slot_plan_id) = runtime_slot_plan {
@@ -425,6 +466,14 @@ impl PreparationWalk<'_> {
             };
             let mut facts = self.walk_node(root, view, loop_binding_paths, &node_role)?;
             facts.merge(runtime_slot_plan_facts);
+            if conditional_wrapper_unresolved {
+                facts.has_unresolved_slots = true;
+                facts.has_unresolved_named_slots = true;
+            }
+            if conditional_wrapper_unfilled {
+                facts.has_unfilled_slots = true;
+                facts.has_unfilled_named_slots = true;
+            }
 
             if matches!(
                 kind,
@@ -521,11 +570,7 @@ impl PreparationWalk<'_> {
                     if let Some(context) = view.effective_wrapper_context(*occurrence_id)?
                         && let Some(wrapper_set_ref) = context.inherited_wrapper_set
                     {
-                        let wrapper_facts = self.walk_wrapper_set(
-                            wrapper_set_ref,
-                            view,
-                            role.in_aggregate_wrapper,
-                        )?;
+                        let wrapper_facts = self.walk_wrapper_set(wrapper_set_ref, view, *role)?;
                         if !context.skip_parent_child_wrappers && !wrapper_facts.foldable {
                             let reason = if wrapper_facts.contains_slot_insert {
                                 RuntimeTemplateReason::SlotContribution
@@ -533,6 +578,21 @@ impl PreparationWalk<'_> {
                                 RuntimeTemplateReason::InheritedWrapperApplication
                             };
                             self.record_role_runtime(&mut facts, role, reason);
+                        }
+                        if !context.skip_parent_child_wrappers
+                            && wrapper_facts.has_unresolved_named_slots
+                        {
+                            // The wrapper applies to this occurrence, so its unresolved
+                            // named occurrences are part of the enclosing output. Report
+                            // them before folding can reduce the tree to a String.
+                            facts.has_unresolved_slots = true;
+                            facts.has_unresolved_named_slots = true;
+                        }
+                        if !context.skip_parent_child_wrappers
+                            && wrapper_facts.has_unfilled_named_slots
+                        {
+                            facts.has_unfilled_slots = true;
+                            facts.has_unfilled_named_slots = true;
                         }
                     }
                     let child_template_id = reference.root;
@@ -559,6 +619,16 @@ impl PreparationWalk<'_> {
                 TemplateIrNodeKind::Slot { placeholder } => {
                     let mut facts = PreparationFacts::const_value();
                     facts.has_unresolved_slots = true;
+                    let slot_resolution =
+                        view.effective_slot_resolution(placeholder.occurrence_id)?;
+                    if slot_resolution.is_none() && placeholder.default.is_none() {
+                        facts.has_unfilled_slots = true;
+                        facts.has_unfilled_named_slots =
+                            matches!(placeholder.key, SlotKey::Named(_));
+                    }
+                    if slot_resolution.is_none() && matches!(placeholder.key, SlotKey::Named(_)) {
+                        facts.has_unresolved_named_slots = true;
+                    }
                     for wrapper_set_id in [
                         placeholder.applied_child_wrapper_set,
                         placeholder.child_wrapper_set,
@@ -566,8 +636,7 @@ impl PreparationWalk<'_> {
                     .into_iter()
                     .flatten()
                     {
-                        let wrapper_facts =
-                            self.walk_wrapper_set(wrapper_set_id, view, role.in_aggregate_wrapper)?;
+                        let wrapper_facts = self.walk_wrapper_set(wrapper_set_id, view, *role)?;
                         if !wrapper_facts.foldable {
                             self.record_role_runtime(
                                 &mut facts,
@@ -580,8 +649,7 @@ impl PreparationWalk<'_> {
                             );
                         }
                     }
-                    if let Some(resolution) =
-                        view.effective_slot_resolution(placeholder.occurrence_id)?
+                    if let Some(resolution) = &slot_resolution
                         && let TirSlotResolutionKind::Resolved { sources } = &resolution.kind
                     {
                         facts.has_resolved_slot_sources = true;
@@ -605,7 +673,12 @@ impl PreparationWalk<'_> {
                             role,
                             RuntimeTemplateReason::SlotWrapperApplication,
                         );
-                    } else if !role.virtual_wrapper && slot_resolution_overlay_absent {
+                    } else if !role.virtual_wrapper
+                        && slot_resolution_overlay_absent
+                        && placeholder.default.is_none()
+                    {
+                        // A defaulted occurrence with no routing overlay is a foldable
+                        // compile-time fallback, not unresolved runtime work.
                         self.record_role_runtime(
                             &mut facts,
                             role,
@@ -732,7 +805,7 @@ impl PreparationWalk<'_> {
                     );
                     Ok(facts)
                 }
-                TemplateIrNodeKind::RuntimeSlotContributionSource { plan, source } => {
+                TemplateIrNodeKind::RuntimeSlotContributionSource { plan, source, .. } => {
                     self.validate_contribution_source_marker(*plan, *source, view, role)?;
                     let mut facts = PreparationFacts::default();
                     self.record_role_runtime(
@@ -970,7 +1043,7 @@ impl PreparationWalk<'_> {
         &mut self,
         wrapper_set_id: TemplateWrapperSetId,
         view: &TirView<'_>,
-        in_aggregate_wrapper: bool,
+        role: PreparationTraversalRole,
     ) -> Result<WrapperSetFacts, TemplateError> {
         let wrapper_set = view
             .store()
@@ -979,6 +1052,8 @@ impl PreparationWalk<'_> {
         let mut facts = WrapperSetFacts {
             foldable: true,
             contains_slot_insert: false,
+            has_unresolved_named_slots: false,
+            has_unfilled_named_slots: false,
         };
         for wrapper in &wrapper_set.wrappers {
             let wrapper_view = view.wrapper(*wrapper)?;
@@ -986,13 +1061,15 @@ impl PreparationWalk<'_> {
                 wrapper.root,
                 &wrapper_view,
                 &[],
-                PreparationTraversalRole::virtual_wrapper(in_aggregate_wrapper),
+                PreparationTraversalRole::virtual_wrapper(role),
             )?;
             facts.contains_slot_insert |= wrapper_facts.has_slot_insertions
                 || view
                     .store()
                     .get_template(wrapper.root)
                     .is_some_and(|template| matches!(template.kind, TemplateType::SlotInsert(_)));
+            facts.has_unresolved_named_slots |= wrapper_facts.has_unresolved_named_slots;
+            facts.has_unfilled_named_slots |= wrapper_facts.has_unfilled_named_slots;
             if !wrapper_facts.wrapper_foldable {
                 facts.foldable = false;
             }

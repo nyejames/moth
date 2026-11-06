@@ -2,11 +2,11 @@ list = [:
     <ol>
         [$slot]
     </ol>
-    <footer>[$slot("summary")]</footer>
+    <footer>[$slot summary]</footer>
 ]
 
-row = [:<li data-copy="[$slot(1)]">[$slot]</li>]
-slot_probe = [$raw:<span>[$slot(1)]|[$slot]|</span>]
+row = [:<li data-copy="[$slot 1]">[$slot]</li>]
+slot_probe = [$raw:<span>[$slot 1]|[$slot]|</span>]
 
 items = {"one", "two"}
 
@@ -16,7 +16,7 @@ rendered = [list:
         [slot_probe, item:[$raw: 	 ]]
     ]
 
-    [$insert("summary"): done]
+    [$in summary: done]
 ]
 
 io.line(rendered)

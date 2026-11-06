@@ -693,6 +693,7 @@ fn expand_owned_runtime_template_node<'a>(
 
         OwnedRuntimeTemplateNode::Sequence { .. }
         | OwnedRuntimeTemplateNode::Text { .. }
+        | OwnedRuntimeTemplateNode::ConstantText { .. }
         | OwnedRuntimeTemplateNode::ChildTemplate { .. }
         | OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput

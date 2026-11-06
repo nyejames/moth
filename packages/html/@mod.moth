@@ -26,73 +26,71 @@ stroke_rect |this ~Canvas, x F64, y F64, width F64, height F64|:
 
 export:
     -- Basic tags
-    p #String = [$html:<p style="[$slot("style")]">[$slot]</p>]
-    h1 #String = [$html:<h1 style="[$slot("style")]">[$slot]</h1>]
-    h2 #String = [$html:<h2 style="[$slot("style")]">[$slot]</h2>]
-    h3 #String = [$html:<h3 style="[$slot("style")]">[$slot]</h3>]
-    h4 #String = [$html:<h4 style="[$slot("style")]">[$slot]</h4>]
-    h5 #String = [$html:<h5 style="[$slot("style")]">[$slot]</h5>]
-    h6 #String = [$html:<h6 style="[$slot("style")]">[$slot]</h6>]
+    p #String = [$html:<p style="[$slot style]">[$slot]</p>]
+    h1 #String = [$html:<h1 style="[$slot style]">[$slot]</h1>]
+    h2 #String = [$html:<h2 style="[$slot style]">[$slot]</h2>]
+    h3 #String = [$html:<h3 style="[$slot style]">[$slot]</h3>]
+    h4 #String = [$html:<h4 style="[$slot style]">[$slot]</h4>]
+    h5 #String = [$html:<h5 style="[$slot style]">[$slot]</h5>]
+    h6 #String = [$html:<h6 style="[$slot style]">[$slot]</h6>]
     
-    small #String = [$html:<small style="[$slot("style")]">[$slot]</small>]
-    large #String = [$html:<large style="[$slot("style")]">[$slot]</large>]
+    small #String = [$html:<small style="[$slot style]">[$slot]</small>]
+    large #String = [$html:<large style="[$slot style]">[$slot]</large>]
 
-    img #String = [$html:<img src="[$slot(1)]" style="[$slot("style")]" alt="[$slot]">]
+    img #String = [$html:<img src="[$slot 1]" style="[$slot style]" alt="[$slot]">]
 
     -- Formatting helpers
-    bold #String = [$html:<b style="[$slot("style")]">[$slot]</b>]
-    italic #String = [$html:<i style="[$slot("style")]">[$slot]</i>]
-    underline #String = [$html:<u style="[$slot("style")]">[$slot]</u>]
-    strikethrough #String = [$html:<s style="[$slot("style")]">[$slot]</s>]
+    bold #String = [$html:<b style="[$slot style]">[$slot]</b>]
+    italic #String = [$html:<i style="[$slot style]">[$slot]</i>]
+    underline #String = [$html:<u style="[$slot style]">[$slot]</u>]
+    strikethrough #String = [$html:<s style="[$slot style]">[$slot]</s>]
 
     -- Structure
-    div #String = [$html:<div style="[$slot("style")]">[$slot]</div>]
-    span #String = [$html:<span style="[$slot("style")]">[$slot]</span>]
+    div #String = [$html:<div style="[$slot style]">[$slot]</div>]
+    span #String = [$html:<span style="[$slot style]">[$slot]</span>]
 
     -- Code blocks
     codeblock #= [$html:
-        <pre style="[$slot("style")]">[$slot]</pre>
+        <pre style="[$slot style]">[$slot]</pre>
     ]
 
     -- Basic table components
     table #String = [$html:
-        <table style="[$slot("style")]">
+        <table style="[$slot style]">
             [$note: The first row can be styled differently to the rest of the table rows.]
-            <tr style="[$slot("header_style")]">
-                [$slot(1)]
+            <tr style="[$slot header_style]">
+                [$slot 1]
             </tr>
 
             [$note: Each remaining row can be styled differently.]
-            [$children([$html:<tr style="[$slot("row_style")]">[$slot]</tr>]):
+            [$before = [$html:<tr style="[$slot row_style]">], $after = [$html:</tr>]:
                 [$slot]
             ]
         </table>
     ]
 
     td #= [$html:
-        [$children([$html: <td style="[$slot("style")]">[$slot]</td>]):
+        [$before = [$html: <td style="[$slot style]">], $after = [$html:</td>]:
             [$slot]
         ]
     ]
 
     th #= [$html:
-        [$children([$html:
-            <th scope="col" style="[$slot("style")]">[$slot]</th>
-        ]):
+        [$before = [$html:<th scope="col" style="[$slot style]">], $after = [$html:</th>]:
             [$slot]
         ]
     ]
 
     -- Utility style inserts
-    center #String = [$insert("style"):text-align: center;]
-    right #String = [$insert("style"):text-align: right;]
-    left #String = [$insert("style"):text-align: left;]
-    smaller #String = [$insert("style"):font-size: smaller;]
-    medium #String = [$insert("style"):font-size: medium;]
-    larger #String = [$insert("style"):font-size: larger;]
+    center #String = [$in style:text-align: center;]
+    right #String = [$in style:text-align: right;]
+    left #String = [$in style:text-align: left;]
+    smaller #String = [$in style:font-size: smaller;]
+    medium #String = [$in style:font-size: medium;]
+    larger #String = [$in style:font-size: larger;]
 
     -- Basic Canvas component
-    canvas #String = [$html:<canvas id="[$slot("id")]" style="[$slot("style")]"></canvas>]
+    canvas #String = [$html:<canvas id="[$slot id]" style="[$slot style]"></canvas>]
 
     -- Get the basic canvas element and 2D context for drawing (opaque JS interop)
     get_canvas_context |id String| -> Canvas2d, Error!:

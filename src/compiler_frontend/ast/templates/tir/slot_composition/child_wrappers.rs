@@ -1,4 +1,4 @@
-//! TIR-native owned `$children(..)` wrapper-tree construction.
+//! TIR-native owned child-wrapper tree construction.
 //!
 //! Wrapper-context overlays own direct-child inherited wrappers. This module
 //! remains only for transforms that need a store-local owned wrapper tree,
@@ -9,13 +9,15 @@ use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionB
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{Style, TemplateType};
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference;
-use crate::compiler_frontend::ast::templates::tir::slot_layout::collect_tir_slot_layout;
+use crate::compiler_frontend::ast::templates::tir::slot_layout::collect_tir_slot_layout_with_context;
 use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIr, TemplateIrId, TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+
+use rustc_hash::FxHashMap;
 
 use super::head_chain::HeadChainResolutionInputs;
 use super::helpers::{compose_wrapper_application, internal_infrastructure_failure};
@@ -26,13 +28,15 @@ type ChildWrapperResult<T> = Result<T, TemplateError>;
 ///
 /// Wrapper sets are stored innermost-to-outermost, so forward iteration yields
 /// `outermost(innermost(child))`. Each application receives the complete wrapper
-/// reference so phase and contextual authority are preserved at the boundary.
+/// reference so phase and contextual authority are preserved at the boundary, plus
+/// the receiving application's named contributions for the names that wrapper declares.
 pub(crate) fn wrap_tir_node_in_wrappers_into(
     store: &mut TemplateIrStore,
     expressions: &AstExpressionBuilder,
     const_values: &ConstValueStore,
     child_node_id: TemplateIrNodeId,
     wrapper_references: &[TemplateWrapperReference],
+    named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
     string_table: &StringTable,
 ) -> ChildWrapperResult<TemplateIrNodeId> {
     let child_span = store
@@ -47,7 +51,11 @@ pub(crate) fn wrap_tir_node_in_wrappers_into(
     let mut current_child_node_id = child_node_id;
 
     for wrapper_reference in wrapper_references {
-        let layout = collect_tir_slot_layout(store, wrapper_reference.root)?;
+        let layout = collect_tir_slot_layout_with_context(
+            store,
+            wrapper_reference.root,
+            wrapper_reference.context,
+        )?;
 
         if layout.schema.has_any_slots() {
             let resolved = compose_wrapper_application(
@@ -62,6 +70,7 @@ pub(crate) fn wrap_tir_node_in_wrappers_into(
                 *wrapper_reference,
                 &layout,
                 vec![current_child_node_id],
+                named_fill,
                 child_span,
             )?;
 

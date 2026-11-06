@@ -25,6 +25,7 @@
 //! TIR types and the production route are implemented directly without a
 //! feature flag.
 
+use crate::compiler_frontend::ast::const_values::store::ConstValueId;
 use crate::compiler_frontend::ast::expressions::expression_store::ExprId;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
@@ -35,6 +36,7 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
 use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
 };
+use crate::compiler_frontend::ast::templates::tir::contribution_shape::ContributionShape;
 use crate::compiler_frontend::ast::templates::tir::ids::{
     ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId,
     TemplateSlotPlanId, TemplateWrapperSetId,
@@ -69,7 +71,7 @@ pub(crate) struct TemplateIr {
     pub(crate) summary: TemplateIrSummary,
 
     pub(crate) span: Option<SourceSpan>,
-    /// Parent `$children(..)` wrappers that must be applied around this
+    /// Parent `$before`/`$after` wrappers that must be applied around this
     /// template's output during folding.
     ///
     /// WHAT: references a `TemplateWrapperSet` side-table entry that stores
@@ -95,8 +97,8 @@ impl TemplateIr {
     /// Creates a top-level TIR template with no wrapper set or slot plan attached.
     ///
     /// WHAT: stores the root node, style, kind, summary, and source span.
-    /// WHY: side-table links (`conditional_child_wrapper_set`, `runtime_slot_plan`)
-    ///      are attached later by composition or slot-plan materialization.
+    /// WHY: side-table links (`conditional_child_wrapper_set`, `runtime_slot_plan`) are
+    ///      attached later by composition or slot-plan materialization.
     pub(crate) fn new(
         root: TemplateIrNodeId,
         style: Style,
@@ -212,7 +214,7 @@ pub(crate) enum TemplateIrNodeKind {
     /// Structural slot placeholder awaiting composition.
     Slot { placeholder: TirSlotPlaceholder },
 
-    /// Content contributed by an `$insert("name")` directive.
+    /// Content contributed by an `$in` directive.
     InsertContribution { template: TemplateIrId },
 
     /// One conditional selector and its selected body.
@@ -293,6 +295,24 @@ pub(crate) enum TemplateIrNodeKind {
     RuntimeSlotContributionSource {
         plan: TemplateSlotPlanId,
         source: RuntimeSlotContributionSourceId,
+
+        /// Authored contribution shape the marker replaced.
+        ///
+        /// WHAT: records whether the source is a child-template contribution and
+        /// whether it uses `$fresh`.
+        /// WHY: recursive structural named composition splices markers into
+        /// wrapper trees away from the source drafts, so the shared classifier
+        /// must recover the authored shape from the marker itself.
+        shape: ContributionShape,
+
+        /// Whether the source root emits only through template control flow.
+        ///
+        /// WHAT: lets the shared control-flow classifier answer for a marker
+        /// exactly as it answers for an authored conditional or loop root.
+        /// WHY: wrapper decisions for named markers happen during structural
+        /// composition, before the runtime source can be evaluated, and an empty
+        /// source must never emit its wrapper.
+        control_flow: bool,
     },
 
     /// Payload-free position of one numeric-dependent template position.
@@ -425,6 +445,16 @@ pub(crate) struct TirSlotPlaceholder {
     /// Stable occurrence ID for this slot placeholder.
     pub(crate) occurrence_id: SlotOccurrenceId,
 
+    /// Compile-time `String` fallback authored on this exact occurrence.
+    ///
+    /// WHAT: keeps the module-local constant ID while the module's constant store is
+    /// alive. Composition and folding fall back to this value only when no routed
+    /// contribution reaches the occurrence; public projection lowers it to an owned
+    /// stable folded string before the store is released.
+    /// WHY: defaults belong to occurrences, not slot keys. Repeated occurrences of one
+    /// key may carry different fallbacks, so the value cannot live on `TirSlotSchema`.
+    pub(crate) default: Option<ConstValueId>,
+
     /// Wrappers already applied around this slot's fallback content.
     ///
     /// WHAT: references a `TemplateWrapperSet` that was already resolved and
@@ -449,6 +479,18 @@ pub(crate) struct TirSlotPlaceholder {
     /// WHY: some slot directives suppress outer wrappers to avoid double-wrapping
     /// or to force raw child insertion.
     pub(crate) skip_parent_child_wrappers: bool,
+
+    /// Whether this exact occurrence is fixed by the application that composed it.
+    ///
+    /// WHAT: set when constant composition or wrapper filling consumed this
+    ///       occurrence with no routed contribution and an authored fallback. The
+    ///       fallback stays on the placeholder, but no enclosing application may
+    ///       route content into it. Occurrences without a fallback are removed
+    ///       instead of closed.
+    /// WHY: closure belongs to the occurrence, not the template or its key. Embedding
+    ///      it in the placeholder makes it survive node clones and subtree copies and
+    ///      keeps repeated occurrences of one key independently open or closed.
+    pub(crate) closed: bool,
 }
 
 impl TirSlotPlaceholder {
@@ -456,6 +498,7 @@ impl TirSlotPlaceholder {
     pub(crate) fn with_wrapper_sets(
         key: SlotKey,
         occurrence_id: SlotOccurrenceId,
+        default: Option<ConstValueId>,
         applied_child_wrapper_set: Option<TemplateWrapperSetId>,
         child_wrapper_set: Option<TemplateWrapperSetId>,
         skip_parent_child_wrappers: bool,
@@ -463,9 +506,11 @@ impl TirSlotPlaceholder {
         Self {
             key,
             occurrence_id,
+            default,
             applied_child_wrapper_set,
             child_wrapper_set,
             skip_parent_child_wrappers,
+            closed: false,
         }
     }
 }

@@ -74,6 +74,18 @@ pub(crate) enum OwnedRuntimeTemplateNode {
         text: OwnedFoldedString,
     },
 
+    /// Authored constant `String` value selected as output.
+    ///
+    /// WHAT: carries a slot occurrence's own compile-time fallback as owned
+    /// structural text.
+    /// WHY: selecting the fallback is an authored output decision, so an empty
+    /// or whitespace-only constant still counts as emitted output for
+    /// output-conditioned wrappers. Ordinary template `Text` keeps
+    /// formatting-only whitespace outside that classification.
+    ConstantText {
+        text: OwnedFoldedString,
+    },
+
     DynamicExpression {
         expression: ExprId,
         #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
@@ -342,6 +354,7 @@ pub(crate) fn walk_owned_runtime_template_node<E>(
         }
 
         OwnedRuntimeTemplateNode::Text { .. }
+        | OwnedRuntimeTemplateNode::ConstantText { .. }
         | OwnedRuntimeTemplateNode::DynamicExpression { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
@@ -435,6 +448,7 @@ pub(crate) fn walk_owned_runtime_template_node_mut<E>(
         }
 
         OwnedRuntimeTemplateNode::Text { .. }
+        | OwnedRuntimeTemplateNode::ConstantText { .. }
         | OwnedRuntimeTemplateNode::DynamicExpression { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }

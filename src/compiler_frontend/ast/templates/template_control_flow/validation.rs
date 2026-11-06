@@ -21,7 +21,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use std::collections::HashSet;
 
-/// One escaped `$insert(...)` contribution discovered in a composed view.
+/// One escaped `$in name: ...` contribution discovered in a composed view.
 ///
 /// WHAT: pairs the authored insertion site and constant name with the named slot the helper
 ///       targets.
@@ -34,7 +34,7 @@ pub(crate) struct EscapedInsertSite {
     pub(crate) insert_name: Option<StringId>,
 }
 
-/// Returns the first escaped `$insert(...)` contribution in a composed view.
+/// Returns the first escaped `$in name: ...` contribution in a composed view.
 ///
 /// WHAT: walks the structural tree in authored order and returns the first contribution that no
 ///       wrapper consumed, together with its authored span and target slot name.
@@ -79,7 +79,7 @@ pub(crate) fn validate_runtime_template_control_flow_slot_artifacts(
 /// `TirView`.
 ///
 /// WHAT: walks the view's structural tree, checking `Conditional` and `Loop`
-///       bodies for escaped `$insert(...)` contributions. Receiver `$slot`
+///       bodies for escaped `$in name: ...` contributions. Receiver `$slot`
 ///       markers may remain until a later wrapper or parent routes them.
 ///       Nested child-template traversal descends through module-store child
 ///       views, preserving each child reference's exact root, phase and overlay
@@ -99,7 +99,7 @@ fn validate_runtime_tir_view_control_flow_slot_artifacts(
 /// Validates every reachable runtime control-flow body in a module-store view.
 ///
 /// WHAT: walks the structural tree from `node_ref`. For each `Conditional` and
-///       `Loop` body, checks for escaped `$insert(...)` contributions. Recurses
+///       `Loop` body, checks for escaped `$in name: ...` contributions. Recurses
 ///       through `Sequence`, control-flow bodies,
 ///       aggregate wrappers and nested child views. Missing effective-node
 ///       authority propagates as an internal error.
@@ -191,7 +191,7 @@ fn validate_runtime_qualified_child_view(
 /// Checks a control-flow body root for escaped inserts.
 ///
 /// Receiver `$slot` markers may remain until later routing or wrapper fill
-/// injection. Escaped `$insert(...)` helpers stay invalid.
+/// injection. Escaped `$in name: ...` helpers stay invalid.
 fn validate_runtime_tir_view_control_flow_body(
     view: &TirView<'_>,
     body_root: TemplateIrNodeId,
@@ -212,7 +212,7 @@ fn validate_runtime_tir_view_control_flow_body(
     Ok(())
 }
 
-/// Returns the first escaped `$insert(...)` helper in the subtree rooted at `node_ref`.
+/// Returns the first escaped `$in name: ...` helper in the subtree rooted at `node_ref`.
 ///
 /// WHAT: follows structural children through the effective view. Slot
 ///       placeholders remain owned by later slot routing, so their optional

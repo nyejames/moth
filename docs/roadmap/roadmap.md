@@ -29,11 +29,9 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Sequenced work
 
-- [Builder top level template slots and template directive changes](./plans/moth-builder-slots-and-template-directives-implementation-plan.md) **NEXT**
-
 - [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: consume the shared MON argument owner, all fixed numeric input types and delivered destination-aware command literal materialisation for general directives, explicit $config contracts and strict $project/$html_builder configuration
 
-- [HTML page directives and runtime title](./plans/html-page-directives-and-runtime-title-plan.md) - Queued: root-only $page, explicit root purposes, metadata cutover and browser title capability
+- [Explicit entries and runtime title](./plans/html-page-directives-and-runtime-title-plan.md) - Queued: general `$entry` root purpose and capability-checked browser title mutation. Builder slots own initial metadata.
 
 - [Const functions and shared compile-time evaluation](./plans/const-functions-plan.md) - explicit `#|...|` compile-time-only callable contracts, a unified constant/function dependency graph, bounded shared function evaluation, cross-module const body publication, release-only ordinary function folding and low-priority budget suggestions. The first active slice is the Stage 4 ownership and early-HIR feasibility gate.
 
@@ -87,6 +85,15 @@ This roadmap owns the normal serial order. A plan owns its own work and nothing 
 # Deferred design and follow-ups
 
 This is a bunch of notes for work that will likely be picked up in the future, but has no set design plan yet.
+
+## Builder slot and template constraints
+
+Runtime top-level named builder slots remain unsettled. The current contract
+routes direct const root inserts only; it does not register runtime resources.
+`$required` is a much later candidate whose value and exact behaviour need
+reconsideration; `$unique` is also deferred. Neither is accepted or implemented.
+Loop-level uniqueness is excluded, and const-function implementation is outside
+the builder slots work.
 
 ## Compiler data-layout follow-ups
 

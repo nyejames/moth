@@ -1,0 +1,17 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<h1>Untitled</h1><section>Intro</section><img src=\"./helpers/assets/icon.svg\">Logo"
+
+[[backends.html.artifact_assertions]]
+path = "helpers/assets/icon.svg"
+kind = "binary"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<h1>Untitled</h1><section>Intro</section><img src=\"./helpers/assets/icon.svg\">Logo"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "helpers/assets/icon.svg"
+kind = "binary"

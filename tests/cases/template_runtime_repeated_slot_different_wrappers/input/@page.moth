@@ -1,8 +1,8 @@
 panel = [:
     <section>
-        <div class="plain">[$slot("item")]</div>
-        [$children([:<strong>[$slot]</strong>]):
-            <div class="wrapped">[$slot("item")]</div>
+        <div class="plain">[$slot item]</div>
+        [$before = [:<strong>], $after = [:</strong>]:
+            <div class="wrapped">[$slot item]</div>
         ]
         [$slot]
     </section>
@@ -18,15 +18,15 @@ empty_producer |calls ~{I32}| -> String:
 ;
 
 rendered = [panel:
-    [$insert("item"):
+    [$in item:
         [if show:
             value [label]
         ]
     ]
-    [$insert("item"):
+    [$in item:
         [empty_producer(~empty_producer_calls)]
     ]
-    [$insert("item"):
+    [$in item:
         [if not show:
             structural-no-output
         ]

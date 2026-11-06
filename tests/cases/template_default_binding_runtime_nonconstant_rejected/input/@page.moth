@@ -1,0 +1,9 @@
+identity |value String| -> String:
+    return value
+;
+
+runtime_fallback = identity("runtime")
+
+-- A runtime binding is not an authored compile-time constant, so resolving the
+-- constant-reference path must leave it rejected as a slot default.
+card = [:[$slot title = runtime_fallback]]

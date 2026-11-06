@@ -380,7 +380,6 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
             ConstValueMetadata::resolved(producer_marker, None, ValueMode::ImmutableOwned);
         metadata.const_record_state = ConstRecordState::ConstRecord;
         metadata.value_kind = ConstValueKind::Composite;
-        metadata.hir_visible = false;
         const_values
             .insert_value(
                 metadata,
@@ -412,7 +411,6 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
             ConstValueMetadata::resolved(producer_marker, None, ValueMode::ImmutableOwned);
         metadata.const_record_state = ConstRecordState::ConstRecord;
         metadata.value_kind = ConstValueKind::Composite;
-        metadata.hir_visible = false;
         let root_id = const_values
             .insert_value(
                 metadata,

@@ -2,13 +2,12 @@
 //!
 //! WHAT: evaluates whether an AST expression resolves to a compile-time constant
 //!       by substituting known const references and reusing the existing constant folder.
-//! WHY: one shared resolver avoids duplicating fold/reference logic across config,
-//!      AST finalization, and HIR metadata.
+//! WHY: one shared resolver avoids duplicating fold/reference logic across config and
+//!      AST finalization.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_eval::{
     ConstantFoldError, ConstantFoldOutcome, FoldRequirement, FoldServices,
     fold_expression_with_constants,
@@ -63,11 +62,6 @@ impl ConstValueEnvironment {
     pub(crate) fn module_constant(&self, path: &PathId) -> Option<ConstValueId> {
         self.module.get(path).copied()
     }
-
-    /// Number of bindings a scope copy actually duplicates.
-    pub(crate) fn len(&self) -> usize {
-        self.local.len()
-    }
 }
 
 /// Reason why an expression could not be resolved to a compile-time constant.
@@ -81,22 +75,8 @@ pub enum ConstResolutionError {
     NonConstReference,
     NonFoldableRuntimeExpression,
     CallInConstContext,
-    MutableDeclaration,
     NonConstExpression,
     TemplateClassification(TemplateError),
-}
-
-impl ConstResolutionError {
-    /// Expected non-const failures are advisory for fact collection.
-    ///
-    /// WHAT: unresolved references, mutable declarations, calls, and runtime
-    ///       expressions simply mean "do not record a const fact". Template
-    ///       classification errors are different because they may represent a
-    ///       broken TIR materialization invariant or a source diagnostic that
-    ///       should stay on the template normalization boundary.
-    pub(crate) fn is_expected_non_const_resolution(&self) -> bool {
-        !matches!(self, Self::TemplateClassification(_))
-    }
 }
 
 impl From<TemplateError> for ConstResolutionError {
@@ -116,7 +96,6 @@ impl PartialEq for ConstResolutionError {
                     Self::NonFoldableRuntimeExpression
                 )
                 | (Self::CallInConstContext, Self::CallInConstContext)
-                | (Self::MutableDeclaration, Self::MutableDeclaration)
                 | (Self::NonConstExpression, Self::NonConstExpression)
                 | (
                     Self::TemplateClassification(_),
@@ -127,12 +106,6 @@ impl PartialEq for ConstResolutionError {
 }
 
 impl Eq for ConstResolutionError {}
-
-/// The advisory declaration result retains content identity, never a duplicate expression.
-#[derive(Debug)]
-pub(crate) struct ResolvedConstDeclaration {
-    pub(crate) value: ConstValueId,
-}
 
 pub(crate) struct ConstValueResolver<'a> {
     string_table: &'a mut StringTable,
@@ -173,24 +146,6 @@ impl<'a> ConstValueResolver<'a> {
     }
     pub(crate) fn const_values(&self) -> &ConstValueStore {
         self.const_values
-    }
-
-    /// Top-level and body-local constants resolve identically: reject mutable bindings, then
-    /// resolve the initializer. Callers record the declaration's scope themselves.
-    pub(crate) fn resolve_declaration(
-        &mut self,
-        declaration: &Declaration,
-        environment: &ConstValueEnvironment,
-    ) -> Result<ResolvedConstDeclaration, ConstResolutionError> {
-        if declaration.value_mode.is_mutable() {
-            return Err(ConstResolutionError::MutableDeclaration);
-        }
-        let initializer = declaration
-            .value
-            .initializer()
-            .ok_or(ConstResolutionError::NonConstExpression)?;
-        let value = self.resolve_expression(initializer, environment)?;
-        Ok(ResolvedConstDeclaration { value })
     }
 
     pub(crate) fn resolve_expression(

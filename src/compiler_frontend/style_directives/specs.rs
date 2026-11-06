@@ -16,13 +16,38 @@ use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 /// the name from here so they cannot drift apart.
 pub(crate) const DOC_DIRECTIVE_NAME: &str = "doc";
 
+/// The core `$slot` directive name.
+///
+/// The symbol immediately after it names a slot in the receiving template's schema, not a
+/// lexical value. Header-stage initializer scans read the name from here so they do not
+/// record slot targets as constant references.
+pub(crate) const SLOT_DIRECTIVE_NAME: &str = "slot";
+
+/// The core `$in` directive name.
+///
+/// Its required symbol target is a slot identity, not a lexical value. Header-stage
+/// initializer scans read the name from here so they do not record insert targets as
+/// constant references.
+pub(crate) const INSERT_DIRECTIVE_NAME: &str = "in";
+
+/// The core `$before` directive name.
+///
+/// Its assigned value wraps every direct child template on the prefix edge.
+pub(crate) const BEFORE_DIRECTIVE_NAME: &str = "before";
+
+/// The core `$after` directive name.
+///
+/// Its assigned value wraps every direct child template on the suffix edge.
+pub(crate) const AFTER_DIRECTIVE_NAME: &str = "after";
+
 /// Core language directive behavior handled directly by compiler-owned template parsing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CoreStyleDirectiveKind {
-    Children,
+    Before,
+    After,
     Fresh,
     Slot,
-    Insert,
+    In,
     Note,
     Todo,
     Doc,
@@ -60,7 +85,7 @@ pub struct StyleDirectiveEffects {
     pub body_whitespace_policy: Option<BodyWhitespacePolicy>,
     /// Optional toggle for parsing `[...]` as literal body text.
     pub suppress_child_templates: Option<bool>,
-    /// Optional toggle that opts this template out of parent `$children(..)` wrappers.
+    /// Optional toggle that opts this template out of parent `$before`/`$after` wrappers.
     pub skip_parent_child_wrappers: Option<bool>,
 }
 

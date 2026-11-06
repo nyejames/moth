@@ -1,6 +1,7 @@
 //! Tests for the JS-only HTML rendering path.
 
 use super::*;
+use crate::compiler_frontend::builder_root_slots::{BuilderRootSlotName, ConstFragmentDestination};
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::module_compilation::ResolvedConstFragment;
@@ -11,8 +12,8 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::projects::html_project::html_slot_plan::HtmlSlotPlan;
 use crate::projects::html_project::output_plan::derive_logical_html_path;
-use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
 use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, ResourceUrlContext, ResourceUseKind,
 };
@@ -101,6 +102,33 @@ fn fixture_resource_origin() -> StableResourceOriginId {
 }
 
 #[test]
+fn render_entry_fragments_ignores_named_builder_fragments() {
+    let plan = HtmlResourceOutputPlan::new("js-path-tests");
+    let context = ResourceUrlContext::PageDocument(PathBuf::from("index.html"));
+    let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
+    let fragments = vec![
+        ResolvedConstFragment {
+            runtime_insertion_index: 0,
+            destination: ConstFragmentDestination::Named(BuilderRootSlotName::new("title")),
+            span: None,
+            value: OwnedFoldedString::Text(String::from("Metadata")),
+        },
+        ResolvedConstFragment {
+            runtime_insertion_index: 0,
+            destination: ConstFragmentDestination::Body,
+            span: None,
+            value: OwnedFoldedString::Text(String::from("<main>Body</main>")),
+        },
+    ];
+
+    let (body_html, slot_ids) =
+        render_entry_fragments(&fragments, 0, &renderer).expect("body fragment should render");
+
+    assert_eq!(body_html, "<main>Body</main>\n");
+    assert!(slot_ids.is_empty());
+}
+
+#[test]
 fn render_entry_fragments_preserves_text_and_all_text_piece_bytes() {
     // WHAT: identical authored bytes, insertion indices, and slot counts render identically
     //      whether const fragments use concrete text or all-text structural pieces.
@@ -109,16 +137,19 @@ fn render_entry_fragments_preserves_text_and_all_text_piece_bytes() {
     let text_fragments = vec![
         ResolvedConstFragment {
             runtime_insertion_index: 0,
+            destination: ConstFragmentDestination::Body,
             span: None,
             value: OwnedFoldedString::Text(String::from("<head>")),
         },
         ResolvedConstFragment {
             runtime_insertion_index: 2,
+            destination: ConstFragmentDestination::Body,
             span: None,
             value: OwnedFoldedString::Text(String::from("</html>")),
         },
         ResolvedConstFragment {
             runtime_insertion_index: 1,
+            destination: ConstFragmentDestination::Body,
             span: None,
             value: OwnedFoldedString::Text(String::from("<main>body")),
         },
@@ -126,6 +157,7 @@ fn render_entry_fragments_preserves_text_and_all_text_piece_bytes() {
     let piece_fragments = vec![
         ResolvedConstFragment {
             runtime_insertion_index: 0,
+            destination: ConstFragmentDestination::Body,
             span: None,
             value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Text(String::from(
                 "<head>",
@@ -133,6 +165,7 @@ fn render_entry_fragments_preserves_text_and_all_text_piece_bytes() {
         },
         ResolvedConstFragment {
             runtime_insertion_index: 2,
+            destination: ConstFragmentDestination::Body,
             span: None,
             value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Text(String::from(
                 "</html>",
@@ -140,6 +173,7 @@ fn render_entry_fragments_preserves_text_and_all_text_piece_bytes() {
         },
         ResolvedConstFragment {
             runtime_insertion_index: 1,
+            destination: ConstFragmentDestination::Body,
             span: None,
             value: OwnedFoldedString::Pieces(vec![
                 OwnedFoldedStringPiece::Text(String::from("<main>")),
@@ -188,6 +222,7 @@ fn render_entry_fragments_renders_resource_piece_at_builder_boundary() {
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
     let fragments = vec![ResolvedConstFragment {
         runtime_insertion_index: 0,
+        destination: ConstFragmentDestination::Body,
         span: None,
         value: OwnedFoldedString::Pieces(vec![
             OwnedFoldedStringPiece::Text(String::from("before")),
@@ -210,6 +245,7 @@ fn render_entry_fragments_renders_site_root_piece_at_builder_boundary() {
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/moth");
     let fragments = vec![ResolvedConstFragment {
         runtime_insertion_index: 0,
+        destination: ConstFragmentDestination::Body,
         span: None,
         value: OwnedFoldedString::Pieces(vec![
             OwnedFoldedStringPiece::Text(String::from("before")),
@@ -243,11 +279,11 @@ fn no_runtime_fragments_still_emits_start_call() {
     let plan = HtmlResourceOutputPlan::new("");
     let context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
-    let page_metadata_plan = HtmlPageMetadataPlan::default();
+    let slot_plan = HtmlSlotPlan::default();
     let html = render_html_document(
         &crate::projects::html_project::js_path::HtmlDocumentRenderInput {
             hir_module: &module.executable.hir,
-            page_metadata_plan: &page_metadata_plan,
+            slot_plan: &slot_plan,
             const_fragments: &[],
             structural_url_renderer: &renderer,
             document_config: &HtmlDocumentConfig::default(),
@@ -325,11 +361,11 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
     let plan = HtmlResourceOutputPlan::new("");
     let context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
-    let page_metadata_plan = HtmlPageMetadataPlan::default();
+    let slot_plan = HtmlSlotPlan::default();
     let html = render_html_document(
         &crate::projects::html_project::js_path::HtmlDocumentRenderInput {
             hir_module: &hir_module,
-            page_metadata_plan: &page_metadata_plan,
+            slot_plan: &slot_plan,
             const_fragments: &[],
             structural_url_renderer: &renderer,
             document_config: &HtmlDocumentConfig::default(),
@@ -385,11 +421,11 @@ fn module_script_places_escaped_import_preamble_before_the_bundle() {
     let plan = HtmlResourceOutputPlan::new("");
     let context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
-    let page_metadata_plan = HtmlPageMetadataPlan::default();
+    let slot_plan = HtmlSlotPlan::default();
     let html = render_html_document(
         &crate::projects::html_project::js_path::HtmlDocumentRenderInput {
             hir_module: &hir_module,
-            page_metadata_plan: &page_metadata_plan,
+            slot_plan: &slot_plan,
             const_fragments: &[],
             structural_url_renderer: &renderer,
             document_config: &HtmlDocumentConfig::default(),

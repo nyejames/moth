@@ -1,10 +1,10 @@
 format_table #= [$html:
-    <table style="[$slot("style")]">
-        [$children([:<tr>[$slot]</tr>]):[$slot]]
+    <table style="[$slot style]">
+        [$before = [:<tr>], $after = [:</tr>]:[$slot]]
     </table>
 ]
 
 table #= [format_table, $html:
-    [$insert("style"): border-collapse: collapse; border: 1px solid;]
-    [$children([:<td>[$slot]</td>]):[$slot]]
+    [$in style: border-collapse: collapse; border: 1px solid;]
+    [$before = [:<td>], $after = [:</td>]:[$slot]]
 ]

@@ -81,11 +81,13 @@ legacy `Number` type alias.
 
 ### Configuration names
 
-The accepted queued project and page directives use the `$` marker: `$config`,
-`$project`, `$html_builder` and `$page`. There is no accepted `config:` block or
-`#Config` qualifier.
+The accepted queued project directives use the `$` marker: `$config`,
+`$project` and `$html_builder`. A general `$entry` root purpose is a separate
+future directive. The earlier `$page` proposal is superseded and is not current
+syntax. There is no accepted `config:` block or `#Config` qualifier.
 Directive spellings do not reserve ordinary identifiers, so `config`, `Config`,
-`project` and `html_builder` remain ordinary names outside directive syntax.
+`project`, `html_builder` and `entry` remain ordinary names outside directive
+syntax.
 The file `config.moth` and the dependency root `@project` retain their separate
 path and package semantics.
 

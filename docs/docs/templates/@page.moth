@@ -18,9 +18,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Templates"
-page_description #= "Template strings, directives, slots, wrappers, control flow and Markdown in Moth."
-page_head #= language_theme_head
+#[$in title:["Templates"]]
+#[$in description:["Template strings, directives, slots, wrappers, control flow and Markdown in Moth."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -41,9 +41,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):template-basics]
-        [$insert("title"):Template basics]
-        [$insert("advanced"):[template_basics]]
+        [$in key:template-basics]
+        [$in title:Template basics]
+        [$in advanced:[template_basics]]
 
         [template_basics_basic]
     ]
@@ -51,9 +51,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):template-directives]
-        [$insert("title"):Template directives]
-        [$insert("advanced"):[template_directives]]
+        [$in key:template-directives]
+        [$in title:Template directives]
+        [$in advanced:[template_directives]]
 
         [template_directives_basic]
     ]
@@ -61,9 +61,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):template-slots]
-        [$insert("title"):Template slots]
-        [$insert("advanced"):[template_slots]]
+        [$in key:template-slots]
+        [$in title:Template slots]
+        [$in advanced:[template_slots]]
 
         [template_slots_basic]
     ]
@@ -71,9 +71,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):child-wrappers]
-        [$insert("title"):Child wrappers]
-        [$insert("advanced"):[child_wrappers]]
+        [$in key:child-wrappers]
+        [$in title:Child wrappers]
+        [$in advanced:[child_wrappers]]
 
         [child_wrappers_basic]
     ]
@@ -81,9 +81,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):template-control-flow]
-        [$insert("title"):Template control flow]
-        [$insert("advanced"):[template_control_flow]]
+        [$in key:template-control-flow]
+        [$in title:Template control flow]
+        [$in advanced:[template_control_flow]]
 
         [template_control_flow_basic]
     ]
@@ -91,9 +91,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):markdown-formatting]
-        [$insert("title"):Markdown formatting]
-        [$insert("advanced"):[markdown_formatting]]
+        [$in key:markdown-formatting]
+        [$in title:Markdown formatting]
+        [$in advanced:[markdown_formatting]]
 
         [markdown_formatting_basic]
     ]
@@ -101,9 +101,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../collections/]
-        [$insert("previous_title"):Collections and maps]
-        [$insert("next_path"):../constants/]
-        [$insert("next_title"):Constants and compile-time behaviour]
+        [$in previous_path:../collections/]
+        [$in previous_title:Collections and maps]
+        [$in next_path:../constants/]
+        [$in next_title:Constants and compile-time behaviour]
     ]
 ]

@@ -1,0 +1,6 @@
+@aliases docs_alias
+
+#[$in stylesheets: [@styles/docs.css]]
+#[$in stylesheets: [docs_alias]]
+
+#[:<main>about stylesheets body</main>]

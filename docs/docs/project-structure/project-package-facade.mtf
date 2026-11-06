@@ -27,15 +27,15 @@ The facade:
 - cannot depend on `@project`
 - cannot expose a semantic fact that depends on project-private context
 - rejects top-level runtime work and page fragments
-- cannot declare root-only `$page` metadata
+- cannot declare an application root purpose, including a future `$entry`
 - has no implicit entry
 - emits no route or HTML artefact
 
 Support roots and the project package facade reject top-level runtime work and
-page fragments. They don't merely stay inactive. Generic directives also cannot
-promote a facade or support root into an application entry. A future directive
-cannot weaken this API-only boundary without an explicit contract owned by the
-facade/package design.
+page fragments, including direct builder slot contributions. They don't merely
+stay inactive. Generic directives also cannot promote a facade or support root
+into an application entry. A future directive cannot weaken this API-only
+boundary without an explicit contract owned by the facade/package design.
 
 ### Project package assembly
 
@@ -81,6 +81,6 @@ implicitly satisfy a dependency's `$config` contracts.
 ### Concepts related to the project package facade
 
 - For module root rules see @#module-roots (Module roots).
-- For page purpose and non-activation see @#entry-runtime-and-fragments (Active-root runtime and fragments).
+- For entry activity and non-activation see @#entry-runtime-and-fragments (Active-root runtime and fragments).
 - For package origins and backing see @../packages/#package-origins-and-backing (Package origins and backing).
 - For the full facade contract see @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build system design).

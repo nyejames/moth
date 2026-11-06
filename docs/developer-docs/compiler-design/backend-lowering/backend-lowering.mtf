@@ -51,36 +51,36 @@ Those two variants share validated topology and source semantics. Their target, 
 For the walkthrough, target-labelled entry, `greet` and template work arrive ready. The JavaScript path might own page orchestration. Neutral string work may sit in either partition depending on assignment.
 
 [diagram:
-    [$insert("label"): One validated input, two target paths]
-    [$insert("caption"): Everything before the split is decided once. After it, each backend only chooses how to spell the result.]
+    [$in label: One validated input, two target paths]
+    [$in caption: Everything before the split is decided once. After it, each backend only chooses how to spell the result.]
 
     [stage:
         [node:
-            [$insert("href"): ../hir/]
-            [$insert("eyebrow"): Shared]
-            [$insert("title"): Validated HIR and its plans]
+            [$in href: ../hir/]
+            [$in eyebrow: Shared]
+            [$in title: Validated HIR and its plans]
             Meaning, borrow facts, link facts and the memory plan for this variant. Settled before any backend looks.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ../target-planning-and-validation/]
-            [$insert("eyebrow"): Assignment]
-            [$insert("title"): Per-function target labels]
+            [$in href: ../target-planning-and-validation/]
+            [$in eyebrow: Assignment]
+            [$in title: Per-function target labels]
             Target planning already decided which function runs where.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Target-native spelling]
+                [$in label: Target-native spelling]
                 [fanout:
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     JavaScript values, functions and host GC
                 ]
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     Wasm structured LIR, ABI and handles
                 ]
                 ]
@@ -90,9 +90,9 @@ For the walkthrough, target-labelled entry, `greet` and template work arrive rea
 
     [stage:
         [node:
-            [$insert("href"): ../html-assembly-and-output/]
-            [$insert("eyebrow"): Output]
-            [$insert("title"): Records for the builder]
+            [$in href: ../html-assembly-and-output/]
+            [$in eyebrow: Output]
+            [$in title: Records for the builder]
             Neither backend writes project files. Both hand back records.
         ]
     ]

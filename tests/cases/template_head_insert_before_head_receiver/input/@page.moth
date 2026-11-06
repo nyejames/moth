@@ -1,0 +1,8 @@
+-- Regression: a head-position stored insert is still a head node. The
+-- receiver after it must stay in the head chain so the body reaches the inner
+-- template's default slot instead of becoming loose fill for the outer one.
+outer #= [:<h1>[$slot title]</h1>[$slot]]
+inner #= [:<p>[$slot]</p>]
+ins #= [$in title:T]
+
+[outer,ins,inner:Body]

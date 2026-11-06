@@ -34,9 +34,9 @@ Executed evidence (throwaway fixtures under `tmp/`, debug binary):
 
 - `AGENTS.md` core contracts and failure-lane rule
 - `docs/compiler-data-layout-design.md`: `Hard representation invariants`, `Compilation identity context`, `Genuine path interning`, `Deterministic parallel construction`, `Failure architecture`, and source, token and diagnostic data-layout contracts
-- `docs/src/docs/progress/@page.moth`: `Entry-selected module roots and implicit start` and `Structured diagnostics` rows
-- `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf`: naming conventions, top-level work becoming dormant `start`
-- `docs/src/docs/project-structure/entry-runtime-and-fragments.mtf`: compiler-synthesised start, helper files have no independent start
+- `docs/docs/progress/@page.moth`: `Entry-selected module roots and implicit start` and `Structured diagnostics` rows
+- `docs/docs/cheatsheet/moth-language-cheatsheet.mtf`: naming conventions, top-level work becoming dormant `start`
+- `docs/docs/project-structure/entry-runtime-and-fragments.mtf`: compiler-synthesised start, helper files have no independent start
 - `docs/roadmap/audit-kinds/correctness.md`, `docs/roadmap/audit-guide.md`
 
 ## Existing findings and active plans checked
@@ -95,15 +95,15 @@ That promised source diagnostic is delivered for the value forms and missing for
 
 #### Counter-explanation tested
 
-**"Authored `start` is deferred, so this is not a defect."** Rejected. `docs/src/docs/progress/@page.moth:120-125` records the row `Entry-selected module roots and implicit start` as `Supported` and states the contract explicitly: "The implicit `start` function is build-system-owned and not user-bindable or callable." A supported, stated contract is being enforced through the wrong lane, not deferred.
+**"Authored `start` is deferred, so this is not a defect."** Rejected. `docs/docs/progress/@page.moth:120-125` records the row `Entry-selected module roots and implicit start` as `Supported` and states the contract explicitly: "The implicit `start` function is build-system-owned and not user-bindable or callable." A supported, stated contract is being enforced through the wrong lane, not deferred.
 
-**"The `Compiler Bug` banner is the intended rejection."** Rejected on two independent grounds. `docs/src/docs/progress/@page.moth:133` states "User-facing failures use typed `CompilerDiagnostic` payloads with stable codes ... Infrastructure and invariant failures use `CompilerError`", matching `AGENTS.md` and `docs/compiler-data-layout-design.md` `Failure architecture`. And `declaration_table.rs:189` names the intended outcome as "the authored source diagnostic", which the sibling value forms actually produce.
+**"The `Compiler Bug` banner is the intended rejection."** Rejected on two independent grounds. `docs/docs/progress/@page.moth:133` states "User-facing failures use typed `CompilerDiagnostic` payloads with stable codes ... Infrastructure and invariant failures use `CompilerError`", matching `AGENTS.md` and `docs/compiler-data-layout-design.md` `Failure architecture`. And `declaration_table.rs:189` names the intended outcome as "the authored source diagnostic", which the sibling value forms actually produce.
 
 **"The duplicate-declaration check is a genuine invariant, so `CompilerError` is right."** Rejected as an explanation of the defect, not of the check. The invariant "the emitted AST must not contain two nodes with the same path" is real and worth keeping; it is being violated by unvalidated user input, so the missing upstream rejection is the defect. The check is the detector.
 
 **"An existing test already covers this, so it must be accepted behaviour."** Rejected. `tests/cases/this_local_declaration_error/input/src/@page.moth` does declare `start ||:`, and its `expect.toml` requires exactly `["MOTH-RULE-0040"]`. Running it confirms it passes. It masks this path because its body `this = 1` fails body validation before AST emission; the collision is only reachable when the authored `start` body is otherwise valid. That fixture is therefore evidence the case is untested, not evidence it is supported.
 
-**"A helper-file `start` is the same defect."** Rejected. `./target/debug/moth check` on a non-root helper file declaring `start ||:` exits 0 with no diagnostic, but `docs/src/docs/project-structure/entry-runtime-and-fragments.mtf:37-43` states helper files have no independent `start`, so no implicit `start` exists there to collide with and an ordinary function of that name is legal. Recorded under `Checked and clean` rather than filed.
+**"A helper-file `start` is the same defect."** Rejected. `./target/debug/moth check` on a non-root helper file declaring `start ||:` exits 0 with no diagnostic, but `docs/docs/project-structure/entry-runtime-and-fragments.mtf:37-43` states helper files have no independent `start`, so no implicit `start` exists there to collide with and an ordinary function of that name is legal. Recorded under `Checked and clean` rather than filed.
 
 Disproof would be a canonical document stating that a root-level authored `start` function is an internal invariant breach rather than a user error, or a progress-matrix row moving the implicit `start` out of `Supported`.
 
@@ -113,7 +113,7 @@ Three at once:
 
 - `AGENTS.md`: "User-authored failures use structured `CompilerDiagnostic` values with useful source context. `CompilerError` is for internal invariants, filesystem, tooling and backend infrastructure failures."
 - `docs/compiler-data-layout-design.md` `Failure architecture` Lane 1 versus Lane 3, and `Adding a compiler bug check` ("A new `compiler_bug!` site must name the proven invariant and the stage that promised it").
-- `docs/src/docs/progress/@page.moth:125`: the implicit `start` is not user-bindable, which is currently unenforced for the function form.
+- `docs/docs/progress/@page.moth:125`: the implicit `start` is not user-bindable, which is currently unenforced for the function form.
 
 The user cost is a message with no source span, no diagnostic code, no indication which line is at fault, and an explicit claim that the compiler is broken, for an ordinary naming mistake.
 

@@ -1,5 +1,4 @@
 //! Resolver tests use one explicit phase expression/content pair.
-use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue};
 use crate::compiler_frontend::ast::const_values::resolver::{
     ConstResolutionError, ConstValueEnvironment, ConstValueResolver,
 };
@@ -109,21 +108,6 @@ impl Fixture {
         assert!(
             matches!(self.values.payload(value), Some(ConstValuePayload::FixedScalar(value)) if value.as_i64() == Some(expected))
         );
-    }
-    fn declaration(&mut self, value: ExprId, mutable: bool) -> Declaration {
-        Declaration {
-            id: self.path("local"),
-            type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            type_syntax: None,
-            value_mode: if mutable {
-                ValueMode::MutableOwned
-            } else {
-                ValueMode::ImmutableOwned
-            },
-            value: DeclarationValue::Initializer(value),
-            binding_span: None,
-            config_qualifier: None,
-        }
     }
 }
 
@@ -288,20 +272,6 @@ fn function_call_fails_const_resolution() {
 }
 
 #[test]
-fn mutable_declaration_fails_const_resolution() {
-    let mut fixture = Fixture::default();
-    let value = fixture.integer(1);
-    let declaration = fixture.declaration(value, true);
-    assert_eq!(
-        fixture
-            .resolver()
-            .resolve_declaration(&declaration, &ConstValueEnvironment::default())
-            .expect_err("mutable"),
-        ConstResolutionError::MutableDeclaration
-    );
-}
-
-#[test]
 fn coerced_expression_resolves_inner_value() {
     let mut fixture = Fixture::default();
     let inner = fixture.integer(7);
@@ -338,26 +308,6 @@ fn runtime_operation_with_unresolved_reference_fails() {
             .resolve(expression, &ConstValueEnvironment::default())
             .expect_err("unresolved"),
         ConstResolutionError::UnresolvedReference
-    );
-}
-
-#[test]
-fn immutable_literal_declaration_resolves() {
-    let mut fixture = Fixture::default();
-    let value = fixture.integer(99);
-    let declaration = fixture.declaration(value, false);
-    let result = fixture
-        .resolver()
-        .resolve_declaration(&declaration, &ConstValueEnvironment::default())
-        .expect("immutable local");
-    fixture.assert_integer(result.value, 99);
-    assert_eq!(
-        fixture
-            .values
-            .metadata(result.value)
-            .expect("metadata")
-            .span,
-        None
     );
 }
 

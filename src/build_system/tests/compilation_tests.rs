@@ -1856,7 +1856,7 @@ fn generated_sidecar_warning_frontend(
     std::fs::write(
         package_root.join("@mod.moth"),
         r#"shell #= [:<span>[$slot]</span>]
-unused_insert #= [$insert("unused"): unused]
+unused_insert #= [$in unused: unused]
 
 wrap type T |value T| -> String:
     return [shell: generated]

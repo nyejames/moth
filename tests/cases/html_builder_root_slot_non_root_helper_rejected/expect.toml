@@ -1,0 +1,25 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-DEFERRED-0001"]
+message_contains = ["top-level const templates in ordinary source files"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-DEFERRED-0001"
+reason = "deferred_feature.named_feature"
+path = "input/helper.moth"
+line = 2
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-DEFERRED-0001"]
+message_contains = ["top-level const templates in ordinary source files"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-DEFERRED-0001"
+reason = "deferred_feature.named_feature"
+path = "input/helper.moth"
+line = 2

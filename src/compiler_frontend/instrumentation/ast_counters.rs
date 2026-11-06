@@ -32,12 +32,6 @@ pub(crate) enum AstCounter {
     ConstantResolutionContextsCreated,
     ConstantsResolved,
 
-    /// Advisory const-fact environments copied for a function body or nested lexical scope.
-    ConstFactEnvironmentClones,
-
-    /// Entries copied by those environment clones, summed.
-    ConstFactEnvironmentEntriesCloned,
-
     // Expression ordering, operator typing and constant-folding pressure.
     ExpressionOrderingInputItems,
     ExpressionTypedStackItems,
@@ -63,7 +57,7 @@ pub(crate) enum AstCounter {
     TemplateTirHeadChainCompositionCalls,
     TemplateTirHeadChainCompositionHits,
 
-    // TIR-native `$children(..)` wrapper application counters.
+    // TIR-native child-wrapper application counters.
     TemplateTirChildWrapperCalls,
     TemplateTirChildWrapperHits,
 
@@ -356,8 +350,6 @@ mod detailed {
             AstCounter::BoundedExpressionTokenCopiesAvoided,
             AstCounter::ConstantResolutionContextsCreated,
             AstCounter::ConstantsResolved,
-            AstCounter::ConstFactEnvironmentClones,
-            AstCounter::ConstFactEnvironmentEntriesCloned,
             AstCounter::ExpressionOrderingInputItems,
             AstCounter::ExpressionTypedStackItems,
             AstCounter::ExpressionFoldItems,
@@ -464,10 +456,6 @@ mod detailed {
                 "ast_constant_resolution_contexts_created"
             }
             AstCounter::ConstantsResolved => "ast_constants_resolved",
-            AstCounter::ConstFactEnvironmentClones => "ast_const_fact_environment_clones",
-            AstCounter::ConstFactEnvironmentEntriesCloned => {
-                "ast_const_fact_environment_entries_cloned"
-            }
 
             AstCounter::ExpressionOrderingInputItems => "ast_expression_ordering_input_items",
             AstCounter::ExpressionTypedStackItems => "ast_expression_typed_stack_items",

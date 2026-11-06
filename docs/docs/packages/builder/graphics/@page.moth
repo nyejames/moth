@@ -8,9 +8,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "@web/graphics"
-page_description #= "WebGL2 rendering as a builder binding-backed runtime package."
-page_head #= language_theme_head
+#[$in title:["@web/graphics"]]
+#[$in description:["WebGL2 rendering as a builder binding-backed runtime package."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -25,9 +25,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):graphics]
-        [$insert("title"):Graphics]
-        [$insert("advanced"):[graphics_advanced]]
+        [$in key:graphics]
+        [$in title:Graphics]
+        [$in advanced:[graphics_advanced]]
 
         [graphics_basic]
     ]
@@ -35,9 +35,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../canvas/]
-        [$insert("previous_title"):@web/canvas]
-        [$insert("next_path"):../site/]
-        [$insert("next_title"):@web/site]
+        [$in previous_path:../canvas/]
+        [$in previous_title:@web/canvas]
+        [$in next_path:../site/]
+        [$in next_title:@web/site]
     ]
 ]

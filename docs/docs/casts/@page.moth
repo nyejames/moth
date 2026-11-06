@@ -14,9 +14,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Casts"
-page_description #= "Explicit cast syntax, target contexts, fallible conversion and cast evidence in Moth."
-page_head #= language_theme_head
+#[$in title:["Casts"]]
+#[$in description:["Explicit cast syntax, target contexts, fallible conversion and cast evidence in Moth."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -33,9 +33,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):cast-syntax]
-        [$insert("title"):Cast syntax]
-        [$insert("advanced"):[cast_syntax]]
+        [$in key:cast-syntax]
+        [$in title:Cast syntax]
+        [$in advanced:[cast_syntax]]
 
         [cast_syntax_basic]
     ]
@@ -43,9 +43,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):cast-targets]
-        [$insert("title"):Cast targets]
-        [$insert("advanced"):[cast_targets]]
+        [$in key:cast-targets]
+        [$in title:Cast targets]
+        [$in advanced:[cast_targets]]
 
         [cast_targets_basic]
     ]
@@ -53,9 +53,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):fallible-casts]
-        [$insert("title"):Fallible casts]
-        [$insert("advanced"):[fallible_casts]]
+        [$in key:fallible-casts]
+        [$in title:Fallible casts]
+        [$in advanced:[fallible_casts]]
 
         [fallible_casts_basic]
     ]
@@ -63,9 +63,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):cast-evidence]
-        [$insert("title"):Cast evidence]
-        [$insert("advanced"):[cast_evidence]]
+        [$in key:cast-evidence]
+        [$in title:Cast evidence]
+        [$in advanced:[cast_evidence]]
 
         [cast_evidence_basic]
     ]
@@ -73,9 +73,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../numbers/]
-        [$insert("previous_title"):Numbers]
-        [$insert("next_path"):../functions/]
-        [$insert("next_title"):Functions]
+        [$in previous_path:../numbers/]
+        [$in previous_title:Numbers]
+        [$in next_path:../functions/]
+        [$in next_title:Functions]
     ]
 ]

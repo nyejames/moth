@@ -1,0 +1,20 @@
+-- Regression: the receiver's `$before` value contains a nested decorated
+-- template before the wrapper's own opening tag. The nested template owns a
+-- fixed direct child and declares the named `row_style` slot in its `$before`
+-- value; the following opening tag declares `row_style` directly. The enclosing
+-- application supplies row_style, so the fixed direct child must replay it for
+-- the ordinary composed contribution and the deferred runtime conditional and
+-- loop wrappers. A false condition and a zero-iteration loop emit no wrapper,
+-- so no fixed child appears for them.
+identity |value I32| -> I32:
+    return value
+;
+
+rows = [$before = [:[$before = [$html:<b style="[$slot row_style]">], $after = [$html:</b>]:[:fixed]][$html:<b style="[$slot row_style]">]], $after = [$html:</b>]:[$slot]]
+
+show_condition = 1
+skip_condition = 2
+loop_limit = 2
+empty_limit = 0
+
+[rows:[$in row_style:background: red;][:contributed][if identity(show_condition) < 2:[:shown]][if identity(skip_condition) < 2:[:hidden]][loop 0 to identity(loop_limit) |loop_item|:[:row-[loop_item]]][loop 0 to identity(empty_limit) |empty_item|:[:row-no-output]]]

@@ -1,0 +1,17 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "data-label=\"outer-label\"",
+    "<b style=\"inner-red\">body</b>",
+    "outer-body",
+]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "data-label=\"outer-label\"",
+    "<b style=\"inner-red\">body</b>",
+    "outer-body",
+]

@@ -14,6 +14,7 @@
     ApiHandle
 
 page_title #= [: [project_name] v[version]]
+#[$in title:[page_title]]
 
 items ~{String} = {}
 loop 0 to base_count |i|:

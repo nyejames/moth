@@ -1,4 +1,5 @@
 page_title #= "Tiny one file"
+#[$in title:[page_title]]
 
 [:
     <main>

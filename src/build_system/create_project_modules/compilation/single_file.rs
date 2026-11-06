@@ -681,6 +681,7 @@ fn compile_single_file_frontend_with_target(
                 source_provider_dependencies: &source_provider_dependencies,
                 provider_materialisations: &provider_materialisations,
                 builder_runtime_packages: &builder_surface.builder_runtime_packages,
+                builder_root_slots: Some(builder_surface.builder_root_slots()),
             };
             let boracle_result = compile_module_for_boracle(
                 &compile_context,

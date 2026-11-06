@@ -144,7 +144,7 @@ fn slot_wrappers_remain_compile_time_templates_until_filled() {
             &const_values,
         )
         .expect("wrapper classification should succeed")
-        .has_unresolved_slot_occurrences,
+        .has_unfilled_slot_occurrences,
         "wrapper template should have unresolved slots"
     );
     let expression = expression_builder
@@ -182,7 +182,7 @@ fn folding_nested_wrapper_constant_with_unfilled_named_slots_renders_empty_strin
         .expect("test path fits");
 
     let wrapper_file_tokens = template_tokens_from_source(
-        "[:<link rel=\"icon\" href=\"[$slot(\"favicon\")]\"><style>[$slot(\"css\")]</style>]",
+        "[:<link rel=\"icon\" href=\"[$slot favicon]\"><style>[$slot css]</style>]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -264,7 +264,7 @@ fn folding_nested_wrapper_constant_with_unfilled_named_slots_renders_empty_strin
     assert!(rendered.contains("rel=\"icon\""));
     assert!(rendered.contains("href=\"\""));
     assert!(rendered.contains("<style></style>"));
-    assert!(!rendered.contains("$slot("));
+    assert!(!rendered.contains("$slot"));
 }
 
 #[test]
@@ -321,7 +321,7 @@ fn wrapper_templates_with_runtime_references_are_not_compile_time_constants() {
             &const_values,
         )
         .expect("runtime wrapper classification should succeed")
-        .has_unresolved_slot_occurrences,
+        .has_unfilled_slot_occurrences,
         "runtime wrapper template should have unresolved slots"
     );
     let expression = expression_builder
@@ -553,7 +553,7 @@ fn assert_slot_is_tir_only_and_const(source: &str, slot_name: &str) {
             &const_values,
         )
         .expect("slot classification should succeed")
-        .has_unresolved_slot_occurrences,
+        .has_unfilled_slot_occurrences,
         "{slot_name} slot should be detected from TIR"
     );
 
@@ -587,5 +587,5 @@ fn default_slot_is_recorded_in_tir_and_const() {
 
 #[test]
 fn named_slot_is_recorded_in_tir_and_const() {
-    assert_slot_is_tir_only_and_const("[: before [$slot(\"name\")] after]", "named");
+    assert_slot_is_tir_only_and_const("[: before [$slot name] after]", "named");
 }

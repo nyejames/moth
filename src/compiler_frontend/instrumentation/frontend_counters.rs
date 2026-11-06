@@ -91,7 +91,6 @@ pub(crate) enum FrontendCounter {
 
     // HIR and borrow-validation volume.
     PublicFoldedValueConversions,
-    HirConstValueConversions,
     HirStaticBoolIfNodes,
     HirRuntimeIfNodes,
     HirBlockCount,
@@ -299,7 +298,6 @@ mod detailed {
     static GENERIC_SUBSTITUTION_KEY_BUILDS: AtomicUsize = AtomicUsize::new(0);
     static GENERIC_SUBSTITUTION_KEY_SORTED_PAIRS: AtomicUsize = AtomicUsize::new(0);
     static PUBLIC_FOLDED_VALUE_CONVERSIONS: AtomicUsize = AtomicUsize::new(0);
-    static HIR_CONST_VALUE_CONVERSIONS: AtomicUsize = AtomicUsize::new(0);
     static HIR_STATIC_BOOL_IF_NODES: AtomicUsize = AtomicUsize::new(0);
     static HIR_RUNTIME_IF_NODES: AtomicUsize = AtomicUsize::new(0);
     static TYPE_ENVIRONMENT_SUBSTITUTION_CACHE_LOOKUPS: AtomicUsize = AtomicUsize::new(0);
@@ -638,7 +636,6 @@ mod detailed {
             FrontendCounter::RuntimeTemplateCount,
             FrontendCounter::ResourceOriginCount,
             FrontendCounter::PublicFoldedValueConversions,
-            FrontendCounter::HirConstValueConversions,
             FrontendCounter::HirStaticBoolIfNodes,
             FrontendCounter::HirRuntimeIfNodes,
             FrontendCounter::HirBlockCount,
@@ -906,8 +903,6 @@ mod detailed {
             FrontendCounter::ResourceOriginCount => &RESOURCE_ORIGIN_COUNT,
 
             FrontendCounter::PublicFoldedValueConversions => &PUBLIC_FOLDED_VALUE_CONVERSIONS,
-
-            FrontendCounter::HirConstValueConversions => &HIR_CONST_VALUE_CONVERSIONS,
 
             FrontendCounter::HirStaticBoolIfNodes => &HIR_STATIC_BOOL_IF_NODES,
 
@@ -1316,8 +1311,6 @@ mod detailed {
             FrontendCounter::ResourceOriginCount => "resource_origin_count",
 
             FrontendCounter::PublicFoldedValueConversions => "public_folded_value_conversions",
-
-            FrontendCounter::HirConstValueConversions => "hir_const_value_conversions",
 
             FrontendCounter::HirStaticBoolIfNodes => "hir_static_bool_if_nodes",
 

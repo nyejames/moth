@@ -389,7 +389,6 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
         contains_regular_division: false,
         synthetic_interface_provenance: root.synthetic_interface_provenance.clone(),
         value_kind,
-        hir_visible: true,
     };
 
     match folded {
@@ -432,11 +431,9 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
             )
         }
         PublicFoldedValue::ConstTemplate { template, folded } => {
-            let (value_kind, hir_visible) = match template.kind {
-                PublicConstTemplateKind::Wrapper => (ConstValueKind::TemplateWrapper, true),
-                PublicConstTemplateKind::SlotInsert(_) => {
-                    (ConstValueKind::SlotInsertTemplate, false)
-                }
+            let value_kind = match template.kind {
+                PublicConstTemplateKind::Wrapper => ConstValueKind::TemplateWrapper,
+                PublicConstTemplateKind::SlotInsert(_) => ConstValueKind::SlotInsertTemplate,
             };
             let folded = folded
                 .as_ref()
@@ -446,8 +443,7 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                     })
                 })
                 .transpose()?;
-            let mut metadata = node(value_kind);
-            metadata.hir_visible = hir_visible;
+            let metadata = node(value_kind);
             const_values.insert_value(
                 metadata,
                 ConstValuePayload::Template {
@@ -522,7 +518,6 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                 }
                 let mut metadata = node(ConstValueKind::Composite);
                 metadata.const_record_state = ConstRecordState::ConstRecord;
-                metadata.hir_visible = false;
                 const_values.insert_value(metadata, ConstValuePayload::Record(projected))
             } else {
                 let definitions = materialiser
@@ -546,7 +541,6 @@ fn import_folded_value<M: FoldedValueMaterialiser>(
                 let mut metadata = node(ConstValueKind::Composite);
                 if root.const_record {
                     metadata.const_record_state = ConstRecordState::ConstRecord;
-                    metadata.hir_visible = false;
                 }
                 const_values.insert_value(metadata, ConstValuePayload::Record(projected))
             }

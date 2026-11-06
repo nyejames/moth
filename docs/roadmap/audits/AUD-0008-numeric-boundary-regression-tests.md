@@ -13,7 +13,7 @@
 
 ## Authorities read
 
-`docs/src/developer-docs/style-guide/testing.mtf`; `docs/roadmap/audit-kinds/tests.md`; `docs/roadmap/audit-guide.md`; `docs/roadmap/plans/number_type_numeric_plan.md`; `docs/src/docs/loops/range-loops.mtf`; `docs/src/docs/errors/error-values-basic.mtf`; repository instructions.
+`docs/developer-docs/style-guide/testing.mtf`; `docs/roadmap/audit-kinds/tests.md`; `docs/roadmap/audit-guide.md`; `docs/roadmap/plans/number_type_numeric_plan.md`; `docs/docs/loops/range-loops.mtf`; `docs/docs/errors/error-values-basic.mtf`; repository instructions.
 
 ## Existing findings and active plans checked
 

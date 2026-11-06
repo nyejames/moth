@@ -1,8 +1,8 @@
 @styles navbar, section, language_theme_head, doc_pager, sidebar, init_docs_sidebar
 
-page_title #= "Builder packages"
-page_description #= "HTML helpers, static site URLs, canvas drawing, WebGL2 graphics and live page state from the HTML builder."
-page_head #= language_theme_head
+#[$in title:["Builder packages"]]
+#[$in description:["HTML helpers, static site URLs, canvas drawing, WebGL2 graphics and live page state from the HTML builder."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -31,9 +31,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../core/]
-        [$insert("previous_title"):Core packages]
-        [$insert("next_path"):../../memory/]
-        [$insert("next_title"):Memory and lifetimes]
+        [$in previous_path:../core/]
+        [$in previous_title:Core packages]
+        [$in next_path:../../memory/]
+        [$in next_title:Memory and lifetimes]
     ]
 ]

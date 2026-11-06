@@ -8,9 +8,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Directives"
-page_description #= "General compiler and builder directives in Moth, including configuration, pages and shared argument rules."
-page_head #= language_theme_head
+#[$in title:["Directives"]]
+#[$in description:["General compiler and builder directives in Moth, including configuration, builder slots and shared argument rules."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -20,17 +20,19 @@ init_docs_sidebar()!
 
     `$` introduces a registered compiler or builder directive. Template
     formatters already use this marker. The accepted general family extends it
-    to configuration, page metadata and later compiler-owned blocks.
+    to configuration, future root purpose and later compiler-owned blocks.
+    HTML document metadata uses direct const root inserts through builder slots.
 
     Template directives are implemented. The general non-template family is
-    accepted design and is not yet available in the Alpha compiler.
+    accepted design and is not yet available in the Alpha compiler. The earlier
+    `$page` proposal is superseded; general `$entry` remains deferred.
 ]
 
 #[section:
     [doc_level:
-        [$insert("key"):directive-pages]
-        [$insert("title"):Directives]
-        [$insert("advanced"):[directives]]
+        [$in key:directive-pages]
+        [$in title:Directives]
+        [$in advanced:[directives]]
 
         [directives_basic]
     ]
@@ -38,9 +40,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../templates/]
-        [$insert("previous_title"):Templates]
-        [$insert("next_path"):../project-structure/]
-        [$insert("next_title"):Project structure]
+        [$in previous_path:../templates/]
+        [$in previous_title:Templates]
+        [$in next_path:../project-structure/]
+        [$in next_title:Project structure]
     ]
 ]

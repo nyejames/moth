@@ -8,9 +8,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Core time"
-page_description #= "Duration, TimeMark and Timestamp helpers in @core/time."
-page_head #= language_theme_head
+#[$in title:["Core time"]]
+#[$in description:["Duration, TimeMark and Timestamp helpers in @core/time."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -25,9 +25,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):time-helpers]
-        [$insert("title"):Time helpers]
-        [$insert("advanced"):[time_advanced]]
+        [$in key:time-helpers]
+        [$in title:Time helpers]
+        [$in advanced:[time_advanced]]
 
         [time_basic]
     ]
@@ -35,9 +35,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../random/]
-        [$insert("previous_title"):Core random]
-        [$insert("next_path"):../]
-        [$insert("next_title"):Core packages]
+        [$in previous_path:../random/]
+        [$in previous_title:Core random]
+        [$in next_path:../]
+        [$in next_title:Core packages]
     ]
 ]

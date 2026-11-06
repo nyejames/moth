@@ -14,7 +14,7 @@ Think of four layers plus records of what changed:
 
 **Link facts.** Backend-neutral per-function edges, binding-backed call ids, helpers, capabilities, numeric and cast operations, resource uses, provenance and generated-function requests. Resource *uses* are the compiler's business. Physical paths, URLs and asset placement stay with the builder.
 
-**Compiler and builder metadata.** Dormant root activity, folded fragment values and insertion indexes, `$page` root metadata, documentation fragments, resource origins, non-executable fragment uses, materialisation context and structured warnings. Resolved `$page` metadata is accepted design and deferred.
+**Compiler and builder metadata.** Dormant root activity, folded fragment values with body or builder-slot destinations and insertion indexes, documentation fragments, resource origins, non-executable fragment uses, materialisation context and structured warnings. Direct named builder contributions are folded metadata, not a runtime side channel.
 
 **Fingerprints** are an accepted design layer over those lanes, meant to let reuse say what changed. They are not a lane the current artefact retains. The compiler computes fingerprint facts during a build and today's builds do not keep them for later comparison.
 
@@ -25,35 +25,35 @@ Backend planning facts do not live in the public interface. Private bodies do no
 For `greeting.moth`, the constant and function land in the interface when exported, in executable state as HIR and types and in link facts as call and capability edges as needed.
 
 [diagram:
-    [$insert("label"): One sealed artefact, four lanes]
-    [$insert("caption"): Each fact has exactly one lane. Knowing which lane a fact belongs to answers most questions about who is allowed to read it.]
+    [$in label: One sealed artefact, four lanes]
+    [$in caption: Each fact has exactly one lane. Knowing which lane a fact belongs to answers most questions about who is allowed to read it.]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Sealed]
-            [$insert("title"): CompiledModuleArtifact]
+            [$in href: ./]
+            [$in eyebrow: Sealed]
+            [$in title: CompiledModuleArtifact]
             Immutable once published. Later stages graft onto it rather than reopening it.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Who reads which lane]
+                [$in label: Who reads which lane]
                 [lane:
                 [detail:
-                    [$insert("href"): ../declarations-dependencies-and-ordering/]
+                    [$in href: ../declarations-dependencies-and-ordering/]
                     Interface, read by consumers
                 ]
                 [detail:
-                    [$insert("href"): ../backend-lowering/]
+                    [$in href: ../backend-lowering/]
                     Executable state, read by backends
                 ]
                 [detail:
-                    [$insert("href"): ../linking-entries-and-reachability/]
+                    [$in href: ../linking-entries-and-reachability/]
                     Link facts, read by link planning
                 ]
                 [detail:
-                    [$insert("href"): ../html-assembly-and-output/]
+                    [$in href: ../html-assembly-and-output/]
                     Metadata, read by the builder
                 ]
                 ]

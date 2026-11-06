@@ -1,9 +1,7 @@
-//! Config schema construction tests.
+//! Config schema construction and builder surface validation tests.
 //!
-//! WHAT: covers the schema engine's data invariants: dense node and field identifiers, root
-//! identity, node field registration, unknown-field policy storage and shape descriptions.
-//! WHY: the validator relies on these facts being total and deterministic; the construction
-//! surface is the one place that could break them.
+//! WHAT: covers schema data invariants and validation of the complete builder surface.
+//! WHY: builder definitions must be deterministic and valid before project compilation.
 
 use super::super::BuilderSurface;
 use super::super::config_schema::{
@@ -685,4 +683,37 @@ fn surface_accepts_storable_sections_and_rich_entry_schemas() {
         .frontend_surface()
         .validate()
         .expect("HTML surface remains valid");
+}
+
+#[test]
+fn surface_root_slots_require_addressable_symbols() {
+    let mut surface = BuilderSurface::with_mandatory_core();
+    for name in ["title", "page_title", "_if", "Δ", "IF", "title"] {
+        surface.register_root_slot(name);
+    }
+    surface
+        .validate()
+        .expect("symbol names and duplicates are valid");
+
+    for name in [
+        "",
+        "_",
+        " ",
+        "page title",
+        "1",
+        "1title",
+        "if",
+        "true",
+        "String",
+    ] {
+        let mut surface = BuilderSurface::with_mandatory_core();
+        surface.register_root_slot(name);
+        let error = surface.validate().expect_err("unaddressable root slot");
+        match error {
+            BuilderSurfaceValidationError::InvalidDefinition(message) => {
+                assert!(message.contains(&format!("{name:?}")), "{message}");
+            }
+            other => panic!("unexpected error for {name:?}: {other:?}"),
+        }
+    }
 }

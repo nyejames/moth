@@ -1,0 +1,6 @@
+project #= (
+    name = "test_project")
+html #= (
+    html_lang = "en",
+    html_favicon = "/configured.ico",
+    html_body_style = "margin: 0;")

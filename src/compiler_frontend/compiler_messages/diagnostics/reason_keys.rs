@@ -434,8 +434,9 @@ define_stable_reason_keys! {
         &InvalidTemplateDirectiveCode::UnexpectedArguments => "invalid_template_directive.unexpected_arguments",
         &InvalidTemplateDirectiveCode::EmptyArguments => "invalid_template_directive.empty_arguments",
         &InvalidTemplateDirectiveCode::InvalidSlotTarget => "invalid_template_directive.invalid_slot_target",
+        &InvalidTemplateDirectiveCode::InvalidSlotDefault => "invalid_template_directive.invalid_slot_default",
         &InvalidTemplateDirectiveCode::InvalidInsertTarget => "invalid_template_directive.invalid_insert_target",
-        &InvalidTemplateDirectiveCode::InvalidChildrenArgument => "invalid_template_directive.invalid_children_argument",
+        &InvalidTemplateDirectiveCode::InvalidChildDecoratorValue => "invalid_template_directive.invalid_child_decorator_value",
     },
     CssTemplateWarning => {
         @delegate(reason => CssTemplateWarningCode::of(reason).stable_reason_key());
@@ -508,6 +509,7 @@ define_stable_reason_keys! {
         &InvalidTemplateStructureCode::TemplateConditionalLoopConstTrue => "invalid_template_structure.template_conditional_loop_const_true",
         &InvalidTemplateStructureCode::TemplateLoopBodyNotConst => "invalid_template_structure.template_loop_body_not_const",
         &InvalidTemplateStructureCode::TemplateConstLoopExpansionLimitExceeded => "invalid_template_structure.template_const_loop_expansion_limit_exceeded",
+        &InvalidTemplateStructureCode::BuilderRootSlotNotRegistered => "invalid_template_structure.builder_root_slot_not_registered",
     },
 
     InvalidSignatureMemberReason => {
@@ -864,6 +866,8 @@ define_stable_reason_keys! {
     &InvalidTemplateSlotReason::InsertTargetsUnknownNamedSlot => "invalid_template_slot.insert_targets_unknown_named_slot",
     &InvalidTemplateSlotReason::InsertTargetsUnknownPositionalSlot => "invalid_template_slot.insert_targets_unknown_positional_slot",
     &InvalidTemplateSlotReason::SlotDefinitionOutsideTemplateBody => "invalid_template_slot.slot_definition_outside_template_body",
+    &InvalidTemplateSlotReason::DefaultSlotInChildDecorator => "invalid_template_slot.default_slot_in_child_decorator",
+    &InvalidTemplateSlotReason::PositionalSlotInChildDecorator => "invalid_template_slot.positional_slot_in_child_decorator",
     },
 
     CompileTimeEvaluationErrorReason => {
@@ -954,9 +958,12 @@ define_stable_reason_keys! {
         &DeferredFeatureCode::RuntimeAnonymousRecord => "deferred_feature.runtime_anonymous_record",
     },
 
-    InvalidPageMetadataReason => {
-    &InvalidPageMetadataReason::NotAString => "invalid_page_metadata.not_a_string",
-    &InvalidPageMetadataReason::DuplicateDeclaration => "invalid_page_metadata.duplicate_declaration",
+    InvalidHtmlSlotContributionReason => {
+    &InvalidHtmlSlotContributionReason::MissingResource => "invalid_html_slot_contribution.missing_resource",
+    &InvalidHtmlSlotContributionReason::NotAStaticResource => "invalid_html_slot_contribution.not_a_static_resource",
+    &InvalidHtmlSlotContributionReason::MultipleResources => "invalid_html_slot_contribution.multiple_resources",
+    &InvalidHtmlSlotContributionReason::SiteRoot => "invalid_html_slot_contribution.site_root",
+    &InvalidHtmlSlotContributionReason::NonCssResource => "invalid_html_slot_contribution.non_css_resource",
     },
 
     InvalidLoopOperandReason => {

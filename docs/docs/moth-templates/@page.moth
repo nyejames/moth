@@ -16,9 +16,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Moth template files"
-page_description #= "Moth-aware Markdown content files for HTML projects."
-page_head #= language_theme_head
+#[$in title:["Moth template files"]]
+#[$in description:["Moth-aware Markdown content files for HTML projects."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -37,9 +37,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):moth-template-files-files]
-        [$insert("title"):Moth template files]
-        [$insert("advanced"):[moth_template_files]]
+        [$in key:moth-template-files-files]
+        [$in title:Moth template files]
+        [$in advanced:[moth_template_files]]
 
         [moth_template_files_basic]
     ]
@@ -47,9 +47,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):implicit-markdown]
-        [$insert("title"):Implicit Markdown]
-        [$insert("advanced"):[implicit_markdown]]
+        [$in key:implicit-markdown]
+        [$in title:Implicit Markdown]
+        [$in advanced:[implicit_markdown]]
 
         [implicit_markdown_basic]
     ]
@@ -57,9 +57,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):content-dependencies]
-        [$insert("title"):Content dependencies]
-        [$insert("advanced"):[content_dependencies]]
+        [$in key:content-dependencies]
+        [$in title:Content dependencies]
+        [$in advanced:[content_dependencies]]
 
         [content_dependencies_basic]
     ]
@@ -67,9 +67,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):template-scope]
-        [$insert("title"):Template scope]
-        [$insert("advanced"):[template_scope]]
+        [$in key:template-scope]
+        [$in title:Template scope]
+        [$in advanced:[template_scope]]
 
         [template_scope_basic]
     ]
@@ -77,9 +77,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):moth-template-files-limits]
-        [$insert("title"):Moth template file limits]
-        [$insert("advanced"):[moth_template_limits]]
+        [$in key:moth-template-files-limits]
+        [$in title:Moth template file limits]
+        [$in advanced:[moth_template_limits]]
 
         [moth_template_limits_basic]
     ]
@@ -87,9 +87,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../resources/]
-        [$insert("previous_title"):Resources and file values]
-        [$insert("next_path"):../markdown/]
-        [$insert("next_title"):Plain Markdown]
+        [$in previous_path:../resources/]
+        [$in previous_title:Resources and file values]
+        [$in next_path:../markdown/]
+        [$in next_title:Plain Markdown]
     ]
 ]

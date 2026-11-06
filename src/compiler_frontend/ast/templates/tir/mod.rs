@@ -110,7 +110,8 @@ pub(crate) use ids::{
 pub(crate) use numeric_intake::{NumericTemplateIntakePosition, RangeOperandSlot};
 
 pub(crate) use expression_overlays::{
-    collect_effective_tir_expression_overlay_payloads, replace_expression_overlay_entries,
+    ReachableExpressionRoot, collect_effective_tir_expression_overlay_payloads,
+    collect_reachable_expression_sites, replace_expression_overlay_entries,
 };
 pub(crate) use expression_sites::{
     walk_expression_payloads_with_nested_tir_views, walk_tir_view_expression_payloads,
@@ -127,14 +128,13 @@ pub(crate) use store::MalformedTirStore;
 pub(crate) use store::{
     ControlFlowBodyKind, DerivedCount, DerivedTemplateMetadata, TemplateIrStore,
 };
-#[cfg(test)]
-pub(crate) use summary::TemplateIrSummary;
+pub(crate) use summary::{TemplateIrSummary, summarize_existing_root};
 
 pub(crate) use refs::{TemplateTirReference, TemplateWrapperReference};
 pub(crate) use view::{TirView, TirViewIdentity};
 pub(crate) use wrapper_sets::{
-    attach_wrapper_context_overlay, conditional_wrapper_set_for_control_flow,
-    wrapper_reference_for_template,
+    attach_wrapper_context_overlay, compose_child_decorator_wrapper,
+    conditional_wrapper_set_for_control_flow, wrapper_reference_for_template,
 };
 
 pub(crate) use overlays::TemplateViewContext;
@@ -153,25 +153,35 @@ pub(crate) use contribution_shape::{
     ContributionShape, classify_tir_contribution_node, tir_node_is_control_flow_root,
 };
 
+pub(crate) use node::TirSlotPlaceholder;
+#[cfg(test)]
+pub(crate) use slot_layout::collect_tir_slot_layout;
 pub(crate) use slot_layout::{
-    TirSlotPlaceholderRef, TirSlotSchema, collect_tir_slot_layout,
-    collect_tir_slot_layout_from_root, collect_tir_slot_schema,
+    TirSlotPlaceholderRef, TirSlotSchema, WrapperSlotRouting, collect_tir_slot_layout_from_root,
+    collect_tir_slot_layout_with_context, collect_tir_slot_schema_with_context,
 };
 
 pub(crate) use slot_composition::{
-    TirSlotContributions, attach_conditional_wrapper_set, compose_tir_head_chain_from_root,
+    TirSlotContributions, apply_slot_wrapper_sets_to_deferred_fill, attach_conditional_wrapper_set,
+    compose_tir_head_chain_from_root, compose_tir_head_chain_from_template,
+    fill_direct_child_wrapper_names_into, fill_named_slots_in_wrapper_root,
+    fill_named_slots_in_wrapper_template, fill_wrapper_tree_named_contexts,
     stored_insert_contribution_templates,
 };
 
 pub(crate) use construction_context::TemplateConstructionContext;
 
 pub(crate) use copy_state::{TirCopyState, record_tir_copy_counters};
-pub(crate) use subtree_copy::copy_tir_subtree_with_active_slot_plan;
+pub(crate) use subtree_copy::{
+    copy_tir_subtree_with_active_slot_plan,
+    copy_tir_subtree_with_active_slot_plan_and_retained_wrapper_context,
+};
 
 pub(crate) use expression_constness::tir_node_is_const_evaluable_value;
 
 pub(crate) use fold::{
-    FoldedConstTemplatePiece, fold_prepared_const_template_pattern, fold_prepared_template,
+    FoldedConstTemplatePiece, fold_prepared_const_template_pattern, fold_prepared_root_slot,
+    fold_prepared_template,
 };
 pub(crate) use handoff_materialization::{
     owned_runtime_slot_handoff_for_prepared_view, owned_runtime_template_handoff_for_prepared_view,

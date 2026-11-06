@@ -1,7 +1,7 @@
 repeater = [:
     <section>
-        <p class="first">[$slot("item")]</p>
-        <p class="second">[$slot("item")]</p>
+        <p class="first">[$slot item]</p>
+        <p class="second">[$slot item]</p>
         [$slot]
     </section>
 ]
@@ -16,7 +16,7 @@ show = true
 values ~{I32} = {}
 
 rendered = [repeater:
-    [$insert("item"):
+    [$in item:
         [if show:
             [mark_once(~values)]
         ]

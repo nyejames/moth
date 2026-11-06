@@ -11,6 +11,7 @@
 @pages/about render_about
 
 page_title #= [: [app_name] v[app_version]]
+#[$in title:[page_title]]
 
 user ~= User("admin", "admin@example.com", Status::Active)
 profile ~= UserProfile("Admin User", "Administrator", Priority::High)

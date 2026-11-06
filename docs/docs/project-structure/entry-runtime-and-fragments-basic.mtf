@@ -1,4 +1,7 @@
-**Current versus accepted.** Alpha HTML entries still come from root activity. The accepted design requires a root purpose, initially `$page`. Dependencies never activate their roots.
+**Current support.** Alpha HTML entries come from root activity: a non-trivial
+root body, a const fragment or a runtime fragment. A general `$entry` purpose is
+deferred; the earlier `$page` proposal is superseded and is not implemented.
+Dependencies never activate their roots.
 
 ### Root activation
 
@@ -10,21 +13,25 @@ The entry has built-in `Error!`. Checked numeric failure and compatible top-leve
 postfix `!` can propagate to the generated terminal handler. Custom errors still
 need explicit recovery. See @../progress (Progress) for current compiler support.
 
-### Purpose and comments
+### Activity and future purpose
 
-An unmarked root with authored runtime work or direct output needs a purpose,
-even inside `if false`. API-only declarations need no purpose. Semantically
-classified `$doc`, `$note` and `$todo` templates count as documentation and
-don't need one.
-
-An accepted page can contain metadata alone:
+Any of these makes a normal root an HTML entry candidate: a non-trivial root
+body, a direct const fragment or a runtime fragment. A direct named builder
+contribution is a const fragment, so a metadata-only root still emits a complete
+document:
 
 [codeblock, $code("moth"):
-    $page
+    #[$in title:Welcome]
 ]
 
-It still emits a complete document. A dependency cannot make unpurposed
-runtime work legal by keeping it dormant.
+A nested or aliased insert remains ordinary template composition. Runtime named
+builder slots are unsettled and are not supported.
+
+A future general `$entry` purpose will make entry selection explicit. It is
+deferred and is not current syntax. The earlier `$page` proposal is superseded.
+`$doc`, `$note` and `$todo` templates are documentation/comment processing and
+do not create an entry by themselves. A dependency cannot contribute its root
+work or named slots to a consumer.
 
 ### Page fragments in brief
 

@@ -16,9 +16,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Memory and lifetimes"
-page_description #= "Reference semantics, explicit copies, lifetimes, retained edges and declared regions in Moth."
-page_head #= language_theme_head
+#[$in title:["Memory and lifetimes"]]
+#[$in description:["Reference semantics, explicit copies, lifetimes, retained edges and declared regions in Moth."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -39,9 +39,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):reference-semantics]
-        [$insert("title"):Reference semantics]
-        [$insert("advanced"):[reference_semantics]]
+        [$in key:reference-semantics]
+        [$in title:Reference semantics]
+        [$in advanced:[reference_semantics]]
 
         [reference_semantics_basic]
     ]
@@ -49,9 +49,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):copy-and-exclusive-access]
-        [$insert("title"):Copy and exclusive access]
-        [$insert("advanced"):[copy_and_exclusive_access]]
+        [$in key:copy-and-exclusive-access]
+        [$in title:Copy and exclusive access]
+        [$in advanced:[copy_and_exclusive_access]]
 
         [copy_and_exclusive_access_basic]
     ]
@@ -59,9 +59,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):lifetimes-and-result-shapes]
-        [$insert("title"):Lifetimes and result shapes]
-        [$insert("advanced"):[lifetimes_and_result_shapes]]
+        [$in key:lifetimes-and-result-shapes]
+        [$in title:Lifetimes and result shapes]
+        [$in advanced:[lifetimes_and_result_shapes]]
 
         [lifetimes_and_result_shapes_basic]
     ]
@@ -69,9 +69,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):automatic-cleanup-and-retained-edges]
-        [$insert("title"):Automatic cleanup and retained edges]
-        [$insert("advanced"):[automatic_cleanup_and_retained_edges]]
+        [$in key:automatic-cleanup-and-retained-edges]
+        [$in title:Automatic cleanup and retained edges]
+        [$in advanced:[automatic_cleanup_and_retained_edges]]
 
         [automatic_cleanup_and_retained_edges_basic]
     ]
@@ -79,9 +79,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):declared-regions]
-        [$insert("title"):Declared regions]
-        [$insert("advanced"):[declared_regions]]
+        [$in key:declared-regions]
+        [$in title:Declared regions]
+        [$in advanced:[declared_regions]]
 
         [declared_regions_basic]
     ]
@@ -89,9 +89,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../wiring/]
-        [$insert("previous_title"):Wiring]
-        [$insert("next_path"):../project-structure/]
-        [$insert("next_title"):Project structure]
+        [$in previous_path:../wiring/]
+        [$in previous_title:Wiring]
+        [$in next_path:../project-structure/]
+        [$in next_title:Project structure]
     ]
 ]

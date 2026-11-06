@@ -316,18 +316,14 @@ pub(super) fn build_module(
     module
         .function_origins
         .insert(function_id, HirFunctionOrigin::EntryStart);
-    // The supplied name is a stand-in for JS naming tests, not the entry's source file, so the
-    // fixture records ownership separately and keeps the callable name path explicit.
+    // The supplied name is a stand-in for JS naming tests, so the fixture keeps the callable
+    // name path explicit even though production entries are nameless.
     let function_path = path_fork
         .try_intern_portable_path(function_name, string_table)
         .expect("test path fits");
     module
         .side_table
         .bind_function_name(function_id, function_path);
-    let source_path = path_fork
-        .try_intern_portable_path("main.moth", string_table)
-        .expect("test path fits");
-    module.start_source_file = Some(source_path);
 
     for (local_id, local_name) in local_names {
         let local_path = path_fork

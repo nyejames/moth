@@ -8,9 +8,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "MON format"
-page_description #= "The MON serialised literal-data format: root framing, literal values, strict conversion and schema validation."
-page_head #= language_theme_head
+#[$in title:["MON format"]]
+#[$in description:["The MON serialised literal-data format: root framing, literal values, strict conversion and schema validation."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -91,9 +91,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):mon-format]
-        [$insert("title"):MON format]
-        [$insert("advanced"):[mon_format]]
+        [$in key:mon-format]
+        [$in title:MON format]
+        [$in advanced:[mon_format]]
 
         [mon_format_basic]
     ]

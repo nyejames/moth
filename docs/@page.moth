@@ -1,8 +1,8 @@
 @styles navbar, section, theme_head, highlight, sidebar, init_docs_sidebar
 
-page_title #= "What is Moth?"
-page_description #= "Introduction to the Moth language and toolchain."
-page_head #= theme_head
+#[$in title:["What is Moth?"]]
+#[$in description:["Introduction to the Moth language and toolchain."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -20,7 +20,7 @@ init_docs_sidebar()!
 
     [highlight, $md: *This website was created using Moth!*]
 
-    The source code for this whole website can be found on @https://github.com/nyejames/moth/tree/main/docs/src (Github).
+    The source code for this whole website can be found on @https://github.com/nyejames/moth/tree/main/docs (Github).
 
 
     ## Documentation

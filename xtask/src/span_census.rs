@@ -202,7 +202,7 @@ fn finished_report(run: ReportRunIdentity, census: &SpanCensus) -> SpanCensusRep
 }
 
 fn corpus_roots() -> Vec<String> {
-    ["benchmarks", "docs/src", "tests"]
+    moth::benchmarking::span_census::CORPUS_ROOTS
         .iter()
         .map(|root| (*root).to_string())
         .collect()

@@ -1,0 +1,4 @@
+-- The site root names a route rather than a stylesheet file.
+#[$in stylesheets: [@/]]
+
+#[:<main>invalid site root stylesheet</main>]

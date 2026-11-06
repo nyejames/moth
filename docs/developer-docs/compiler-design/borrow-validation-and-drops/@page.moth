@@ -2,9 +2,9 @@
 @styles navbar, section, theme_css, sidebar, init_docs_sidebar
 @diagrams css as diagrams_css, diagram as flow_diagram, stage as flow_stage, node as flow_node, branch as flow_branch, lane as flow_lane, detail as flow_detail, island as flow_island, fanout as flow_fanout
 
-page_title #= "13. Borrow validation and drops"
-page_description #= "How Moth analyses HIR for safe access and inferred ownership."
-page_head #= [:<style>[theme_css] [diagrams_css]</style>]
+#[$in title:["13. Borrow validation and drops"]]
+#[$in description:["How Moth analyses HIR for safe access and inferred ownership."]]
+#[$in head:<style>[theme_css] [diagrams_css]</style>]
 
 #[navbar]
 #[sidebar]

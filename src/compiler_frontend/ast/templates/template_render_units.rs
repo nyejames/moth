@@ -87,7 +87,7 @@ struct TirBodyRootInput<'a> {
 /// plus the parsed body root.
 ///
 /// WHAT: formats the body, combines it with the owning template's head prefix,
-///       and composes the shared head chain. Inherited `$children(..)` wrappers
+///       and composes the shared head chain. Inherited child wrappers
 ///       stay on the wrapper-context overlay attached after composition.
 /// WHY: concrete and retained conditional positions use the same TIR composition
 ///      authority without rebuilding a second template representation.
@@ -126,11 +126,15 @@ fn compose_conditional_body_tir_root(
         &mut store,
     )?;
 
+    // The candidate root is the authored head prefix followed by the branch
+    // body, so its head boundary is the prefix length even when the body starts
+    // with a structural child template.
     compose_tir_head_chain_from_root(
         &mut store,
         expression_builder,
         const_values,
         candidate_root,
+        head_prefix_nodes.len(),
         string_table,
         true,
         Some(context.external_package_registry.as_ref()),

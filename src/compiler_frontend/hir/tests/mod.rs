@@ -28,7 +28,6 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 mod checked_numeric_lowering_tests;
 mod float_formatting_lowering_tests;
 mod hir_branch_lowering_tests;
-mod hir_const_facts_tests;
 mod hir_display_tests;
 mod hir_expression_lowering_tests;
 mod hir_function_origin_tests;

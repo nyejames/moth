@@ -1,0 +1,4 @@
+card #= [:<h1>[$slot title = "Untitled"]</h1><section>[$slot]</section>]
+applied #= [card:Intro]
+image #= [:<img src="[$slot source = @helpers/assets/icon.svg]">[$slot]]
+applied_image #= [image:Logo]

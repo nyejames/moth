@@ -1,0 +1,7 @@
+card #= [:title=[$slot title = "Title fallback"]|subtitle=[$slot subtitle = "Subtitle fallback"]|body=[$slot = "Body fallback"]]
+
+ordered #= [card:[$in title:A-][$in subtitle:S-][$in title:B-]]
+emptied #= [card:[$in title:[""]]]
+bare_empty #= [card:[$in title:]]
+rendered #= [:ordered=[ordered]|emptied=[emptied]|bare=[bare_empty]]
+[rendered]

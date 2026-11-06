@@ -186,7 +186,8 @@ impl MothTemplatePrepareContext {
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
     ) -> Result<crate::compiler_frontend::headers::types::Header, InfrastructureFailure> {
-        let initializer_references = collect_scanned_symbol_references(body_tokens, self.file_id);
+        let initializer_references =
+            collect_scanned_symbol_references(body_tokens, self.file_id, string_table);
 
         synthetic_content_header(
             SyntheticContentHeaderInput {

@@ -4,8 +4,8 @@ use super::*;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::compile_input::HtmlModuleCompileInput;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
+use crate::projects::html_project::html_slot_plan::HtmlSlotPlan;
 use crate::projects::html_project::output_plan::derive_logical_html_path;
-use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
 use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, ResourceUrlContext,
 };
@@ -36,7 +36,7 @@ fn compile_html_module_wasm_exports_moth_start_directly() {
     let mut string_table = StringTable::new();
     let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
     let reachability = entry_reachability(&module);
-    let page_metadata_plan = HtmlPageMetadataPlan::default();
+    let slot_plan = HtmlSlotPlan::default();
 
     let compile_input = HtmlModuleCompileInput {
         hir_module: &module.executable.hir,
@@ -45,7 +45,7 @@ fn compile_html_module_wasm_exports_moth_start_directly() {
         reachability: &reachability,
         type_environment: &module.executable.type_environment,
         const_fragments: &[],
-        page_metadata_plan: &page_metadata_plan,
+        slot_plan: &slot_plan,
         borrow_facts: module.executable.borrow_analysis.borrow_facts(),
         numeric_proofs: &module.executable.numeric_proofs,
         project_name: "",
@@ -148,7 +148,7 @@ fn compile_html_module_wasm_preserves_nested_logical_html_route() {
     let module = create_test_module(PathBuf::from("docs/@page.moth"), &mut string_table);
     let reachability = entry_reachability(&module);
 
-    let page_metadata_plan = HtmlPageMetadataPlan::default();
+    let slot_plan = HtmlSlotPlan::default();
     let compile_input = HtmlModuleCompileInput {
         hir_module: &module.executable.hir,
         path_table: &module.executable.path_table,
@@ -158,7 +158,7 @@ fn compile_html_module_wasm_preserves_nested_logical_html_route() {
         const_fragments: &[],
         borrow_facts: module.executable.borrow_analysis.borrow_facts(),
         numeric_proofs: &module.executable.numeric_proofs,
-        page_metadata_plan: &page_metadata_plan,
+        slot_plan: &slot_plan,
         project_name: "",
         document_config: &HtmlDocumentConfig::default(),
         build_profile: crate::build_system::BuildProfile::Dev,

@@ -3,7 +3,7 @@
 //! WHAT: a `ConstValuePayload::Template` constant is stored as its stable `PublicConstTemplate`
 //!       projection. A reference to that constant in a constant context rebuilds the projection
 //!       into the consumer's `TemplateIrStore` and yields a real `Template` expression.
-//! WHY: head composition, `$children(..)` and slot routing attach their semantics only to
+//! WHY: head composition, child wrappers and slot routing attach their semantics only to
 //!      `ExpressionOperationView::Template` values. A bare `Constant` reference would drop the
 //!      wrapper and insert structure, so the reference has to be a template again.
 
@@ -17,7 +17,9 @@ use super::refs::{TemplateTirReference, TemplateWrapperReference};
 use super::store::TemplateIrStore;
 use super::summary::summarize_existing_root;
 use super::view::TemplateTirPhase;
-use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringPiece, ConstStringValue, ConstValueMetadata,
+};
 use crate::compiler_frontend::ast::const_values::{
     ConstValueId, ConstValuePayload, ConstValueStore,
 };
@@ -28,6 +30,7 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, Template, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplate, PublicConstTemplateKind,
     PublicConstTemplatePiece, PublicConstTemplateSlot, PublicTemplateSlotKey,
@@ -36,6 +39,7 @@ use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, Res
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Builds the `Template` expression payload for one imported const-template constant.
@@ -216,14 +220,65 @@ impl Rebuild<'_> {
         let applied_set =
             (!applied.is_empty()).then(|| self.store.push_or_reuse_wrapper_set(&applied));
         let child_set = (!child.is_empty()).then(|| self.store.push_or_reuse_wrapper_set(&child));
+        let default = slot
+            .default
+            .as_ref()
+            .map(|default| self.default(default, &slot.default_provenance))
+            .transpose()?;
 
         Ok(TirSlotPlaceholder::with_wrapper_sets(
             slot_key(&slot.key, self.string_table),
             self.store.next_slot_occurrence_id(),
+            default,
             applied_set,
             child_set,
             slot.skip_parent_child_wrappers,
         ))
+    }
+
+    /// Rebuilds one imported occurrence default as a local constant String.
+    ///
+    /// WHAT: interns owned text and resource origins into this module's tables, then inserts the
+    /// resolved `String` value into the local constant store with the donor default's
+    /// synthetic-interface provenance.
+    /// WHY: `TIR` keeps module-local `ConstValueId`s for its fallback path, while the
+    /// public projection crosses modules with owned text/pieces and stable provenance member
+    /// identities. Rebuilding the value here restores the one TIR representation without
+    /// exporting donor IDs, and retaining provenance keeps the fresh local constant from
+    /// reporting fewer synthetic-interface dependencies than the donor constant it replaces.
+    fn default(
+        &mut self,
+        default: &OwnedFoldedString,
+        provenance: &SyntheticInterfaceProvenance,
+    ) -> Result<ConstValueId, ExpressionParseError> {
+        let value = match default {
+            OwnedFoldedString::Text(text) => ConstStringValue::Text(self.string_table.intern(text)),
+            OwnedFoldedString::Pieces(pieces) => {
+                let mut projected = Vec::with_capacity(pieces.len());
+                for piece in pieces {
+                    projected.push(match piece {
+                        OwnedFoldedStringPiece::Text(text) => {
+                            ConstStringPiece::Text(self.string_table.intern(text))
+                        }
+                        OwnedFoldedStringPiece::Resource(origin) => {
+                            ConstStringPiece::Resource(self.resource(origin)?)
+                        }
+                        OwnedFoldedStringPiece::SiteRoot => ConstStringPiece::SiteRoot,
+                    });
+                }
+                ConstStringValue::Pieces(projected)
+            }
+        };
+
+        let mut metadata = ConstValueMetadata::resolved(
+            builtin_type_ids::STRING,
+            self.span,
+            ValueMode::ImmutableOwned,
+        );
+        metadata.synthetic_interface_provenance = provenance.clone();
+        self.const_values
+            .insert_value(metadata, ConstValuePayload::String(value))
+            .map_err(ExpressionParseError::from)
     }
 
     fn wrappers(

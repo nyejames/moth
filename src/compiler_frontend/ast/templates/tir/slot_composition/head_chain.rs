@@ -7,17 +7,19 @@
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::template::{TemplateSegmentOrigin, TemplateType};
+use crate::compiler_frontend::ast::templates::template::TemplateType;
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference;
 use crate::compiler_frontend::ast::templates::tir::slot_layout::{
-    TirSlotLayout, collect_tir_slot_layout,
+    TirSlotLayout, collect_tir_slot_layout_with_context,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
+    TemplateIrId, TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+
+use rustc_hash::FxHashMap;
 
 use super::helpers::{
     children_of_node, compose_wrapper_application, internal_infrastructure_failure,
@@ -75,18 +77,25 @@ enum TirChainItem {
 /// Composes a head-chain directly from a root node, without requiring a
 /// durable `TemplateIr` entry.
 ///
-/// WHAT: partitions the root node's children by head/body origin, builds the
-///       wrapper chain, and resolves each layer. Returns the composed root
-///       node ID.
+/// WHAT: splits the root node's children at the caller-owned authored boundary,
+///       builds the wrapper chain, and resolves each layer. Returns the
+///       composed root node ID.
 /// WHY: control-flow body roots and aggregate-wrapper candidates are node
-///      roots, not published templates. Composing them directly avoids pushing
-///      a scratch `TemplateIr` that would remain in the durable store without
-///      a referencing identity.
+///      roots, not published templates. Their caller constructs the root from
+///      a known head prefix plus body content, so it owns the exact boundary;
+///      structural body nodes must never be guessed into the head partition.
+///      Composing from the root node avoids pushing a scratch `TemplateIr`
+///      that would remain in the durable store without a referencing identity.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the caller-owned head boundary stays explicit beside the shared composition services"
+)]
 pub(crate) fn compose_tir_head_chain_from_root(
     store: &mut TemplateIrStore,
     expressions: &AstExpressionBuilder,
     const_values: &ConstValueStore,
     root_node_id: TemplateIrNodeId,
+    head_node_count: usize,
     string_table: &StringTable,
     allow_runtime_plans: bool,
     external_package_registry: Option<&ExternalPackageRegistry>,
@@ -98,12 +107,48 @@ pub(crate) fn compose_tir_head_chain_from_root(
         external_package_registry,
         allow_runtime_plans,
     };
-    compose_tir_head_chain_from_root_into(store, root_node_id, &inputs)
+    compose_tir_head_chain_from_root_into(store, root_node_id, head_node_count, &inputs)
+}
+
+/// Composes a published template's own root through the head chain.
+///
+/// A template root knows its exact authored head/body boundary from its
+/// published summary. Passing that boundary prevents a body that begins with a
+/// structural child template (for example a wrapper value containing a nested
+/// decorator) from being mistaken for a head receiver and consuming its
+/// siblings as fill. Bare node roots receive their boundary from the caller
+/// that built them.
+pub(crate) fn compose_tir_head_chain_from_template(
+    store: &mut TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+    template_id: TemplateIrId,
+    string_table: &StringTable,
+    allow_runtime_plans: bool,
+    external_package_registry: Option<&ExternalPackageRegistry>,
+) -> HeadChainResult<TemplateIrNodeId> {
+    let (root_node_id, head_node_count) = {
+        let template = store.get_template(template_id).ok_or_else(|| {
+            internal_infrastructure_failure(
+                "TIR head-chain composition: template ID was not present in the store.",
+            )
+        })?;
+        (template.root, template.summary.head_node_count as usize)
+    };
+    let inputs = HeadChainResolutionInputs {
+        string_table,
+        expressions,
+        const_values,
+        external_package_registry,
+        allow_runtime_plans,
+    };
+    compose_tir_head_chain_from_root_into(store, root_node_id, head_node_count, &inputs)
 }
 
 fn compose_tir_head_chain_from_root_into(
     store: &mut TemplateIrStore,
     root_node_id: TemplateIrNodeId,
+    head_node_count: usize,
     inputs: &HeadChainResolutionInputs,
 ) -> HeadChainResult<TemplateIrNodeId> {
     // Fast path: if the root is not a sequence, no receiving layer can exist
@@ -112,7 +157,8 @@ fn compose_tir_head_chain_from_root_into(
         return Ok(root_node_id);
     };
 
-    let (head_children, body_children) = partition_tir_children_by_origin(store, root_children)?;
+    let (head_children, body_children) =
+        partition_tir_children_at_head_boundary(root_children, head_node_count);
 
     let (root_items, layers) = build_tir_chain_graph(store, &head_children, &body_children)?;
 
@@ -147,55 +193,21 @@ pub(super) fn root_sequence_children(
     }
 }
 
-/// Partitions root sequence children into head-origin and body-origin groups.
+/// Partitions root sequence children at the authored head/body boundary.
 ///
-/// WHAT: walks children in source order. `Text` and `DynamicExpression` nodes
-///       are classified by their `origin` field. `ChildTemplate` and other
-///       structural nodes are head-origin until the first body-origin
-///       `Text`/`DynamicExpression` is seen, after which they become body-origin.
-/// WHY: the parser records head nodes before body nodes, so the first
-///      body-origin `Text`/`DynamicExpression` marks the end of the head section.
-fn partition_tir_children_by_origin(
-    store: &TemplateIrStore,
+/// WHAT: the first `head_node_count` children are head-origin and the rest are
+///       body-origin.
+/// WHY: the parser records every head node before body parsing starts, and a
+///      calling render unit constructs bare roots from an explicit head prefix.
+///      The boundary is authoritative for both callers, so a body that starts
+///      with structural nodes and no body-origin text marker still stays in the
+///      body partition. Clamping is defensive against malformed stores.
+fn partition_tir_children_at_head_boundary(
     children: &[TemplateIrNodeId],
-) -> HeadChainResult<(Vec<TemplateIrNodeId>, Vec<TemplateIrNodeId>)> {
-    let mut head_children = Vec::new();
-    let mut body_children = Vec::new();
-    let mut saw_body_origin = false;
-
-    for child_id in children {
-        let child_node = store.get_node(*child_id).ok_or_else(|| {
-            internal_infrastructure_failure(
-                "TIR head-chain composition: child node ID was not present in the store while partitioning.",
-            )
-        })?;
-
-        let is_body = match &child_node.kind {
-            TemplateIrNodeKind::Text { origin, .. }
-            | TemplateIrNodeKind::DynamicExpression { origin, .. } => {
-                *origin == TemplateSegmentOrigin::Body
-            }
-
-            // Aggregate-output markers are compiler-internal fill content for
-            // loop aggregate wrappers. They begin the body partition even
-            // though they have no text/dynamic origin field.
-            TemplateIrNodeKind::AggregateOutput => true,
-
-            // Structural nodes follow the boundary set by Text/DynamicExpression
-            // origin. Once a body-origin node has appeared, later structural
-            // nodes are treated as body content.
-            _ => saw_body_origin,
-        };
-
-        if is_body {
-            saw_body_origin = true;
-            body_children.push(*child_id);
-        } else {
-            head_children.push(*child_id);
-        }
-    }
-
-    Ok((head_children, body_children))
+    head_node_count: usize,
+) -> (Vec<TemplateIrNodeId>, Vec<TemplateIrNodeId>) {
+    let boundary = head_node_count.min(children.len());
+    (children[..boundary].to_vec(), children[boundary..].to_vec())
 }
 
 /// Checks whether a head-origin child node is a wrapper template receiver.
@@ -232,7 +244,7 @@ fn is_tir_receiver(
         return Ok(None);
     }
 
-    let layout = collect_tir_slot_layout(store, reference.root)?;
+    let layout = collect_tir_slot_layout_with_context(store, reference.root, reference.context)?;
 
     Ok(if layout.schema.has_any_slots() {
         Some((
@@ -398,6 +410,7 @@ fn resolve_tir_chain_layer(
         layer.wrapper_reference,
         &layer.layout,
         resolved_fill_node_ids,
+        &FxHashMap::default(),
         original_span,
     )?;
 

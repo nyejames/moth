@@ -94,7 +94,6 @@ pub(crate) enum ConstTemplateValue {
     Public {
         template: PublicConstTemplate,
         kind: ConstValueKind,
-        hir_visible: bool,
         /// The template's folded string when finalization produced one; structural pieces
         /// stay intact until a consumer can represent them.
         folded: Option<ConstStringValue>,
@@ -146,7 +145,6 @@ pub(crate) struct ConstValueMetadata {
     pub(crate) contains_regular_division: bool,
     pub(crate) synthetic_interface_provenance: SyntheticInterfaceProvenance,
     pub(crate) value_kind: ConstValueKind,
-    pub(crate) hir_visible: bool,
 }
 
 impl ConstValueMetadata {
@@ -163,7 +161,6 @@ impl ConstValueMetadata {
             contains_regular_division: false,
             synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
             value_kind: ConstValueKind::Literal,
-            hir_visible: true,
         }
     }
 
@@ -812,7 +809,6 @@ impl ConstValueStore {
                 contains_regular_division: false,
                 synthetic_interface_provenance: SyntheticInterfaceProvenance::default(),
                 value_kind,
-                hir_visible: true,
             },
             payload,
         )
@@ -820,7 +816,7 @@ impl ConstValueStore {
 
     /// Attach one use's occurrence provenance to a shared constant. Stages a copy only when the
     /// occurrence adds members, so the stored value itself is never mutated.
-    fn with_occurrence_provenance(
+    pub(crate) fn with_occurrence_provenance(
         &mut self,
         expression: ExpressionView<'_>,
         id: ConstValueId,
@@ -986,28 +982,24 @@ impl ConstValueStore {
             }
             ExpressionOperationView::Template(template) => {
                 let result = template_builder(template)?;
-                let (payload, kind, visible, provenance) = match result {
+                let (payload, kind, provenance) = match result {
                     ConstTemplateValue::Folded { value, provenance } => (
                         ConstValuePayload::String(value),
                         ConstValueKind::RenderableTemplate,
-                        true,
                         provenance,
                     ),
                     ConstTemplateValue::Public {
                         template,
                         kind,
-                        hir_visible,
                         folded,
                         provenance,
                     } => (
                         ConstValuePayload::Template { template, folded },
                         kind,
-                        hir_visible,
                         provenance,
                     ),
                 };
                 let mut metadata = Self::metadata_from_view(expression, kind)?;
-                metadata.hir_visible = visible;
                 metadata.synthetic_interface_provenance =
                     metadata.synthetic_interface_provenance.union(&provenance);
                 self.insert_value(metadata, payload).map(Some)
@@ -1090,7 +1082,6 @@ impl ConstValueStore {
                 .map(|facts| facts.provenance.clone())
                 .unwrap_or_default(),
             value_kind,
-            hir_visible: true,
         }
     }
 
@@ -1131,9 +1122,8 @@ impl ConstValueStore {
     /// WHAT: yields each row's path, id and metadata together.
     /// WHY: a row's id was minted by this store and its value node was pushed before the row,
     /// so the metadata always exists. Handing out a bare id forces every consumer to look the
-    /// metadata up again and invent a meaning for a miss that cannot happen - callers variously
-    /// skipped the row, reported it as a user config error, or read it as "not HIR visible".
-    /// Yielding the view removes the lookup and those branches with it.
+    /// metadata up again and invent a meaning for a miss that cannot happen. Yielding the view
+    /// removes the lookup and those branches with it.
     pub(crate) fn iter_module_constant_views(&self) -> impl Iterator<Item = ConstValueRowView<'_>> {
         self.rows.iter().map(|row| ConstValueRowView {
             path: &row.path,

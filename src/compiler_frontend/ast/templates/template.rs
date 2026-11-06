@@ -7,6 +7,7 @@
 //!      durable `Template` value and the shared vocabulary used by parsing,
 //!      folding, slot routing, and runtime-handoff preparation.
 
+use crate::compiler_frontend::ast::const_values::store::ConstValueId;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterInput, FormatterOutput,
@@ -31,7 +32,7 @@ use std::sync::Arc;
 pub enum SlotKey {
     /// The default unnamed slot (`$slot`).
     Default,
-    /// A named slot (`$slot("name")`).
+    /// A named slot (`$slot name`).
     Named(StringId),
     /// A positional slot used in composition.
     Positional(usize),
@@ -40,6 +41,26 @@ pub enum SlotKey {
 impl SlotKey {
     pub fn named(name: StringId) -> Self {
         Self::Named(name)
+    }
+}
+
+/// One parsed `$slot` declaration.
+///
+/// WHAT: keeps the routing key apart from the compile-time default authored on
+///       this specific slot occurrence.
+/// WHY: defaults belong to occurrences, not keys. Repeated occurrences of the
+///      same named key consume the same routed contributions but may fall back
+///      to different values. The default stays a module-local constant id here;
+///      TIR and public projection own its later materialisation.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SlotDeclaration {
+    pub(crate) key: SlotKey,
+    pub(crate) default: Option<ConstValueId>,
+}
+
+impl SlotDeclaration {
+    pub(crate) fn new(key: SlotKey, default: Option<ConstValueId>) -> Self {
+        Self { key, default }
     }
 }
 
@@ -65,11 +86,11 @@ pub enum TemplateType {
     /// slots, which makes it a compile-time wrapper rather than a direct string value.
     String,
 
-    /// `[$slot]` and `[$slot("name")]` parse as dedicated template nodes, then
-    /// become structural slot placeholders in the parent parser TIR.
-    SlotDefinition(SlotKey),
+    /// `[$slot]`, `[$slot name]` and `[$slot 1]` parse as dedicated template
+    /// nodes, then become structural slot placeholders in the parent parser TIR.
+    SlotDefinition(SlotDeclaration),
 
-    /// `[$insert("name"): ...]` helpers carry contribution content that only an
+    /// `[$in name: ...]` helpers carry contribution content that only an
     /// immediate parent template can consume during slot composition.
     SlotInsert(SlotKey),
 
@@ -96,7 +117,7 @@ pub enum TemplateConstValueKind {
     /// This is not automatically a backend-facing constant string in runtime paths.
     WrapperTemplate,
 
-    /// AST composition helper (e.g., `$insert(...)`) that must not escape as a
+    /// AST composition helper (e.g., `$in name: ...`) that must not escape as a
     /// backend-facing runtime value. Helper identity alone is not sufficient to
     /// prove validity when nested under a wrapper-owned final template value.
     SlotInsertHelper,
@@ -113,6 +134,12 @@ pub enum TemplateConstValueKind {
 #[derive(Clone, Debug)]
 pub struct SlotPlaceholder {
     pub key: SlotKey,
+    /// Compile-time `String` default authored on this slot occurrence.
+    ///
+    /// The id belongs to the module's `ConstValueStore`. TIR may resolve it
+    /// while that store is alive, but public projection must lower it to the
+    /// stable folded String representation.
+    pub default: Option<ConstValueId>,
     pub applied_child_wrappers: Vec<TemplateWrapperReference>,
     pub child_wrappers: Vec<TemplateWrapperReference>,
     pub skip_parent_child_wrappers: bool,
@@ -122,14 +149,16 @@ pub struct SlotPlaceholder {
 
 impl SlotPlaceholder {
     pub fn with_wrappers(
-        key: SlotKey,
+        declaration: SlotDeclaration,
         applied_child_wrappers: Vec<TemplateWrapperReference>,
         child_wrappers: Vec<TemplateWrapperReference>,
         skip_parent_child_wrappers: bool,
         span: Option<SourceSpan>,
     ) -> Self {
+        let SlotDeclaration { key, default } = declaration;
         Self {
             key,
+            default,
             applied_child_wrappers,
             child_wrappers,
             skip_parent_child_wrappers,
@@ -217,7 +246,7 @@ pub(crate) struct FormatterResult {
 /// WHAT: non-recursive style metadata for a template: formatter, style ID,
 ///       whitespace policy, and suppress-child-template behavior.
 /// WHY: parser-local wrapper references and TIR wrapper-context overlays own
-///      `$children(..)` application, so `Style` remains a non-recursive config
+///      `$before`/`$after` wrapper application, so `Style` remains a non-recursive config
 ///      shape that can be stored on TIR entries without recursive wrapper
 ///      payloads.
 #[derive(Clone, Debug)]
@@ -230,7 +259,7 @@ pub struct Style {
     /// If at all. Compiler will determine if this can be run at compile-time, or need a runtime call.
     pub(crate) formatter: Option<Formatter>,
 
-    /// When true, nested child templates skip the parent-applied `$children(..)`
+    /// When true, nested child templates skip the parent-applied `$before`/`$after`
     /// wrappers while still allowing wrappers declared on the child itself.
     pub skip_parent_child_wrappers: bool,
 

@@ -1,8 +1,8 @@
-canvas #= [:<canvas id="[$slot("id")]" style="[$slot("style")]"></canvas>]
+canvas #= [:<canvas id="[$slot id]" style="[$slot style]"></canvas>]
 
 output = [canvas:
-    [$insert("id"):canvas]
-    [$insert("style"):
+    [$in id:canvas]
+    [$in style:
         position: fixed;
         inset: 0;
     ]

@@ -19,6 +19,7 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::const_values::ConstValuePayload;
+use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     ExprId, ExpressionOperationView, ExpressionView, ResolvedCallableTarget,
 };
@@ -30,6 +31,10 @@ use crate::compiler_frontend::ast::expressions::failure_facts::{
 };
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueCatchBlock,
+};
+use crate::compiler_frontend::ast::templates::top_level_templates::AstConstTopLevelFragment;
+use crate::compiler_frontend::builder_root_slots::{
+    BuilderRootSlotName, BuilderRootSlotSchema, ConstFragmentDestination,
 };
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::canonical_type_identity::{
@@ -337,6 +342,7 @@ struct FrontendProject {
     entry_file: PathBuf,
     files: Vec<PathBuf>,
     frontend: FrontendServices,
+    builder_root_slots: Option<BuilderRootSlotSchema>,
 }
 
 impl FrontendProject {
@@ -405,7 +411,14 @@ impl FrontendProject {
             entry_file,
             files: canonical_files,
             frontend,
+            builder_root_slots: None,
         }
+    }
+
+    /// Registers the named destinations the frontend may route direct root contributions to.
+    fn with_builder_root_slots(mut self, schema: BuilderRootSlotSchema) -> Self {
+        self.builder_root_slots = Some(schema);
+        self
     }
 
     fn tokenize_all(&mut self) -> Vec<TokenizedFile> {
@@ -506,6 +519,7 @@ impl FrontendProject {
         // These fixtures have valid declaration shells. Body diagnostics belong to the AST result
         // and are frozen only when a test inspects them.
         let sorted = self.sorted_headers();
+        let builder_root_slots = self.builder_root_slots.as_ref();
         let result = self.frontend.with_compiler(|compiler| {
             compiler.headers_to_ast(
                 AstBuildRequest {
@@ -518,6 +532,7 @@ impl FrontendProject {
                     module_origin: None,
                     public_source_trait_origins: Arc::default(),
                     build_config_values: Arc::new(Default::default()),
+                    builder_root_slots,
                 },
                 #[cfg(feature = "timers")]
                 None,
@@ -750,6 +765,195 @@ fn compiles_single_file_program_through_borrow_check() {
             statement.id
         );
     }
+}
+
+/// Resolves the complete text of a fragment whose fixture value is a plain text run.
+fn fragment_text(fragment: &AstConstTopLevelFragment, string_table: &StringTable) -> String {
+    match &fragment.value {
+        ConstStringValue::Text(text) => string_table.resolve(*text).to_owned(),
+        ConstStringValue::Pieces(pieces) => pieces
+            .iter()
+            .map(|piece| match piece {
+                crate::compiler_frontend::ast::const_values::store::ConstStringPiece::Text(
+                    text,
+                ) => string_table.resolve(*text).to_owned(),
+                _ => panic!("fixture fragment should contain only text pieces"),
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn direct_root_named_insert_routes_to_registered_builder_slot() {
+    // A builder-neutral schema name proves the frontend does not depend on HTML slot vocabulary.
+    let mut schema = BuilderRootSlotSchema::default();
+    schema.register("sidebar");
+
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@page.moth",
+            "#[$in sidebar: Sidebar]\n#[: <main>Body</main>]\n#[$in sidebar: Tail]\n#[$in sidebar:]\n",
+        )],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    )
+    .with_builder_root_slots(schema);
+
+    let ast = project.ast();
+    let string_table = &project.frontend.string_table;
+    assert_eq!(
+        ast.const_top_level_fragments.len(),
+        4,
+        "the named contribution and the ordinary body fragment both survive AST construction"
+    );
+
+    let named = &ast.const_top_level_fragments[0];
+    assert_eq!(
+        named.destination,
+        ConstFragmentDestination::Named(BuilderRootSlotName::new("sidebar"))
+    );
+    assert_eq!(fragment_text(named, string_table).trim(), "Sidebar");
+
+    let body = &ast.const_top_level_fragments[1];
+    assert_eq!(body.destination, ConstFragmentDestination::Body);
+    assert_eq!(
+        fragment_text(body, string_table).trim(),
+        "<main>Body</main>"
+    );
+    let tail = &ast.const_top_level_fragments[2];
+    let empty = &ast.const_top_level_fragments[3];
+    assert_eq!(tail.destination, named.destination);
+    assert_eq!(empty.destination, named.destination);
+    assert_eq!(fragment_text(tail, string_table).trim(), "Tail");
+    assert_eq!(fragment_text(empty, string_table), "");
+    assert!(
+        ast.const_top_level_fragments
+            .iter()
+            .all(|fragment| fragment.runtime_insertion_index == 0)
+    );
+    assert_ne!(
+        named.span, body.span,
+        "each fragment keeps its own authored source span"
+    );
+}
+
+#[test]
+fn unregistered_direct_root_builder_slot_diagnoses_at_authored_site() {
+    let mut schema = BuilderRootSlotSchema::default();
+    schema.register("sidebar");
+
+    let mut project = FrontendProject::new(
+        &[("src/@page.moth", "#[$in title: Title]\n#[: body]\n")],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    )
+    .with_builder_root_slots(schema);
+
+    let failure = project
+        .ast_result()
+        .expect_ast_failure("an unregistered builder destination should fail in AST construction");
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0022",
+        Some("invalid_template_structure.builder_root_slot_not_registered"),
+    );
+    assert!(
+        !matches!(diagnostic.primary_site(), SiteRef::Absent),
+        "the unknown builder destination must point at the authored insert"
+    );
+}
+
+#[test]
+fn runtime_direct_root_builder_slot_contribution_is_not_folded() {
+    let mut schema = BuilderRootSlotSchema::default();
+    schema.register("sidebar");
+
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@page.moth",
+            "runtime_value || -> String:\n    return \"runtime\"\n;\n#[$in sidebar: [runtime_value()]]\n",
+        )],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    )
+    .with_builder_root_slots(schema);
+
+    let failure = project
+        .ast_result()
+        .expect_ast_failure("a runtime builder contribution should not fold at compile time");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0053",
+        Some("compile_time_evaluation_error.non_constant_reference_in_constant"),
+    );
+}
+
+#[test]
+fn nested_insert_in_ordinary_root_fragment_stays_an_ordinary_helper() {
+    let mut schema = BuilderRootSlotSchema::default();
+    schema.register("sidebar");
+
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@page.moth",
+            "#[: before [$in sidebar: Nested] after]\n",
+        )],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    )
+    .with_builder_root_slots(schema);
+
+    let failure = project
+        .ast_result()
+        .expect_ast_failure("a nested insert must not escape to builder routing");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0052",
+        Some("invalid_template_slot.named_insert_outside_parent_slot"),
+    );
+}
+
+#[test]
+fn root_builder_insert_rejects_unresolved_template_slots() {
+    let mut schema = BuilderRootSlotSchema::default();
+    schema.register("sidebar");
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@page.moth",
+            "card #= [:<h1>[$slot title]</h1>]\n#[$in sidebar: [card]]\n",
+        )],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    )
+    .with_builder_root_slots(schema);
+    let failure = project
+        .ast_result()
+        .expect_ast_failure("unfilled slots cannot be builder output");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0022",
+        Some("invalid_template_structure.non_foldable_const_template"),
+    );
+}
+
+#[test]
+fn aliased_root_insert_is_not_a_builder_message() {
+    let mut schema = BuilderRootSlotSchema::default();
+    schema.register("sidebar");
+    let mut project = FrontendProject::new(
+        &[("src/@page.moth", "part #= [$in sidebar: X]\n#[part]\n")],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    )
+    .with_builder_root_slots(schema);
+    let failure = project
+        .ast_result()
+        .expect_ast_failure("an aliased helper must not route to the builder");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0052",
+        Some("invalid_template_slot.named_insert_outside_parent_slot"),
+    );
 }
 
 #[test]

@@ -9,9 +9,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Getting Started with moth"
-page_description #= "How to use the Moth compiler CLI, create a project, run the dev server, and read compiler diagnostics."
-page_head #= language_theme_head
+#[$in title:["Getting Started with moth"]]
+#[$in description:["How to use the Moth compiler CLI, create a project, run the dev server, and read compiler diagnostics."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -22,10 +22,10 @@ init_docs_sidebar()!
     `moth` compiles and tools Moth projects.
     You use it from the command line to create projects, check them, build them and run the hot-reloading dev server.
 
-    **Support notice.** Live config syntax is parenthesised grouped `project` and
-    `html` records with declaration-owned `#Config of T` inputs, plus reserved `page_*` metadata.
-    The accepted `$config`, `$project`, `$html_builder` and root-only `$page`
-    forms below remain queued design. `moth new` emits the current grouped parenthesised config, not those forms yet.
+    **Support notice.** Live config syntax uses grouped parenthesised `project` and
+    `html` records with declaration-owned `#Config of T` inputs. Direct const
+    root inserts supply HTML metadata. The accepted `$config`, `$project` and
+    `$html_builder` forms remain queued design.
 
     Other tooling continues rapid development.
 
@@ -59,7 +59,7 @@ init_docs_sidebar()!
         [data:
             [$md:`new html`]
             [: Creates the current HTML project scaffold.]
-            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates a minimal grouped parenthesised config with an explicit valid name, a conventional root-level `@page.moth`, output manifests and an optional .gitignore. It does not yet emit the accepted `$config`/`$project`/`$html_builder` starter or a live `$page` declaration. Use structural `+*.moth` packages under the selected source root for project-local packages.]
+            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates a minimal grouped parenthesised config with an explicit valid name, a conventional root-level `@page.moth` with direct builder slot metadata, output manifests and an optional .gitignore. It does not yet emit the accepted `$config`/`$project`/`$html_builder` starter or an explicit `$entry` declaration. Use structural `+*.moth` packages under the selected source root for project-local packages.]
         ]
 
         [data:
@@ -151,15 +151,17 @@ init_docs_sidebar()!
     To supply a version explicitly, add an earlier `$config` contract or a fixed
     literal to `$project`. The selected directory is the source root.
 
-    A normal module root declares an HTML page separately. The accepted page
-    directive is root-only and does not belong in helper files:
+    A normal module root can supply HTML metadata with direct const builder
+    slots. That contribution counts as root activity, so a metadata-only root
+    still produces a page:
 
     [codeblock, $code("moth"):
-        $page
+        #[$in title:Welcome]
     ]
 
-    `moth new` does not emit these accepted forms yet. Keep operational
-    scaffolds on their current grouped parenthesised config and reserved page metadata.
+    `moth new` emits the current grouped parenthesised config and builder slots.
+    A general `$entry` root purpose remains deferred; the earlier `$page`
+    proposal is superseded and is not current syntax.
 
     Start a new project:
 
@@ -230,7 +232,7 @@ init_docs_sidebar()!
 
     - `_dev/` and `_release/` are hidden output folders.
     - `.moth_manifest` files are build-system metadata for safe stale-output cleanup.
-    - `@page.moth` is the current conventional module root at the selected project root. The filename is cosmetic; it does not mean that the accepted root-only `$page` syntax is implemented.
+    - `@page.moth` is the current conventional module root at the selected project root. The filename is cosmetic; it does not mean that a root-purpose directive is present. Entries are selected from root activity, and a direct builder slot contribution is activity.
     - Use structural `+*.moth` packages under the selected source root for project-local packages.
 
     ### Using --force
@@ -454,7 +456,7 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager_next:
-        [$insert("next_path"):../language-overview/]
-        [$insert("next_title"):Language basics]
+        [$in next_path:../language-overview/]
+        [$in next_title:Language basics]
     ]
 ]

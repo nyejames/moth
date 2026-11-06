@@ -566,7 +566,7 @@ preparation, tokenization/header parsing, string-table merge/remap, and docs AST
 
 - `docs/compiler-design-overview.md` now records frontend arenas as stage/module-owned
   implementation details, with capacity estimates explicitly policy-only.
-- `docs/src/docs/progress/@page.moth` tracks "Frontend Arena + Semantic Invariant Optimisation" as
+- `docs/docs/progress/@page.moth` tracks "Frontend Arena + Semantic Invariant Optimisation" as
   `Partial`: scope-frame arenas, capacity estimates, external package clone reduction, and
   adversarial fixtures are implemented; deeper expression/template/HIR arenas remain deferred.
 - `benchmarks/README.md` records the five independent invocation protocol for optimization phase
@@ -3015,7 +3015,7 @@ and this report is modified by the census that would measure it.
 
 4584 files, 2,354,191 bytes total, median 77 bytes, p95 1,318 bytes, p99 9,002 bytes. The largest
 source is `benchmarks/nominal-scaling/nominal-scaling-320.moth` at 92,557 bytes, followed by
-`docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf` at 78,392 bytes.
+`docs/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf` at 78,392 bytes.
 
 | `LENGTH_BITS` | Inline start range | Sources at or over the limit |
 | ---: | ---: | ---: |
@@ -7208,3 +7208,92 @@ The three small opt-level 0 cases the maintainer accepted on 2026-11-01 are unaf
 ### Validation
 
 `just validate` and `just validate-full` passed on the follow-up tree.
+
+## Builder slots and template directives (2026-11-06)
+
+The pre-refactor compiler at `919ec4e50` and the implementation after the final
+slot-scope corrections were measured on macOS Apple Silicon with
+`just bench-frontend-check` and `just bench-check`. Each used one preflight and
+10 measured iterations. Both trees were dirty with admitted work.
+
+| Workload | Baseline mean ms | Candidate mean ms |
+| --- | ---: | ---: |
+| Frontend template stress | 23.300 | 24.648 |
+| Frontend render-plan churn | 21.243 | 18.635 |
+| CLI template stress | 9.966 | 9.598 |
+| CLI render-plan churn | 9.186 | 8.199 |
+| External-JS imports build | 11.500 | 9.697 |
+| Module-root stress build | 12.004 | 9.770 |
+| External-import churn build | 15.809 | 12.863 |
+
+These are not controlled like-for-like comparisons: the cutover migrated
+template syntax, builder slots, common packages and documentation. The benchmark
+runner reported changed workload fingerprints for 39 frontend and 13 CLI cases,
+including template stress and render-plan churn. The table records the observed
+means, not a regression verdict for those changed inputs. The runtime audit also
+removed an unconditional named-marker allocation and context walk on applications
+without inherited wrapper contexts; a focused cost regression bounds retained
+markers on that path.
+
+Validation: `just validate-full` passed, including 17 standard feature lanes,
+the integration suite, performance checks and the no-timer release-artifact
+check. The isolated release documentation build and builder-slot title smoke
+also passed.
+
+### Merge-audit follow-up
+
+On Apple M1 Pro, 16 GiB, rustc 1.99.0 and revision `2b2acc088`, the dev-profile
+`data_layout_memory_probe` measured deterministic conditional-wrapper projects in alternating
+order. It was built with
+`cargo build -p moth --bin data_layout_memory_probe --features data_layout_memory_probe` and
+run as `target/debug/data_layout_memory_probe <project>`.
+Nine runs of 64 receiving sites with nested named decorators had a 343.880 ms median,
+195 schema walks and 8.81 MiB peak allocator growth. The no-wrapper control was 57.550 ms,
+two walks and 1.16 MiB. A 16-site, 16-child case took 1,050.519 ms and 123.96 MiB over seven
+runs; a 64-site, 16-child case took 12,445.933 ms and 1,571.84 MiB over five. These are
+different synthetic workloads, not matched before/after compiler comparisons. The probe counts
+TIR nodes created by runtime-plan materialisation, not all retained TIR nodes.
+
+Breakpoint counts show the per-site cache already limits the site-planner layout walk to one
+per receiving site and wrapper set. Sampling puts all context-aware layout work at about
+1.6 ms per 64-site run. The 64 site-planner walks are about a third of those calls, roughly
+0.5 ms if their costs are equal, so another cache is not justified. Separately, the runtime
+handoff materialiser, introduced on this branch in `1b0be5259`, repeated schema collection once
+or twice per emitted runtime child: 128 of 194 context-aware walks at 64 sites and 2,048 at
+64 sites by 16 children. Layout sampling was about 13.75 ms in one 13.33 s profiled run, so
+this is a low-priority candidate, not a demonstrated material cost.
+
+The large synthetic case instead showed substantial TIR preparation and borrow-analysis activity.
+Its peak-memory ownership was not directly attributed; blocks-times-locals borrow-state storage
+is an investigation candidate, not a proven cause. Release behaviour and ordinary-project impact
+remain unmeasured.
+The 64-site case spent most of its time in AST emission and module-constant finalisation;
+the gap from the no-wrapper control remains unexplained. Increasing the combined workload from
+16 to 64 sites at 16 children grew time by 11.8 times and peak allocator growth by 12.7 times,
+an open synthetic scaling risk rather than proof of the same behaviour in production.
+
+For the preceding project-structure change, release timer builds of `41f7993ee` and
+`2b2acc088` checked identical copied source files in alternating order for 25 measured pairs.
+The old compiler used its required `src` boundary and old config while the new compiler used
+the selected root and new config; package inputs and compiler implementations also differed.
+Both used `MOTH_TIMERS=bench MOTH_COUNTERS=off moth check <project> --terse` and the
+`stage0.directory.inventory` timing. The old binary was built with
+`cargo build -p moth-cli --bin moth --release --features timers`; the candidate came from
+`just bench-check`.
+The `stage0.directory.inventory` medians were 1.251 to 1.120 ms for module graph, 1.716 to
+1.590 ms for import fanout and 1.568 to 1.427 ms for module-root stress. Module graph plus 256
+matching directories, each containing a non-source file, gave 14.609 to 10.430 ms. These are
+directional measurements across the stated revision range, which includes changes after the
+project-structure refactor, not an isolated estimate of discovery changes. They do not show
+the suspected slowdown on these inputs.
+The difference between the new compiler's two medians is about 36 µs per additional directory,
+an approximate cost from distinct inputs rather than an isolated per-directory measurement.
+These inputs contain no excluded or aliased directories or non-source trees formerly outside
+the `src` boundary, so they do not exercise the added boundary and skip-policy cases.
+
+The non-recording `just bench-frontend-check` and `just bench-check` passed on `2b2acc088`
+with one preflight and ten measured iterations per case. Several workload fingerprints differed
+from benchmark history, so those historical comparisons do not establish a speedup or regression.
+The generated fixtures and raw measurements live in ignored `tmp/wrapper-cost/` and
+`tmp/discovery-experiment/`; they are not reproduced by a checked-in harness.
+

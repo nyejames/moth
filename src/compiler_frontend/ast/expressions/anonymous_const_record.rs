@@ -127,7 +127,6 @@ fn finish_record(
         ConstValueMetadata::resolved(record_type_id, span, ValueMode::ImmutableOwned);
     metadata.const_record_state = ConstRecordState::ConstRecord;
     metadata.value_kind = ConstValueKind::Composite;
-    metadata.hir_visible = false;
     let value = const_values.insert_value(metadata, ConstValuePayload::Record(fields))?;
     let expression =
         expression_builder.constant(value, record_type_id, span, ValueMode::ImmutableOwned)?;

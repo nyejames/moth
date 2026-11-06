@@ -1,6 +1,6 @@
 wrapper #= [:
-    [$children([:H: [$slot]]):[$slot(1)]]
-    [$children([:R: [$slot]]):[$slot]]
+    [$before = [:H: ]:[$slot 1]]
+    [$before = [:R: ]:[$slot]]
 ]
 
 [wrapper:

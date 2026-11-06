@@ -2,9 +2,14 @@
 //!
 //! `ContributionShape` classifies a single TIR contribution node as a
 //! potential child-template contribution, capturing whether it represents
-//! child output and whether it opts out of parent `$children(..)` wrappers.
+//! child output and whether it opts out of parent child wrappers.
 //! Control-flow-root classification stays alongside these contribution facts
 //! so slot composition and runtime sites share the same decision.
+//!
+//! Runtime contribution markers store the authored shape and control-flow
+//! class they replaced. Both classifiers read those stored facts, so recursive
+//! structural named composition reaches the same wrapper decisions as the
+//! authored contribution without a parallel marker side table.
 
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
@@ -74,6 +79,12 @@ pub(crate) fn classify_tir_contribution_node(
             }
         }
 
+        // Runtime planning replaces the authored contribution with a marker so the
+        // source is evaluated once. The marker carries the replaced shape because
+        // recursive structural named composition can splice it into wrappers away
+        // from the source drafts that knew the authored node.
+        TemplateIrNodeKind::RuntimeSlotContributionSource { shape, .. } => *shape,
+
         _ => ContributionShape::Other,
     };
 
@@ -113,6 +124,12 @@ pub(crate) fn tir_node_is_control_flow_root(
                 .control_flow_node_id_in_subtree(template.root)?
                 .is_some())
         }
+
+        // A runtime source marker answers for the authored contribution it
+        // replaced. Named composition must attach conditional wrappers before
+        // runtime evaluation can prove the source emitted nothing.
+        TemplateIrNodeKind::RuntimeSlotContributionSource { control_flow, .. } => Ok(*control_flow),
+
         _ => Ok(false),
     }
 }

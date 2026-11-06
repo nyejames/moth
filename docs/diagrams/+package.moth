@@ -364,13 +364,13 @@ flow_diagram_head #= [$html:
 ]
 
 flow_diagram #= [$html:
-    <figure class="moth-flow" aria-label="[$slot("label")]">
+    <figure class="moth-flow" aria-label="[$slot label]">
         <div class="moth-flow__pipeline">
             [$slot]
         </div>
 
         <figcaption class="moth-flow__caption">
-            [$slot("caption")]
+            [$slot caption]
         </figcaption>
     </figure>
 ]
@@ -382,22 +382,22 @@ flow_stage #= [$html:
         </div>
 
         <div class="moth-flow__details">
-            [$slot("details")]
+            [$slot details]
         </div>
     </section>
 ]
 
 flow_node #= [$html:
-    <a class="moth-flow__node" href="[$slot("href")]">
-        <span class="moth-flow__eyebrow">[$slot("eyebrow")]</span>
-        <span class="moth-flow__title">[$slot("title")]</span>
+    <a class="moth-flow__node" href="[$slot href]">
+        <span class="moth-flow__eyebrow">[$slot eyebrow]</span>
+        <span class="moth-flow__title">[$slot title]</span>
         <span class="moth-flow__description">[$slot]</span>
     </a>
 ]
 
 flow_branch #= [$html:
     <div class="moth-flow__branch">
-        <div class="moth-flow__branch-label">[$slot("label")]</div>
+        <div class="moth-flow__branch-label">[$slot label]</div>
         [$slot]
     </div>
 ]
@@ -409,15 +409,15 @@ flow_lane #= [$html:
 ]
 
 flow_detail #= [$html:
-    <a class="moth-flow__detail" href="[$slot("href")]">
+    <a class="moth-flow__detail" href="[$slot href]">
         [$slot]
     </a>
 ]
 
 flow_island #= [$html:
     <aside class="moth-flow__island">
-        <a class="moth-flow__island-link" href="[$slot("href")]">
-            <span class="moth-flow__island-title">[$slot("title")]</span>
+        <a class="moth-flow__island-link" href="[$slot href]">
+            <span class="moth-flow__island-title">[$slot title]</span>
             <span class="moth-flow__island-description">[$slot]</span>
         </a>
     </aside>

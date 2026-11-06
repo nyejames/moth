@@ -13,9 +13,11 @@ use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
 };
+use crate::compiler_frontend::ast::templates::tir::contribution_shape::ContributionShape;
 use crate::compiler_frontend::ast::templates::tir::copy_state::TirCopyState;
 use crate::compiler_frontend::ast::templates::tir::ids::{TemplateIrNodeId, TemplateSlotPlanId};
 use crate::compiler_frontend::ast::templates::tir::node::{TemplateIrNode, TemplateIrNodeKind};
+use crate::compiler_frontend::ast::templates::tir::slot_layout::template_has_runtime_slot_plan;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -110,17 +112,28 @@ pub(super) fn convert_runtime_slot_site(
 /// Plants one plan-qualified contribution-source marker.
 ///
 /// WHAT: constructs the only TIR splice representation used by runtime slot
-///       site planning. The marker always carries the active slot plan.
+///       site planning. The marker always carries the active slot plan and the
+///       authored contribution facts it replaced.
 /// WHY: a marker without a plan cannot be checked against its owning source
-///      list, and nested plans may reuse the same local source index.
+///      list, and nested plans may reuse the same local source index. The shape
+///      and control-flow class travel on the marker because recursive named
+///      composition can splice it into wrappers long after the source drafts
+///      that knew the authored node are out of reach.
 pub(crate) fn push_runtime_slot_contribution_source(
     store: &mut TemplateIrStore,
     plan: TemplateSlotPlanId,
     source: RuntimeSlotContributionSourceId,
+    shape: ContributionShape,
+    control_flow: bool,
     span: Option<SourceSpan>,
 ) -> TemplateIrNodeId {
     store.push_node(TemplateIrNode::new(
-        TemplateIrNodeKind::RuntimeSlotContributionSource { plan, source },
+        TemplateIrNodeKind::RuntimeSlotContributionSource {
+            plan,
+            source,
+            shape,
+            control_flow,
+        },
         span,
     ))
 }
@@ -137,7 +150,10 @@ pub(crate) fn push_runtime_slot_contribution_source(
 /// slot is converted.
 ///
 /// `ChildTemplate` nodes are recursed into so nested slots inside child
-/// templates are converted in the same document-order pass. When a child
+/// templates are converted in the same document-order pass. A child template
+/// that already owns a runtime slot plan is a leaf: its slots belong to that
+/// plan's sites, and this enclosing plan must not assign its own. Closed
+/// placeholders are fixed fallbacks and stay as slot nodes. When a child
 /// template has slots converted, its `TemplateIr.summary` is recomputed from
 /// the converted tree.
 ///
@@ -167,6 +183,10 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
 
     let converted = match node_kind {
         TemplateIrNodeKind::Slot { placeholder } => {
+            if placeholder.closed {
+                return Ok(false);
+            }
+
             let site_id = copy_state
                 .next_runtime_slot_site_for_key_in_sites(
                     slot_plan_id,
@@ -204,14 +224,23 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {
             let child_template_id = reference.root;
 
-            let child_root = store
-                .get_template(child_template_id)
-                .ok_or_else(|| {
-                    InfrastructureFailure::internal(CompilerStage::AstConstruction,
-                        "TIR active-slot conversion: child template ID was not present in the store.",
-                    )
-                })?
-                .root;
+            let child_template = store.get_template(child_template_id).ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "TIR active-slot conversion: child template ID was not present in the store.",
+                )
+            })?;
+
+            // A runtime-plan child owns its own occurrences. This walk belongs to an
+            // enclosing plan and must not assign its sites to occurrences inside that
+            // application. A constant-composed child is not a leaf: its closed
+            // placeholders are skipped individually and its open contribution slots
+            // still belong to this plan.
+            if template_has_runtime_slot_plan(child_template) {
+                return Ok(false);
+            }
+
+            let child_root = child_template.root;
 
             let child_converted = convert_tir_tree_to_active_slot_plan(
                 child_root,

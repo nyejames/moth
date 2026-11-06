@@ -1,7 +1,7 @@
-`$children(...)` applies a wrapper to each direct child template.
+`$before` and `$after` add a prefix and suffix around each direct child template.
 
 [codeblock, $code("moth"):
-    list #= [$children([:<li>[$slot]</li>]):
+    list #= [$before = [:<li>], $after = [:</li>]:
         <ul>
             [$slot]
         </ul>
@@ -15,18 +15,76 @@
 
 Each direct child becomes one list item.
 
+The composed order is prefix content, the direct child, then suffix content.
+The child insertion point is implicit because only one is allowed.
+
+### Values and named slots
+
+Each directive is optional, and either may be used alone. Each may occur once
+per head, so a repeated `$before` or `$after` is rejected. Both may appear in the
+same head. The assignment marker is required, so `$before` or `$after` without
+`=` is invalid.
+
+A value is a compile-time String or a constant template wrapper. A plain String
+is literal text. A compile-time String may also retain structural resource
+pieces, which survive composition and resolve in the output context. A constant
+template wrapper may contain named slots, which the enclosing application fills.
+Its unresolved slot identity and structural resource pieces survive composition.
+
+[codeblock, $code("moth"):
+    row #= [$html:<tr style="[$slot row_style]">]
+    rows #= [$before = row, $after = [$html:</tr>]:[$slot]]
+
+    [rows:
+        [$in row_style:background: red;]
+        [: first]
+        [: second]
+    ]
+]
+
+The `$in row_style` contribution belongs to the enclosing `rows` application
+and fills the wrapper's named slot. It is not routed to either child.
+
+An occurrence can own a default in the wrapper value. The default applies only
+when no contribution reaches that occurrence:
+
+[codeblock, $code("moth"):
+    rows #= [$before = [$html:<tr style="[$slot row_style = "background: white;"]">], $after = [$html:</tr>]:[$slot]]
+]
+
+Only named slots may appear in a `$before` or `$after` value. An explicit
+default or positional slot anywhere in the value, including in a nested
+template, is rejected at the offending slot. The child insertion point is implicit.
+
+Runtime-dependent expressions and values that are neither compile-time Strings
+nor constant template wrappers are rejected at their authored span. For a
+template value, normal template body whitespace applies, including a space
+immediately after its body colon.
+
+### No output and loops
+
+A false or absent condition and a zero-iteration loop emit no wrapper. A selected
+empty String still counts as output and is wrapped. A direct child loop is
+wrapped once around its aggregate output. Put a wrapper inside the loop body to
+wrap each iteration.
+
 ### Direct-child scope
 
 The wrapper applies only to direct children.
+
+Literal body text is not individually wrapped.
 
 A selected child becomes an opaque contribution to its parent.
 
 The parent's wrapper does not descend into that child's nested templates.
 
-A nested helper may declare its own `$children(...)` wrapper.
+A nested helper may declare its own `$before` and `$after` wrapper.
 
 This keeps row, cell, list and layout helpers from leaking wrappers into deeper
 content.
+
+The same rules apply through const folding, runtime lowering, imports and
+re-exports.
 
 ### `$fresh`
 

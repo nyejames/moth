@@ -1,0 +1,87 @@
+entry = "."
+
+# Retired page_* constants have no reserved metadata meaning. Each remains an ordinary constant
+# and reaches output only when an ordinary body fragment references it, in source order. The
+# document keeps its default shell metadata.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "<title>test_project</title>",
+    "Old title sentinel",
+    "Old description sentinel",
+    "old-lang",
+    "old-favicon.ico",
+    "outline: 1px solid red;",
+    "<meta name=\"old-head\" content=\"old-head-sentinel\">",
+]
+must_contain_in_order = [
+    "<title>test_project</title>",
+    "Old title sentinel",
+    "Old description sentinel",
+    "old-lang",
+    "old-favicon.ico",
+    "outline: 1px solid red;",
+    "<meta name=\"old-head\" content=\"old-head-sentinel\">",
+]
+must_contain_exactly_once = [
+    "Old title sentinel",
+    "Old description sentinel",
+    "old-lang",
+    "old-favicon.ico",
+    "outline: 1px solid red;",
+    "<meta name=\"old-head\" content=\"old-head-sentinel\">",
+]
+must_not_contain = [
+    "<title>Old title sentinel",
+    "name=\"description\" content=\"Old description sentinel",
+    "<html lang=\"old-lang\"",
+    "rel=\"icon\" href=\"old-favicon.ico\"",
+    "<body style=\"outline: 1px solid red;\"",
+]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "<title>test_project</title>",
+    "Old title sentinel",
+    "Old description sentinel",
+    "old-lang",
+    "old-favicon.ico",
+    "outline: 1px solid red;",
+    "<meta name=\"old-head\" content=\"old-head-sentinel\">",
+]
+must_contain_in_order = [
+    "<title>test_project</title>",
+    "Old title sentinel",
+    "Old description sentinel",
+    "old-lang",
+    "old-favicon.ico",
+    "outline: 1px solid red;",
+    "<meta name=\"old-head\" content=\"old-head-sentinel\">",
+]
+must_contain_exactly_once = [
+    "Old title sentinel",
+    "Old description sentinel",
+    "old-lang",
+    "old-favicon.ico",
+    "outline: 1px solid red;",
+    "<meta name=\"old-head\" content=\"old-head-sentinel\">",
+]
+must_not_contain = [
+    "<title>Old title sentinel",
+    "name=\"description\" content=\"Old description sentinel",
+    "<html lang=\"old-lang\"",
+    "rel=\"icon\" href=\"old-favicon.ico\"",
+    "<body style=\"outline: 1px solid red;\"",
+]

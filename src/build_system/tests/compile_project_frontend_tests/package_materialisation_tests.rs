@@ -452,7 +452,7 @@ fn same_module_generated_sidecars_rebuild_const_templates_in_their_fresh_store()
     fs::write(
         dir.join("@page.moth"),
         r#"shell #= [:<span>[$slot]</span>]
-unused_insert #= [$insert("unused"): unused]
+unused_insert #= [$in unused: unused]
 
 wrap type T |value T| -> String:
     return [shell: generated]

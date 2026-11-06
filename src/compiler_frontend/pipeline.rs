@@ -25,6 +25,7 @@ use crate::compiler_frontend::ast::{
     Ast, AstBuildContext, AstBuildInput, AstBuildResult, FileValueResolutionServices,
     Stage0ResolutionFacts,
 };
+use crate::compiler_frontend::builder_root_slots::BuilderRootSlotSchema;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
@@ -199,6 +200,8 @@ pub(crate) struct AstBuildRequest<'a> {
     pub(crate) public_source_trait_origins: Arc<FxHashMap<PathId, OriginTraitId>>,
     pub(crate) build_config_values:
         Arc<crate::compiler_frontend::build_config::ResolvedBuildConfigMap>,
+    /// Named destinations the active builder registers for direct top-level const contributions.
+    pub(crate) builder_root_slots: Option<&'a BuilderRootSlotSchema>,
 }
 
 /// Resolve the registered logical path and source identity for one prepared source path.
@@ -549,6 +552,7 @@ impl<'a> CompilerFrontend<'a> {
             module_origin,
             public_source_trait_origins,
             build_config_values,
+            builder_root_slots,
         } = request;
 
         let entry_dir = match self.source_files.get_by_canonical_path(entry_file_path) {
@@ -605,6 +609,7 @@ impl<'a> CompilerFrontend<'a> {
                 file_value_resolution,
                 config_resolution: None,
                 build_config_values,
+                builder_root_slots,
                 template_const_loop_iteration_limit: self
                     .options
                     .template_const_loop_iteration_limit,

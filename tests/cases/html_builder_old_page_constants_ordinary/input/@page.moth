@@ -1,0 +1,15 @@
+-- The retired page_* names are ordinary constants with no implicit HTML metadata effects.
+-- Each appears in output only because this fixture explicitly references it as a body fragment.
+page_title #= "Old title sentinel"
+page_description #= "Old description sentinel"
+page_lang #= "old-lang"
+page_favicon #= "old-favicon.ico"
+page_body_style #= "outline: 1px solid red;"
+page_head #= [$html:<meta name="old-head" content="old-head-sentinel">]
+
+#[page_title]
+#[page_description]
+#[page_lang]
+#[page_favicon]
+#[page_body_style]
+#[page_head]

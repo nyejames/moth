@@ -75,6 +75,29 @@ selection, signature, lifecycle and outcome handling. A function declaration
 modifier or a semantic block requires its own compiler-owned contract.
 Registering a name isn't permission to invent one.
 
+### Keep root slot destinations builder-owned
+
+A builder surface may register statically known named destinations for direct
+top-level const contributions. The compiler treats that set as read-only input:
+it recognises a direct const `$in` only when the insert is the whole root
+template, validates the destination, folds the contribution and records the
+name, authored span and structural value in the fragment handoff. It never
+interprets an HTML slot name or scans constant names for metadata.
+Each registered name must tokenize as a single source symbol after `$in`.
+Builder-definition validation rejects invalid names. A unit test validates the built-in HTML
+surface.
+
+Slot meaning stays with the builder. The HTML builder interprets its registered
+`title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and
+`head` destinations and leaves the default body lane for ordinary fragments.
+Another builder may register unrelated names. Nested, aliased and runtime
+inserts remain ordinary template composition and do not route to a builder
+destination. Runtime named builder slots remain unsettled final design.
+
+This registration belongs to the builder capability surface, not to source
+packages or arbitrary callbacks. Keep slot-specific validation, escaping,
+fallbacks and output deduplication in the builder that owns the meaning.
+
 ### Keep directive powers bounded
 
 A descriptor fixes the directive's context, form, argument contract and
@@ -90,7 +113,7 @@ Structural exclusion belongs to the compiler's pre-graph feature-selection
 contract, not to a builder callback or configuration Boolean.
 
 Metadata preserves its declared scope. Project settings don't automatically
-merge with root metadata. A provider's metadata isn't inherited by its
+merge with builder slot contributions. A provider's metadata isn't inherited by its
 consumer. Repeated directive occurrences are accepted only when their
 registered cardinality allows them.
 

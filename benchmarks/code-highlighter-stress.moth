@@ -244,12 +244,12 @@ code_block #= [$code("moth"):
     value = 42
 ]
 
-page_wrapper #= [$children(:<div class="card">[$slot]</div>):
+page_wrapper #= [$before = [:<div class="card">], $after = [:</div>]:
     <article>[$slot]</article>
 ]
 
-named_slot #= [$slot("title")]
-insert_block #= [$insert("aside"): sidebar text]
+named_slot #= [$slot title]
+insert_block #= [$in aside: sidebar text]
 raw_block #= [$raw: <b>kept</b>]
 html_block #= [$html: <main class="content"></main>]
 css_block #= [$css: .card { border: 1px solid; }]
@@ -594,16 +594,16 @@ icon #= [: <span class="icon">[$slot]</span> ]
 badge #= [: <span class="badge">[$slot]</span> ]
 
 -- layout templates
-sidebar_layout #= [$children(:<aside>[$slot]</aside>):
+sidebar_layout #= [$before = [:<aside>], $after = [:</aside>]:
     <div class="sidebar">[$slot]</div>
 ]
 
-main_layout #= [$children(:<main>[$slot]</main>):
+main_layout #= [$before = [:<main>], $after = [:</main>]:
     <article>[$slot]</article>
 ]
 
-header_layout #= [$insert("title"): Document title]
-footer_layout #= [$insert("footer"): Copyright notice]
+header_layout #= [$in title: Document title]
+footer_layout #= [$in footer: Copyright notice]
 
 -- long template with markdown
 long_document #= [$md:
@@ -663,10 +663,10 @@ escaped_html #= [$escape_html:
 ]
 
 -- slots and inserts
-profile_page #= [$insert("profile"): Profile section]
-settings_page #= [$insert("settings"): Settings section]
-history_page #= [$insert("history"): History section]
-notifications_page #= [$insert("notifications"): Notifications section]
+profile_page #= [$in profile: Profile section]
+settings_page #= [$in settings: Settings section]
+history_page #= [$in history: History section]
+notifications_page #= [$in notifications: Notifications section]
 
 -- unicode identifiers
 héllo #= 1
@@ -975,10 +975,10 @@ float_pair #= Pair(1.0, 2.0)
 mixed_pair #= Pair("name", 42)
 
 -- constant templates
-title_template #= [: <h1>[$slot("title")]</h1> ]
-subtitle_template #= [: <h2>[$slot("subtitle")]</h2> ]
+title_template #= [: <h1>[$slot title]</h1> ]
+subtitle_template #= [: <h2>[$slot subtitle]</h2> ]
 paragraph_template #= [: <p>[$slot]</p> ]
-link_template #= [: <a href="[$slot("href")]">[$slot("label")]</a> ]
+link_template #= [: <a href="[$slot href]">[$slot label]</a> ]
 list_template #= [: <ul>[$slot]</ul> ]
 item_template #= [: <li>[$slot]</li> ]
 
@@ -1023,8 +1023,9 @@ local_io = io
 [$md]
 [$code]
 [$slot]
-[$insert]
-[$children]
+[$in name:]
+[$before]
+[$after]
 [$fresh]
 [$html]
 [$css]
@@ -1322,23 +1323,23 @@ counter_state ~= 0
 ~counter_state += 1
 
 -- Example: template components
-component_button #= [$children(:<button class="btn">[$slot]</button>):
+component_button #= [$before = [:<button class="btn">], $after = [:</button>]:
     <span class="label">[$slot]</span>
 ]
 
-component_input #= [$children(:<label>[$slot]</label>):
+component_input #= [$before = [:<label>], $after = [:</label>]:
     <input type="text" placeholder="[$slot]">
 ]
 
-component_badge #= [$children(:<span class="badge">[$slot]</span>):
+component_badge #= [$before = [:<span class="badge">], $after = [:</span>]:
     <em>[$slot]</em>
 ]
 
 -- Example: page fragments
-fragment_header #= [: <header class="page-header">[$slot("title")]</header> ]
+fragment_header #= [: <header class="page-header">[$slot title]</header> ]
 fragment_nav #= [: <nav class="page-nav">[$slot]</nav> ]
 fragment_main #= [: <main class="page-main">[$slot]</main> ]
-fragment_footer #= [: <footer class="page-footer">[$slot("copyright")]</footer> ]
+fragment_footer #= [: <footer class="page-footer">[$slot copyright]</footer> ]
 
 -- Example: deep constant folding
 fold_01 #= ((1 + 2 + 3 + 4 + 5) * 6) - ((7 + 8) * 9)

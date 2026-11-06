@@ -3,9 +3,9 @@
 @pipeline_diagram compiler_pipeline as compiler_pipeline_diagram
 @diagrams css as diagrams_css
 
-page_title #= "Compiler design: source to page"
-page_description #= "A chronological educational tour of Moth's compiler and build pipeline."
-page_head #= [:<style>[theme_css] [diagrams_css]</style>]
+#[$in title:["Compiler design: source to page"]]
+#[$in description:["A chronological educational tour of Moth's compiler and build pipeline."]]
+#[$in head:<style>[theme_css] [diagrams_css]</style>]
 
 #[navbar]
 #[sidebar]

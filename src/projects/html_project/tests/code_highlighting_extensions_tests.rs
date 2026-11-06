@@ -235,7 +235,7 @@ fn moth_template_bodies_are_plain_text_around_highlighted_interpolations() {
     // Heads keep code roles, including nested templates inside head arguments,
     // while body markup and quotes stay plain.
     let highlighted = highlight_code_html(
-        "[$children([:<li>[$slot]</li>]): <ul class=\"x\">[$slot]</ul>]",
+        "[$before = [:<li>[$slot style]]: <ul class=\"x\">[$slot]</ul>]",
         CodeLanguage::Moth,
     );
     assert_eq!(
@@ -244,11 +244,10 @@ fn moth_template_bodies_are_plain_text_around_highlighted_interpolations() {
             .count(),
         2
     );
-    assert!(highlighted.contains("<span class='moth-code-directive'>$children</span>"));
+    assert!(highlighted.contains("<span class='moth-code-directive'>$before</span>"));
     assert!(highlighted.contains(
         "<span class='moth-code-delimiter'>:</span> &lt;ul class=&quot;x&quot;&gt;<span class='moth-code-delimiter'>[</span>"
     ));
-    assert!(!highlighted.contains("moth-code-operator"));
     assert!(!highlighted.contains("moth-code-string"));
 }
 

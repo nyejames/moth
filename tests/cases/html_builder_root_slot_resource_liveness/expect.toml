@@ -1,0 +1,68 @@
+entry = "."
+
+# Resources referenced only by named builder slots remain live, render in their document head
+# destinations, and keep their output artifacts in both HTML output modes.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain_in_order = [
+    "<link rel=\"icon\" href=\"./static/dot.svg\">",
+    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
+    "<link rel=\"preload\" href=\"./static/preload.bin\">",
+    "<body style=",
+    "<p>resource liveness body</p>",
+]
+must_contain_exactly_once = [
+    "<link rel=\"icon\" href=\"./static/dot.svg\">",
+    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
+    "<link rel=\"preload\" href=\"./static/preload.bin\">",
+]
+
+[[backends.html.artifact_assertions]]
+path = "styles/docs.css"
+kind = "binary"
+
+[[backends.html.artifact_assertions]]
+path = "static/dot.svg"
+kind = "binary"
+
+[[backends.html.artifact_assertions]]
+path = "static/preload.bin"
+kind = "binary"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain_in_order = [
+    "<link rel=\"icon\" href=\"./static/dot.svg\">",
+    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
+    "<link rel=\"preload\" href=\"./static/preload.bin\">",
+    "<body style=",
+    "<p>resource liveness body</p>",
+]
+must_contain_exactly_once = [
+    "<link rel=\"icon\" href=\"./static/dot.svg\">",
+    "<link rel=\"stylesheet\" href=\"./styles/docs.css\">",
+    "<link rel=\"preload\" href=\"./static/preload.bin\">",
+]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "styles/docs.css"
+kind = "binary"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "static/dot.svg"
+kind = "binary"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "static/preload.bin"
+kind = "binary"

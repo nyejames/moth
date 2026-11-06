@@ -5,8 +5,8 @@ A `$` marker is not automatically harmless metadata. Compiler-owned directives m
 ### Current versus accepted syntax
 
 Today, `config.moth` uses declaration-owned `#Config of T` inputs with grouped
-parenthesised `project` and `html` records, and pages still use reserved names
-such as `page_title`. The accepted configuration shape is:
+parenthesised `project` and `html` records. Direct const root inserts supply
+HTML metadata through builder slots. The accepted configuration shape is:
 
 [codeblock, $code("moth"):
     $project(
@@ -18,11 +18,9 @@ such as `page_title`. The accepted configuration shape is:
 
 Version is optional, and there is no `entry_root`; the selected directory is the source root.
 
-`$page` will be legal only on a normal module root, or on an explicitly selected synthetic single-file root. Helper files cannot declare pages.
-
-[codeblock, $code("moth"):
-    $page(title = "Moth")
-]
+General `$entry` root-purpose validation remains queued. It does not replace
+builder slots. The earlier `$page` proposal is superseded and is not current
+syntax. See @../project-structure/#entry-config (Entry metadata and builder slots).
 
 ### Directive argument basics
 
@@ -31,6 +29,6 @@ Version is optional, and there is no `entry_root`; the selected directory is the
 - Authored empty `()` is invalid for directives.
 - Ordinary function calls still use `f()`.
 
-`$html_builder` and `$page` may be written with no parentheses when every parameter has a default. `$html_builder()` and `$page()` are invalid.
+`$html_builder` may be written with no parentheses when every parameter has a default. `$html_builder()` is invalid. A future `$entry` purpose has no decided signature and must not be written today.
 
-Exact signatures live in @../project-structure/#project-config (Project config) and @../project-structure/#entry-config (Entry metadata and page directives).
+Exact signatures live in @../project-structure/#project-config (Project config) and @../project-structure/#entry-config (Entry metadata and builder slots).

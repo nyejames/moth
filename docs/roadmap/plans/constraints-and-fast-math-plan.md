@@ -26,7 +26,7 @@ Consume these merged capabilities, without rebuilding them:
 - Compact typed semantic expressions, dense HIR, native success/error result channels and the bounded Wiring foundation.
 - Exact numeric identities and I32/F64 defaults, D15's equal-type preservation and smallest mixed domains, per-operation F16 completion and bounded body-local numeric-origin inference.
 - Shared directive recognition, retained attachment syntax and argument validation.
-- Explicit HTML root purposes, `$page` and runtime title capability.
+- Explicit root purposes, `$entry` and runtime title capability.
 - Existing implicit-failure inference, expression catch, public summaries, generic convergence and trusted Core constant evaluation where advertised.
 
 The roadmap owns sequencing. Name prerequisite capabilities rather than linking temporary prerequisite plans. Establish a fresh baseline and isolated branch/worktree at activation. Keep that revision and raw measurements in working notes, not this queued status block.

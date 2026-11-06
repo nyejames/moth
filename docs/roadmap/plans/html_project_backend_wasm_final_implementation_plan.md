@@ -85,7 +85,7 @@ Consume these completed compiler/build inputs. The referenced permanent document
 - selected builder capability metadata (see `docs/build-system-design.md` "Selected command and capability surface")
 - backend config fingerprints (see `docs/build-system-design.md` "Physical variants")
 - output manifest ownership (see `docs/build-system-design.md` "Output ownership")
-- explicit root-only HTML entry metadata and purpose facts from compiled module metadata (see `docs/build-system-design.md` "Root metadata and purpose directives" and "Entry candidates and selection")
+- direct const root builder-slot destinations and root-activity facts from compiled module metadata; explicit root-purpose facts remain deferred (see `docs/build-system-design.md` "Builder slots and future root purpose" and "Entry candidates and selection")
 - validated `$layout` representation contracts when delivered. ABI and struct-lowering phases honour offsets, alignment and those contracts without inventing a new nominal type category
 - canonical exact numeric identities, scalar size/alignment/stride facts and explicit numeric failure/conversion HIR, with no pending inference state
 - dense HIR stores and typed ranges, native result shapes and the final success/error CFG after private failure-channel convergence

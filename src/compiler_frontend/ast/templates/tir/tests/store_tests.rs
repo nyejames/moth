@@ -7,9 +7,11 @@ use super::super::overlays::{
 use super::super::refs::{TemplateTirChildReference, TemplateWrapperReference};
 use super::super::slot_plan::{
     TemplateSlotContributionSourcePlan, TemplateSlotPlan, TemplateSlotSitePlan,
+    push_runtime_slot_contribution_source,
 };
 use super::super::store::{ControlFlowBodyKind, TemplateIrStore};
 use super::super::summary::TemplateIrSummary;
+use super::super::tir_node_is_control_flow_root;
 use super::super::view::TemplateTirPhase;
 use super::builder::TemplateIrBuilder;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
@@ -372,8 +374,14 @@ fn overlay_allocation_rejects_duplicate_and_out_of_range_keys() {
 fn slot_placeholder_lookup_uses_the_store_not_raw_vectors() {
     let mut store = TemplateIrStore::new();
     let occurrence = store.next_slot_occurrence_id();
-    let placeholder =
-        TirSlotPlaceholder::with_wrapper_sets(SlotKey::Default, occurrence, None, None, false);
+    let placeholder = TirSlotPlaceholder::with_wrapper_sets(
+        SlotKey::Default,
+        occurrence,
+        None,
+        None,
+        None,
+        false,
+    );
     store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Slot { placeholder },
         None,
@@ -495,6 +503,7 @@ fn conversion_failure_leaves_reserved_plan_invisible() {
                 occurrence,
                 None,
                 None,
+                None,
                 false,
             ),
         },
@@ -516,7 +525,14 @@ fn active_slot_conversion_publishes_derived_child_and_rewrites_reference() {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let occurrence = builder.store.next_slot_occurrence_id();
         let slot = builder.push_tir_slot_placeholder_node(
-            TirSlotPlaceholder::with_wrapper_sets(SlotKey::Default, occurrence, None, None, false),
+            TirSlotPlaceholder::with_wrapper_sets(
+                SlotKey::Default,
+                occurrence,
+                None,
+                None,
+                None,
+                false,
+            ),
             span,
         );
         let root = builder.push_sequence_node(vec![slot], span);
@@ -621,6 +637,73 @@ fn reserved_plan_is_invisible_to_preparation_lookup() {
     let reserved = store.reserve_slot_plan();
     assert!(store.get_slot_plan(reserved).is_none());
     assert!(store.get_slot_plan(TemplateSlotPlanId::new(99)).is_none());
+}
+
+#[test]
+fn control_flow_lookup_recognizes_a_control_flow_marker() {
+    let mut store = TemplateIrStore::new();
+    let plan = store.push_slot_plan(TemplateSlotPlan {
+        contribution_sources: vec![],
+        slot_sites: vec![],
+    });
+    let marker = push_runtime_slot_contribution_source(
+        &mut store,
+        plan,
+        RuntimeSlotContributionSourceId(0),
+        super::super::ContributionShape::Other,
+        true,
+        None,
+    );
+
+    assert_eq!(
+        store
+            .control_flow_node_id_in_subtree(marker)
+            .expect("marker subtree lookup should succeed"),
+        Some(marker),
+        "a control-flow marker must report conditional emission to subtree consumers"
+    );
+}
+
+#[test]
+fn control_flow_classifier_recognizes_marker_rooted_child_template() {
+    let mut store = TemplateIrStore::new();
+    let plan = store.push_slot_plan(TemplateSlotPlan {
+        contribution_sources: vec![],
+        slot_sites: vec![],
+    });
+    let marker = push_runtime_slot_contribution_source(
+        &mut store,
+        plan,
+        RuntimeSlotContributionSourceId(0),
+        super::super::ContributionShape::Other,
+        true,
+        None,
+    );
+    let template_id = store.push_template(TemplateIr::new(
+        marker,
+        Style::default(),
+        TemplateType::String,
+        TemplateIrSummary::default(),
+        None,
+    ));
+    let occurrence_id = store.next_child_template_occurrence_id();
+    let child = store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::ChildTemplate {
+            reference: TemplateTirChildReference::new(
+                template_id,
+                TemplateTirPhase::Parsed,
+                TemplateViewContext::default(),
+            ),
+            occurrence_id,
+        },
+        None,
+    ));
+
+    assert!(
+        tir_node_is_control_flow_root(&store, child)
+            .expect("child-template control-flow classification should read"),
+        "a marker-rooted child template must preserve conditional emission for recursive composition"
+    );
 }
 
 #[test]

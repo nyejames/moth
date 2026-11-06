@@ -200,7 +200,7 @@ The positional order and defaults are:
     ]
 ]
 
-`page_url_style` accepts `trailing_slash`, `no_trailing_slash` or `ignore`. `html_favicon` accepts a compile-time String containing an untracked URL, not necessarily a string literal. Tracked file resources belong in `$page` metadata because `config.moth` rejects authored file-value paths.
+`page_url_style` accepts `trailing_slash`, `no_trailing_slash` or `ignore`. `html_favicon` accepts a compile-time String containing an untracked URL, not necessarily a string literal. Tracked file resources belong in a direct root builder slot because `config.moth` rejects authored file-value paths.
 
 Unknown or inactive unsupported directives error. Multi-builder configuration waits for `$feature`. Synthetic single-file operations without authored `config.moth` keep their explicit synthetic path and do not invent `$project` / `$html_builder` source.
 
@@ -231,5 +231,5 @@ Retired flat keys and `entry_root` remain rejected. Keep live `docs/config.moth`
 ### Concepts related to project config
 
 - For `$config` input contracts see @#build-inputs (Build configuration values).
-- For `$page` see @#entry-config (Entry metadata and page directives).
+- For builder slots see @#entry-config (Entry metadata and builder slots).
 - For general directive grammar see @../directives (Directives).

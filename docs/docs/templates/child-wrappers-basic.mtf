@@ -1,7 +1,7 @@
-`$children(...)` wraps every direct child in the same template.
+`$before` and `$after` wrap each direct child with a prefix and suffix.
 
 [codeblock, $code("moth"):
-    list #= [$children([:<li>[$slot]</li>]):
+    list #= [$before = [:<li>], $after = [:</li>]:
         <ul>
             [$slot]
         </ul>
@@ -9,6 +9,25 @@
 ]
 
 This is useful for lists, table rows and repeated layout elements.
+
+Either directive is optional, and each may appear once per head. Values must be
+compile-time Strings or constant template wrappers. A constant template may
+contain named slots, filled by the enclosing application. If a value contains a
+slot, it must be named: an explicit default or positional slot is rejected. The
+child insertion point is implicit.
+
+[codeblock, $code("moth"):
+    row #= [$html:<tr style="[$slot row_style]">]
+    rows #= [$before = row, $after = [$html:</tr>]:[$slot]]
+
+    [rows:
+        [$in row_style:background: red;]
+        [: first]
+    ]
+]
+
+Conditions or loops producing no output do not emit a wrapper. An explicitly
+selected empty String still does.
 
 Use `$fresh` when one child should skip the immediate wrapper:
 

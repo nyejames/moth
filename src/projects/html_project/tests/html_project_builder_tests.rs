@@ -12,6 +12,7 @@ use crate::build_system::output::{
     WriteOptions, write_project_outputs,
 };
 use crate::compiler_frontend::Flag;
+use crate::compiler_frontend::builder_root_slots::ConstFragmentDestination;
 use crate::compiler_frontend::compiler_errors::{
     CompilationOutcome, CompilationResult, InfrastructureErrors, InfrastructureFailure,
     InfrastructureFailureKind,
@@ -368,6 +369,7 @@ fn shared_resource_origin_defers_one_output_file_across_pages() {
             .intern_origin(resource_origin.clone(), None);
         module.metadata.const_top_level_fragments = vec![ResolvedConstFragment {
             runtime_insertion_index: 0,
+            destination: ConstFragmentDestination::Body,
             span: None,
             value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Resource(
                 resource_origin.clone(),
@@ -722,6 +724,7 @@ fn emits_const_fragment_and_calls_start() {
     let mut module = create_test_module(entry_path.clone(), &mut string_table);
     module.metadata.const_top_level_fragments = vec![ResolvedConstFragment {
         runtime_insertion_index: 0,
+        destination: ConstFragmentDestination::Body,
         span: None,
         value: OwnedFoldedString::Text(String::from("<meta charset=\"utf-8\">")),
     }];

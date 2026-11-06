@@ -3877,13 +3877,6 @@ contract = "backend.html.builder_invalid_config_rejected"
 role = "primary"
 
 [[case]]
-id = "html_builder_invalid_page_metadata"
-path = "html_builder_invalid_page_metadata"
-tags = ["integration", "html", "diagnostics"]
-contract = "backend.html.builder_invalid_page_metadata_rejected"
-role = "primary"
-
-[[case]]
 id = "html_builder_js_script_inside_body"
 path = "html_builder_js_script_inside_body"
 tags = ["integration", "html"]
@@ -3891,24 +3884,94 @@ contract = "backend.html.builder_js_script_placement"
 role = "primary"
 
 [[case]]
-id = "html_builder_page_head"
-path = "html_builder_page_head"
-tags = ["integration", "html"]
-contract = "backend.html.builder_page_head"
+id = "html_builder_old_page_constants_ordinary"
+path = "html_builder_old_page_constants_ordinary"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots"]
+contract = "backend.html.old_page_constants_are_ordinary_body_fragments"
 role = "primary"
 
 [[case]]
-id = "html_builder_page_title"
-path = "html_builder_page_title"
-tags = ["integration", "html"]
-contract = "backend.html.builder_page_title"
+id = "html_builder_slot_favicon_sources"
+path = "html_builder_slot_favicon_sources"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "resources"]
+contract = "backend.html.builder_slot_favicon_resource_and_string"
 role = "primary"
 
 [[case]]
-id = "html_builder_structural_page_metadata"
-path = "html_builder_structural_page_metadata"
-tags = ["integration", "html"]
-contract = "backend.html.builder_structural_page_metadata"
+id = "html_builder_slot_head_dedup"
+path = "html_builder_slot_head_dedup"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "resources"]
+contract = "backend.html.builder_slot_head_dedup_after_rendering"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_metadata_scalars"
+path = "html_builder_slot_metadata_scalars"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots"]
+contract = "backend.html.builder_slot_scalar_metadata_escaping_and_fallback"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_stylesheet_invalid_combined"
+path = "html_builder_slot_stylesheet_invalid_combined"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "diagnostics"]
+contract = "backend.html.builder_slot_stylesheet_invalid_combined"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_stylesheet_invalid_empty"
+path = "html_builder_slot_stylesheet_invalid_empty"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "diagnostics"]
+contract = "backend.html.builder_slot_stylesheet_invalid_empty"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_stylesheet_invalid_external_url"
+path = "html_builder_slot_stylesheet_invalid_external_url"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "diagnostics"]
+contract = "backend.html.builder_slot_stylesheet_invalid_external_url"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_stylesheet_invalid_multiple_resources"
+path = "html_builder_slot_stylesheet_invalid_multiple_resources"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "diagnostics"]
+contract = "backend.html.builder_slot_stylesheet_invalid_multiple_resources"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_stylesheet_invalid_non_css"
+path = "html_builder_slot_stylesheet_invalid_non_css"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "diagnostics"]
+contract = "backend.html.builder_slot_stylesheet_invalid_non_css"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_stylesheet_invalid_site_root"
+path = "html_builder_slot_stylesheet_invalid_site_root"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "diagnostics"]
+contract = "backend.html.builder_slot_stylesheet_invalid_site_root"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_stylesheet_invalid_text"
+path = "html_builder_slot_stylesheet_invalid_text"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "diagnostics"]
+contract = "backend.html.builder_slot_stylesheet_invalid_text"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_stylesheets_dedup"
+path = "html_builder_slot_stylesheets_dedup"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots", "resources"]
+contract = "backend.html.builder_slot_stylesheets_origin_dedup"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_title"
+path = "html_builder_slot_title"
+tags = ["integration", "html", "html-wasm", "html-builder", "slots"]
+contract = "backend.html.builder_slot_title_concatenation_empty_and_fallback"
 role = "primary"
 
 [[case]]
@@ -6133,10 +6196,45 @@ contract = "language.templates.children_wrapper_applied_once_on_runtime_if"
 role = "primary"
 
 [[case]]
+id = "template_children_named_slot_wrapper_application"
+path = "template_children_named_slot_wrapper_application"
+tags = ["integration","templates","slots"]
+contract = "language.templates.children_named_slot_wrapper_application"
+role = "primary"
+
+[[case]]
+id = "template_children_named_slot_wrapper_fixed_child"
+path = "template_children_named_slot_wrapper_fixed_child"
+tags = ["integration","templates","slots"]
+contract = "language.templates.children_named_slot_wrapper_fixed_direct_child"
+role = "primary"
+
+[[case]]
+id = "template_children_named_slot_wrapper_nested_fixed_child"
+path = "template_children_named_slot_wrapper_nested_fixed_child"
+tags = ["integration","templates","slots"]
+contract = "language.templates.children_named_slot_nested_wrapper_fixed_direct_child"
+role = "primary"
+
+[[case]]
+id = "template_children_named_slot_wrapper_nested_decorator_only"
+path = "template_children_named_slot_wrapper_nested_decorator_only"
+tags = ["integration","templates","slots"]
+contract = "language.templates.children_named_slot_from_nested_decorator_context_only"
+role = "primary"
+
+[[case]]
 id = "template_children_wrapper_on_control_flow_body"
 path = "template_children_wrapper_on_control_flow_body"
 tags = ["integration","templates"]
 contract = "language.templates.children_wrapper_on_control_flow_body"
+role = "primary"
+
+[[case]]
+id = "template_control_flow_body_leading_decorated_child"
+path = "template_control_flow_body_leading_decorated_child"
+tags = ["integration","templates","slots"]
+contract = "language.templates.control_flow_body_leading_decorated_child"
 role = "primary"
 
 [[case]]
@@ -6854,6 +6952,13 @@ contract = "language.templates.runtime_loop_slot_application"
 role = "primary"
 
 [[case]]
+id = "template_runtime_nested_child_edge_named_slot"
+path = "template_runtime_nested_child_edge_named_slot"
+tags = ["integration","templates","slots"]
+contract = "language.templates.runtime_named_slot_from_nested_child_edge_decorator"
+role = "primary"
+
+[[case]]
 id = "template_runtime_slot_children_fresh_control_flow"
 path = "template_runtime_slot_children_fresh_control_flow"
 tags = ["integration","templates"]
@@ -6991,6 +7096,104 @@ id = "template_stored_named_insert_success"
 path = "template_stored_named_insert_success"
 tags = ["integration", "templates", "slots", "const-folding"]
 contract = "language.templates.stored_named_insert_acceptance"
+role = "primary"
+
+[[case]]
+id = "template_slot_defaults_per_occurrence_const"
+path = "template_slot_defaults_per_occurrence_const"
+tags = ["integration", "templates", "slots", "const-folding"]
+contract = "language.templates.slot_defaults_per_occurrence_const"
+role = "primary"
+
+[[case]]
+id = "template_slot_defaults_multiple_named_inserts"
+path = "template_slot_defaults_multiple_named_inserts"
+tags = ["integration", "templates", "slots", "const-folding"]
+contract = "language.templates.slot_defaults_multiple_named_inserts"
+role = "primary"
+
+[[case]]
+id = "template_slot_defaults_runtime_application"
+path = "template_slot_defaults_runtime_application"
+tags = ["integration", "templates", "slots", "runtime"]
+contract = "language.templates.slot_defaults_runtime_application"
+role = "primary"
+
+[[case]]
+id = "template_slot_defaults_stored_insert"
+path = "template_slot_defaults_stored_insert"
+tags = ["integration", "templates", "slots", "const-folding"]
+contract = "language.templates.slot_defaults_stored_insert"
+role = "primary"
+
+[[case]]
+id = "template_head_insert_before_head_receiver"
+path = "template_head_insert_before_head_receiver"
+tags = ["integration", "templates", "slots", "const-folding"]
+contract = "language.templates.head_insert_before_head_receiver"
+role = "primary"
+
+[[case]]
+id = "template_slot_defaults_imported_wrapper"
+path = "template_slot_defaults_imported_wrapper"
+tags = ["integration", "templates", "slots", "imports"]
+contract = "language.templates.slot_defaults_imported_wrapper"
+role = "primary"
+
+[[case]]
+id = "template_slot_default_structural_resource"
+path = "template_slot_default_structural_resource"
+tags = ["integration", "templates", "slots", "resources"]
+contract = "language.templates.slot_default_structural_resource"
+role = "primary"
+
+[[case]]
+id = "template_default_scope_nested_named_rejected"
+path = "template_default_scope_nested_named_rejected"
+tags = ["integration", "templates", "slots", "defaults", "nested"]
+contract = "language.templates.default_scope_nested_named_rejected"
+role = "primary"
+
+[[case]]
+id = "template_default_scope_nested_default_preserved"
+path = "template_default_scope_nested_default_preserved"
+tags = ["integration", "templates", "slots", "defaults", "nested"]
+contract = "language.templates.default_scope_nested_default_preserved"
+role = "primary"
+
+[[case]]
+id = "template_default_scope_imported_default_preserved"
+path = "template_default_scope_imported_default_preserved"
+tags = ["integration", "templates", "slots", "defaults", "imports"]
+contract = "language.templates.default_scope_imported_default_preserved"
+role = "primary"
+
+[[case]]
+id = "template_default_scope_imported_named_rejected"
+path = "template_default_scope_imported_named_rejected"
+tags = ["integration", "templates", "slots", "defaults", "imports"]
+contract = "language.templates.default_scope_imported_named_rejected"
+role = "primary"
+
+[[case]]
+id = "template_default_scope_runtime_default_preserved"
+path = "template_default_scope_runtime_default_preserved"
+tags = ["integration", "templates", "slots", "defaults", "runtime"]
+contract = "language.templates.default_scope_runtime_default_preserved"
+role = "primary"
+
+[[case]]
+id = "template_default_scope_structural_default_preserved"
+path = "template_default_scope_structural_default_preserved"
+tags = ["integration", "templates", "slots", "defaults", "resources"]
+contract = "language.templates.default_scope_structural_default_preserved"
+role = "primary"
+
+[[case]]
+id = "template_default_scope_mixed_runtime"
+path = "template_default_scope_mixed_runtime"
+tags = ["integration", "templates", "slots", "defaults", "runtime"]
+contract = "language.templates.default_scope_mixed_runtime"
 role = "primary"
 
 [[case]]
@@ -18711,4 +18914,144 @@ id = "diagnostic_recovery_unlimited_error_limits"
 path = "diagnostic_recovery_unlimited_error_limits"
 tags = ["integration", "diagnostics", "functions", "config"]
 contract = "language.diagnostics.ordinary_body_recovery_explicit_none_limits"
+role = "primary"
+
+[[case]]
+id = "template_stored_decorator_reexport"
+path = "template_stored_decorator_reexport"
+tags = ["integration", "templates", "imports", "resources"]
+contract = "language.templates.stored_decorator_reexport"
+role = "primary"
+
+[[case]]
+id = "template_stored_decorator_template_string"
+path = "template_stored_decorator_template_string"
+tags = ["integration", "templates", "resources"]
+contract = "language.templates.stored_decorator_template_string"
+role = "primary"
+
+[[case]]
+id = "template_stored_decorator_projected_wrapper"
+path = "template_stored_decorator_projected_wrapper"
+tags = ["integration", "templates", "slots", "resources"]
+contract = "language.templates.stored_decorator_projected_wrapper"
+role = "primary"
+
+[[case]]
+id = "template_stored_decorator_projected_wrapper_constant"
+path = "template_stored_decorator_projected_wrapper_constant"
+tags = ["integration", "templates", "slots", "resources"]
+contract = "language.templates.stored_decorator_projected_wrapper_constant"
+role = "primary"
+
+[[case]]
+id = "template_runtime_child_plan_foreign_slot_rejected"
+path = "template_runtime_child_plan_foreign_slot_rejected"
+tags = ["integration", "templates", "slots", "diagnostics"]
+contract = "language.templates.runtime_child_plan_foreign_named_target_rejected"
+role = "primary"
+
+[[case]]
+id = "template_runtime_child_plan_outer_slot_success"
+path = "template_runtime_child_plan_outer_slot_success"
+tags = ["integration", "templates", "slots", "runtime"]
+contract = "language.templates.runtime_child_plan_outer_named_target_acceptance"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_body_interleave"
+path = "html_builder_root_slot_body_interleave"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots"]
+contract = "backend.html.builder_root_slot_direct_body_interleave"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_unknown_target_rejected"
+path = "html_builder_root_slot_unknown_target_rejected"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "diagnostics"]
+contract = "backend.html.builder_root_slot_unknown_target_rejected"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_nested_insert_rejected"
+path = "html_builder_root_slot_nested_insert_rejected"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "diagnostics"]
+contract = "backend.html.builder_root_slot_nested_insert_rejected"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_non_root_helper_rejected"
+path = "html_builder_root_slot_non_root_helper_rejected"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "diagnostics"]
+contract = "backend.html.builder_root_slot_non_root_helper_rejected"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_imported_root_isolated"
+path = "html_builder_root_slot_imported_root_isolated"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "imports"]
+contract = "backend.html.builder_root_slot_imported_root_isolated"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_api_only_root_rejected"
+path = "html_builder_root_slot_api_only_root_rejected"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "diagnostics"]
+contract = "backend.html.builder_root_slot_api_only_root_rejected"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_nonconstant_contribution_rejected"
+path = "html_builder_root_slot_nonconstant_contribution_rejected"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "diagnostics"]
+contract = "backend.html.builder_root_slot_nonconstant_contribution_rejected"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_metadata_only_entry"
+path = "html_builder_root_slot_metadata_only_entry"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots"]
+contract = "backend.html.builder_root_slot_metadata_only_entry"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_resource_liveness"
+path = "html_builder_root_slot_resource_liveness"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "resources"]
+contract = "backend.html.builder_root_slot_resource_liveness"
+role = "primary"
+
+[[case]]
+id = "template_default_binding_runtime_constants"
+path = "template_default_binding_runtime_constants"
+tags = ["integration", "templates", "slots", "const-folding", "runtime"]
+contract = "language.templates.slot_defaults_runtime_constant_binding"
+role = "primary"
+
+[[case]]
+id = "template_default_binding_runtime_nonconstant_rejected"
+path = "template_default_binding_runtime_nonconstant_rejected"
+tags = ["integration", "templates", "slots", "diagnostics", "runtime"]
+contract = "language.templates.slot_defaults_runtime_nonconstant_rejected"
+role = "primary"
+
+[[case]]
+id = "template_default_whitespace_named_insert_fallbacks"
+path = "template_default_whitespace_named_insert_fallbacks"
+tags = ["integration", "templates", "slots", "whitespace", "runtime"]
+contract = "language.templates.slot_defaults_ignore_formatting_whitespace"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_composed_defaults"
+path = "html_builder_slot_composed_defaults"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots"]
+contract = "backend.html.builder_slot_composed_defaults"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_runtime_rejected"
+path = "html_builder_root_slot_runtime_rejected"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "diagnostics"]
+contract = "backend.html.builder_root_slot_runtime_rejected"
 role = "primary"

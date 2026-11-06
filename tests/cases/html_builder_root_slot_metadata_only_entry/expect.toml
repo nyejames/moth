@@ -1,0 +1,44 @@
+entry = "."
+
+# Named const contributions alone keep the entry active and now assemble into document
+# metadata. Each value appears exactly once, in the head, and never in the body lane.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain_in_order = [
+    "<head>",
+    "<title>Metadata-only title sentinel</title>",
+    "<meta name=\"description\" content=\"Metadata-only description sentinel\">",
+    "</head>",
+    "<body style=\"\">",
+]
+must_contain_exactly_once = [
+    "Metadata-only title sentinel",
+    "Metadata-only description sentinel",
+]
+must_not_contain = ["<main>"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain_in_order = [
+    "<head>",
+    "<title>Metadata-only title sentinel</title>",
+    "<meta name=\"description\" content=\"Metadata-only description sentinel\">",
+    "</head>",
+    "<body style=\"\">",
+]
+must_contain_exactly_once = [
+    "Metadata-only title sentinel",
+    "Metadata-only description sentinel",
+]
+must_not_contain = ["<main>"]

@@ -34,7 +34,7 @@
         -- directives and paths
         @core/io print, line
         @web/canvas Canvas, draw_rect
-        page #= $slot("title")
+        page #= [$slot title]
 
         -- operators and numbers
         ~total //= 1_000

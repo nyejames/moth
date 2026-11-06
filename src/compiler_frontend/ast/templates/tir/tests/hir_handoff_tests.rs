@@ -76,7 +76,7 @@ fn prepared_runtime(view: &TirView<'_>) -> TemplatePreparation {
         identity: view.identity(),
         facts: TemplatePreparationFacts {
             is_const_evaluable_shape: false,
-            has_unresolved_slot_occurrences: false,
+            has_unfilled_slot_occurrences: false,
             has_escaped_insert_helpers: false,
             final_value_kind: TemplateConstValueKind::NonConst,
         },
@@ -794,6 +794,7 @@ fn owned_handoff_resolves_slot_overlay_to_a_child_template() {
                     occurrence_id,
                     None,
                     None,
+                    None,
                     false,
                 ),
             },
@@ -858,6 +859,7 @@ fn owned_handoff_missing_slot_resolution_renders_slot_placeholder() {
                     occurrence_id,
                     None,
                     None,
+                    None,
                     false,
                 ),
             },
@@ -883,6 +885,105 @@ fn owned_handoff_missing_slot_resolution_renders_slot_placeholder() {
             OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Slot { .. })
         ),
         "missing slot resolution should materialize as a structural no-output slot placeholder, got {:?}",
+        handoff.body
+    );
+}
+
+#[test]
+fn owned_handoff_renders_unrouted_occurrence_default() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut strings = StringTable::new();
+    let fallback = const_values
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Text(strings.intern("fallback"))),
+            None,
+        )
+        .expect("test default inserts");
+    let store = Rc::new(RefCell::new(TemplateIrStore::new()));
+    let parent_id = {
+        let mut store_ref = store.borrow_mut();
+        let occurrence_id = store_ref.next_slot_occurrence_id();
+        let slot = store_ref.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::Slot {
+                placeholder: TirSlotPlaceholder::with_wrapper_sets(
+                    SlotKey::Default,
+                    occurrence_id,
+                    Some(fallback),
+                    None,
+                    None,
+                    false,
+                ),
+            },
+            None,
+        ));
+        finish_text_template(&mut store_ref, slot)
+    };
+    let handoff = {
+        let store_ref = store.borrow();
+        let view = view_for(&store_ref, parent_id, TemplateViewContext::default());
+        handoff_for_view(view, &expressions, &const_values, &strings)
+            .expect("handoff materialization should succeed")
+    };
+
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ConstantText { text }) =
+        handoff.body
+    else {
+        panic!("an unrouted occurrence default should materialize as authored constant text");
+    };
+    assert_eq!(text.clone().into_text().as_deref(), Some("fallback"));
+}
+
+#[test]
+fn owned_handoff_missing_resolution_suppresses_occurrence_default() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut strings = StringTable::new();
+    let fallback = const_values
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Text(strings.intern("fallback"))),
+            None,
+        )
+        .expect("test default inserts");
+    let store = Rc::new(RefCell::new(TemplateIrStore::new()));
+    let (parent_id, view_context) = {
+        let mut store_ref = store.borrow_mut();
+        let occurrence_id = store_ref.next_slot_occurrence_id();
+        let slot = store_ref.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::Slot {
+                placeholder: TirSlotPlaceholder::with_wrapper_sets(
+                    SlotKey::Default,
+                    occurrence_id,
+                    Some(fallback),
+                    None,
+                    None,
+                    false,
+                ),
+            },
+            None,
+        ));
+        let parent_id = finish_text_template(&mut store_ref, slot);
+        let context = slot_resolution_context(
+            &mut store_ref,
+            vec![(occurrence_id, TirSlotResolution::missing(SlotKey::Default))],
+        );
+        (parent_id, context)
+    };
+    let handoff = {
+        let store_ref = store.borrow();
+        let view = view_for(&store_ref, parent_id, view_context);
+        handoff_for_view(view, &expressions, &const_values, &strings)
+            .expect("handoff materialization should succeed")
+    };
+
+    assert!(
+        matches!(
+            &handoff.body,
+            OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Slot { .. })
+        ),
+        "routed presence with no content must suppress the fallback, got {:?}",
         handoff.body
     );
 }
@@ -1072,6 +1173,7 @@ fn prepared_handoff_preserves_structural_and_nested_value_contexts_after_tir_rel
                 placeholder: TirSlotPlaceholder::with_wrapper_sets(
                     SlotKey::Default,
                     slot_occurrence,
+                    None,
                     None,
                     None,
                     false,
@@ -2161,6 +2263,7 @@ fn missing_wrapper_tree_node_propagates_layout_error() {
                 placeholder: TirSlotPlaceholder::with_wrapper_sets(
                     SlotKey::Default,
                     slot_occurrence_id,
+                    None,
                     None,
                     None,
                     false,

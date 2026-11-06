@@ -40,23 +40,23 @@ Neither analysis depends on a collector. A GC backend must receive the same vali
 ## The proof pipeline
 
 [diagram:
-    [$insert("label"): Legality is proven before representation is chosen]
-    [$insert("caption"): The first two steps decide whether the program is allowed at all. Only the last two decide how it gets stored. Swapping that order is the mistake this whole design exists to prevent.]
+    [$in label: Legality is proven before representation is chosen]
+    [$in caption: The first two steps decide whether the program is allowed at all. Only the last two decide how it gets stored. Swapping that order is the mistake this whole design exists to prevent.]
 
     [stage:
         [node:
-            [$insert("href"): ../borrow-validation-and-drops/]
-            [$insert("eyebrow"): Shared, target-independent]
-            [$insert("title"): Proof of legality]
+            [$in href: ../borrow-validation-and-drops/]
+            [$in eyebrow: Shared, target-independent]
+            [$in title: Proof of legality]
             Access rules, last use, lifetime topology, intervals, frontiers and epochs. True regardless of where the code runs.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Last shared artefact]
+                [$in label: Last shared artefact]
                 [lane:
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     Backend-neutral memory requirements, carrying no chosen strategy
                 ]
                 ]
@@ -66,39 +66,39 @@ Neither analysis depends on a collector. A GC backend must receive the same vali
 
     [stage:
         [node:
-            [$insert("href"): ../target-planning-and-validation/]
-            [$insert("eyebrow"): Build-owned]
-            [$insert("title"): Target partition and validation]
+            [$in href: ../target-planning-and-validation/]
+            [$in eyebrow: Build-owned]
+            [$in title: Target partition and validation]
             Establishes which candidate physical variants exist. Sits between the two halves.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Per variant, compiler-owned]
-            [$insert("title"): Choice of representation]
+            [$in href: ./]
+            [$in eyebrow: Per variant, compiler-owned]
+            [$in title: Choice of representation]
             Now the planner knows the target, profile and backend capabilities, so it can pick a strategy.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Strategies available]
+                [$in label: Strategies available]
                 [fanout:
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     Stack or inline placement
                 ]
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     Affine cleanup
                 ]
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     Inferred or declared regions
                 ]
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     REC or a collector
                 ]
                 ]
@@ -108,9 +108,9 @@ Neither analysis depends on a collector. A GC backend must receive the same vali
 
     [stage:
         [node:
-            [$insert("href"): ../backend-lowering/]
-            [$insert("eyebrow"): Encoded]
-            [$insert("title"): ValidatedMemoryPlan]
+            [$in href: ../backend-lowering/]
+            [$in eyebrow: Encoded]
+            [$in title: ValidatedMemoryPlan]
             One plan per physical variant. Lowering realises it without choosing anything of its own.
         ]
     ]
@@ -232,41 +232,41 @@ Backends realise the validated memory plan through different physical mechanisms
 ### Retained Edge Counting
 
 [diagram:
-    [$insert("label"): The planner works down a ladder before it reaches REC]
-    [$insert("caption"): Each step down the ladder costs more than the one above it, so the planner takes the first rung that answers precisely enough. A counter is the last option.]
+    [$in label: The planner works down a ladder before it reaches REC]
+    [$in caption: Each step down the ladder costs more than the one above it, so the planner takes the first rung that answers precisely enough. A counter is the last option.]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Cheapest]
-            [$insert("title"): Static cleanup]
+            [$in href: ./]
+            [$in eyebrow: Cheapest]
+            [$in title: Static cleanup]
             The final use is statically known, so cleanup is a fixed point in the code with no bookkeeping at all.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Bulk]
-            [$insert("title"): Regions]
+            [$in href: ./]
+            [$in eyebrow: Bulk]
+            [$in title: Regions]
             An inferred or declared region reclaims a whole domain at once. One decision covers many values.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Refinement]
-            [$insert("title"): Frontiers, splitting and bounded retention]
+            [$in href: ./]
+            [$in eyebrow: Refinement]
+            [$in title: Frontiers, splitting and bounded retention]
             Cleanup frontiers, field splitting and cheap bounded retention narrow the problem before anything counts.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Last resort]
-            [$insert("title"): Retained Edge Counting]
+            [$in href: ./]
+            [$in eyebrow: Last resort]
+            [$in title: Retained Edge Counting]
             Runtime-many edges disappearing independently, where a region would hold storage far too long.
         ]
     ]

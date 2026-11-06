@@ -1,0 +1,4 @@
+@widgets widget_label
+
+#[:<p>entry body</p>]
+[: [widget_label]]

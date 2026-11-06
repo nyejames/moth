@@ -17,6 +17,10 @@ pub(crate) enum ControlFlowBodyKind {
 
 impl TemplateIrStore {
     /// Recursively searches a TIR subtree for the template-owned control-flow node.
+    ///
+    /// A runtime contribution marker whose source emits only through template
+    /// control flow reports itself: the marker is the control-flow owner at that
+    /// position after runtime slot planning replaced the authored root.
     pub(crate) fn control_flow_node_id_in_subtree(
         &self,
         root: TemplateIrNodeId,
@@ -66,6 +70,14 @@ impl TemplateIrStore {
             {
                 Ok(Some(node_id))
             }
+
+            // A runtime contribution marker has no structural body, but its source
+            // can still emit only through control flow. Reporting the marker keeps
+            // subtree classification identical to the authored contribution after
+            // recursive named composition has spliced the marker into wrappers.
+            TemplateIrNodeKind::RuntimeSlotContributionSource {
+                control_flow: true, ..
+            } => Ok(Some(node_id)),
 
             TemplateIrNodeKind::Sequence { children } => {
                 for child in children {

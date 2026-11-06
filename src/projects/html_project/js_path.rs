@@ -33,8 +33,8 @@ use crate::projects::html_project::document_shell::{
 use crate::projects::html_project::external_js::runtime_glue::{
     ModuleGlueResult, generate_module_glue,
 };
+use crate::projects::html_project::html_slot_plan::HtmlSlotPlan;
 use crate::projects::html_project::output_plan::CanonicalPageRoute;
-use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use crate::timing_scope;
 use std::collections::HashMap;
@@ -67,7 +67,7 @@ pub(crate) fn append_startup_fault_report(output: &mut String, indent: &str) {
 /// fields evolve.
 pub(crate) struct HtmlDocumentRenderInput<'a> {
     pub hir_module: &'a HirModule,
-    pub page_metadata_plan: &'a HtmlPageMetadataPlan,
+    pub slot_plan: &'a HtmlSlotPlan,
     pub const_fragments: &'a [ResolvedConstFragment],
     pub structural_url_renderer: &'a StructuralUrlRenderer<'a>,
     pub document_config: &'a HtmlDocumentConfig,
@@ -281,7 +281,7 @@ pub(crate) fn compile_html_module_js(
 
     let html = render_html_document(&HtmlDocumentRenderInput {
         hir_module: input.hir_module,
-        page_metadata_plan: input.page_metadata_plan,
+        slot_plan: input.slot_plan,
         const_fragments: input.const_fragments,
         structural_url_renderer,
         document_config: input.document_config,
@@ -368,9 +368,12 @@ pub(crate) fn render_entry_fragments(
     let mut slot_ids: Vec<String> = Vec::new();
     let mut runtime_index = 0usize;
 
-    // Sort const fragments by runtime_insertion_index to handle them in order.
+    // Sort body fragments by runtime_insertion_index to handle them in order. Named builder
+    // contributions remain in the module artefact for builder interpretation but never render
+    // into the default body lane.
     let mut sorted_const: Vec<(usize, String)> = const_fragments
         .iter()
+        .filter(|fragment| fragment.destination.is_body())
         .map(|fragment| {
             structural_url_renderer
                 .render_owned(&fragment.value)
@@ -443,8 +446,7 @@ pub(crate) fn render_html_document(
 
     render_html_document_shell(HtmlDocumentShellInput {
         config: input.document_config,
-        page_metadata: &input.page_metadata_plan.metadata,
-        structural_url_renderer: input.structural_url_renderer,
+        slot_plan: input.slot_plan,
         route: input.route,
         project_name: input.project_name,
         body_html,

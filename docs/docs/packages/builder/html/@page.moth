@@ -8,9 +8,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "@html"
-page_description #= "Compile-time HTML helpers and canvas wrapper from the HTML builder."
-page_head #= language_theme_head
+#[$in title:["@html"]]
+#[$in description:["Compile-time HTML helpers and canvas wrapper from the HTML builder."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -25,9 +25,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):html-helpers]
-        [$insert("title"):HTML helpers]
-        [$insert("advanced"):[html_advanced]]
+        [$in key:html-helpers]
+        [$in title:HTML helpers]
+        [$in advanced:[html_advanced]]
 
         [html_basic]
     ]
@@ -35,9 +35,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../]
-        [$insert("previous_title"):Builder packages]
-        [$insert("next_path"):../canvas/]
-        [$insert("next_title"):@web/canvas]
+        [$in previous_path:../]
+        [$in previous_title:Builder packages]
+        [$in next_path:../canvas/]
+        [$in next_title:@web/canvas]
     ]
 ]

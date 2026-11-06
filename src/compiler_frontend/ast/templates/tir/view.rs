@@ -593,7 +593,7 @@ impl<'a> TirView<'a> {
     ///       context, then looks up the context for `occurrence_id` within that
     ///       entry. Returns `Ok(None)` when no wrapper-context overlay exists or
     ///       the overlay has no entry for this child occurrence.
-    /// WHY: view-native folding uses this to apply inherited `$children(..)`
+    /// WHY: view-native folding uses this to apply inherited child
     ///      wrappers around a child-template emission without mutating the
     ///      shared structural root.
     pub(crate) fn effective_wrapper_context(

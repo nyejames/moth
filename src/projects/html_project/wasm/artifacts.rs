@@ -17,9 +17,9 @@ use crate::projects::html_project::document_config::HtmlDocumentConfig;
 use crate::projects::html_project::document_shell::{
     HtmlDocumentShellInput, render_html_document_shell,
 };
+use crate::projects::html_project::html_slot_plan::HtmlSlotPlan;
 use crate::projects::html_project::js_path::render_entry_fragments;
 use crate::projects::html_project::output_plan::{CanonicalPageRoute, plan_wasm_output_from_route};
-use crate::projects::html_project::page_metadata::HtmlPageMetadataPlan;
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
 use crate::projects::html_project::wasm::export_plan::{
     HtmlWasmExportPlan, build_html_wasm_export_plan,
@@ -63,11 +63,10 @@ pub(crate) struct HtmlWasmArtifacts {
 /// WHY: emission is called from one orchestration site and should avoid a long argument list.
 pub(crate) struct HtmlWasmArtifactEmitInput<'a> {
     pub entry_fragment_html: &'a str,
-    pub structural_url_renderer: &'a StructuralUrlRenderer<'a>,
     pub route: &'a CanonicalPageRoute,
     pub project_name: &'a str,
     pub document_config: &'a HtmlDocumentConfig,
-    pub page_metadata_plan: &'a HtmlPageMetadataPlan,
+    pub slot_plan: &'a HtmlSlotPlan,
     pub js_bundle: &'a str,
     pub wasm_bytes: Vec<u8>,
 }
@@ -169,11 +168,10 @@ pub(crate) fn compile_html_module_wasm(
             &build_plan,
             HtmlWasmArtifactEmitInput {
                 entry_fragment_html: &entry_fragment_html,
-                structural_url_renderer,
                 route,
                 project_name: input.project_name,
                 document_config: input.document_config,
-                page_metadata_plan: input.page_metadata_plan,
+                slot_plan: input.slot_plan,
                 js_bundle: &js_module.source,
                 wasm_bytes,
             },
@@ -238,11 +236,10 @@ pub(crate) fn emit_html_wasm_artifacts(
 ) -> Result<HtmlWasmArtifacts, InfrastructureFailure> {
     let HtmlWasmArtifactEmitInput {
         entry_fragment_html,
-        structural_url_renderer,
         route,
         project_name,
         document_config,
-        page_metadata_plan,
+        slot_plan,
         js_bundle,
         wasm_bytes,
     } = input;
@@ -254,8 +251,7 @@ pub(crate) fn emit_html_wasm_artifacts(
     );
     let html = render_wasm_html_document(
         document_config,
-        page_metadata_plan,
-        structural_url_renderer,
+        slot_plan,
         route,
         project_name,
         entry_fragment_html,
@@ -269,16 +265,14 @@ pub(crate) fn emit_html_wasm_artifacts(
 }
 fn render_wasm_html_document(
     document_config: &HtmlDocumentConfig,
-    page_metadata_plan: &HtmlPageMetadataPlan,
-    structural_url_renderer: &StructuralUrlRenderer<'_>,
+    slot_plan: &HtmlSlotPlan,
     route: &CanonicalPageRoute,
     project_name: &str,
     entry_fragment_html: &str,
 ) -> Result<String, InfrastructureFailure> {
     render_html_document_shell(HtmlDocumentShellInput {
         config: document_config,
-        page_metadata: &page_metadata_plan.metadata,
-        structural_url_renderer,
+        slot_plan,
         route,
         project_name,
         body_html: entry_fragment_html.to_string(),

@@ -683,7 +683,7 @@ fn is_default_error_span(span: Option<crate::compiler_frontend::source::SourceSp
 }
 
 mod builder_tests;
-mod children_tests;
+mod child_decorator_tests;
 mod directive_built_in_tests;
 mod directive_style_tests;
 mod head_tests;

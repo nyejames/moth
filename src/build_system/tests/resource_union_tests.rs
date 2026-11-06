@@ -8,12 +8,14 @@ use crate::build_system::resource_unions::{
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
+use crate::compiler_frontend::builder_root_slots::{BuilderRootSlotName, ConstFragmentDestination};
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
-    OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedValue,
+    OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplate, PublicConstTemplateKind,
+    PublicConstTemplatePiece, PublicConstTemplateSlot, PublicFoldedValue, PublicTemplateSlotKey,
 };
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::{HirReachability, ReachableResourceUse};
@@ -34,6 +36,7 @@ use crate::compiler_frontend::semantic_identity::{
     StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -100,7 +103,7 @@ fn reachable_resource_use_reads_only_live_origins_through_its_table() {
 }
 
 #[test]
-fn entry_union_includes_const_fragment_resource_without_executable_use() {
+fn entry_union_includes_named_const_fragment_resource_without_executable_use() {
     let fragment_resource = origin("assets/fragment.svg");
     let mut module = module_with_resource_table(ModuleResourceTable::new());
     module
@@ -108,6 +111,7 @@ fn entry_union_includes_const_fragment_resource_without_executable_use() {
         .const_top_level_fragments
         .push(ResolvedConstFragment {
             runtime_insertion_index: 0,
+            destination: ConstFragmentDestination::Named(BuilderRootSlotName::new("stylesheets")),
             span: None,
             value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Resource(
                 fragment_resource.clone(),
@@ -146,6 +150,39 @@ fn site_root_piece_is_not_a_resource_union_member() {
     );
 
     assert_eq!(union.origins(), &[live]);
+}
+
+#[test]
+fn occurrence_default_resource_is_selected_from_a_public_const_template() {
+    let default_resource = origin("assets/default.svg");
+    let template = PublicConstTemplate {
+        kind: PublicConstTemplateKind::Wrapper,
+        pieces: vec![PublicConstTemplatePiece::Slot(PublicConstTemplateSlot {
+            key: PublicTemplateSlotKey::Default,
+            default: Some(OwnedFoldedString::Pieces(vec![
+                OwnedFoldedStringPiece::Resource(default_resource.clone()),
+            ])),
+            default_provenance: SyntheticInterfaceProvenance::empty(),
+            applied_child_wrappers: Vec::new(),
+            child_wrappers: Vec::new(),
+            skip_parent_child_wrappers: false,
+        })],
+        conditional_child_wrappers: Vec::new(),
+    };
+    let mut union = ResourceOriginUnion::new();
+    append_public_folded_value(
+        &mut union,
+        &PublicFoldedValue::ConstTemplate {
+            template,
+            folded: None,
+        },
+    );
+
+    assert_eq!(
+        union.origins(),
+        &[default_resource],
+        "a resource used only by an occurrence fallback must stay live"
+    );
 }
 
 #[test]

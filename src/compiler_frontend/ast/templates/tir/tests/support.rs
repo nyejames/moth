@@ -244,6 +244,7 @@ pub(crate) fn wrap_tir_node_in_wrappers(
         const_values,
         child_node_id,
         &wrapper_references,
+        &rustc_hash::FxHashMap::default(),
         string_table,
     )
 }
@@ -262,6 +263,7 @@ pub(crate) fn wrap_tir_node_in_wrapper_references(
         const_values,
         child_node_id,
         wrapper_references,
+        &rustc_hash::FxHashMap::default(),
         string_table,
     )
 }

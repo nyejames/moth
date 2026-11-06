@@ -1,0 +1,2 @@
+card #= [:image=[$slot image = @assets/icon.svg]|alt=[$slot alt = "Asset fallback"]]
+[card]

@@ -3,8 +3,10 @@ semantics; general ownership, context, argument and diagnostic rules live in
 @../directives (Directives).
 
 The template directives documented here are current supported semantics. General
-non-template directives such as `$config`, `$project`, `$html_builder` and `$page`
-are accepted queued design and have their own signature owners.
+non-template directives such as `$config`, `$project` and `$html_builder` are
+accepted queued design and have their own signature owners. A general `$entry`
+root purpose is a separate deferred candidate. The former `$page` metadata design
+is superseded by direct const builder slots.
 
 Directive availability comes from one merged registry:
 
@@ -14,23 +16,30 @@ Directive availability comes from one merged registry:
 
 ### Frontend directives
 
-`$children(...)`:
+`$before = value` and `$after = value`:
 
-- applies one wrapper to each direct child
-- accepts a template or string-slice wrapper
-- the wrapper template must close before the directive closes
+- add a prefix and suffix to each direct child; either directive may be omitted
+- each may appear once per head, so a repeated `$before` or `$after` is rejected
+- accept a compile-time String or constant template wrapper and reject runtime-dependent values
+- values may contain named slots, but not default or positional slots; child insertion is implicit
+- produce no wrapper for structurally absent output, but wrap a selected empty String
+- wrap a direct child loop's aggregate output once
 
 `$fresh`:
 
-- opts one child out of the immediate parent's `$children(...)` wrapper
+- opts one child out of the immediate parent's before/after wrapper
 
 `$slot`:
 
-- declares a default, named or positional slot
+- declares `$slot`, `$slot name`, `$slot 1` and an optional `= <compile-time String>` default
+- must be the only meaningful item in its head and never opens a body
 
-`$insert(...)`:
+`$in name`:
 
-- contributes content to a named slot
+- contributes content to one named slot
+- accepts a bare name only, not a String expression or a positional target
+- can appear only once per head
+- a routed contribution, including an explicitly empty one, suppresses that slot occurrence's default
 
 `$note` and `$todo`:
 
@@ -48,6 +57,22 @@ Directive availability comes from one merged registry:
 `$md`:
 
 - applies Moth Markdown formatting
+
+### Builder-root inserts
+
+On an active application entry root, a direct top-level const `$in`
+is a builder contribution rather than a template-slot helper.
+The selected builder registers its destination names. Only a direct root insert
+routes. A nested, stored or aliased insert remains ordinary template
+composition.
+
+Builder destinations are builder-interpreted. The HTML builder registers
+`title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and
+`head`. See @../constants/#const-templates (Const templates) and
+@../project-structure/#entry-config (Entry metadata and builder slots).
+
+Runtime top-level named builder inserts are not supported, and their final
+design remains unsettled.
 
 ### HTML builder directives
 
@@ -126,14 +151,14 @@ the compiler rejects a second formatter, including a repeat of the same one:
     io.line([$md, $raw: Hello])
 ]
 
-`$insert(...)` can sit beside other items, but it can appear only once per
+`$in name` can sit beside other items, but it can appear only once per
 head. Each insert sends its body to one named slot, so use one insert template
 for each slot you fill:
 
 [codeblock, $code("moth"):
     [card:
-        [$insert("title"): Hello]
-        [$insert("footer"): Goodbye]
+        [$in title:Hello]
+        [$in footer:Goodbye]
         Body content
     ]
 ]

@@ -1,4 +1,4 @@
-list #= [$children([:<li class="branch-item">[$slot]</li>]):
+list #= [$before = [:<li class="branch-item">], $after = [:</li>]:
     <ul class="branch-list">[$slot]</ul>
 ]
 

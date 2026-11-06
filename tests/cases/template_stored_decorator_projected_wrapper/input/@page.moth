@@ -1,0 +1,13 @@
+-- Direct and aliased compile-time record fields must materialize their stored
+-- wrapper before decorator classification in a runtime-capable receiver.
+theme #= (
+    prefix = [$html:<tr data-site="[@/]" data-icon="[@assets/icon.svg]" style="[$slot tone]">],
+)
+theme_alias #= theme
+prefix_alias #= theme.prefix
+
+direct_rows = [$before = theme.prefix, $after = [$html:</tr>]:[$slot]]
+record_alias_rows = [$before = theme_alias.prefix, $after = [$html:</tr>]:[$slot]]
+prefix_alias_rows = [$before = prefix_alias, $after = [$html:</tr>]:[$slot]]
+
+[:[direct_rows:[$in tone:background: blue;][:direct]][record_alias_rows:[$in tone:background: blue;][:record-alias]][prefix_alias_rows:[$in tone:background: blue;][:prefix-alias]]]

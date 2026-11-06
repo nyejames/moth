@@ -1,0 +1,1 @@
+card #= [:title=[$slot title = "Imported fallback"]|body=[$slot = "Imported body fallback"]]

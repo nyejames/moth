@@ -101,7 +101,11 @@ impl<'a> StructuralUrlRenderer<'a> {
         }))
     }
 
-    fn render_resource_origin(
+    /// Render one tracked resource origin in this artefact's URL context.
+    ///
+    /// WHY: builder-specific structural slots, such as stylesheet links, need the same final URL
+    ///      text as an ordinary structural string without constructing a temporary value.
+    pub(crate) fn render_resource_origin(
         &self,
         origin: &StableResourceOriginId,
     ) -> Result<String, InfrastructureFailure> {

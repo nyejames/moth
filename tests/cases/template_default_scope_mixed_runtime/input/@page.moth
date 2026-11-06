@@ -1,0 +1,13 @@
+-- Nested constant composition inside a runtime application: the applied card
+-- closes its own title fallback, while the named child keeps an open title the
+-- enclosing runtime application fills. The closed card title must survive the
+-- runtime plan copy and must not compete with the named title for `title`.
+identity |value String| -> String:
+    return value
+;
+
+card #= [:<h1>[$slot title = "Card title fallback"]</h1>[$slot]]
+named #= [:<h1>[$slot title = "Named title fallback"]</h1>[$slot]]
+composed #= [:[card:[named]]<main>[$slot main = "Composed main fallback"]</main>]
+runtime_page = [:[composed:[$in title:Outer][$in main:[identity("Runtime main")]]]<footer>[$slot footer = "Footer fallback"]</footer>]
+[runtime_page:[$in footer:End]]

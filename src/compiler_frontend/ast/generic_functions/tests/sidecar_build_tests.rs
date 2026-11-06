@@ -83,6 +83,7 @@ fn requester_template_contract_slots_use_nonidentity_generated_domain_remap() {
         file_value_resolution: None,
         config_resolution: None,
         build_config_values: Arc::new(Default::default()),
+        builder_root_slots: None,
         template_const_loop_iteration_limit: requester.template_const_loop_iteration_limit,
         capacity_estimate: Default::default(),
         #[cfg(feature = "timers")]

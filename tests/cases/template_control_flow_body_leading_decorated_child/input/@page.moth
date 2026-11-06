@@ -1,0 +1,7 @@
+-- Regression: a conditional body that starts with a decorator-bearing child
+-- template must not treat that body child as a head receiver. Its wrapper
+-- exposes only a named slot, so guessing it into the head chain would consume
+-- the following body text as loose fill and reject the program.
+rows #= [$before = [$html:<tr style="[$slot row_style = "background: red;"]">], $after = [$html:</tr>]:[:a][:b]]
+
+[if true:[rows]X]

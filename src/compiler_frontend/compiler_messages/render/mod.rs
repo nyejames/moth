@@ -52,7 +52,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::generics
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::DeferredFeatureView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
-    InvalidPageMetadataView, UnsupportedBuilderPackageView,
+    InvalidHtmlSlotContributionView, UnsupportedBuilderPackageView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView, MalformedCssTemplateView,
@@ -75,8 +75,8 @@ use crate::compiler_frontend::compiler_messages::{
     HtmlTemplateWarning, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
     InvalidCompileTimePathReason, InvalidConfigReason, InvalidDependencyClauseReason,
     InvalidExpressionReason, InvalidExternalModuleReason, InvalidGenericParameterReason,
-    InvalidImportPathReason, InvalidLoopOperandReason, InvalidMapLiteralReason,
-    InvalidMutableAccessReason, InvalidOutputFolderReason, InvalidPageMetadataReason,
+    InvalidHtmlSlotContributionReason, InvalidImportPathReason, InvalidLoopOperandReason,
+    InvalidMapLiteralReason, InvalidMutableAccessReason, InvalidOutputFolderReason,
     InvalidRouteOutputReason, InvalidTemplateDirectiveReason, LoopOperandKind,
     MalformedTemplateReason, NameNamespace, NamespaceTypeValueMisuseKind, PathKind,
     SourceSpanCapacityResource, UnsupportedBackendFeatureReason,
@@ -449,21 +449,38 @@ pub(crate) fn invalid_template_directive_message(
         InvalidTemplateDirectiveReason::DirectiveNotAllowedHere => {
             format!("Template directive '{name}' is not allowed here.")
         }
-        InvalidTemplateDirectiveReason::UnexpectedArguments => {
-            format!("`${name}` does not take arguments. Write `${name}:` instead.")
-        }
+        InvalidTemplateDirectiveReason::UnexpectedArguments => match name {
+            "slot" => {
+                "`$slot` uses a bare name or positive position, not parentheses.\n                 Use `$slot`, `$slot title`, or `$slot 1`.".to_owned()
+            }
+            "in" => {
+                "`$in` uses a bare slot name, not parentheses.\n                 Use `$in title: ...`.".to_owned()
+            }
+            _ => format!("`${name}` does not take arguments. Write `${name}:` instead."),
+        },
         InvalidTemplateDirectiveReason::EmptyArguments => {
             format!("`${name}()` has empty parentheses. Remove the parentheses or provide an argument.")
         }
         InvalidTemplateDirectiveReason::InvalidSlotTarget => {
-            "`$slot` accepts no argument, a string name, or a positive whole-number position.\n                 Use `$slot`, `$slot(\"title\")`, or `$slot(1)`.".to_owned()
+            "`$slot` accepts no target, a name, or a positive whole-number position.\n                 Use `$slot`, `$slot title`, or `$slot 1`.".to_owned()
+        }
+        InvalidTemplateDirectiveReason::InvalidSlotDefault => {
+            "A `$slot` default must be a compile-time `String` value.\n                 Use `$slot title = \"Untitled\"`.".to_owned()
         }
         InvalidTemplateDirectiveReason::InvalidInsertTarget => {
-            "`$insert(...)` requires a string slot name.\n                 Use `$insert(\"title\")`.".to_owned()
+            "`$in` requires a slot name.\n                 Use `$in title: ...`.".to_owned()
         }
-        InvalidTemplateDirectiveReason::InvalidChildrenArgument => {
-            "`$children(...)` requires one wrapper template or string argument.\n                 Example: `$children([:<li>[$slot]</li>])`.".to_owned()
-        }
+        InvalidTemplateDirectiveReason::InvalidChildDecoratorValue => match name {
+            "before" => {
+                "`$before` requires `= <compile-time String or constant template wrapper>`.\n                 Example: `$before = [: <tr> ]`.".to_owned()
+            }
+            "after" => {
+                "`$after` requires `= <compile-time String or constant template wrapper>`.\n                 Example: `$after = [: </tr> ]`.".to_owned()
+            }
+            _ => format!(
+                "`${name}` requires `= <compile-time String or constant template wrapper>`."
+            ),
+        },
     }
 }
 
@@ -479,7 +496,7 @@ pub(crate) fn render_invalid_template_directive(
     let reason = facts.reason.to_reason(facts.detail);
     let guidance = if facts.reason == InvalidTemplateDirectiveCode::UnknownDirective {
         vec![
-            "Known template directives include `$md`, `$raw`, `$children`, `$slot`, `$insert`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, and `$doc`.".to_owned(),
+            "Known template directives include `$md`, `$raw`, `$before`, `$after`, `$slot`, `$in`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, and `$doc`.".to_owned(),
         ]
     } else {
         Vec::new()
@@ -1132,32 +1149,43 @@ pub(crate) fn render_unsupported_builder_package(
     }
 }
 
-pub(crate) fn invalid_page_metadata_message(
-    key: StringId,
-    reason: InvalidPageMetadataReason,
+pub(crate) fn invalid_html_slot_contribution_message(
+    slot: StringId,
+    reason: InvalidHtmlSlotContributionReason,
     string_table: &dyn StringTableResolver,
 ) -> String {
-    let key_str = string_table.resolve(key);
+    let slot = string_table.resolve(slot);
     match reason {
-        InvalidPageMetadataReason::NotAString => {
-            format!("Reserved HTML page metadata constant '{key_str}' must fold to a string.")
-        }
-        InvalidPageMetadataReason::DuplicateDeclaration => {
-            format!(
-                "Reserved HTML page metadata constant '{key_str}' is declared more than once for this entry page."
-            )
-        }
+        InvalidHtmlSlotContributionReason::MissingResource => format!(
+            "The `{slot}` HTML builder slot requires exactly one tracked resource reference; this contribution contains none."
+        ),
+        InvalidHtmlSlotContributionReason::NotAStaticResource => format!(
+            "The `{slot}` HTML builder slot accepts one tracked resource reference and formatting whitespace; this contribution contains literal text instead."
+        ),
+        InvalidHtmlSlotContributionReason::MultipleResources => format!(
+            "The `{slot}` HTML builder slot accepts exactly one resource reference; this contribution contains more than one."
+        ),
+        InvalidHtmlSlotContributionReason::SiteRoot => format!(
+            "The `{slot}` HTML builder slot cannot use the site root; reference one tracked resource instead."
+        ),
+        InvalidHtmlSlotContributionReason::NonCssResource => format!(
+            "The `{slot}` HTML builder slot requires a CSS resource; this contribution references a non-CSS file."
+        ),
     }
 }
-/// WHAT: renders invalid page metadata from its key and reason facts.
-/// WHY: `invalid_page_metadata_message` owns both substitutions.
-pub(crate) fn render_invalid_page_metadata(
+/// WHAT: renders one invalid HTML builder slot contribution from its slot and reason facts.
+/// WHY: `invalid_html_slot_contribution_message` owns both substitutions.
+pub(crate) fn render_invalid_html_slot_contribution(
     _diagnostic: &DiagnosticView<'_>,
-    facts: &InvalidPageMetadataView,
+    facts: &InvalidHtmlSlotContributionView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
     RenderedPayload {
-        message: invalid_page_metadata_message(facts.key, facts.reason, context.string_table),
+        message: invalid_html_slot_contribution_message(
+            facts.slot,
+            facts.reason,
+            context.string_table,
+        ),
         guidance: Vec::new(),
     }
 }

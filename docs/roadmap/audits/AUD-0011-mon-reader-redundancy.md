@@ -14,7 +14,7 @@
 
 ## Authorities read
 
-`docs/roadmap/audit-guide.md`; `docs/roadmap/audit-kinds/redundancy.md`; `docs/roadmap/audits/README.md`; `docs/roadmap/audit-log.md`; `docs/roadmap/open-audit-findings.md`; `docs/src/docs/language-overview/mon-syntax.mtf`; `docs/src/docs/mon/mon-format.mtf`; `docs/src/developer-docs/style-guide/testing.mtf`; the compiler/build ownership contracts; the originating extraction plan; the supplied `moth-code-review-guide.md`; and repository instructions.
+`docs/roadmap/audit-guide.md`; `docs/roadmap/audit-kinds/redundancy.md`; `docs/roadmap/audits/README.md`; `docs/roadmap/audit-log.md`; `docs/roadmap/open-audit-findings.md`; `docs/docs/language-overview/mon-syntax.mtf`; `docs/docs/mon/mon-format.mtf`; `docs/developer-docs/style-guide/testing.mtf`; the compiler/build ownership contracts; the originating extraction plan; the supplied `moth-code-review-guide.md`; and repository instructions.
 
 ## Existing findings and active plans checked
 

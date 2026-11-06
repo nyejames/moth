@@ -6,14 +6,15 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
-use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::ConstRecordState;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    AstExpressionBuilder, ExprId, OwnedExpr,
+    AstExpressionBuilder, ExprId, ExpressionOperationView, OwnedExpr,
 };
+use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
 use crate::compiler_frontend::ast::expressions::parse_expression::complete_pending_expression;
 use crate::compiler_frontend::ast::place_access::{
     ReceiverSourceState, classify_expression_source_state,
@@ -100,6 +101,128 @@ pub(crate) fn reference_expression_from_declaration(
     string_table: &mut StringTable,
     base_span: Option<SourceSpan>,
 ) -> Result<OwnedExpr, ExpressionParseError> {
+    declaration_reference_expression(
+        reference_arg,
+        context,
+        expression_builder,
+        const_values,
+        string_table,
+        base_span,
+        context.kind.is_constant_context(),
+    )
+}
+
+/// Builds the expression payload for a declaration reference whose consumer requires a
+/// compile-time value even when the surrounding template is runtime-capable.
+///
+/// WHAT: applies the same authored-initializer inlining and imported/const template rebuild
+///       that a constant context receives. The caller establishes that the declaration has
+///       authored compile-time provenance; this function only performs the value resolution.
+/// WHY: direct-child decorator values are compile-time composition patterns inside ordinary
+///      templates, so a stored constant wrapper must resolve to its template instead of
+///      staying a runtime `Reference`.
+pub(crate) fn constant_reference_expression_from_declaration(
+    reference_arg: &Declaration,
+    context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    string_table: &mut StringTable,
+    base_span: Option<SourceSpan>,
+) -> Result<OwnedExpr, ExpressionParseError> {
+    let resolved = declaration_reference_expression(
+        reference_arg,
+        context,
+        expression_builder,
+        const_values,
+        string_table,
+        base_span,
+        true,
+    )?;
+    materialize_constant_template_expression(
+        resolved,
+        context,
+        expression_builder,
+        const_values,
+        string_table,
+        base_span,
+    )
+}
+
+/// Rebuilds a folded `Constant` template payload into a `Template` expression.
+///
+/// WHAT: a constant occurrence that carries the stable public template projection instead of an
+///       authored template expression keeps wrapper identity. This includes a same-module alias
+///       of a constant and a projected record field. Rebuild that projection exactly like an
+///       imported template so wrapper composition sees template semantics.
+/// WHY: only `ExpressionOperationView::Template` carries wrapper and slot identity to consumers
+///      that require a compile-time template value, such as child decorators; a bare `Constant`
+///      cannot supply a `TemplateWrapperReference`.
+pub(crate) fn materialize_constant_template_expression(
+    expression: OwnedExpr,
+    context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    string_table: &mut StringTable,
+    base_span: Option<SourceSpan>,
+) -> Result<OwnedExpr, ExpressionParseError> {
+    let expression_id = expression.id();
+    let ExpressionOperationView::Constant(value) =
+        expression_builder.view(expression_id)?.operation()
+    else {
+        return Ok(expression);
+    };
+    let is_template_wrapper = const_values
+        .metadata(value)
+        .is_some_and(|metadata| metadata.value_kind == ConstValueKind::TemplateWrapper);
+    if !is_template_wrapper
+        || !matches!(
+            const_values.payload(value),
+            Some(ConstValuePayload::Template { .. })
+        )
+    {
+        return Ok(expression);
+    }
+
+    let rebuilt = {
+        let mut store = context.template_ir_store.borrow_mut();
+        rebuild_const_template_reference(
+            value,
+            &mut store,
+            expression_builder,
+            const_values,
+            context
+                .file_value_resolution
+                .as_ref()
+                .map(|services| &*services.module_resources),
+            string_table,
+            base_span,
+        )?
+    };
+    let Some(template) = rebuilt else {
+        return Ok(expression);
+    };
+    // WHY: the constant occurrence's synthetic provenance must reach the rebuilt template
+    //      expression exactly as the canonical imported-template branch preserves it.
+    let provenance = const_values
+        .metadata(value)
+        .map(|metadata| metadata.synthetic_interface_provenance.clone())
+        .unwrap_or_default();
+    let template = expression_builder.template(template, ValueMode::ImmutableOwned)?;
+    Ok(expression_builder.with_synthetic_interface_provenance(template, provenance)?)
+}
+
+/// Shared declaration-reference builder; `resolve_constant` selects whether the consumer's
+/// value contract requires the declaration's compile-time content or the surrounding context's
+/// ordinary reference policy.
+fn declaration_reference_expression(
+    reference_arg: &Declaration,
+    context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    string_table: &mut StringTable,
+    base_span: Option<SourceSpan>,
+    resolve_constant: bool,
+) -> Result<OwnedExpr, ExpressionParseError> {
     let initializer = reference_arg.value.initializer();
     let default = reference_arg.value.default();
     let const_record_state = match (initializer, default) {
@@ -123,7 +246,7 @@ pub(crate) fn reference_expression_from_declaration(
         _ => ConstRecordState::RuntimeValue,
     };
 
-    if context.kind.is_constant_context() {
+    if resolve_constant {
         if context.is_unresolved_constant_placeholder(reference_arg) {
             let placeholder_type_id = context
                 .expected_result_type_ids
@@ -197,7 +320,7 @@ pub(crate) fn reference_expression_from_declaration(
         reference_arg.id,
         reference_arg.type_id,
         base_span,
-        if context.kind.is_constant_context() {
+        if resolve_constant {
             ValueMode::ImmutableOwned
         } else {
             reference_arg.value_mode

@@ -13,7 +13,6 @@ mod definitions;
 mod dominance;
 mod expressions;
 mod functions;
-mod metadata;
 mod structure;
 mod support;
 #[cfg(test)]
@@ -117,10 +116,7 @@ impl<'a> HirValidator<'a> {
         self.validate_function_provenance()?;
         self.validate_function_cfg_ownership()?;
 
-        // 4. Validate module-level metadata.
-        self.validate_module_constants()?;
-
-        // 5. Validate core HIR entities.
+        // 4. Validate core HIR entities.
         self.validate_functions()?;
         self.validate_blocks()?;
         self.validate_function_definitions()?;

@@ -19,8 +19,8 @@ use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateFoldBinding;
 use crate::compiler_frontend::ast::templates::tir::{
-    FoldedConstTemplatePiece, TemplateIrStore, TemplatePreparationMode, TemplateTirPhase, TirView,
-    prepare_tir_view,
+    FoldedConstTemplatePiece, TemplateIrStore, TemplatePreparationMode, TemplateTirPhase,
+    TemplateWrapperReference, TirView, WrapperSlotRouting, prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -32,6 +32,8 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 
+use rustc_hash::FxHashMap;
+
 pub(crate) struct TirFoldContext<'a> {
     pub string_table: &'a mut StringTable,
     pub expression_builder: &'a mut AstExpressionBuilder,
@@ -40,6 +42,17 @@ pub(crate) struct TirFoldContext<'a> {
     pub(crate) bindings: Vec<TemplateFoldBinding>,
     pub(crate) source_scope: Option<&'a ScopeContext>,
     pub(crate) external_package_registry: Option<&'a ExternalPackageRegistry>,
+    /// Slot routing prepared for wrapper edges during this fold.
+    ///
+    /// A wrapper reference's slot schema depends only on the immutable TIR store and the
+    /// reference's exact context. Every direct child that inherits the same `$before`/`$after`
+    /// composite therefore reuses one entry instead of repeating the schema walk. Entries are
+    /// keyed by the exact reference, so reuse is a hash lookup rather than a scan over every
+    /// prepared edge. The map is fold-local preparation, not a cross-compilation result cache:
+    /// no entry outlives this fold, every fold context reads one store for its whole lifetime
+    /// and templates without inherited wrappers allocate none.
+    pub(crate) prepared_wrapper_slot_routing:
+        FxHashMap<TemplateWrapperReference, WrapperSlotRouting>,
 }
 
 /// Structural no-output is distinct from an emitted empty string for parent wrappers.
@@ -109,6 +122,7 @@ impl<'a> TirFoldContext<'a> {
             template_const_loop_iteration_limit,
             bindings: Vec::new(),
             source_scope: None,
+            prepared_wrapper_slot_routing: FxHashMap::default(),
         }
     }
 }

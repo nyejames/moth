@@ -1,9 +1,9 @@
 @borrow-validation content as reference_content
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-page_title #= "Borrow validation"
-page_description #= "How Moth checks exclusivity, aliasing and optional transfer safety."
-page_head #= theme_head
+#[$in title:["Borrow validation"]]
+#[$in description:["How Moth checks exclusivity, aliasing and optional transfer safety."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]

@@ -32,6 +32,7 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use rustc_hash::FxHashMap;
 
 fn context<'a>(
     strings: &'a mut StringTable,
@@ -46,6 +47,7 @@ fn context<'a>(
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         source_scope: None,
         external_package_registry: None,
+        prepared_wrapper_slot_routing: FxHashMap::default(),
         bindings,
     }
 }

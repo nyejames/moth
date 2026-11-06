@@ -1,0 +1,44 @@
+entry = "."
+
+# A favicon slot accepts one structural resource or an ordinary permitted String. Structural
+# resource pieces keep their page-relative URL and their output artifact.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["<link rel=\"icon\" href=\"./static/favicon.png\">"]
+must_contain_exactly_once = ["<link rel=\"icon\" href=\"./static/favicon.png\">"]
+
+[[backends.html.artifact_assertions]]
+path = "string_icon/index.html"
+kind = "html"
+must_contain = ["<link rel=\"icon\" href=\"/slot-icon.ico\">"]
+must_contain_exactly_once = ["<link rel=\"icon\" href=\"/slot-icon.ico\">"]
+
+[[backends.html.artifact_assertions]]
+path = "static/favicon.png"
+kind = "binary"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["<link rel=\"icon\" href=\"./static/favicon.png\">"]
+must_contain_exactly_once = ["<link rel=\"icon\" href=\"./static/favicon.png\">"]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "string_icon/index.html"
+kind = "html"
+must_contain = ["<link rel=\"icon\" href=\"/slot-icon.ico\">"]
+must_contain_exactly_once = ["<link rel=\"icon\" href=\"/slot-icon.ico\">"]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "static/favicon.png"
+kind = "binary"

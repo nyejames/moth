@@ -710,6 +710,7 @@ fn collect_scanned_symbol_references_matches_initializer_behavior_for_bare_symbo
     let references = collect_scanned_symbol_references(
         TokenFactView::from_source(&owner),
         SourceId::COMPILATION_ROOT,
+        &string_table,
     );
 
     assert_eq!(references.len(), 1);
@@ -736,6 +737,7 @@ fn collect_scanned_symbol_references_matches_initializer_behavior_for_dot_member
     let references = collect_scanned_symbol_references(
         TokenFactView::from_source(&owner),
         SourceId::COMPILATION_ROOT,
+        &string_table,
     );
 
     assert_eq!(references.len(), 1);
@@ -764,6 +766,7 @@ fn collect_scanned_symbol_references_matches_initializer_behavior_for_call() {
     let references = collect_scanned_symbol_references(
         TokenFactView::from_source(&owner),
         SourceId::COMPILATION_ROOT,
+        &string_table,
     );
 
     assert_eq!(references.len(), 1);
@@ -787,6 +790,7 @@ fn collect_scanned_symbol_references_matches_initializer_behavior_for_choice_nam
     let references = collect_scanned_symbol_references(
         TokenFactView::from_source(&owner),
         SourceId::COMPILATION_ROOT,
+        &string_table,
     );
 
     assert_eq!(references.len(), 1);
@@ -1131,8 +1135,11 @@ fn initializer_references_carry_the_scanned_token_span() {
         .finish()
         .expect("canonical span fixture should satisfy source-token invariants");
 
-    let references =
-        collect_scanned_symbol_references(TokenFactView::from_source(&owner), source_id);
+    let references = collect_scanned_symbol_references(
+        TokenFactView::from_source(&owner),
+        source_id,
+        &string_table,
+    );
 
     assert_eq!(references.len(), 1);
     assert_eq!(references[0].name, name);

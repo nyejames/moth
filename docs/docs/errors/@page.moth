@@ -19,9 +19,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Errors, options and assertions"
-page_description #= "Recoverable errors, optional values, local recovery and assertions in Moth."
-page_head #= language_theme_head
+#[$in title:["Errors, options and assertions"]]
+#[$in description:["Recoverable errors, optional values, local recovery and assertions in Moth."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -45,9 +45,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):error-values]
-        [$insert("title"):Error values]
-        [$insert("advanced"):[error_values]]
+        [$in key:error-values]
+        [$in title:Error values]
+        [$in advanced:[error_values]]
 
         [error_values_basic]
     ]
@@ -55,9 +55,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):error-returns]
-        [$insert("title"):Error returns]
-        [$insert("advanced"):[error_returns]]
+        [$in key:error-returns]
+        [$in title:Error returns]
+        [$in advanced:[error_returns]]
 
         [error_returns_basic]
     ]
@@ -65,9 +65,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):propagation]
-        [$insert("title"):Error propagation]
-        [$insert("advanced"):[propagation]]
+        [$in key:propagation]
+        [$in title:Error propagation]
+        [$in advanced:[propagation]]
 
         [propagation_basic]
     ]
@@ -75,9 +75,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):catch-and-recovery]
-        [$insert("title"):Catch and recovery]
-        [$insert("advanced"):[catch_and_recovery]]
+        [$in key:catch-and-recovery]
+        [$in title:Catch and recovery]
+        [$in advanced:[catch_and_recovery]]
 
         [catch_and_recovery_basic]
     ]
@@ -85,9 +85,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):options]
-        [$insert("title"):Options]
-        [$insert("advanced"):[options]]
+        [$in key:options]
+        [$in title:Options]
+        [$in advanced:[options]]
 
         [options_basic]
     ]
@@ -95,9 +95,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):assertions]
-        [$insert("title"):Assertions]
-        [$insert("advanced"):[assertions]]
+        [$in key:assertions]
+        [$in title:Assertions]
+        [$in advanced:[assertions]]
 
         [assertions_basic]
     ]
@@ -105,9 +105,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):runtime-failures-and-termination]
-        [$insert("title"):Runtime failures and termination]
-        [$insert("advanced"):[runtime_failures_and_termination]]
+        [$in key:runtime-failures-and-termination]
+        [$in title:Runtime failures and termination]
+        [$in advanced:[runtime_failures_and_termination]]
 
         Checked operations and typed errors support recovery. Resource exhaustion
         and host termination remain outside that contract. Choose Advanced for
@@ -117,9 +117,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../choices/]
-        [$insert("previous_title"):Choices]
-        [$insert("next_path"):../collections/]
-        [$insert("next_title"):Collections and maps]
+        [$in previous_path:../choices/]
+        [$in previous_title:Choices]
+        [$in next_path:../collections/]
+        [$in next_title:Collections and maps]
     ]
 ]

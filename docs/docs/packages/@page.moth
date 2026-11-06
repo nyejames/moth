@@ -20,9 +20,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Packages and dependencies"
-page_description #= "Dependency paths, module visibility, project-local packages and package origin and backing."
-page_head #= language_theme_head
+#[$in title:["Packages and dependencies"]]
+#[$in description:["Dependency paths, module visibility, project-local packages and package origin and backing."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -43,9 +43,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):dependency-paths]
-        [$insert("title"):Dependency paths]
-        [$insert("advanced"):[dependency_paths]]
+        [$in key:dependency-paths]
+        [$in title:Dependency paths]
+        [$in advanced:[dependency_paths]]
 
         [dependency_paths_basic]
     ]
@@ -53,9 +53,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):dependency-clauses]
-        [$insert("title"):Dependency clauses]
-        [$insert("advanced"):[dependency_clauses]]
+        [$in key:dependency-clauses]
+        [$in title:Dependency clauses]
+        [$in advanced:[dependency_clauses]]
 
         [dependency_clauses_basic]
     ]
@@ -63,9 +63,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):module-visibility]
-        [$insert("title"):Module visibility]
-        [$insert("advanced"):[module_visibility]]
+        [$in key:module-visibility]
+        [$in title:Module visibility]
+        [$in advanced:[module_visibility]]
 
         [module_visibility_basic]
     ]
@@ -73,9 +73,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):public-reexports]
-        [$insert("title"):Public re-exports]
-        [$insert("advanced"):[public_reexports]]
+        [$in key:public-reexports]
+        [$in title:Public re-exports]
+        [$in advanced:[public_reexports]]
 
         [public_reexports_basic]
     ]
@@ -83,9 +83,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):project-local-packages]
-        [$insert("title"):Project-local packages]
-        [$insert("advanced"):[project_local_packages]]
+        [$in key:project-local-packages]
+        [$in title:Project-local packages]
+        [$in advanced:[project_local_packages]]
 
         [project_local_packages_basic]
     ]
@@ -93,9 +93,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):package-origins-and-backing]
-        [$insert("title"):Package origins and backing]
-        [$insert("advanced"):[package_origins_and_backing]]
+        [$in key:package-origins-and-backing]
+        [$in title:Package origins and backing]
+        [$in advanced:[package_origins_and_backing]]
 
         [package_origins_and_backing_basic]
     ]
@@ -103,9 +103,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):external-binding-contracts]
-        [$insert("title"):External binding contracts]
-        [$insert("advanced"):[external_binding_contracts]]
+        [$in key:external-binding-contracts]
+        [$in title:External binding contracts]
+        [$in advanced:[external_binding_contracts]]
 
         [external_binding_contracts_basic]
     ]
@@ -120,9 +120,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../project-structure/]
-        [$insert("previous_title"):Project structure]
-        [$insert("next_path"):../resources/]
-        [$insert("next_title"):Resources and file values]
+        [$in previous_path:../project-structure/]
+        [$in previous_title:Project structure]
+        [$in next_path:../resources/]
+        [$in next_title:Resources and file values]
     ]
 ]

@@ -35,10 +35,10 @@ The `@project` dependency root is reserved for project globals.
 
 ### Core template directives
 
-- `$children` - wrap each direct child.
+- `$before`, `$after` - prefix and suffix each direct child.
 - `$fresh` - bypass the parent's child wrapper.
-- `$slot` - declare a template slot.
-- `$insert` - contribute content to a named slot.
+- `$slot` - declare a default, named or positional slot, with an optional compile-time String default.
+- `$in` - contribute to one named slot.
 - `$note`, `$todo` - discard template comments.
 - `$doc` - mark documentation content.
 - `$raw` - preserve unformatted template content.
@@ -56,9 +56,11 @@ The `@project` dependency root is reserved for project globals.
 - `$config` - mark a compile-time declaration as a build input (compiler).
 - `$project` - declare project settings in the project config (compiler).
 - `$html_builder` - configure the HTML builder.
-- `$page` - declare an HTML page root and its metadata.
 
-These four general directives are accepted language design and are queued for implementation. The template directives above
+These three general directives are accepted language design and are queued for implementation. The template directives above
 are already registered by the compiler or HTML builder.
+
+The former `$page` metadata design is superseded. HTML metadata uses direct top-level const `$in` builder slots, and a general `$entry`
+purpose remains deferred.
 
 See @../directives (Directives) and @../templates/#template-directives (Template directives) for their syntax and use.

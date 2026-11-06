@@ -282,20 +282,23 @@ fn source_config_contracts_reject_generic_parameters_and_comma_termination() {
 }
 
 #[test]
-fn malformed_children_wrapper_constant_initializer_reports_eof_delimiter_error() {
+fn malformed_decorator_wrapper_constant_initializer_reports_eof_delimiter_error() {
     let result = parse_single_file_headers_with_entry(
-        "broken #= [$children([:<li>[$slot]</li>):\n<ul>[$slot]</ul>\n]\n",
+        "broken #= [$before = [:<li>]:\n<ul>[$slot]</ul>\n",
         "src/@page.moth",
         "src/@page.moth",
     );
 
     assert!(
         matches!(&result, HeaderTestOutcome::Diagnostics(_)),
-        "unterminated '$children(..)' wrapper templates should fail instead of hanging"
+        "unterminated decorator wrapper templates should fail instead of hanging"
     );
     let errors = expect_header_error(result, "expected parse errors");
 
-    assert!(errors.diagnostics.views().any(|diagnostic| {
-        diagnostic_has_family::<token_lexical::UnexpectedEndOfFileView>(&diagnostic)
-    }));
+    assert!(
+        errors
+            .diagnostics
+            .views()
+            .any(|diagnostic| { diagnostic.descriptor().code == "MOTH-SYNTAX-0022" })
+    );
 }

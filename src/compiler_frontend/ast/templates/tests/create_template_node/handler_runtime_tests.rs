@@ -14,11 +14,6 @@ fn handler_directive_argument_preserves_infrastructure_failure() {
 }
 
 #[test]
-fn children_directive_argument_preserves_infrastructure_failure() {
-    assert_stale_template_directive_argument_is_infrastructure("[$children(stale_template): body]");
-}
-
-#[test]
 fn truncated_template_head_stream_returns_missing_closing_delimiter() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -184,7 +179,7 @@ fn const_required_template_head_folds_const_record_instance_field() {
 fn runtime_template_if_rejects_insert_leaking_from_conditional_body() {
     let error = parse_control_flow_template_after_composition_error(
         "[if true:
-            [$insert(\"style\"): color: red;]
+            [$in style: color: red;]
         ]",
     );
 
@@ -198,7 +193,7 @@ fn runtime_template_if_rejects_insert_leaking_from_conditional_body() {
 fn runtime_template_loop_rejects_insert_leaking_from_body() {
     let error = parse_control_flow_template_after_composition_error(
         "[loop 0 to 2 |i|:
-            [$insert(\"row\"): [i]]
+            [$in row: [i]]
         ]",
     );
 
@@ -229,7 +224,7 @@ fn runtime_template_if_allows_unresolved_slot_receiver() {
 fn runtime_template_if_rejects_unresolved_insert() {
     let diagnostic = parse_template_error(
         "[if true:
-            [$insert(\"style\"): color: red;]
+            [$in style: color: red;]
         ]",
     );
 
@@ -2121,7 +2116,7 @@ fn runtime_template_if_rejects_unresolved_insert_through_tir_view() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let (template, context, _string_table) = parse_runtime_template_without_validation(
-        "[if true:\n            [$insert(\"style\"): color: red;]\n        ]",
+        "[if true:\n            [$in style: color: red;]\n        ]",
         &mut expression_builder,
         &mut const_values,
     );

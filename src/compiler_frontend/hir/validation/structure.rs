@@ -58,28 +58,20 @@ impl<'a> HirValidator<'a> {
     }
 
     pub(super) fn validate_start_function(&self) -> Result<(), InfrastructureFailure> {
-        // WHAT: the entry function ID and its source owner are one contract and must agree.
-        // WHY: root-scoped consumers such as page metadata branch on the source owner; a missing
-        //      half would silently skip entries or attribute them to the wrong root.
-        match (self.module.start_function, self.module.start_source_file) {
-            (None, None) => Ok(()),
-            (Some(start_function), Some(_)) => {
-                if self.function_ids.contains(&start_function) {
-                    Ok(())
-                } else {
-                    Err(self.error_with_hir(format!(
-                        "HIR start_function {:?} is not present in module functions",
-                        start_function
-                    )))
-                }
-            }
-            (Some(start_function), None) => Err(self.error_with_hir(format!(
-                "HIR start_function {:?} requires a start_source_file owner",
+        // WHAT: when an entry is present, it must be one of the module's functions.
+        // WHY: backends select the entry by ID, so an ID outside the function list would point
+        //      at no reachable body.
+        let Some(start_function) = self.module.start_function else {
+            return Ok(());
+        };
+
+        if self.function_ids.contains(&start_function) {
+            Ok(())
+        } else {
+            Err(self.error_with_hir(format!(
+                "HIR start_function {:?} is not present in module functions",
                 start_function
-            ))),
-            (None, Some(_)) => Err(self.error_with_hir(
-                "HIR start_source_file owner requires a start_function".to_owned(),
-            )),
+            )))
         }
     }
 

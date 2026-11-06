@@ -1,0 +1,20 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0021"]
+message_contains = ["compile-time `String`"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+path = "input/@page.moth"
+line = 9
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0021"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+path = "input/@page.moth"
+line = 9

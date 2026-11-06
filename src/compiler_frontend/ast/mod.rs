@@ -154,7 +154,6 @@ pub use templates::top_level_templates::AstDocFragmentKind;
 
 // Imports for the AST entry point and body-parsing helper.
 use crate::compiler_frontend::ast::ast_nodes::{AstFunctionIdentity, AstNode};
-use crate::compiler_frontend::ast::const_values::facts::AstConstFacts;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
@@ -259,13 +258,6 @@ pub struct Ast {
     /// WHY: HIR needs to query substituted fields/variants for generic struct/choice instances.
     pub type_environment: TypeEnvironment,
 
-    /// Compile-time const facts for all declarations that resolve to constant values.
-    ///
-    /// WHAT: records explicit module constants, private inferred top-level constants
-    ///       (entry body), and body-local constants discovered during AST finalization.
-    /// WHY: config validation and HIR metadata need one shared source of truth for
-    ///      const-ness without re-walking the AST.
-    pub const_facts: AstConstFacts,
     pub(crate) imported_functions_by_local_path: FxHashMap<PathId, AstImportedFunctionContract>,
     /// Canonical infallible cast requirements, projected onto local executable method paths.
     pub(crate) infallible_cast_evidence: FxHashMap<PathId, InfallibleCastEvidenceContract>,
@@ -564,10 +556,6 @@ pub(crate) fn function_body_to_ast(
         path_fork,
     )
 }
-
-#[cfg(test)]
-#[path = "tests/const_fact_tests.rs"]
-mod const_fact_tests;
 
 #[cfg(test)]
 #[path = "tests/parser_error_recovery_tests.rs"]

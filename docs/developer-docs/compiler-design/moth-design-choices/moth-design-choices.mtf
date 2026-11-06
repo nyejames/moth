@@ -75,44 +75,44 @@ If a feature would force solver-heavy reasoning, implicit behaviour or backend l
 Do not call those refusals "missing features" as if every language must collect the same stamps.
 
 [diagram:
-    [$insert("label"): Where each choice moves the work]
-    [$insert("caption"): Read every row the same way. Something the programmer would otherwise express, or the runtime would otherwise decide, becomes the compiler's job instead.]
+    [$in label: Where each choice moves the work]
+    [$in caption: Read every row the same way. Something the programmer would otherwise express, or the runtime would otherwise decide, becomes the compiler's job instead.]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Given up]
-            [$insert("title"): Source-surface power]
+            [$in href: ./]
+            [$in eyebrow: Given up]
+            [$in title: Source-surface power]
             Macros, reflection, trait objects, general closures, source-visible lifetimes and shadowing.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ../compile-time-semantics/]
-            [$insert("eyebrow"): Absorbed]
-            [$insert("title"): Compiler bookkeeping]
+            [$in href: ../compile-time-semantics/]
+            [$in eyebrow: Absorbed]
+            [$in title: Compiler bookkeeping]
             The same problems still need solving. They move behind the source surface.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Who now does the work]
+                [$in label: Who now does the work]
                 [lane:
                 [detail:
-                    [$insert("href"): ../compile-time-semantics/]
+                    [$in href: ../compile-time-semantics/]
                     Folding and trait evidence
                 ]
                 [detail:
-                    [$insert("href"): ../templates-and-tir/]
+                    [$in href: ../templates-and-tir/]
                     Template structure
                 ]
                 [detail:
-                    [$insert("href"): ../borrow-validation-and-drops/]
+                    [$in href: ../borrow-validation-and-drops/]
                     Inferred moves
                 ]
                 [detail:
-                    [$insert("href"): ../target-planning-and-validation/]
+                    [$in href: ../target-planning-and-validation/]
                     Target planning
                 ]
                 ]
@@ -122,9 +122,9 @@ Do not call those refusals "missing features" as if every language must collect 
 
     [stage:
         [node:
-            [$insert("href"): ../what-a-compiler-does/]
-            [$insert("eyebrow"): Bought]
-            [$insert("title"): One owner per question]
+            [$in href: ../what-a-compiler-does/]
+            [$in eyebrow: Bought]
+            [$in title: One owner per question]
             Fewer competing paths through the frontend and backends, and less to re-analyse downstream.
         ]
     ]
@@ -150,7 +150,7 @@ When you propose an example, ask whether the progress matrix already supports it
 
 - **Accepted design:** design-scope, compiler and memory authorities agree on the bias above.
 - **Current implementation:** the progress matrix reports syntax and backend coverage without rewriting the bias. Grouped config, typed build values and explicit `@project` are implemented.
-- **Queued work:** mixed backend plans and the accepted general-directive/config and HTML page-purpose migrations remain labelled by plan status.
+- **Queued work:** mixed backend plans, the accepted general-directive/config migration and the deferred `$entry` purpose and runtime-title plan remain labelled by plan status.
 - **Deferred or outside scope:** rejected language families stay outside scope even when a neighbouring language loves them.
 
 ## Exit state

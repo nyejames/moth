@@ -1,0 +1,58 @@
+entry = "."
+
+# Direct named contributions keep source order and land in their dedicated head destinations.
+# Body fragments and runtime slots still interleave exactly as phase 3 established.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain_in_order = [
+    "<head>",
+    "<title>Builder direct title sentinelBuilder direct title tail</title>",
+    "<meta name=\"description\" content=\"Builder direct description sentinel\">",
+    "<meta name=\"builder-direct\" content=\"builder-root-head-sentinel\">",
+    "</head>",
+    "<body style=",
+    "<p>body alpha</p>",
+    "moth-slot-0",
+    "<p>body beta</p>",
+    "<aside>nested body note</aside>",
+    "<p>body gamma</p>",
+]
+must_contain_exactly_once = [
+    "Builder direct title sentinel",
+    "Builder direct title tail",
+    "Builder direct description sentinel",
+    "builder-root-head-sentinel",
+]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain_in_order = [
+    "<head>",
+    "<title>Builder direct title sentinelBuilder direct title tail</title>",
+    "<meta name=\"description\" content=\"Builder direct description sentinel\">",
+    "<meta name=\"builder-direct\" content=\"builder-root-head-sentinel\">",
+    "</head>",
+    "<body style=",
+    "<p>body alpha</p>",
+    "moth-slot-0",
+    "<p>body beta</p>",
+    "<aside>nested body note</aside>",
+    "<p>body gamma</p>",
+]
+must_contain_exactly_once = [
+    "Builder direct title sentinel",
+    "Builder direct title tail",
+    "Builder direct description sentinel",
+    "builder-root-head-sentinel",
+]

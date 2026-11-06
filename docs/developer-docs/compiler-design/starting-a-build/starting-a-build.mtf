@@ -4,9 +4,11 @@
 
 Until those answers settle, the compiler has no honest graph to walk. Choose climate and soil first. Then grow the plant.
 
-The Alpha compiler currently uses grouped `project`/`html` records, declaration-owned
-`#Config of T` contracts and reserved `page_*` metadata. The `$config`, `$project` and
-`$html_builder` forms in this article are accepted queued design, not current syntax.
+The Alpha compiler currently uses grouped `project`/`html` records and
+declaration-owned `#Config of T` contracts. HTML document metadata uses direct
+const root builder slots. The `$config`, `$project` and `$html_builder` forms in
+this article are accepted queued design, not current syntax. A general `$entry`
+root purpose is deferred; the earlier `$page` proposal is superseded.
 
 ## Command and capability surface
 
@@ -41,44 +43,44 @@ The three commands also differ in how far they run:
 - **`check`** casts the widest net, taking in every discovered module plus check-only orphans and package surfaces. It plans and validates all the way through the `ValidatedMemoryPlan`, then stops before lowering or writing anything.
 
 [diagram:
-    [$insert("label"): What is already decided before config.moth opens]
-    [$insert("caption"): Each step narrows what the project is allowed to be. By the time any page source is read, the set of legal source kinds, packages and targets is already fixed.]
+    [$in label: What is already decided before config.moth opens]
+    [$in caption: Each step narrows what the project is allowed to be. By the time any page source is read, the set of legal source kinds, packages and targets is already fixed.]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): First]
-            [$insert("title"): The command]
+            [$in href: ./]
+            [$in eyebrow: First]
+            [$in title: The command]
             `build`, `dev` or `check` picks the artefact builder, the build profile, tooling overlays, explicit inputs and target intent.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Second]
-            [$insert("title"): The capability surface]
+            [$in href: ./]
+            [$in eyebrow: Second]
+            [$in title: The capability surface]
             The selected builder publishes what this project may use.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Published before any source is read]
+                [$in label: Published before any source is read]
                 [lane:
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     Config schemas
                 ]
                 [detail:
-                    [$insert("href"): ../project-graphs-and-modules/]
+                    [$in href: ../project-graphs-and-modules/]
                     Available packages
                 ]
                 [detail:
-                    [$insert("href"): ../tokenization/]
+                    [$in href: ../tokenization/]
                     Supported source kinds
                 ]
                 [detail:
-                    [$insert("href"): ../target-planning-and-validation/]
+                    [$in href: ../target-planning-and-validation/]
                     Target affinity metadata
                 ]
                 ]
@@ -88,18 +90,18 @@ The three commands also differ in how far they run:
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Third]
-            [$insert("title"): Bootstrap facts]
+            [$in href: ./]
+            [$in eyebrow: Third]
+            [$in title: Bootstrap facts]
             Only now does `config.moth` compile through the single config service, producing folded project and builder facts plus separate bootstrap input-contract results.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ../project-graphs-and-modules/]
-            [$insert("eyebrow"): Then]
-            [$insert("title"): Stage 0 discovery]
+            [$in href: ../project-graphs-and-modules/]
+            [$in eyebrow: Then]
+            [$in title: Stage 0 discovery]
             With a project it can name, the build system finally goes looking for source.
         ]
     ]
@@ -234,7 +236,7 @@ The compiler does not wander the filesystem inventing a project. The builder doe
 
 The command and build system own target intent, target partition and physical-variant orchestration. Compiler-owned validation checks the assignment it is handed rather than choosing it. Builders expose stable capabilities and map them to target artefact forms. Source never observes physical target identity at all.
 
-The compiler owns general directive syntax, `$config` contracts and `$project` semantics. The build system applies folded project settings and runs bootstrap and graph orchestration; the HTML builder owns `$html_builder` settings and `$page` root metadata.
+The compiler owns general directive syntax, `$config` contracts and `$project` semantics. The build system applies folded project settings and runs bootstrap and graph orchestration; the HTML builder owns `$html_builder` settings and its registered root slot destinations.
 
 ## What can fail here
 
@@ -242,7 +244,7 @@ The compiler owns general directive syntax, `$config` contracts and `$project` s
 - invalid config shape, forbidden config dependency or missing required input
 - strict `$project` field, invalid optional version or configuration-dependence violation
 
-The command and config service report these as structured diagnostics. Entry purpose and page selection are validated later by the build system; they are not recovered by reopening `config.moth`.
+The command and config service report these as structured diagnostics. A future `$entry` purpose and explicit entry selection are validated later by the build system; they are not recovered by reopening `config.moth`.
 
 ## Why Moth does it this way
 
@@ -258,7 +260,7 @@ The command and config service report these as structured diagnostics. Entry pur
 
 - **Accepted design:** one self-contained `config.moth` service with explicit `$config` contracts, strict `$project` and `$html_builder` invocations, separate bootstrap input results and a specialised `ProjectGlobalsInterface`.
 - **Current implementation:** grouped parenthesised `config.moth`, declaration-owned `#Config`, typed `--input` for build, check and dev, ordinary static-`if` integration and immutable explicit `@project`.
-- **Queued work:** `general-directives-and-project-config-plan.md` for the directive/config cutover and `html-page-directives-and-runtime-title-plan.md` for root-only `$page`, page metadata and runtime title.
+- **Queued work:** `general-directives-and-project-config-plan.md` for the directive/config cutover and `html-page-directives-and-runtime-title-plan.md` for a general `$entry` purpose and runtime title. Builder slots own initial document metadata; the earlier `$page` proposal is superseded.
 - **Deferred or outside scope:** structural `$feature` selection, config dependencies and a general Moth build-script system.
 
 ## Exit state

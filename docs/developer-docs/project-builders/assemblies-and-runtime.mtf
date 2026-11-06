@@ -42,9 +42,15 @@ missing package lowering.
 
 ### Read constant and runtime templates
 
-An entry's template assembly view exposes folded fragments, runtime fragment
-positions and the executable entry contract. It contains no AST or template-IR
-handles.
+An entry's template assembly view exposes folded fragments with their body or
+builder-slot destinations, runtime fragment positions and the executable entry
+contract. It contains no AST or template-IR handles.
+
+A folded fragment with a named destination is builder metadata, not body
+output. The builder resolves those values once for its document or artefact;
+the compiler has already validated the destination against the builder's
+registered set and preserved the structural value and authored span. A nested
+or aliased insert never appears as a named destination.
 
 A constant top-level template is already a folded string value. It may still
 contain structural resource or site-root pieces whose final characters depend

@@ -77,7 +77,12 @@ Moth template bodies are const-required. There is no runtime capture. The entire
 
 ### Allowed template directives
 
-All template directives available in the compile-time template environment are valid inside `.mtf`. This includes `$md`, `$raw`, `$fresh`, `$html`, `$code`, `$css` and `$escape_html`.
+Formatting and child-selection directives available in the compile-time
+template environment are valid inside `.mtf`. This includes `$md`, `$raw`,
+`$fresh`, `$html`, `$code`, `$css` and `$escape_html`.
+
+A `.mtf` file produces one fixed `content` constant. It cannot expose its own
+slot receiver or contribute a builder root slot.
 
 ### Child-template formatting boundary
 

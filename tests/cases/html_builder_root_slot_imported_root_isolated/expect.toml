@@ -1,0 +1,90 @@
+entry = "."
+
+# A linked module root owns its own page independently. Its named builder contributions and
+# resources stay out of the selected entry document, but appear on its own route.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["<p>entry body</p>", "moth-slot-0"]
+must_not_contain = [
+    "Imported title sentinel",
+    "Imported description sentinel",
+    "imported head sentinel",
+    "imported root body sentinel",
+    "imported.css",
+    "imported.png",
+]
+
+[[backends.html.artifact_assertions]]
+path = "widgets/index.html"
+kind = "html"
+must_contain = [
+    "<title>Imported title sentinel</title>",
+    "<meta name=\"description\" content=\"Imported description sentinel\">",
+    "<meta name=\"imported-head\" content=\"imported head sentinel\">",
+    "<link rel=\"stylesheet\" href=\"./shared/imported.css\">",
+    "<link rel=\"icon\" href=\"./shared/imported.png\">",
+    "<p>imported root body sentinel</p>",
+]
+must_contain_exactly_once = [
+    "<meta name=\"description\" content=\"Imported description sentinel\">",
+    "<meta name=\"imported-head\" content=\"imported head sentinel\">",
+    "<link rel=\"stylesheet\" href=\"./shared/imported.css\">",
+    "<link rel=\"icon\" href=\"./shared/imported.png\">",
+]
+
+[[backends.html.artifact_assertions]]
+path = "widgets/shared/imported.css"
+kind = "binary"
+
+[[backends.html.artifact_assertions]]
+path = "widgets/shared/imported.png"
+kind = "binary"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["<p>entry body</p>", "moth-slot-0"]
+must_not_contain = [
+    "Imported title sentinel",
+    "Imported description sentinel",
+    "imported head sentinel",
+    "imported root body sentinel",
+    "imported.css",
+    "imported.png",
+]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "widgets/index.html"
+kind = "html"
+must_contain = [
+    "<title>Imported title sentinel</title>",
+    "<meta name=\"description\" content=\"Imported description sentinel\">",
+    "<meta name=\"imported-head\" content=\"imported head sentinel\">",
+    "<link rel=\"stylesheet\" href=\"./shared/imported.css\">",
+    "<link rel=\"icon\" href=\"./shared/imported.png\">",
+    "<p>imported root body sentinel</p>",
+]
+must_contain_exactly_once = [
+    "<meta name=\"description\" content=\"Imported description sentinel\">",
+    "<meta name=\"imported-head\" content=\"imported head sentinel\">",
+    "<link rel=\"stylesheet\" href=\"./shared/imported.css\">",
+    "<link rel=\"icon\" href=\"./shared/imported.png\">",
+]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "widgets/shared/imported.css"
+kind = "binary"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "widgets/shared/imported.png"
+kind = "binary"

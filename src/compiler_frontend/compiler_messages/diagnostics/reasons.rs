@@ -886,12 +886,15 @@ pub enum InvalidTemplateDirectiveReason {
     UnexpectedArguments,
     /// Directive parentheses are empty.
     EmptyArguments,
-    /// `$slot` received an invalid target argument.
+    /// `$slot` received an invalid target declaration.
     InvalidSlotTarget,
-    /// `$insert` received an invalid slot name argument.
+    /// `$slot ... = ...` received a default that is not a compile-time `String`.
+    InvalidSlotDefault,
+    /// `$in` received an invalid slot name declaration.
     InvalidInsertTarget,
-    /// `$children` received an invalid wrapper argument.
-    InvalidChildrenArgument,
+    /// `$before` or `$after` received a value that is not a compile-time
+    /// `String` or constant template wrapper.
+    InvalidChildDecoratorValue,
 }
 
 impl InvalidTemplateDirectiveReason {
@@ -1050,11 +1053,15 @@ pub enum InvalidTemplateStructureReason {
     NonFoldableConstTemplate,
     NonFoldableDocComment,
     FallibleValueInTemplateHead,
-    UnsupportedTypeInTemplateHead { type_id: TypeId },
+    UnsupportedTypeInTemplateHead {
+        type_id: TypeId,
+    },
     RuntimeTemplateInConst,
     RuntimeValueInConstTemplateHead,
     EmptyPathInTemplateHead,
-    IncompatibleHeadItem { conflict: TemplateHeadConflict },
+    IncompatibleHeadItem {
+        conflict: TemplateHeadConflict,
+    },
     HelperOutsideWrapperSlot,
     RuntimeControlFlowUnresolvedInsert,
     MissingCommaBeforeControlFlowSuffix,
@@ -1074,7 +1081,11 @@ pub enum InvalidTemplateStructureReason {
     TemplateLoopConditionNotConst,
     TemplateConditionalLoopConstTrue,
     TemplateLoopBodyNotConst,
-    TemplateConstLoopExpansionLimitExceeded { limit: usize },
+    TemplateConstLoopExpansionLimitExceeded {
+        limit: usize,
+    },
+    /// A direct top-level `$in name` target is not registered by the active builder.
+    BuilderRootSlotNotRegistered,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1707,6 +1718,10 @@ pub enum InvalidTemplateSlotReason {
     InsertTargetsUnknownNamedSlot,
     InsertTargetsUnknownPositionalSlot,
     SlotDefinitionOutsideTemplateBody,
+    /// A `$before`/`$after` value contains the default `$slot`.
+    DefaultSlotInChildDecorator,
+    /// A `$before`/`$after` value contains a positional `$slot n`.
+    PositionalSlotInChildDecorator,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1945,10 +1960,23 @@ pub enum DeferredFeatureReason {
     RuntimeAnonymousRecord,
 }
 
+/// Why one HTML builder root-slot contribution cannot be interpreted.
+///
+/// WHAT: the narrow set of structural-value rejections owned by the HTML builder.
+/// WHY: the compiler routes the contribution and the builder validates slot-specific meaning;
+///      a resource-bearing slot must explain which part of that meaning the contribution missed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum InvalidPageMetadataReason {
-    NotAString,
-    DuplicateDeclaration,
+pub enum InvalidHtmlSlotContributionReason {
+    /// The contribution carries no resource origin at all.
+    MissingResource,
+    /// The contribution carries literal text, such as a rendered path or external URL.
+    NotAStaticResource,
+    /// The contribution carries more than one resource origin.
+    MultipleResources,
+    /// The contribution uses the site root, which names no tracked resource.
+    SiteRoot,
+    /// The single resource origin does not name a CSS file.
+    NonCssResource,
 }
 
 /// Which operand position one loop header rejected.

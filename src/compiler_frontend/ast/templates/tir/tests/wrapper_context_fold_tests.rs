@@ -64,6 +64,8 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use rustc_hash::FxHashMap;
+
 fn fold_context<'a>(
     string_table: &'a mut StringTable,
     expression_builder: &'a mut AstExpressionBuilder,
@@ -76,6 +78,7 @@ fn fold_context<'a>(
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         source_scope: None,
         external_package_registry: None,
+        prepared_wrapper_slot_routing: FxHashMap::default(),
         bindings: vec![],
     }
 }
@@ -839,7 +842,7 @@ fn handoff_fixture_result(
         identity: view.identity(),
         facts: TemplatePreparationFacts {
             is_const_evaluable_shape: false,
-            has_unresolved_slot_occurrences: false,
+            has_unfilled_slot_occurrences: false,
             has_escaped_insert_helpers: false,
             final_value_kind: TemplateConstValueKind::NonConst,
         },

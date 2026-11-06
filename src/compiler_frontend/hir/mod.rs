@@ -27,8 +27,6 @@
 //! `validation` checks compiler invariants only; it must not become a user diagnostic layer.
 
 pub(crate) mod blocks;
-pub(crate) mod const_facts;
-pub(crate) mod constants;
 pub(crate) mod expression_rewrite;
 pub(crate) mod expression_store;
 pub(crate) mod expressions;

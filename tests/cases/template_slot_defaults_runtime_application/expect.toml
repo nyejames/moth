@@ -1,0 +1,4 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "plain=named=Named fallback|again=Again fallback|pos=Positional fallback|pos_again=Second positional fallback|body=Body fallback|missing=|filled=named=A-B-|again=A-B-|pos=POS|pos_again=POS|body=Body fallback|missing=|emptied=named=|again=|pos=POS|pos_again=POS|body=Body fallback|missing=|conditional=fallback|whitespace= |empty=<seen></seen>|rows=<tr style=\"background: red;\" data-style=\"color: blue;\">first</tr><tr style=\"background: red;\" data-style=\"color: blue;\">second</tr>|rows_empty=<tr style=\"\" data-style=\"\">first</tr>"

@@ -13,13 +13,12 @@ use super::*;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
-use crate::compiler_frontend::compiler_messages::DiagnosticToken;
 use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     InvalidTemplateStructureCode, InvalidTemplateStructureView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
-    ExpectedTokenView, UnexpectedEndOfFileView, UnexpectedTokenShape, UnexpectedTokenView,
+    UnexpectedTokenShape, UnexpectedTokenView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
@@ -173,26 +172,6 @@ fn unexpected_template_body_token_retains_exact_primary_span() {
     assert_eq!(range.end(), 4);
     assert_eq!(&source[range.start() as usize..range.end() as usize], "π");
     assert_eq!(view.durable_labels().count(), 0);
-}
-
-#[test]
-fn children_directive_truncated_argument_template_reports_eof_with_meaningful_span() {
-    let diagnostic = parse_template_diagnostic("[$children([: unclosed): body]");
-
-    let view = diagnostic
-        .first()
-        .expect("truncated children argument should compact to one record");
-    let has_expected_payload = view.family_view::<UnexpectedEndOfFileView>().is_some()
-        || view
-            .family_view::<ExpectedTokenView>()
-            .is_some_and(|facts| {
-                facts.expected == DiagnosticToken::from_static_tag(TokenTag::CLOSE_PARENTHESIS)
-            });
-    assert!(
-        has_expected_payload,
-        "expected unexpected-end-of-file or missing-close-paren for truncated $children argument"
-    );
-    assert_span_is_meaningful(&diagnostic);
 }
 
 #[test]

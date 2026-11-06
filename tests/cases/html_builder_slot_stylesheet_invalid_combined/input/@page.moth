@@ -1,0 +1,4 @@
+-- A combined URL is text plus a resource, not one tracked resource.
+#[$in stylesheets: ["./styles/"][@styles/docs.css]]
+
+#[:<main>invalid combined stylesheet</main>]

@@ -14,9 +14,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Functions"
-page_description #= "Function declarations, parameters, calls, access and return values in Moth."
-page_head #= language_theme_head
+#[$in title:["Functions"]]
+#[$in description:["Function declarations, parameters, calls, access and return values in Moth."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -34,9 +34,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):function-declarations]
-        [$insert("title"):Function declarations]
-        [$insert("advanced"):[function_declarations]]
+        [$in key:function-declarations]
+        [$in title:Function declarations]
+        [$in advanced:[function_declarations]]
 
         [function_declarations_basic]
     ]
@@ -44,9 +44,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):parameters-and-defaults]
-        [$insert("title"):Parameters and defaults]
-        [$insert("advanced"):[parameters_and_defaults]]
+        [$in key:parameters-and-defaults]
+        [$in title:Parameters and defaults]
+        [$in advanced:[parameters_and_defaults]]
 
         [parameters_and_defaults_basic]
     ]
@@ -54,9 +54,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):calls-and-access]
-        [$insert("title"):Calls and access]
-        [$insert("advanced"):[calls_and_access]]
+        [$in key:calls-and-access]
+        [$in title:Calls and access]
+        [$in advanced:[calls_and_access]]
 
         [calls_and_access_basic]
     ]
@@ -64,9 +64,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):returns-and-multiple-values]
-        [$insert("title"):Returns and multiple values]
-        [$insert("advanced"):[returns_and_multiple_values]]
+        [$in key:returns-and-multiple-values]
+        [$in title:Returns and multiple values]
+        [$in advanced:[returns_and_multiple_values]]
 
         [returns_and_multiple_values_basic]
     ]
@@ -74,9 +74,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../casts/]
-        [$insert("previous_title"):Casts]
-        [$insert("next_path"):../branching/]
-        [$insert("next_title"):Branching]
+        [$in previous_path:../casts/]
+        [$in previous_title:Casts]
+        [$in next_path:../branching/]
+        [$in next_title:Branching]
     ]
 ]

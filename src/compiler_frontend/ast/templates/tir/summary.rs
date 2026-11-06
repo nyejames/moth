@@ -5,8 +5,9 @@
 //! It is not semantic proof. Preparation owns constness, unresolved slots
 //! and helper classification.
 //!
-//! Unresolved structural slots (`slot_count`) are separate from runtime slot
-//! sites (`runtime_slot_site_count`). `has_slots()` is derived from `slot_count`.
+//! Structural slots (`slot_count`), including closed fallback occurrences, are
+//! separate from runtime slot sites (`runtime_slot_site_count`). `has_slots()` is
+//! derived from `slot_count`.
 
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use rustc_hash::FxHashSet;
@@ -36,10 +37,12 @@ pub(crate) struct TemplateIrSummary {
     pub(crate) dynamic_expression_count: u32,
     pub(crate) child_template_count: u32,
 
-    /// Head-origin nodes recorded before the first body-origin node.
+    /// Root-sequence nodes recorded while parsing the authored head, including
+    /// head-position insert contributions. The first `head_node_count` root
+    /// children belong to the authored head; every later child is non-head.
     pub(crate) head_node_count: u32,
 
-    /// Unresolved structural `Slot` placeholders.
+    /// Structural `Slot` placeholders, including closed fallback occurrences.
     pub(crate) slot_count: u32,
 
     /// Converted runtime slot sites. Separate from `slot_count`.
@@ -118,6 +121,55 @@ impl TemplateIrSummary {
 
     pub(crate) fn record_insert_contribution(&mut self) {
         self.insert_contribution_count += 1;
+    }
+
+    /// Adds the shape facts of one fill root inserted into a template graph.
+    ///
+    /// WHAT: sums the additive counts and output estimate, admits the fill's own
+    ///       unresolved slots and records control flow. `max_depth`, `head_node_count`
+    ///       and `wrapper_count` stay out: depth depends on where the fill is
+    ///       inserted, and the other two remain source-template facts.
+    /// WHY: runtime wrapper publication versions an already summarized source
+    ///      around a locally rebuilt fill path. Folding the fill's facts into the
+    ///      source summary avoids re-walking the unchanged prefix and suffix
+    ///      edges for every child.
+    pub(crate) fn add_fill_facts(&mut self, fill: &TemplateIrSummary) {
+        self.estimated_output_bytes += fill.estimated_output_bytes;
+        self.text_node_count += fill.text_node_count;
+        self.text_byte_count += fill.text_byte_count;
+        self.dynamic_expression_count += fill.dynamic_expression_count;
+        self.child_template_count += fill.child_template_count;
+        self.slot_count += fill.slot_count;
+        self.runtime_slot_site_count += fill.runtime_slot_site_count;
+        self.runtime_slot_contribution_source_count += fill.runtime_slot_contribution_source_count;
+        self.insert_contribution_count += fill.insert_contribution_count;
+        self.has_control_flow |= fill.has_control_flow;
+    }
+
+    /// Applies one fill pass's slot replacements to this source summary.
+    ///
+    /// WHAT: removes every source slot the pass replaced or resolved to empty,
+    ///       folds in the combined fill facts, and widens depth only when a fill
+    ///       reaches deeper than the source's own graph.
+    /// WHY: a prepared wrapper's unchanged edges are already validated and
+    ///      summarized. Recomputing the summary from the rebuilt root would walk
+    ///      them again for every child and make publication scale with the whole
+    ///      decorator instead of the changed fill path.
+    pub(crate) fn apply_fill_replacements(
+        &mut self,
+        removed_slots: u32,
+        fill_facts: &TemplateIrSummary,
+        introduced_depth: usize,
+    ) -> Result<(), InfrastructureFailure> {
+        self.slot_count = self.slot_count.checked_sub(removed_slots).ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "TIR summary replacement removed more slots than the source template summary records.",
+            )
+        })?;
+        self.add_fill_facts(fill_facts);
+        self.max_depth = self.max_depth.max(introduced_depth);
+        Ok(())
     }
 }
 
@@ -325,8 +377,14 @@ fn accumulate_nodes(
                 summary.record_runtime_slot_site();
             }
 
-            TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => {
+            TemplateIrNodeKind::RuntimeSlotContributionSource { control_flow, .. } => {
                 summary.record_runtime_slot_contribution_source();
+                // The marker replaces a control-flow contribution, so summaries of
+                // wrapper templates containing it must report conditional emission
+                // exactly as the authored root would.
+                if *control_flow {
+                    summary.record_control_flow();
+                }
             }
 
             TemplateIrNodeKind::AggregateOutput => {}

@@ -7,7 +7,6 @@ use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, DeclarationValue, MultiBindTarget, MultiBindTargetKind, NodeKind,
 };
-use crate::compiler_frontend::ast::const_values::facts::AstConstFacts;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::eval_expression::result_type::resolve_expression_result_type;
 use crate::compiler_frontend::ast::expressions::expression::{
@@ -448,7 +447,6 @@ pub(crate) fn build_ast_with_choices(
             )
             .collect(),
         type_environment,
-        const_facts: AstConstFacts::default(),
         imported_functions_by_local_path: Default::default(),
         infallible_cast_evidence: Default::default(),
         imported_struct_definitions: vec![],

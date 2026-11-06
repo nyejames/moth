@@ -65,31 +65,31 @@ Those paths converge. Moth template preparation synthesises an ordinary private 
 The greeting project uses `.moth` files. Document kinds still matter because the same compiler owners serve docs sites and content dependencies without a second semantic pipeline.
 
 [diagram:
-    [$insert("label"): Three source kinds, one semantic pipeline]
-    [$insert("caption"): Each source kind gets its own way in. After preparation they all look like ordinary declarations, so no later stage needs a document dialect.]
+    [$in label: Three source kinds, one semantic pipeline]
+    [$in caption: Each source kind gets its own way in. After preparation they all look like ordinary declarations, so no later stage needs a document dialect.]
 
     [stage:
         [node:
-            [$insert("href"): ./]
-            [$insert("eyebrow"): Entry]
-            [$insert("title"): Three ways in]
+            [$in href: ./]
+            [$in eyebrow: Entry]
+            [$in title: Three ways in]
             Each source kind starts in the lexical mode that suits it.
         ]
 
-        [$insert("details"):
+        [$in details:
             [branch:
-                [$insert("label"): Entry preparation]
+                [$in label: Entry preparation]
                 [fanout:
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     `.moth` starts in code mode
                 ]
                 [detail:
-                    [$insert("href"): ../templates-and-tir/]
+                    [$in href: ../templates-and-tir/]
                     `.mtf` starts inside a template body
                 ]
                 [detail:
-                    [$insert("href"): ./]
+                    [$in href: ./]
                     `.md` is prepared before tokenizing
                 ]
                 ]
@@ -99,18 +99,18 @@ The greeting project uses `.moth` files. Document kinds still matter because the
 
     [stage:
         [node:
-            [$insert("href"): ../declarations-dependencies-and-ordering/]
-            [$insert("eyebrow"): Converged]
-            [$insert("title"): One ordinary declaration]
+            [$in href: ../declarations-dependencies-and-ordering/]
+            [$in eyebrow: Converged]
+            [$in title: One ordinary declaration]
             Document kinds arrive as a private `content #String` constant. From here nothing downstream can tell them apart.
         ]
     ]
 
     [stage:
         [node:
-            [$insert("href"): ../ast-semantics-and-types/]
-            [$insert("eyebrow"): Shared]
-            [$insert("title"): The same later stages]
+            [$in href: ../ast-semantics-and-types/]
+            [$in eyebrow: Shared]
+            [$in title: The same later stages]
             Binding, type checking and lowering serve docs and code with one set of owners.
         ]
     ]

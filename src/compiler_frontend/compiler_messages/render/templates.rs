@@ -30,28 +30,34 @@ pub(crate) fn invalid_template_slot_message(
 
     match reason {
         InvalidTemplateSlotReason::InsertOutsideParentSlot => {
-            "$insert(...) can only be used while filling an immediate parent template that defines matching $slot targets.".to_string()
+            "`$in name: ...` can only be used while filling an immediate parent template that defines matching `$slot` targets.".to_string()
         }
         InvalidTemplateSlotReason::NamedInsertOutsideParentSlot => {
             named_insert_outside_parent_slot_message(slot_name, insert_name, string_table)
         }
         InvalidTemplateSlotReason::ExtraLooseContentWithoutDefaultSlot => {
-            "This template defines positional $slot(n) targets but no default $slot. There is more loose content than positional slots available.".to_string()
+            "This template defines positional `$slot n` targets but no default `$slot`. There is more loose content than positional slots available.".to_string()
         }
         InvalidTemplateSlotReason::LooseContentWithoutDefaultSlot => {
-            "This template defines named $slot(...) targets without a default $slot. Loose content is not allowed here; use $insert(\"name\").".to_string()
+            "This template defines named `$slot name` targets without a default `$slot`. Loose content is not allowed here; use `$in name: ...`.".to_string()
         }
         InvalidTemplateSlotReason::InsertCannotTargetDefaultSlot => {
-            "$insert cannot target the default slot because the parent template does not define $slot.".to_string()
+            "`$in` cannot target the default slot because the parent template does not define `$slot`.".to_string()
         }
         InvalidTemplateSlotReason::InsertTargetsUnknownNamedSlot => {
-            format!("$insert({slot_text}) targets a named slot that does not exist on the immediate parent template.")
+            format!("`$in {slot_text}: ...` targets a named slot that does not exist on the immediate parent template.")
         }
         InvalidTemplateSlotReason::InsertTargetsUnknownPositionalSlot => {
-            "$insert targets a positional slot that does not exist on the immediate parent template.".to_string()
+            "`$in` targets a positional slot that does not exist on the immediate parent template.".to_string()
         }
         InvalidTemplateSlotReason::SlotDefinitionOutsideTemplateBody => {
             "$slot markers are only valid as direct nested templates inside template bodies.".to_string()
+        }
+        InvalidTemplateSlotReason::DefaultSlotInChildDecorator => {
+            "A `$before` or `$after` value may only contain named slots. An unnamed `[$slot]` would add a second child insertion point; use `[$slot name]` instead.".to_string()
+        }
+        InvalidTemplateSlotReason::PositionalSlotInChildDecorator => {
+            "A `$before` or `$after` value may only contain named slots. A positional `[$slot n]` would add another child insertion point; use `[$slot name]` instead.".to_string()
         }
     }
 }
@@ -71,7 +77,7 @@ fn named_insert_outside_parent_slot_message(
             let insert = string_table.resolve(insert);
             let slot = string_table.resolve(slot);
             format!(
-                "The {slot} insert '{insert}' needs a parent template that defines the '{slot}' slot, but this template has no parent template."
+                "The `{insert}` contribution needs a parent template that defines the `{slot}` slot, but this template has no parent template."
             )
         }
         (Some(insert), None) => {
@@ -400,7 +406,7 @@ pub(crate) fn invalid_template_structure_message(reason: InvalidTemplateStructur
 
         // Template-head values and compile-time requirements.
         InvalidTemplateStructureReason::HelperInConstTemplate => {
-            "Top-level const templates cannot evaluate to '$insert(...)' helpers.".to_string()
+            "Top-level const templates cannot evaluate to `$in name: ...` helpers.".to_string()
         }
         InvalidTemplateStructureReason::NonFoldableConstTemplate => {
             "Top-level const templates must be fully foldable at compile time.".to_string()
@@ -435,10 +441,10 @@ pub(crate) fn invalid_template_structure_message(reason: InvalidTemplateStructur
             )
         }
         InvalidTemplateStructureReason::HelperOutsideWrapperSlot => {
-            "`$insert(...)` is a template contribution helper, not a standalone value. Keep it inside a template application that receives the contribution.".to_string()
+            "`$in name: ...` is a template contribution helper, not a standalone value. Keep it inside a template application that receives the contribution.".to_string()
         }
         InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedInsert => {
-            "Runtime template control-flow bodies cannot leave unresolved `$insert(...)` helpers.".to_string()
+            "Runtime template control-flow bodies cannot leave unresolved `$in name: ...` helpers.".to_string()
         }
 
         // Control-flow suffix syntax.
@@ -502,6 +508,9 @@ pub(crate) fn invalid_template_structure_message(reason: InvalidTemplateStructur
                 limit
             )
         }
+        InvalidTemplateStructureReason::BuilderRootSlotNotRegistered => {
+            "A direct top-level `$in name: ...` contribution targets a builder destination that the active builder does not register.".to_string()
+        }
     }
 }
 
@@ -513,7 +522,7 @@ pub(crate) fn render_invalid_template_structure(
     facts: &InvalidTemplateStructureView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
-    let message = match facts.reason {
+    let (message, guidance) = match facts.reason {
         InvalidTemplateStructureCode::UnsupportedTypeInTemplateHead => {
             let type_id = facts
                 .type_id
@@ -523,23 +532,57 @@ pub(crate) fn render_invalid_template_structure(
                 context.string_table,
                 context.path_table(),
             );
-            unsupported_template_head_type_message(&type_name)
+            (
+                unsupported_template_head_type_message(&type_name),
+                Vec::new(),
+            )
         }
         InvalidTemplateStructureCode::IncompatibleHeadItem => {
             let conflict = facts
                 .head_conflict
                 .expect("the incompatible-head-item code stores its conflict");
-            incompatible_template_head_item_message(conflict, diagnostic, context.string_table)
+            (
+                incompatible_template_head_item_message(conflict, diagnostic, context.string_table),
+                Vec::new(),
+            )
+        }
+        InvalidTemplateStructureCode::BuilderRootSlotNotRegistered => {
+            let (message, guidance) =
+                builder_root_slot_not_registered_message(diagnostic, context.string_table);
+            (message, guidance)
         }
         reason => {
             let reason = reason
                 .to_reason(None, facts.limit)
                 .expect("the template-structure code stores the data its reason names");
-            invalid_template_structure_message(reason)
+            (invalid_template_structure_message(reason), Vec::new())
         }
     };
-    RenderedPayload {
-        message,
-        guidance: Vec::new(),
-    }
+    RenderedPayload { message, guidance }
+}
+
+/// Renders the rejected builder destination and the names the active builder did register.
+fn builder_root_slot_not_registered_message(
+    diagnostic: &DiagnosticView<'_>,
+    string_table: &dyn StringTableResolver,
+) -> (String, Vec<String>) {
+    let string_ids = diagnostic.string_ids();
+    let (target, available) = string_ids
+        .split_first()
+        .expect("the builder-root-slot code stores its authored target");
+    let target = string_table.resolve(*target);
+    let message = format!(
+        "`$in {target}: ...` targets a builder destination that the active builder does not register."
+    );
+    let guidance = if available.is_empty() {
+        "This builder registers no named root destinations. Use an ordinary top-level const template for the default body destination.".to_string()
+    } else {
+        let names = available
+            .iter()
+            .map(|name| format!("`{}`", string_table.resolve(*name)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("Registered builder destinations: {names}.")
+    };
+    (message, vec![guidance])
 }

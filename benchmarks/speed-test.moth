@@ -10,6 +10,7 @@
 -- - runtime template construction in function bodies
 
 page_title #= "Moth Frontend Speed Test"
+#[$in title:[page_title]]
 accent #= "hsl(273, 92%, 63%)"
 accent_2 #= "hsl(196, 91%, 58%)"
 accent_3 #= "hsl(22, 96%, 60%)"
@@ -79,16 +80,16 @@ page_shell #= [:
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>[$slot]</title>
     <style>
-        [$slot("style")]
+        [$slot style]
     </style>
 </head>
 <body>
-    [$slot("body")]
+    [$slot body]
 </body>
 </html>
 ]
 
-global_styles #= [$insert("style"), $css:
+global_styles #= [$in style, $css:
     :root {
         --accent: [accent];
         --accent-2: [accent_2];
@@ -392,7 +393,7 @@ global_styles #= [$insert("style"), $css:
     }
 ]
 
-page #= [$children([:<section class="section">[$slot]</section>]):
+page #= [$before = [:<section class="section">], $after = [:</section>]:
     <main class="page">
         [$slot]
     </main>
@@ -401,37 +402,37 @@ page #= [$children([:<section class="section">[$slot]</section>]):
 card #= [:
 <article class="card">
     <div class="card-head">
-        [$slot("head")]
+        [$slot head]
     </div>
     <div class="card-body">
         [$slot]
     </div>
     <div class="card-foot">
-        [$slot("foot")]
+        [$slot foot]
     </div>
 </article>
 ]
 
 section_title #= [:
-<h2 class="heading" style="[$slot("style")]">
+<h2 class="heading" style="[$slot style]">
     [$slot]
 </h2>
 ]
 
-accent_title #= [$insert("style"):
+accent_title #= [$in style:
 color: [accent];
 ]
-accent_title_2 #= [$insert("style"):
+accent_title_2 #= [$in style:
 color: [accent_2];
 ]
-accent_title_3 #= [$insert("style"):
+accent_title_3 #= [$in style:
 color: [accent_3];
 ]
-accent_title_4 #= [$insert("style"):
+accent_title_4 #= [$in style:
 color: [accent_4];
 ]
 
-bullet_list #= [$children([:<li>[$slot]</li>]):
+bullet_list #= [$before = [:<li>], $after = [:</li>]:
 <ul class="tight-list">
     [$slot]
 </ul>
@@ -439,21 +440,21 @@ bullet_list #= [$children([:<li>[$slot]</li>]):
 
 chip #= [:
 <span class="chip">
-    <span>[$slot(1)]</span>
+    <span>[$slot 1]</span>
     <strong>[$slot]</strong>
-    <span>[$slot(1)]</span>
+    <span>[$slot 1]</span>
 </span>
 ]
 
-chip_row #= [$children([:[$slot]]):
+chip_row #= [:
 <div class="chip-row">
     [$slot]
 </div>
 ]
 
-compare_table #= [$children([:<div class="compare-row">[$slot]</div>]):
+compare_table #= [$before = [:<div class="compare-row">], $after = [:</div>]:
 <div class="compare-table">
-    [$children([:<div class="compare-cell">[$slot]</div>]):[$slot]]
+    [$before = [:<div class="compare-cell">], $after = [:</div>]:[$slot]]
 </div>
 ]
 
@@ -475,18 +476,18 @@ escaped_snippet #= [$escape_html:
 </div>
 ]
 
-fresh_list #= [$children([:<li>[$slot]</li>]):
+fresh_list #= [$before = [:<li>], $after = [:</li>]:
 <ul class="tight-list">
     [$slot]
 </ul>
 ]
 
-hero_head #= [$insert("head"):
+hero_head #= [$in head:
     [section_title, accent_title:
         Frontend benchmark overview
     ]
 ]
-hero_foot #= [$insert("foot"):
+hero_foot #= [$in foot:
     [checksum_line]
 ]
 hero_card #= [card, hero_head, hero_foot:
@@ -513,44 +514,44 @@ hero_card #= [card, hero_head, hero_foot:
     ]
 ]
 
-compile_a_head #= [$insert("head"):
+compile_a_head #= [$in head:
     [section_title, accent_title:
         Compile-time block A
     ]
 ]
-compile_a_foot #= [$insert("foot"):
+compile_a_foot #= [$in foot:
     fold_01 [fold_01] / fold_05 [fold_05] / digest_a [digest_a]
 ]
-compile_b_head #= [$insert("head"):
+compile_b_head #= [$in head:
     [section_title, accent_title_2:
         Slot and wrapper stress
     ]
 ]
-compile_b_foot #= [$insert("foot"):
+compile_b_foot #= [$in foot:
     repeated positional slots, named inserts, and $fresh sibling escape
 ]
-compile_c_head #= [$insert("head"):
+compile_c_head #= [$in head:
     [section_title, accent_title_3:
         Formatter and escaping stress
     ]
 ]
-compile_c_foot #= [$insert("foot"):
+compile_c_foot #= [$in foot:
     markdown + raw + html + escape_html all active in one section
 ]
-compile_d_head #= [$insert("head"):
+compile_d_head #= [$in head:
     [section_title, accent_title_4:
         Nested child wrapper stress
     ]
 ]
-compile_d_foot #= [$insert("foot"):
+compile_d_foot #= [$in foot:
     table rows and cells are wrapped by separate direct-child scopes
 ]
-compile_e_head #= [$insert("head"):
+compile_e_head #= [$in head:
     [section_title, accent_title:
         Compile-time digest pressure
     ]
 ]
-compile_e_foot #= [$insert("foot"):
+compile_e_foot #= [$in foot:
     grand [grand_digest] / alt [alt_digest]
 ]
 
@@ -633,7 +634,7 @@ compile_card_d #= [card, compile_d_head, compile_d_foot:
     [$md:
         ### Nested direct-child wrappers
 
-        The table below uses one `$children(..)` wrapper for rows and another nested one for cells.
+        The table below uses before/after wrappers for rows and nested wrappers for cells.
     ]
 
     [compare_table:
@@ -1036,67 +1037,67 @@ runtime_mutation_probe = build_mutation_probe()
 runtime_descending_series = build_descending_series()
 runtime_pair_panels = build_pair_panels()
 
-runtime_grid_head #= [$insert("head"):
+runtime_grid_head #= [$in head:
     [section_title, accent_title_3:
         Runtime grid output
     ]
 ]
-runtime_grid_foot #= [$insert("foot"):
+runtime_grid_foot #= [$in foot:
     built from a collection of structs and an immutable receiver method loop
 ]
-runtime_rows_head #= [$insert("head"):
+runtime_rows_head #= [$in head:
     [section_title, accent_title:
         Runtime metric rows
     ]
 ]
-runtime_rows_foot #= [$insert("foot"):
+runtime_rows_foot #= [$in foot:
     mutable receiver method bump() followed by collection push and row rendering
 ]
-runtime_matrix_head #= [$insert("head"):
+runtime_matrix_head #= [$in head:
     [section_title, accent_title_2:
         Runtime matrix output
     ]
 ]
-runtime_matrix_foot #= [$insert("foot"):
+runtime_matrix_foot #= [$in foot:
     nested loops and per-cell class branching inside a receiver method
 ]
-runtime_summary_head #= [$insert("head"):
+runtime_summary_head #= [$in head:
     [section_title, accent_title_4:
         Runtime summary grid
     ]
 ]
-runtime_summary_foot #= [$insert("foot"):
+runtime_summary_foot #= [$in foot:
     repeated runtime template rebuilding from a numeric range
 ]
-runtime_mutation_head #= [$insert("head"):
+runtime_mutation_head #= [$in head:
     [section_title, accent_title_2:
         Collection mutation probe
     ]
 ]
-runtime_mutation_foot #= [$insert("foot"):
+runtime_mutation_foot #= [$in foot:
     uses push, set, remove and catch fallback
 ]
-runtime_descending_head #= [$insert("head"):
+runtime_descending_head #= [$in head:
     [section_title, accent_title_3:
         Descending range loop
     ]
 ]
-runtime_descending_foot #= [$insert("foot"):
+runtime_descending_foot #= [$in foot:
     descending range with an explicit negative step
 ]
-runtime_pair_head #= [$insert("head"):
+runtime_pair_head #= [$in head:
     [section_title, accent_title:
         Multiple return pair panels
     ]
 ]
-runtime_pair_foot #= [$insert("foot"):
+runtime_pair_foot #= [$in foot:
     one helper function returns two values which are unpacked in a loop
 ]
 
 [page_shell, global_styles:
     [page_title]
 
-    [$insert("body"):
+    [$in body:
         [page:
             [hero_card]
             [compile_card_a]

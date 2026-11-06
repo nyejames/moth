@@ -1,8 +1,9 @@
 **Current support versus accepted design.** Directory commands now select one
 directory as both build root and source root. `config.moth` is optional and its
 `project` record may omit `name` and `version`. Generated outputs default to
-`_dev` and `_release`. The accepted `$config`, `$project`, `$html_builder` and
-root-only `$page` forms are queued, and `moth new` does not emit them yet.
+`_dev` and `_release`. The accepted `$config`, `$project` and `$html_builder`
+forms are queued, and `moth new` does not emit them yet. A general `$entry` root
+purpose is deferred; the earlier `$page` proposal is superseded.
 
 A Moth project is a directory tree rooted at the directory selected by the
 command. There is no implicit `src/` entry directory, and a nested
@@ -83,12 +84,15 @@ filenames.
 
 The current `moth new html` scaffold uses `@page.moth` at the selected root as a
 conventional root filename. That convention does not make the filename a page.
-In the accepted design, the root file declares an HTML artefact with a
-root-only `$page` directive:
+Today the root becomes an HTML entry from authored root activity. A direct
+builder slot contribution is const-fragment activity:
 
 [codeblock, $code("moth"):
-    $page
+    #[$in title:Welcome]
 ]
+
+A future general `$entry` purpose will make entry selection explicit. It is
+deferred and is not current syntax; the earlier `$page` proposal is superseded.
 
 Helpers in ordinary files stay inside the surrounding module and cannot become
 entries on their own.
@@ -107,7 +111,8 @@ and `/_release`. The generated config is:
 ]
 
 It does not emit the accepted starter `$config`/`$project`/`$html_builder` shape
-or a live `$page` declaration. Deleting the generated config is valid when the
+or an explicit `$entry` declaration. It does emit direct builder slot
+contributions in `@page.moth`. Deleting the generated config is valid when the
 directory name is a valid project identifier.
 
 ### Source versus output

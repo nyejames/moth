@@ -2,13 +2,14 @@
 -- Template system stress test:
 -- - Deeply nested template composition (10+ levels)
 -- - Heavy slot usage (positional, named, default, repeated replay)
--- - Complex $children(..) wrapper chains
+-- - Complex before/after wrapper chains
 -- - Multiple formatter directives ($md, $css, $html, $raw, $escape_html)
 -- - $fresh opt-out patterns
 -- - Large compile-time template folding
 -- - Runtime template construction in loops
 
 page_title #= "Template System Stress Test"
+#[$in title:[page_title]]
 base_color #= "hsl(280, 70%, 50%)"
 accent_a #= "hsl(200, 80%, 55%)"
 accent_b #= "hsl(40, 90%, 60%)"
@@ -29,54 +30,54 @@ level_1 #= [: <div class="l1">[level_2]</div> ]
 
 -- Template with multiple named slots
 multi_slot #= [:
-    <header data-slot="header">[$slot("header")]</header>
-    <nav data-slot="nav">[$slot("nav")]</nav>
-    <main data-slot="main">[$slot("main")]</main>
-    <aside data-slot="aside">[$slot("aside")]</aside>
-    <footer data-slot="footer">[$slot("footer")]</footer>
+    <header data-slot="header">[$slot header]</header>
+    <nav data-slot="nav">[$slot nav]</nav>
+    <main data-slot="main">[$slot main]</main>
+    <aside data-slot="aside">[$slot aside]</aside>
+    <footer data-slot="footer">[$slot footer]</footer>
     <div data-slot="default">[$slot]</div>
 ]
 
 -- Positional slot templates
 pos_slot #= [:
-    <span data-pos="1">[$slot(1)]</span>
-    <span data-pos="2">[$slot(2)]</span>
-    <span data-pos="3">[$slot(3)]</span>
+    <span data-pos="1">[$slot 1]</span>
+    <span data-pos="2">[$slot 2]</span>
+    <span data-pos="3">[$slot 3]</span>
     <div data-default>[$slot]</div>
 ]
 
 -- Named insert helpers
-header_insert #= [$insert("header"):
+header_insert #= [$in header:
     <h1>Template Stress Test Header</h1>
 ]
-nav_insert #= [$insert("nav"):
+nav_insert #= [$in nav:
     <ul><li>Nav item 1</li><li>Nav item 2</li><li>Nav item 3</li></ul>
 ]
-main_insert #= [$insert("main"):
+main_insert #= [$in main:
     <p>Main content area with substantial text for template folding tests.</p>
 ]
-aside_insert #= [$insert("aside"):
+aside_insert #= [$in aside:
     <div class="sidebar">Sidebar content here</div>
 ]
-footer_insert #= [$insert("footer"):
+footer_insert #= [$in footer:
     <p>Footer text with copyright info</p>
 ]
 
--- $children wrapper chains
-wrapper_1 #= [$children([:<div class="w1">[$slot]</div>]):
+-- Before/after wrapper chains
+wrapper_1 #= [$before = [:<div class="w1">], $after = [:</div>]:
     <section class="section-1">[$slot]</section>
 ]
-wrapper_2 #= [$children([:<span class="w2">[$slot]</span>]):
+wrapper_2 #= [$before = [:<span class="w2">], $after = [:</span>]:
     <div class="section-2">[$slot]</div>
 ]
-wrapper_3 #= [$children([:<em class="w3">[$slot]</em>]):
+wrapper_3 #= [$before = [:<em class="w3">], $after = [:</em>]:
     <article class="section-3">[$slot]</article>
 ]
 
--- Nested $children wrappers
-nested_wrapper #= [$children([:<div class="outer-wrap">[$slot]</div>]):
-    [$children([:<div class="inner-wrap">[$slot]</div>]):
-        [$children([:<span class="core-wrap">[$slot]</span>]):
+-- Nested before/after wrappers
+nested_wrapper #= [$before = [:<div class="outer-wrap">], $after = [:</div>]:
+    [$before = [:<div class="inner-wrap">], $after = [:</div>]:
+        [$before = [:<span class="core-wrap">], $after = [:</span>]:
             <div class="deepest">[$slot]</div>
         ]
     ]
@@ -137,7 +138,7 @@ escape_block #= [$escape_html:
 ]
 
 -- $fresh opt-out patterns
-fresh_parent #= [$children([:<li class="wrapped">[$slot]</li>]):
+fresh_parent #= [$before = [:<li class="wrapped">], $after = [:</li>]:
     <ul class="fresh-test">[$slot]</ul>
 ]
 
@@ -146,14 +147,14 @@ fresh_child_fresh #= [$fresh: [: Fresh unwrapped item ]]
 
 -- Repeated slot replay
 replay_template #= [:
-    <div>First: [$slot("replay")]</div>
-    <div>Second: [$slot("replay")]</div>
-    <div>Third: [$slot("replay")]</div>
-    <div>Fourth: [$slot("replay")]</div>
-    <div>Fifth: [$slot("replay")]</div>
+    <div>First: [$slot replay]</div>
+    <div>Second: [$slot replay]</div>
+    <div>Third: [$slot replay]</div>
+    <div>Fourth: [$slot replay]</div>
+    <div>Fifth: [$slot replay]</div>
 ]
 
-replay_content #= [$insert("replay"): Replayed content]
+replay_content #= [$in replay: Replayed content]
 
 -- Large compile-time template
 large_template #= [:
@@ -285,8 +286,8 @@ shell #= [:
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>[$slot("title")]</title>
-    <style>[$slot("style")]</style>
+    <title>[$slot title]</title>
+    <style>[$slot style]</style>
 </head>
 <body>
     [$slot]
@@ -294,7 +295,7 @@ shell #= [:
 </html>
 ]
 
-shell_style #= [$insert("style"):
+shell_style #= [$in style:
     body {
         background: [bg_dark];
         color: [text_light];
@@ -333,7 +334,7 @@ run_tests ||:
 
 -- Final output
 [shell, shell_style:
-    [$insert("title"):
+    [$in title:
         [page_title]
     ]
     

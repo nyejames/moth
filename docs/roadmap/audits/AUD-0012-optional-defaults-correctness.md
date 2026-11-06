@@ -9,11 +9,11 @@
 
 ## What was inspected
 
-The nominal-field and function-parameter reproductions below, plus the optional-value contract example in `docs/src/docs/errors/options.mtf:7`. That audit run inspected no compiler implementation path, so it did not establish the root cause. The later correction is recorded in AUD-0012-F01 and is not a new complete audit.
+The nominal-field and function-parameter reproductions below, plus the optional-value contract example in `docs/docs/errors/options.mtf:7`. That audit run inspected no compiler implementation path, so it did not establish the root cause. The later correction is recorded in AUD-0012-F01 and is not a new complete audit.
 
 ## Authorities read
 
-`docs/roadmap/audit-guide.md`; `docs/roadmap/audit-kinds/correctness.md`; `docs/roadmap/audits/README.md`; `docs/roadmap/audit-log.md`; `docs/roadmap/open-audit-findings.md`; and `docs/src/docs/errors/options.mtf`, which defines `T?` as either `T` or absent, shows `fallback String? = "guest"`, says `none` needs an immediate optional receiver, and says optional values are not automatically unwrapped. The originating handover's `Decisions that should stay` section was also checked: signature/default changes outside the extraction are not to be absorbed incidentally.
+`docs/roadmap/audit-guide.md`; `docs/roadmap/audit-kinds/correctness.md`; `docs/roadmap/audits/README.md`; `docs/roadmap/audit-log.md`; `docs/roadmap/open-audit-findings.md`; and `docs/docs/errors/options.mtf`, which defines `T?` as either `T` or absent, shows `fallback String? = "guest"`, says `none` needs an immediate optional receiver, and says optional values are not automatically unwrapped. The originating handover's `Decisions that should stay` section was also checked: signature/default changes outside the extraction are not to be absorbed incidentally.
 
 ## Existing findings and active plans checked
 
@@ -28,7 +28,7 @@ The audit log and open-findings index were checked. The external review's handov
 
 #### Evidence
 
-The contract example `fallback String? = "guest"` in `docs/src/docs/errors/options.mtf:7` is a present optional default. On branch `feature/mon-crate-extraction` at `0f3439fda`, the implementer ran `moth check` against real files and observed:
+The contract example `fallback String? = "guest"` in `docs/docs/errors/options.mtf:7` is a present optional default. On branch `feature/mon-crate-extraction` at `0f3439fda`, the implementer ran `moth check` against real files and observed:
 
 - `Outer = | name String? = "guest" |` followed by `data #= Outer(name = none)` reports MOTH-RULE-0053.
 - With `n String? = "Priya"`, `data = Outer(name = n)` reports MOTH-TYPE-0001.

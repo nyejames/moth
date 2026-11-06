@@ -1,0 +1,57 @@
+entry = "."
+
+# Title contributions concatenate in source order. A supplied empty title is present and
+# suppresses the route fallback, while an absent title falls back to the route segment before
+# the configured title prefix and postfix are applied.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["<title>Docs | Overview | Moth</title>"]
+must_contain_exactly_once = ["<title>Docs | Overview | Moth</title>"]
+
+[[backends.html.artifact_assertions]]
+path = "about/index.html"
+kind = "html"
+must_contain = ["<title>Docs |  | Moth</title>"]
+must_not_contain = ["Docs | About | Moth"]
+
+[[backends.html.artifact_assertions]]
+path = "concat/index.html"
+kind = "html"
+must_contain = ["<title>Docs | Alpha &amp; Beta | Moth</title>"]
+
+[[backends.html.artifact_assertions]]
+path = "fallback/index.html"
+kind = "html"
+must_contain = ["<title>Docs | Fallback | Moth</title>"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["<title>Docs | Overview | Moth</title>"]
+must_contain_exactly_once = ["<title>Docs | Overview | Moth</title>"]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "about/index.html"
+kind = "html"
+must_contain = ["<title>Docs |  | Moth</title>"]
+must_not_contain = ["Docs | About | Moth"]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "concat/index.html"
+kind = "html"
+must_contain = ["<title>Docs | Alpha &amp; Beta | Moth</title>"]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "fallback/index.html"
+kind = "html"
+must_contain = ["<title>Docs | Fallback | Moth</title>"]

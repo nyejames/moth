@@ -1,8 +1,8 @@
-**Accepted queued design.** `$` is the general directive marker. Template directives are implemented. General non-template directives, shared directive-call integration, `$config`, `$project`, `$html_builder` and `$page` are accepted design queued for implementation and are not yet available in the Alpha compiler. Current projects still use grouped `project`/`html` records, `#Config of T` contracts and reserved `page_*` metadata. See @../progress (Progress) for current support.
+**Mixed current and accepted design.** `$` is the general directive marker. Template directives are implemented. General non-template directives, shared directive-call integration, `$config`, `$project` and `$html_builder` remain accepted design queued for implementation and are not yet available in the Alpha compiler. Current projects use grouped `project`/`html` records and `#Config of T` contracts. HTML document metadata uses direct const root inserts through builder slots; the former `page_*` names have no reserved effect. A general `$entry` root purpose and `io.set_title` are later deferred work. See @../progress (Progress) for current support.
 
 `$` does not mean harmless metadata. Compiler-owned semantic directives may impose real language or structural contracts. Builder extensions remain constrained: they may supply template directives and consume metadata, configuration and root-purpose facts, but they cannot rewrite functions, change nominal identity, mutate HIR, alter visibility or weaken borrow and lifetime rules.
 
-This page owns general grammar, ownership, context, arguments, attachment and diagnostic distinctions. Exact `$project`, `$config`, `$html_builder` and `$page` signatures live in the project-structure references linked below.
+This page owns general grammar, ownership, context, arguments, attachment and diagnostic distinctions. Exact `$project`, `$config` and `$html_builder` signatures live in the project-structure references linked below.
 
 ### Marker and non-goals
 
@@ -44,9 +44,9 @@ Config-only is a placement and processing-phase restriction. It is not a second 
     ]
 
     [td:
-        [: Normal-root metadata or purpose]
+        [: Normal-root purpose]
         [: Builder]
-        [: Standalone items on a normal module root. `$page` is the first planned HTML purpose]
+        [: Future root-only `$entry` on a normal module root. Builder metadata instead uses direct const root inserts through builder slots]
     ]
 
     [td:
@@ -66,7 +66,7 @@ Config-only is a placement and processing-phase restriction. It is not a second 
 
 ### Arguments
 
-One ordinary call parser, one parameter-slot router and one default validator own directive arguments.
+Handler directives that take parameters use one ordinary call parser, one parameter-slot router and one default validator.
 
 - A directive with supplied arguments uses `$name(arguments)`.
 - A directive with no supplied arguments uses `$name`.
@@ -84,7 +84,14 @@ The same project invocation may use named arguments: `$project(name = "my_site",
 
 `$project()` and `$html_builder()` are invalid. Bare `$html_builder` still runs required-parameter and default validation.
 
-Template directives move onto the same argument-list owner without changing their existing value domains, head compatibility, formatter behaviour or literal-body modes. Slot labels, indices and helper templates remain compiler-known template argument categories. See @../templates/#template-directives (Template directives).
+Core template directives do not use the call form:
+
+- `$slot`, `$slot name` and `$slot 1` declare the default, named or positional slot. An occurrence may add `= <compile-time String>`.
+- `$in name` contributes to a named slot. Its target is a bare symbol, not an expression; `$in 1:` is invalid and positional slots receive loose contributions instead.
+- `$before = <constant value>` and `$after = <constant value>` wrap direct children. Each accepts a compile-time String or a constant template wrapper, may occur once per head and requires named slots only inside the value.
+- `$fresh` takes no value.
+
+The removed `$slot(...)`, `$insert(...)` and `$children(...)` spellings have no alias or transition mode. Handler directives such as `$code(language)` still use the shared call owner. See @../templates/#template-directives (Template directives).
 
 ### Attachment
 
@@ -135,22 +142,21 @@ A project field named `version` does not satisfy a source input contract. `$proj
 
 Exact field tables, optional version, explicit-only input providers and HTML settings live in @../project-structure/#project-config (Project config) and @../project-structure/#build-inputs (Build configuration values).
 
-### Page example
+### Entry purpose and builder metadata
 
-`$page` is the accepted queued HTML-builder directive for normal-root metadata and page purpose. Ordinary files, support roots, facades and `config.moth` cannot declare pages. Its implementation will supply the first root purpose in this directive family.
+General `$entry` root-purpose validation remains queued. The earlier `$page`
+proposal is superseded and is not current syntax. HTML document metadata uses
+direct const root inserts through builder slots:
 
 [codeblock, $code("moth"):
-    $page(
-        title = "Moth",
-        description = "A language for creating reliable software",
-        lang = "en",
-        favicon = @assets/favicon.svg,
-    )
+    #[$in title:Moth]
+    #[$in description:A language for creating reliable software]
+    #[$in favicon:[@assets/favicon.svg]]
 ]
 
-Bare `$page` is the default invocation. `$page()` is invalid. Exact arguments, command policy and runtime title live in @../project-structure/#entry-config (Entry metadata and page directives).
-
-Until that implementation lands, operational pages keep reserved `page_title`, `page_head` and related declarations.
+See @../project-structure/#entry-config (Entry metadata and builder slots) for
+the builder slot contract and current entry policy. Runtime top-level templates
+do not provide named builder slots.
 
 ### Future blocks
 
@@ -163,5 +169,5 @@ Future compiler-owned blocks use `$name(...): ... ;` or `$name: ... ;`. `$async:
 - For template-specific directive meanings see @../templates/#template-directives (Template directives).
 - For project and HTML configuration signatures see @../project-structure/#project-config (Project config).
 - For input contracts see @../project-structure/#build-inputs (Build configuration values).
-- For `$page` and root purpose see @../project-structure/#entry-config (Entry metadata and page directives).
+- For builder slots and future root purpose see @../project-structure/#entry-config (Entry metadata and builder slots).
 - For accepted, deferred and excluded boundaries see @../design-scope (Design scope).

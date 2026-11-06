@@ -89,7 +89,7 @@ impl SyntheticInterfaceMemberIdentity {
 /// WHY: per-function link facts need a stable, deterministic provenance value that does not
 /// depend on iteration order, source location or process-local identity. AST-to-HIR lowering
 /// carries this value into HIR link-fact collection, while the project-global facade retains it.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub(crate) struct SyntheticInterfaceProvenance {
     members: Vec<SyntheticInterfaceMemberIdentity>,
 }

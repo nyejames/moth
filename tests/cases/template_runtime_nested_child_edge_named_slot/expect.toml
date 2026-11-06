@@ -1,0 +1,9 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "const=<table><tr style=\"background: red;\">row</tr></table>body|runtime=<table><tr style=\"background: blue;\">row</tr></table>body"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "const=<table><tr style=\"background: red;\">row</tr></table>body|runtime=<table><tr style=\"background: blue;\">row</tr></table>body"

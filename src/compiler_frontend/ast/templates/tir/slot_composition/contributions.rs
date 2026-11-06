@@ -1,7 +1,7 @@
 //! TIR-native slot contribution routing.
 //!
 //! WHAT: partitions fill-template content into the slot buckets declared by a
-//!       wrapper template's schema. Explicit `$insert(...)` helpers are routed
+//!       wrapper template's schema. Explicit `$in` helpers are routed
 //!       by target key; remaining loose content is coalesced into chunks and
 //!       assigned to positional slots first, then the default slot.
 //!
@@ -21,7 +21,7 @@ use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counte
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::helpers::{
     children_of_node, extra_loose_content_without_default_slot_error,
@@ -43,25 +43,46 @@ pub(crate) struct TirSlotContributions {
     pub(crate) default_nodes: Vec<TemplateIrNodeId>,
     pub(crate) named_nodes: FxHashMap<StringId, Vec<TemplateIrNodeId>>,
     pub(crate) positional_nodes: FxHashMap<usize, Vec<TemplateIrNodeId>>,
+    /// Targets that received an explicit routing decision, even when the routed
+    /// content was empty.
+    ///
+    /// WHAT: records slot presence independently of the contribution node list.
+    /// WHY: an explicitly empty contribution (`[$in title:]`) still suppresses the
+    ///      occurrence default, but an empty node list alone cannot distinguish that
+    ///      from an unrouted slot.
+    pub(crate) routed_targets: FxHashSet<SlotKey>,
 }
 
 impl TirSlotContributions {
     /// Appends routed nodes to the default-slot bucket.
     pub(crate) fn extend_default_nodes(&mut self, nodes: Vec<TemplateIrNodeId>) {
+        self.routed_targets.insert(SlotKey::Default);
         self.default_nodes.extend(nodes);
     }
 
     /// Appends routed nodes to one named-slot bucket.
     pub(crate) fn extend_named_nodes(&mut self, name: StringId, nodes: Vec<TemplateIrNodeId>) {
+        self.routed_targets.insert(SlotKey::Named(name));
         self.named_nodes.entry(name).or_default().extend(nodes);
     }
 
     /// Appends routed nodes to one positional-slot bucket.
     pub(crate) fn extend_positional_nodes(&mut self, index: usize, nodes: Vec<TemplateIrNodeId>) {
+        self.routed_targets.insert(SlotKey::Positional(index));
         self.positional_nodes
             .entry(index)
             .or_default()
             .extend(nodes);
+    }
+
+    /// Returns whether routing decided this slot key, even when the decision was empty.
+    ///
+    /// WHAT: reports presence independently of rendered content.
+    /// WHY: occurrence defaults fall back only when the slot was never routed. Callers
+    ///      must not infer presence from a nonempty node list, because an explicit empty
+    ///      contribution is still a routed contribution.
+    pub(crate) fn slot_has_routed_presence(&self, key: &SlotKey) -> bool {
+        self.routed_targets.contains(key) || !self.nodes_for_slot(key).is_empty()
     }
 
     /// Returns the routed node IDs for a given slot key.
@@ -70,6 +91,10 @@ impl TirSlotContributions {
     ///       the slot received no contributions.
     /// WHY: callers (placeholder expansion, runtime plan building) need a
     ///      uniform view of every slot's content, including empty slots.
+    ///
+    /// An empty slice does not prove the slot was unrouted. Callers deciding
+    /// whether an occurrence default falls back must ask
+    /// [`Self::slot_has_routed_presence`] instead.
     pub(crate) fn nodes_for_slot(&self, key: &SlotKey) -> &[TemplateIrNodeId] {
         match key {
             SlotKey::Default => &self.default_nodes,
@@ -92,6 +117,7 @@ impl TirSlotContributions {
 /// WHAT: buckets explicit `InsertContribution` nodes by their target slot key,
 ///       groups the remaining nodes into loose contribution chunks, and routes
 ///       those chunks to positional slots first, then the default slot.
+///       Body formatting whitespace around explicit inserts is not routed.
 /// WHY: head-chain composition has already collected the receiver's fill nodes,
 ///      so routing consumes that list directly.
 pub(crate) fn route_tir_fill_nodes_against_schema(
@@ -105,8 +131,9 @@ pub(crate) fn route_tir_fill_nodes_against_schema(
 
     let mut contributions = TirSlotContributions::default();
     let mut loose_nodes = Vec::new();
+    let mut has_explicit_inserts = false;
 
-    // Walk authored fill content exactly once. Explicit `$insert(...)` helpers
+    // Walk authored fill content exactly once. Explicit `$in` helpers
     // (either as `InsertContribution` nodes or as `ChildTemplate` references to
     // a `SlotInsert` helper) are bucketed by target key; everything else becomes
     // loose content that flows into positional or default slots.
@@ -120,7 +147,7 @@ pub(crate) fn route_tir_fill_nodes_against_schema(
         // Resolve an explicit slot-insert helper to its target key and body
         // template. Both `InsertContribution` nodes and `ChildTemplate`
         // references to a `SlotInsert` helper represent the same authored
-        // `$insert("name")` construct at different TIR construction stages.
+        // named `$in` construct at different TIR construction stages.
         let insert_info = match &child_node.kind {
             TemplateIrNodeKind::InsertContribution { template } => Some(*template),
             TemplateIrNodeKind::ChildTemplate { reference, .. } => {
@@ -152,6 +179,7 @@ pub(crate) fn route_tir_fill_nodes_against_schema(
         };
 
         if let Some(insert_template_id) = insert_info {
+            has_explicit_inserts = true;
             let target_template = store.get_template(insert_template_id).ok_or_else(|| {
                 internal_infrastructure_failure(
                     "TIR slot routing: slot-insert helper referenced a missing template.",
@@ -199,9 +227,22 @@ pub(crate) fn route_tir_fill_nodes_against_schema(
     // Keep the closest positional slot receiving the next authored chunk.
     let loose_chunks = collect_loose_tir_contributions(loose_nodes, store, string_table)?;
     let ordered_positional_slots = schema.ordered_positional_slots();
+    let mut next_positional_index = 0;
 
-    for (chunk_index, chunk) in loose_chunks.into_iter().enumerate() {
-        if let Some(slot_index) = ordered_positional_slots.get(chunk_index) {
+    for chunk in loose_chunks {
+        // Formatting whitespace around explicit inserts is not an authored loose
+        // contribution. Routing it would consume a positional slot or mark the
+        // default slot routed, suppressing an occurrence default the author never
+        // addressed. Actual loose content, including explicit whitespace strings,
+        // is unaffected.
+        if has_explicit_inserts
+            && tir_nodes_are_body_whitespace_only_text(&chunk.nodes, store, string_table)?
+        {
+            continue;
+        }
+
+        if let Some(slot_index) = ordered_positional_slots.get(next_positional_index) {
+            next_positional_index += 1;
             contributions.extend_positional_nodes(*slot_index, chunk.nodes);
             continue;
         }
@@ -214,7 +255,7 @@ pub(crate) fn route_tir_fill_nodes_against_schema(
         // Formatting whitespace around explicit insert contributions carries no
         // value when the wrapper has nowhere to render loose content. Discard it
         // while preserving diagnostics for every meaningful loose contribution.
-        if tir_nodes_are_whitespace_only_text(&chunk.nodes, store, string_table)? {
+        if tir_nodes_are_body_whitespace_only_text(&chunk.nodes, store, string_table)? {
             continue;
         }
 
@@ -352,7 +393,7 @@ fn collect_loose_tir_contributions(
 
         if starts_new_chunk {
             if pending_nodes.is_empty()
-                || tir_nodes_are_whitespace_only_text(&pending_nodes, store, string_table)?
+                || tir_nodes_are_body_whitespace_only_text(&pending_nodes, store, string_table)?
             {
                 pending_nodes.push(node_id);
                 chunks.push(LooseTirContribution {
@@ -382,7 +423,14 @@ fn collect_loose_tir_contributions(
     Ok(chunks)
 }
 
-fn tir_nodes_are_whitespace_only_text(
+/// Reports whether a loose chunk is only body-level formatting whitespace.
+///
+/// WHAT: requires every node to be a `Body`-origin `Text` node whose full spelling
+///       trims to nothing.
+/// WHY: body whitespace separates head items and is formatting, while a `Head`-origin
+///      text node came from an authored head expression such as `" "` and is real
+///      contribution content even when it is blank.
+fn tir_nodes_are_body_whitespace_only_text(
     nodes: &[TemplateIrNodeId],
     store: &TemplateIrStore,
     string_table: &StringTable,
@@ -398,11 +446,12 @@ fn tir_nodes_are_whitespace_only_text(
             )
         })?;
 
-        let TemplateIrNodeKind::Text { text, .. } = &node.kind else {
+        let TemplateIrNodeKind::Text { text, origin, .. } = &node.kind else {
             return Ok(false);
         };
 
-        if !string_table.resolve(*text).trim().is_empty() {
+        if *origin != TemplateSegmentOrigin::Body || !string_table.resolve(*text).trim().is_empty()
+        {
             return Ok(false);
         }
     }

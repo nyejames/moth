@@ -747,7 +747,10 @@ fn content_source_identities_follow_canonical_logical_order_not_reference_order(
 fn content_source_preparation_failures_name_the_logical_source() {
     let temp_dir = temp_project(&[
         ("page.mtf", "# Page\n\n[@docs/broken.mtf]"),
-        ("docs/broken.mtf", "# Broken\n\n[$insert(\"unterminated]\n"),
+        (
+            "docs/broken.mtf",
+            "# Broken\n\n[$slot title = \"unterminated]\n",
+        ),
     ]);
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -783,7 +786,7 @@ fn content_source_preparation_failures_name_the_logical_source() {
     };
     assert_eq!(
         report.context().retained_text(span.source()),
-        Some("# Broken\n\n[$insert(\"unterminated]\n"),
+        Some("# Broken\n\n[$slot title = \"unterminated]\n"),
         "the diagnosed boundary should retain the exact content snapshot",
     );
     let position = DiagnosticRenderContext::for_report(report)
@@ -895,7 +898,10 @@ fn failed_content_producer_keeps_its_diagnostic_beside_an_undecodable_sibling() 
             "page.mtf",
             "# Page\n\n[@docs/broken.mtf]\n\n[@docs/legal.md]",
         ),
-        ("docs/broken.mtf", "# Broken\n\n[$insert(\"unterminated]\n"),
+        (
+            "docs/broken.mtf",
+            "# Broken\n\n[$slot title = \"unterminated]\n",
+        ),
     ]);
     fs::write(
         temp_dir.path().join("docs/legal.md"),

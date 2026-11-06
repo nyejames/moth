@@ -14,7 +14,7 @@ The MON reader's named-entry recognition, trivia and payload lookahead, reserved
 
 ## Authorities read
 
-`docs/roadmap/audit-guide.md`; the Correctness, Redundancy and Tests checklists; `docs/src/docs/language-overview/mon-syntax.mtf` (Entries and layout; Shared construction parity); `docs/src/docs/mon/mon-format.mtf` (Reserved user names; Structs and choices; Schemas, defaults and options; Limits and first errors); `docs/compiler-data-layout-design.md` (MON handoff and retained numeric text accounting); `docs/src/docs/collections/hash-maps.mtf`; `docs/src/docs/choices/variant-construction.mtf`; `docs/src/developer-docs/style-guide/testing.mtf`; the compiler/build ownership contracts; the originating extraction plan; the supplied `moth-code-review-guide.md`; and the repository instructions.
+`docs/roadmap/audit-guide.md`; the Correctness, Redundancy and Tests checklists; `docs/docs/language-overview/mon-syntax.mtf` (Entries and layout; Shared construction parity); `docs/docs/mon/mon-format.mtf` (Reserved user names; Structs and choices; Schemas, defaults and options; Limits and first errors); `docs/compiler-data-layout-design.md` (MON handoff and retained numeric text accounting); `docs/docs/collections/hash-maps.mtf`; `docs/docs/choices/variant-construction.mtf`; `docs/developer-docs/style-guide/testing.mtf`; the compiler/build ownership contracts; the originating extraction plan; the supplied `moth-code-review-guide.md`; and the repository instructions.
 
 ## Existing findings and active plans checked
 
@@ -96,7 +96,7 @@ Align MON's constructor-head boundary with source: require `(` after the head on
 
 #### Fix scope and preserved invariants
 
-Resolved in commit `345205680`. MON nominal and choice payload openers now follow the head on the same logical line with only horizontal whitespace. The acceptance tightening is recorded in `docs/src/docs/mon/mon-format.mtf` and `mon-syntax.mtf`; source grammar did not change. The local trivia cleanup is tracked separately in AUD-0011-F01.
+Resolved in commit `345205680`. MON nominal and choice payload openers now follow the head on the same logical line with only horizontal whitespace. The acceptance tightening is recorded in `docs/docs/mon/mon-format.mtf` and `mon-syntax.mtf`; source grammar did not change. The local trivia cleanup is tracked separately in AUD-0011-F01.
 
 #### Required validation
 

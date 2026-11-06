@@ -1,9 +1,9 @@
 @ownership-and-drops content as reference_content
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-page_title #= "Affine ownership and drops"
-page_description #= "Affine cleanup responsibility, the two-bit ownership ABI and conditional destruction."
-page_head #= theme_head
+#[$in title:["Affine ownership and drops"]]
+#[$in description:["Affine cleanup responsibility, the two-bit ownership ABI and conditional destruction."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]

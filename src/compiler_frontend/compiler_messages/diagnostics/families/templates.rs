@@ -49,6 +49,8 @@ unit_code! {
         InsertTargetsUnknownPositionalSlot = 6,
         SlotDefinitionOutsideTemplateBody = 7,
         NamedInsertOutsideParentSlot = 8,
+        DefaultSlotInChildDecorator = 9,
+        PositionalSlotInChildDecorator = 10,
     }
 }
 
@@ -62,7 +64,8 @@ unit_code! {
         EmptyArguments = 6,
         InvalidSlotTarget = 7,
         InvalidInsertTarget = 8,
-        InvalidChildrenArgument = 9,
+        InvalidChildDecoratorValue = 9,
+        InvalidSlotDefault = 10,
     }
 }
 
@@ -86,11 +89,12 @@ impl InvalidTemplateDirectiveCode {
             }
             InvalidTemplateDirectiveReason::EmptyArguments => (Self::EmptyArguments, None),
             InvalidTemplateDirectiveReason::InvalidSlotTarget => (Self::InvalidSlotTarget, None),
+            InvalidTemplateDirectiveReason::InvalidSlotDefault => (Self::InvalidSlotDefault, None),
             InvalidTemplateDirectiveReason::InvalidInsertTarget => {
                 (Self::InvalidInsertTarget, None)
             }
-            InvalidTemplateDirectiveReason::InvalidChildrenArgument => {
-                (Self::InvalidChildrenArgument, None)
+            InvalidTemplateDirectiveReason::InvalidChildDecoratorValue => {
+                (Self::InvalidChildDecoratorValue, None)
             }
         }
     }
@@ -106,9 +110,10 @@ impl InvalidTemplateDirectiveCode {
             Self::UnexpectedArguments => InvalidTemplateDirectiveReason::UnexpectedArguments,
             Self::EmptyArguments => InvalidTemplateDirectiveReason::EmptyArguments,
             Self::InvalidSlotTarget => InvalidTemplateDirectiveReason::InvalidSlotTarget,
+            Self::InvalidSlotDefault => InvalidTemplateDirectiveReason::InvalidSlotDefault,
             Self::InvalidInsertTarget => InvalidTemplateDirectiveReason::InvalidInsertTarget,
-            Self::InvalidChildrenArgument => {
-                InvalidTemplateDirectiveReason::InvalidChildrenArgument
+            Self::InvalidChildDecoratorValue => {
+                InvalidTemplateDirectiveReason::InvalidChildDecoratorValue
             }
         }
     }
@@ -349,6 +354,7 @@ unit_code! {
         TemplateLoopStepNotConst = 32,
         TemplateLoopStepIsZero = 33,
         TemplateLoopStepNoProgress = 34,
+        BuilderRootSlotNotRegistered = 35,
     }
 }
 
@@ -483,6 +489,9 @@ impl InvalidTemplateStructureCode {
                 None,
                 Some(limit),
             ),
+            InvalidTemplateStructureReason::BuilderRootSlotNotRegistered => {
+                (Self::BuilderRootSlotNotRegistered, None, None)
+            }
         }
     }
 
@@ -579,6 +588,9 @@ impl InvalidTemplateStructureCode {
                 InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded {
                     limit: limit?,
                 }
+            }
+            Self::BuilderRootSlotNotRegistered => {
+                InvalidTemplateStructureReason::BuilderRootSlotNotRegistered
             }
         })
     }
@@ -824,6 +836,27 @@ pub(crate) fn invalid_template_structure(
             .with_string_ids(conflict.head_item_names()),
         None => draft,
     }
+}
+
+/// Builds the authored diagnostic for a direct root insert naming an unregistered builder slot.
+///
+/// WHAT: stores the authored target first, followed by the builder's registered names in
+///       deterministic order, in the structure family's string-id list.
+/// WHY: the renderer names both the rejected destination and the alternatives without the
+///      compiler family depending on any builder-specific slot vocabulary.
+pub(crate) fn builder_root_slot_not_registered(
+    target: StringId,
+    available_names: Vec<StringId>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    let mut string_ids = Vec::with_capacity(available_names.len() + 1);
+    string_ids.push(target);
+    string_ids.extend(available_names);
+    invalid_template_structure(
+        InvalidTemplateStructureReason::BuilderRootSlotNotRegistered,
+        span,
+    )
+    .with_string_ids(string_ids)
 }
 
 pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[

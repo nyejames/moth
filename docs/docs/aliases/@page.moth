@@ -12,9 +12,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Aliases"
-page_description #= "Type aliases, dependency aliases and choice payload capture aliases in Moth."
-page_head #= language_theme_head
+#[$in title:["Aliases"]]
+#[$in description:["Type aliases, dependency aliases and choice payload capture aliases in Moth."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -31,9 +31,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):type-aliases]
-        [$insert("title"):Type aliases]
-        [$insert("advanced"):[type_aliases]]
+        [$in key:type-aliases]
+        [$in title:Type aliases]
+        [$in advanced:[type_aliases]]
 
         [type_aliases_basic]
     ]
@@ -41,9 +41,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):dependency-aliases]
-        [$insert("title"):Dependency aliases]
-        [$insert("advanced"):[dependency_aliases]]
+        [$in key:dependency-aliases]
+        [$in title:Dependency aliases]
+        [$in advanced:[dependency_aliases]]
 
         [dependency_aliases_basic]
     ]
@@ -51,9 +51,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):payload-capture-aliases]
-        [$insert("title"):Payload capture aliases]
-        [$insert("advanced"):[payload_capture_aliases]]
+        [$in key:payload-capture-aliases]
+        [$in title:Payload capture aliases]
+        [$in advanced:[payload_capture_aliases]]
 
         [payload_capture_aliases_basic]
     ]
@@ -61,9 +61,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../constants/]
-        [$insert("previous_title"):Constants and compile-time behaviour]
-        [$insert("next_path"):../generics/]
-        [$insert("next_title"):Generics]
+        [$in previous_path:../constants/]
+        [$in previous_title:Constants and compile-time behaviour]
+        [$in next_path:../generics/]
+        [$in next_title:Generics]
     ]
 ]

@@ -1,4 +1,4 @@
-**Current support versus accepted design.** Alpha projects still select HTML entries from implemented root activity. The accepted queued page design makes `$page` the explicit artefact declaration. Current `export:` blocks remain implemented; the later `$export` migration is deferred.
+**Current support.** Alpha projects select HTML entries from implemented root activity. A general `$entry` root purpose is deferred; the earlier `$page` proposal is superseded and is not implemented. Current `export:` blocks remain implemented; the later `$export` migration is deferred.
 
 A normal module root defines the identity of one directory-scoped module. It does not define a page merely because its filename contains `page`.
 
@@ -13,7 +13,7 @@ A non-config file whose name starts with `@` and ends with `.moth` is the module
     @anything.moth
 ]
 
-The compiler treats each spelling as the root for its directory. The HTML route comes from the directory position, not from the root filename. After the page cutover, a root declares an HTML artefact only with a root-only `$page` directive.
+The compiler treats each spelling as the root for its directory. The HTML route comes from the directory position, not from the root filename. A root becomes an HTML artefact from implemented root activity, not from its filename.
 
 ### One structural module per directory
 
@@ -67,15 +67,15 @@ Neither `@page.moth` nor `@site.moth` is bound directly. Do not add the root fil
 
 Files without `@` in the same directory as a root are normal source files within that module. They contribute declarations that the module root can bind and export. They do not execute top-level runtime code independently, and they cannot become page entries by themselves.
 
-### Root identity, page purpose and activation
+### Root identity, entry activity and activation
 
-Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-owned entry. The current builder selects entries from authored runtime or fragment activity. The accepted design instead requires an authored root purpose, initially `$page`, before the builder selects an HTML artefact.
+Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-owned entry. The current builder selects entries from authored runtime or fragment activity. A future general `$entry` purpose will make that selection explicit; it is deferred, and the earlier `$page` proposal is superseded.
 
 [codeblock, $code("moth"):
-    $page
+    #[$in title:Welcome]
 ]
 
-Helpers remain declarations inside the surrounding module. They never own an entry or a page. Binding a module exposes only its public interface and never activates its root work. A selected page root activates its module-owned entry once and assembles its direct fragments in source order.
+A direct named builder contribution counts as const-fragment activity, so a metadata-only root still activates and emits a document. Helpers remain declarations inside the surrounding module. They never own an entry or a page. Binding a module exposes only its public interface and never activates its root work. A selected root activates its module-owned entry once and assembles its direct fragments in source order.
 
 ### Visibility status
 
@@ -91,5 +91,5 @@ Helpers remain declarations inside the surrounding module. They never own an ent
 ### Concepts related to module roots
 
 - For the export block and its current status see @#public-api (Public API).
-- For root purpose, runtime and page fragments see @#entry-runtime-and-fragments (Active-root runtime and fragments).
+- For entry activity, runtime and fragments see @#entry-runtime-and-fragments (Active-root runtime and fragments).
 - For HTML routes and command policy see @#html-routing-and-artifacts (HTML routing and artefacts).

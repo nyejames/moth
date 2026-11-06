@@ -7,7 +7,7 @@ This index routes contributors to the accepted general-directive contract and th
 - `docs/docs/directives/directives.mtf` owns general marker, ownership, context, arguments, attachment and unknown/unavailable/placement rules.
 - `docs/docs/directives/directives-basic.mtf` teaches the short accepted surface.
 - Template-specific meanings stay in `docs/docs/templates/template-directives.mtf`.
-- Exact `$project`, `$config`, `$html_builder` and `$page` signatures stay in the project-structure references.
+- Exact `$project`, `$config` and `$html_builder` signatures stay in the project-structure references. A future `$entry` purpose and runtime title remain deferred.
 
 ## Compiler handoffs
 
@@ -27,8 +27,8 @@ Read `docs/build-system-design.md`:
 - `Selected command and capability surface` for owned directive signatures and config-only contexts.
 - `Project bootstrap` for `$project`, `$html_builder`, bootstrap `$config` and the closed project-directive table.
 - `Source contracts and static specialisation` under bootstrap for matching, precedence and both-branches frontend validation.
-- `Root metadata and purpose directives` for root-only `$page` and explicit purpose.
-- `Entry candidates and selection` and `Command and tooling policies` for page-entry and zero-page check rules.
+- `Builder slots and future root purpose` for direct const builder metadata, `$entry` deferral and root activity.
+- `Entry candidates and selection` and `Command and tooling policies` for current entry selection and deferred zero-entry rules.
 
 ## Status and sequencing
 

@@ -8,9 +8,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "@web/page"
-page_description #= "Live browser state and navigation from the HTML builder."
-page_head #= language_theme_head
+#[$in title:["@web/page"]]
+#[$in description:["Live browser state and navigation from the HTML builder."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -24,9 +24,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):page]
-        [$insert("title"):Browser page state]
-        [$insert("advanced"):[page_advanced]]
+        [$in key:page]
+        [$in title:Browser page state]
+        [$in advanced:[page_advanced]]
 
         [page_basic]
     ]
@@ -34,9 +34,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../site/]
-        [$insert("previous_title"):@web/site]
-        [$insert("next_path"):../../../memory/]
-        [$insert("next_title"):Memory and lifetimes]
+        [$in previous_path:../site/]
+        [$in previous_title:@web/site]
+        [$in next_path:../../../memory/]
+        [$in next_title:Memory and lifetimes]
     ]
 ]

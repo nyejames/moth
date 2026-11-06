@@ -1,0 +1,35 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<tr data-site=\"/moth/\" data-icon=\"./row_facade/assets/icon.svg\" style=\"background: blue;\">third</tr>"
+
+[[backends.html.artifact_assertions]]
+path = "row_facade/assets/icon.svg"
+kind = "binary"
+
+[[backends.html.artifact_assertions]]
+path = "docs/index.html"
+kind = "html"
+must_contain = ["<tr data-site=\\\"/moth/\\\" data-icon=\\\"./row_facade/assets/icon.svg\\\" style=\\\"background: blue;\\\">nested"]
+
+[[backends.html.artifact_assertions]]
+path = "docs/row_facade/assets/icon.svg"
+kind = "binary"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<tr data-site=\"/moth/\" data-icon=\"./row_facade/assets/icon.svg\" style=\"background: blue;\">third</tr>"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "row_facade/assets/icon.svg"
+kind = "binary"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "docs/page.js"
+kind = "js"
+must_contain = ["<tr data-site=\\\"/moth/\\\" data-icon=\\\"./row_facade/assets/icon.svg\\\" style=\\\"background: blue;\\\">nested"]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "docs/row_facade/assets/icon.svg"
+kind = "binary"

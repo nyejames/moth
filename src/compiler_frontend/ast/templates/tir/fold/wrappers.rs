@@ -5,13 +5,15 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult, TirFoldContext,
 };
-use crate::compiler_frontend::ast::templates::tir::collect_tir_slot_schema;
-use crate::compiler_frontend::ast::templates::tir::ids::{TemplateIrId, TemplateIrNodeId};
+use crate::compiler_frontend::ast::templates::tir::ids::TemplateIrNodeId;
 use crate::compiler_frontend::ast::templates::tir::node::TemplateIr;
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TirWrapperApplicationMode, TirWrapperContext,
 };
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference;
+use crate::compiler_frontend::ast::templates::tir::{
+    TemplateIrStore, WrapperSlotRouting, collect_tir_slot_schema_with_context,
+};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
@@ -256,7 +258,7 @@ fn fold_tir_wrapper_around_child_output(
     let wrapper_fold_input = fold_input.with_view(&wrapper_view);
 
     fold_tir_wrapper_with_input(
-        wrapper_reference.root,
+        wrapper_reference,
         wrapper_template,
         &child_output,
         child_provenance,
@@ -265,6 +267,40 @@ fn fold_tir_wrapper_around_child_output(
         &wrapper_fold_input,
     )
 }
+
+/// Returns one wrapper edge's slot routing, preparing it at most once per fold.
+///
+/// WHAT: reuses the fold context's entry for this exact wrapper reference, or collects
+///       the schema from the immutable store and records its routing for later children.
+/// WHY: wrapper slot schema depends only on the store and the reference's exact context.
+///      Every direct child inheriting the same `$before`/`$after` composite therefore
+///      asks the same structural question. Keying by the exact reference makes per-child
+///      reuse a hash lookup instead of a scan over every prepared edge, without outliving
+///      the fold or retaining entries for templates without inherited wrappers.
+fn prepared_wrapper_slot_routing(
+    fold_context: &mut TirFoldContext<'_>,
+    wrapper_store: &TemplateIrStore,
+    wrapper_reference: &TemplateWrapperReference,
+) -> Result<WrapperSlotRouting, InfrastructureFailure> {
+    if let Some(routing) = fold_context
+        .prepared_wrapper_slot_routing
+        .get(wrapper_reference)
+    {
+        return Ok(routing.clone());
+    }
+
+    let routing = collect_tir_slot_schema_with_context(
+        wrapper_store,
+        wrapper_reference.root,
+        wrapper_reference.context,
+    )?
+    .wrapper_slot_routing();
+    fold_context
+        .prepared_wrapper_slot_routing
+        .insert(*wrapper_reference, routing.clone());
+    Ok(routing)
+}
+
 /// Folds one resolved wrapper template around an already-folded child.
 ///
 /// WHAT: applies the wrapper's effective slot routing while carrying the child's
@@ -272,7 +308,7 @@ fn fold_tir_wrapper_around_child_output(
 /// WHY: wrapper output must preserve resource and site-root boundaries instead of
 ///      flattening the child value back to ordinary text.
 fn fold_tir_wrapper_with_input(
-    wrapper_template_id: TemplateIrId,
+    wrapper_reference: &TemplateWrapperReference,
     wrapper_template: &TemplateIr,
     child_output: &ConstStringValue,
     child_provenance: SyntheticInterfaceProvenance,
@@ -300,9 +336,9 @@ fn fold_tir_wrapper_with_input(
         output_state.enable_projection();
     }
 
-    let schema = collect_tir_slot_schema(wrapper_store, wrapper_template_id)?;
+    let routing = prepared_wrapper_slot_routing(fold_context, wrapper_store, wrapper_reference)?;
 
-    if !schema.has_any_slots() {
+    if !routing.has_any_slots {
         // Slot-less wrappers keep their content before the inherited child.
         fold_tir_node_into_buffer(
             wrapper_template.root,
@@ -328,15 +364,12 @@ fn fold_tir_wrapper_with_input(
         // Slot-bearing wrappers inject at the loose-fill target first. Named-
         // only wrappers have no target, so their resolved slots are folded and
         // the child is appended after the wrapper content.
-        let fill_target_key = schema.loose_fill_target_key();
-        let insertion =
-            fill_target_key
-                .as_ref()
-                .map_or(FoldInsertion::None, |key| FoldInsertion::Slot {
-                    key,
-                    output: child_output,
-                    projection: child_projection,
-                });
+        let fill_target_key = routing.loose_fill_target_key.as_ref();
+        let insertion = fill_target_key.map_or(FoldInsertion::None, |key| FoldInsertion::Slot {
+            key,
+            output: child_output,
+            projection: child_projection,
+        });
         fold_tir_node_into_buffer(
             wrapper_template.root,
             &mut output_state,

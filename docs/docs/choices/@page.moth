@@ -14,9 +14,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Choices"
-page_description #= "Choice declarations, variants, payload patterns and structural equality in Moth."
-page_head #= language_theme_head
+#[$in title:["Choices"]]
+#[$in description:["Choice declarations, variants, payload patterns and structural equality in Moth."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -33,9 +33,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):choice-declarations]
-        [$insert("title"):Choice declarations]
-        [$insert("advanced"):[choice_declarations]]
+        [$in key:choice-declarations]
+        [$in title:Choice declarations]
+        [$in advanced:[choice_declarations]]
 
         [choice_declarations_basic]
     ]
@@ -43,9 +43,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):variant-construction]
-        [$insert("title"):Variant construction]
-        [$insert("advanced"):[variant_construction]]
+        [$in key:variant-construction]
+        [$in title:Variant construction]
+        [$in advanced:[variant_construction]]
 
         [variant_construction_basic]
     ]
@@ -53,9 +53,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):payload-patterns]
-        [$insert("title"):Payload patterns]
-        [$insert("advanced"):[payload_patterns]]
+        [$in key:payload-patterns]
+        [$in title:Payload patterns]
+        [$in advanced:[payload_patterns]]
 
         [payload_patterns_basic]
     ]
@@ -63,9 +63,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):choice-equality]
-        [$insert("title"):Choice equality]
-        [$insert("advanced"):[choice_equality]]
+        [$in key:choice-equality]
+        [$in title:Choice equality]
+        [$in advanced:[choice_equality]]
 
         [choice_equality_basic]
     ]
@@ -73,9 +73,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../structs/]
-        [$insert("previous_title"):Structs]
-        [$insert("next_path"):../errors/]
-        [$insert("next_title"):Errors, options and assertions]
+        [$in previous_path:../structs/]
+        [$in previous_title:Structs]
+        [$in next_path:../errors/]
+        [$in next_title:Errors, options and assertions]
     ]
 ]

@@ -35,7 +35,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::template
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, PublicConstTemplate, PublicConstTemplateKind, PublicConstTemplatePiece,
-    PublicConstTemplateSlot, PublicTemplateSlotKey,
+    PublicConstTemplateSlot, PublicTemplateSlotKey, project_const_template_default,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -208,8 +208,8 @@ pub(crate) fn const_template_value_from_projection(
             })
         }
 
-        // A wrapper stays visible to HIR through its folded string while its structured pieces
-        // remain available to the public interface.
+        // A wrapper keeps its folded string while its structured pieces remain available to the
+        // public interface.
         TemplateConstValueKind::WrapperTemplate => {
             let folded = projected.folded.unwrap_or_else(|| {
                 crate::compiler_bug!(
@@ -220,18 +220,16 @@ pub(crate) fn const_template_value_from_projection(
             Ok(ConstTemplateValue::Public {
                 template: public,
                 kind: ConstValueKind::TemplateWrapper,
-                hir_visible: true,
                 folded: Some(folded),
                 provenance: projected.provenance,
             })
         }
 
-        // INVARIANT: `$insert(..)` helpers are composition inputs, not values. They keep their
-        // public projection and stay out of the HIR constant handoff.
+        // INVARIANT: `$in name: ...` helpers are composition inputs, not values. They keep their
+        // public projection without a folded string.
         TemplateConstValueKind::SlotInsertHelper => Ok(ConstTemplateValue::Public {
             template: public,
             kind: ConstValueKind::SlotInsertTemplate,
-            hir_visible: false,
             folded: None,
             provenance: projected.provenance,
         }),
@@ -495,8 +493,23 @@ fn project_slot(
         )
     })?;
 
+    let (default, default_provenance) = match placeholder.default {
+        Some(value) => {
+            let (value, provenance) = project_const_template_default(
+                &*fold_context.const_values,
+                value,
+                module_resources,
+                &*fold_context.string_table,
+            )?;
+            (Some(value), provenance)
+        }
+        None => (None, SyntheticInterfaceProvenance::empty()),
+    };
+
     Ok(PublicConstTemplateSlot {
         key: project_slot_key(&placeholder.key, fold_context.string_table),
+        default,
+        default_provenance,
         applied_child_wrappers: project_wrapper_set(
             view,
             placeholder.applied_child_wrapper_set,

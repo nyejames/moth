@@ -1,9 +1,9 @@
 @access-and-aliasing content as reference_content
 @styles navbar, section, theme_head, sidebar, init_docs_sidebar
 
-page_title #= "Access and aliasing"
-page_description #= "How Moth shares, copies and requests exclusive access to values."
-page_head #= theme_head
+#[$in title:["Access and aliasing"]]
+#[$in description:["How Moth shares, copies and requests exclusive access to values."]]
+#[$in head:[theme_head]]
 
 #[navbar]
 #[sidebar]

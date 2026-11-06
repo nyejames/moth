@@ -15,7 +15,7 @@ Read the opening authority text and `Architectural invariants` in both documents
 | Task | Read here | Compiler companion |
 |---|---|---|
 | Commands, capabilities and tooling | `Selected command and capability surface` and `Command and tooling policies` | New semantic capability or validation-root owners |
-| Config, inputs, project globals and root metadata | Relevant `Project bootstrap` subsection | Stage 4 constants/directives and config service |
+| Config, inputs, project globals, root fragments and builder slots | Relevant `Project bootstrap` subsection | Stage 4 constants/directives and config service |
 | Discovery, ownership and source preparation | `Source indexing and source sets` and `Prepared-source orchestration` | Module input and Stage 1-3 contracts |
 | Modules, packages, facades and namespaces | Relevant `Project and package topology` subsection | Stable identities and public interfaces |
 | Compile waves, publication and failures | `Deterministic scheduling and graph outcomes` | Module outcomes and diagnostics/identity |
@@ -84,7 +84,7 @@ The source identity is registered upfront. Its live span owner survives config a
 
 Allowed source consists of earlier private helper constants, explicit `$config` bindings, exactly one `$project` invocation and the active builder's required config invocation. Helpers may use scalar/optional values, anonymous const records, supported folded collections and folded templates.
 
-Reject source dependency clauses before path resolution, authored file-value paths, runtime or mutable declarations, functions, named support types, traits/conformances, public exports, standalone output templates, page fragments, `$page`, nested config sources and inactive-builder settings retained as a holding area.
+Reject source dependency clauses before path resolution, authored file-value paths, runtime or mutable declarations, functions, named support types, traits/conformances, public exports, standalone output templates, page fragments, root-purpose directives such as `$entry`, nested config sources and inactive-builder settings retained as a holding area.
 
 Config-local helpers do not become declarations visible to project modules. Only specialised build interfaces publish folded settings. Synthetic single-file operations use explicit synthetic configuration without inventing source directives or implicit input providers.
 
@@ -184,21 +184,19 @@ An authored HTML directory config contains exactly one closed `$html_builder` in
 
 The canonical project-config reference owns its signature, positional order and defaults. Shared argument validation fills defaults once. The typed HTML settings owner checks domains such as URL style, origin path, non-empty language/present favicon and output-root containment/profile conflicts.
 
-Settings consume permitted folded values without declaring inputs implicitly. An untracked favicon URL may be a folded String. Tracked resource paths belong in normal-root `$page` metadata because config has no source graph.
+Settings consume permitted folded values without declaring inputs implicitly. An untracked favicon URL may be a folded String. Tracked resource paths belong in direct root builder slots because config has no source graph.
 
-Project settings and page metadata have distinct signatures. Their explicit document fallback rules do not create a generic cross-scope inheritance or merge system. Multi-builder configuration requires structural selection rather than silently ignoring inactive directives.
+Project settings and builder slot values have distinct signatures. Their explicit document fallback rules do not create a generic cross-scope inheritance or merge system. Multi-builder configuration requires structural selection rather than silently ignoring inactive directives.
 
-### Root metadata and purpose directives
+### Builder slots and future root purpose
 
-`$page` declares HTML root metadata and purpose, not an embedded config source or a modifier on the next declaration. It is valid once at the top level of a normal module root, or the explicitly selected synthetic single-file root. It is invalid in ordinary helper files, API-only roots, config, functions, branches, loops, initialisers, templates and export declaration groups.
+HTML document metadata is not a root directive. The active builder registers a read-only set of named destinations. A direct top-level const `#[$in name: ...]` on an active entry root contributes to one registered destination. The compiler validates the name, folds the contribution to a structural String and records its destination, authored span and runtime insertion index in the existing fragment handoff. It does not know HTML slot meaning. Nested or aliased inserts remain ordinary template composition.
 
-The directive describes the whole root regardless of position. Its arguments use ordinary file visibility, including earlier constants, dependency-bound constants, explicit project globals and resolved source inputs. Same-file forward references remain invalid. The canonical `entry-config.mtf` owns the closed argument signature.
+The HTML builder interprets `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and `head`; the default body destination stays on the ordinary fragment lane. Scalar contributions concatenate in source order, and an explicit empty value counts as supplied. An absent title falls back through the route and then the project name with the configured prefix and postfix. An absent description emits no element, while absent language, favicon and body style use builder settings. Title text and attribute values are escaped. Each `stylesheets` contribution must identify exactly one tracked CSS origin, and the builder keeps the first contribution for each stable origin. Complete `head` contributions deduplicate after URL rendering and are inserted after built-in head content. Runtime top-level templates contribute only to the body; runtime named builder slots are unsettled.
 
-Headers retain invocation and structural references. Module AST checks/folds it once into non-HIR metadata with authored argument locations. It creates no public declaration, runtime value or project global. Every selected module validates its own metadata, even when used only as a dormant provider. Consumers never inherit provider page metadata.
+The earlier `$page` proposal is superseded and is not an accepted directive. A general `$entry` root purpose will make HTML entry selection explicit and remains deferred. It will apply to the whole normal root, create no second entry or per-file compilation unit and use authored activity rather than optimised HIR liveness or rendered length. An inactive root `if`, a runtime binding that folds and an empty direct fragment retain their authored role. Compile-time declarations and semantically classified documentation/comment templates are exempt. Entry filtering must retain unpurposed executable candidates for diagnostics rather than dropping them, and a dependency cannot legalise invalid root work by leaving it dormant. `$test` remains a separate future purpose with its own selection, lifecycle and failure contract.
 
-Authored root runtime work or direct output requires a purpose with an applicable consumer. This uses authored activity, not optimised HIR liveness or rendered length. An inactive root `if`, a runtime binding that folds and an empty direct fragment retain their authored role. Compile-time declarations and semantically classified documentation/comment templates are exempt.
-
-Entry filtering retains unpurposed executable candidates for diagnostics rather than dropping them. A dependency cannot legalise invalid root work by leaving it dormant. Metadata presence alone is not execution permission. The accepted `$test` direction still needs its own selection, lifecycle and failure contract and cannot be assumed to supply one.
+The current HTML builder selects an entry from authored root activity: a non-trivial top-level runtime body, a const fragment or a runtime fragment. A direct named builder contribution is const-fragment activity, so a metadata-only root still produces a document. Named contributions keep their tracked resources live without a rendered-HTML scan.
 
 ### Fixed bootstrap order
 
@@ -227,7 +225,7 @@ Structural `$feature` selection must use bootstrap-available facts and act befor
 
 Stage 0 builds one canonical source index per project/package boundary from the selected directory. A directory project's source root is the selected directory itself; there is no configurable entry directory beneath it. A nested module can be compiled independently by selecting its directory as a new root. Single-file compilation is a separate synthetic-module mode.
 
-The index inventories optional normal and support root surfaces per rooted directory, nearest ownership, supported source-kind candidates, provider-owned files, logical source/namespace identities, path collisions and deterministic order. It does not scan arbitrary `.moth` files as page entries. Root-purpose selection consumes retained facts.
+The index inventories optional normal and support root surfaces per rooted directory, nearest ownership, supported source-kind candidates, provider-owned files, logical source/namespace identities, path collisions and deterministic order. It does not scan arbitrary `.moth` files as page entries. Entry selection consumes retained root-activity facts; a future root-purpose design would add purpose facts to the same lane.
 
 A directory component below the selected build root whose final filename starts with `_` is excluded from the entire compilation: normal and support roots, helpers, `.mtf`, resources, check-only inventory, providers, dependency resolution, incremental watches and other discovered inputs. The explicitly selected root is exempt for that root component only. Check both lexical components and canonical ancestry so a visible symlink alias cannot reveal a hidden physical subtree. Retain independently justified non-source skips such as `.git`, `target`, `node_modules` and `.cache`; do not skip visible `dev`, `release`, `dist` or `build` by name.
 
@@ -253,7 +251,7 @@ A check-only unit cannot add declarations to the canonical artefact/interface or
 
 ## Prepared-source orchestration
 
-Stage 0 schedules compiler-owned tokenization/header preparation and retains its result for graph discovery and later compilation. It consumes structural provider/file references, input-contract shells and root-purpose facts, passing the remaining syntax into the compiler unchanged. Stage 2 defines the payload and four reference classes.
+Stage 0 schedules compiler-owned tokenization/header preparation and retains its result for graph discovery and later compilation. It consumes structural provider/file references, input-contract shells and retained root-activity facts, passing the remaining syntax into the compiler unchanged. A future root purpose will reuse the same retained lane. Stage 2 defines the payload and four reference classes.
 
 Preparation happens once for a source in a preparation lane, then all consumers in that lane reuse it. A separate canonical/check-only analysis may use another lane without creating another physical source identity. Such work appends spans through the same live source-local owner. This is distinct from repeatedly parsing the same source to reconstruct graph or semantic facts.
 
@@ -284,7 +282,7 @@ Content sources may contain more references, so discovery grows the selected set
 
 Deduplicate membership by canonical source identity, not authored spelling. Keep every reference location for diagnostics. Multiple references reuse one content preparation. Repeated discovery is not a cycle. Actual synthetic-content dependency cycles belong to local ordering. Final order and diagnostics are independent of worklist insertion order.
 
-Stage 0 never binds symbols, orders local declarations or enters executable AST/HIR/borrow analysis. Input contracts and root purposes use retained metadata, not a second scanner. Provider discovery that mutates shared identities/caches/tables stays serial unless it supplies deterministic worker deltas and remapping.
+Stage 0 never binds symbols, orders local declarations or enters executable AST/HIR/borrow analysis. Input contracts and root activity use retained metadata, not a second scanner. A future root purpose will reuse the same lane. Provider discovery that mutates shared identities/caches/tables stays serial unless it supplies deterministic worker deltas and remapping.
 
 ## Project and package topology
 
@@ -296,7 +294,7 @@ A rooted directory is one structural module with one `ModuleId` and shared owned
 
 The normal and support roots have separate role-qualified semantic origins, public interfaces and dependency edges. Helper files keep one role-neutral origin and belong to the one structural module. Neither root may import the other, including through direct root paths, alias paths, package lookup or re-export. A successful artifact publishes exactly the surface pair declared by its structural graph: a paired module owns both interfaces, while a single-root module owns only its primary interface. Publication and boundary validation reject any missing, extra or wrongly typed secondary interface. Any diagnostic invalidates both surfaces before either is published.
 
-Normal roots may own dormant runtime work/fragments. `$page` selects HTML entry purpose without changing module identity or making helpers independent entries. Compiler root-role rules define API-only restrictions and implicit entry. Stage 0 ensures selected normal roots complete local semantic validation before activation, including unpurposed-work diagnostics.
+Normal roots may own dormant runtime work/fragments. The current HTML builder selects an entry from that activity without changing module identity or making helpers independent entries. A future `$entry` root purpose will make the selection explicit. Compiler root-role rules define API-only restrictions and implicit entry. Stage 0 ensures selected normal roots complete local semantic validation before activation.
 
 ### Module-root-relative dependency clauses
 
@@ -503,7 +501,7 @@ A linkable `ProjectCompilation` contains the canonical structure, project global
 
 Build compiles the union required by selected artefact entries, any selected project package surface, transitive source providers, required Core/Builder/dependency packages and generated work. After successful compilation it performs link/target/memory validation, lowering and owned output emission.
 
-HTML application build requires at least one `$page` below the selected project directory, not necessarily a homepage. Synthetic single-file HTML output requires `$page` on that root. A package surface is not an implicit page.
+Current HTML application build requires at least one artefact-emitting root and a homepage at the selected project directory. Synthetic single-file HTML output uses the explicitly selected root. A package surface is not an implicit page. The deferred `$entry` design will replace the homepage requirement with at least one explicitly purposed entry below the selected project directory.
 
 ### `dev`
 
@@ -515,7 +513,7 @@ Each compilation request uniquely owns its mutable worker state. A long-lived ho
 
 ### `check`
 
-Check compiles every discovered project module below the selected project directory, check-only orphan units, the selected project package surface and required packages/generated work. A valid zero-page tree or declaration-only synthetic root is allowed. Unpurposed root runtime/output still fails.
+Check compiles every discovered project module below the selected project directory, check-only orphan units, the selected project package surface and required packages/generated work. A valid declaration-only tree or synthetic root is allowed. The deferred `$entry` policy will add explicit purpose validation for authored root runtime/output.
 
 Actual linkable roots receive the same selected-target and memory-plan validation as build. Check performs no backend code generation or output writing. Unsupported features in unreachable private functions impose no target failure.
 
@@ -545,15 +543,13 @@ Nested requests converge within the compiler transaction. They create no extra s
 
 ### Entry candidates and selection
 
-Retained `$page` presence identifies an HTML candidate before argument folding, including metadata-only/empty pages and descendant pages not imported by the site root. It becomes an entry only after ordinary module and metadata validation. Entry eligibility requires no non-empty HIR, artificial fragment or generated runtime.
-
-Use the normal-root inventory and retain unpurposed executable candidates for diagnosis. Ordinary files and private dependency-package roots do not become application pages. Runtime work or fragments alone do not select an entry.
+Current HTML entry selection uses retained root activity: a non-trivial root body, const fragments or runtime fragments identify a candidate before builder assembly. A direct named builder contribution is const-fragment activity. The candidate becomes an entry only after ordinary module validation. The deferred `$entry` design will select candidates from explicit root-purpose facts instead. Ordinary files and private dependency-package roots do not become application pages.
 
 A canonical normal module may support multiple entry assemblies under a builder's contract. HTML V1 defines at most one directory-derived route entry per normal module, with no filename-derived page identity or arbitrary route override.
 
 ### Entry assembly
 
-An `EntryAssembly` selects an already compiled normal module's dormant entry, runtime/static fragments, resolved page metadata and entry-owned runtime requirements. It activates only that root, never provider roots reached through dependencies.
+An `EntryAssembly` selects an already compiled normal module's dormant entry, runtime/static fragments, folded builder-slot destinations and entry-owned runtime requirements. It activates only that root, never provider roots reached through dependencies.
 
 Assembly triggers no local parsing, typing, generic inference, HIR construction, borrow checking or local lifetime analysis. Subsequent link-level lifetime validation still instantiates the completed summaries with actual roots/lifecycles. The compiler owns the entry's non-exported contract: built-in `Error!` alongside its fragment-collection success slots, including for a synthetic single-file root. Builders consume the typed outcome and add no error-fragment channel.
 
@@ -579,13 +575,15 @@ The HTML builder owns directory routes, document assembly, browser-runtime polic
 
 ### Entry and fragment assembly
 
-For each validated `$page` entry, the builder plans:
+For each selected entry, the builder plans:
 
 1. Activation of that normal module's compiled dormant root.
 2. Compile-time fragments at their recorded runtime insertion indexes and slots for runtime fragments.
 3. Exactly one invocation of the active entry through the selected runtime path.
 4. Runtime fragment publication in source order, only after that invocation succeeds.
-5. Route HTML and companion outputs from folded page metadata and directory routes.
+5. Resolution of the entry's builder slot plan and route HTML and companion outputs from that plan and the directory route.
+
+The builder slot plan interprets the registered named fragments once. It produces scalar metadata, deduplicated stylesheet `href` values in first-origin order and deduplicated complete `head` HTML. The JavaScript and HTML-Wasm document paths consume the same plan, so metadata, link order and body output stay equivalent.
 
 This is generated runtime behaviour, not execution during semantic compilation. Plain JavaScript and mixed output share one ordinary fragment insertion contract. Templates produce String values and retain structural resource/site-root pieces until their normal output context resolves them. Fragment insertion grants no persistent Wiring observation or event-delivery lifecycle.
 
@@ -635,11 +633,11 @@ Three outcomes stay distinct:
 
 Unknown faults remain unknown startup faults. Normal typed errors use explicit result branches, not this interception path.
 
-A module without `$page` emits no independent page, but its reachable declarations, resources and runtime requirements may contribute to another entry/package. Unpurposed authored root work is still invalid.
+A module that is not selected as an entry emits no independent page, but its reachable declarations, resources and runtime requirements may contribute to another entry/package.
 
-The canonical entry-config and HTML-routing references own document defaults and public metadata shape. A present page title overrides the route/project fallback and receives the initial builder prefix/postfix. Absent fields use documented defaults and `none` differs from a permitted present empty String. Escape title text and attribute values in their output contexts. Insert authored folded `head` as HTML without escaping it or flattening meaningful whitespace. These rules do not form a generic schema merge system.
+The canonical entry-config and HTML-routing references own document defaults and the builder slot contract. A present title contribution overrides the route/project fallback and receives the initial builder prefix/postfix. Absent fields use documented defaults and an explicitly empty contribution differs from an absent slot. Escape title text and attribute values in their output contexts. Each `stylesheets` contribution must identify exactly one tracked CSS origin; the builder keeps the first occurrence of each stable origin and renders its URL relative to the output page. Complete `head` contributions deduplicate after URL rendering, and authored `head` HTML follows built-in head content without escaping or whitespace flattening. These rules do not form a generic schema merge system.
 
-Runtime `io.set_title` sets the title of the current user-facing host surface and requires an advertised title capability. HTML-JS advertises it and realises it as the live document title. The call changes live title text without reapplying initial prefix/postfix, changing routes, mutating folded metadata or rewriting static outputs. A JavaScript host that doesn't advertise the capability receives the same explicit capability rejection as another unsupported target, never a silent no-op.
+Runtime `io.set_title` sets the title of the current user-facing host surface and requires an advertised title capability. HTML-JS advertises it and realises it as the live document title. The call changes live title text without reapplying initial prefix/postfix, changing routes, mutating builder slot metadata or rewriting static outputs. A JavaScript host that doesn't advertise the capability receives the same explicit capability rejection as another unsupported target, never a silent no-op.
 
 ### Mixed-target planning and validation
 
@@ -776,7 +774,7 @@ Preparation/semantic validation never read or hash ordinary resource contents. O
 
 ### Exact resource unions
 
-Entry unions include selected entry, reachable source/generated functions, runtime/static fragments, selected page metadata and reachable provider runtime requirements. Preserve authored metadata/use spans for diagnostics.
+Entry unions include selected entry, reachable source/generated functions, runtime/static fragments, selected builder slot contributions and reachable provider runtime requirements. Preserve authored metadata/use spans for diagnostics.
 
 Package unions include selected exports, resource-bearing exported folded values, reachable implementations and provider runtime requirements allowed by that target. Compute unions from link facts and metadata, without rescanning HIR. Unused private resources contribute nothing.
 

@@ -1,0 +1,16 @@
+-- Neighbor regression: the receiver's own structural `label` slot stays
+-- addressable even though the receiver root fixes an independently planned
+-- runtime child. The outer application targets `label`; the nested plan keeps
+-- ownership of its `tone` decorator and still renders its own runtime body.
+-- This proves the foreign-target rejection is not an over-broad refusal of
+-- named content whenever a nested runtime plan is present.
+
+identity |value String| -> String:
+    return value
+;
+
+inner #= [$before = [$html:<b style="[$slot tone]">], $after = [$html:</b>]:[$slot]]
+
+rows = [:$html:<div data-label="[$slot label]">[inner:[$in tone:inner-red][:[identity("body")]]]</div>[$slot]]
+
+[rows:[$in label:[identity("outer-label")]][:outer-body]]

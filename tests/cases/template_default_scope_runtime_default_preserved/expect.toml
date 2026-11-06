@@ -1,0 +1,9 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<h1>Untitled</h1><section>Runtime body</section><main>Outer body</main>"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<h1>Untitled</h1><section>Runtime body</section><main>Outer body</main>"

@@ -16,9 +16,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Values and bindings"
-page_description #= "Bindings, mutability, shared access, explicit copies and shadowing in Moth."
-page_head #= language_theme_head
+#[$in title:["Values and bindings"]]
+#[$in description:["Bindings, mutability, shared access, explicit copies and shadowing in Moth."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -36,9 +36,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):bindings]
-        [$insert("title"):Bindings]
-        [$insert("advanced"):[bindings]]
+        [$in key:bindings]
+        [$in title:Bindings]
+        [$in advanced:[bindings]]
 
         [bindings_basic]
     ]
@@ -46,9 +46,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):mutable-bindings]
-        [$insert("title"):Mutable bindings]
-        [$insert("advanced"):[mutable_bindings]]
+        [$in key:mutable-bindings]
+        [$in title:Mutable bindings]
+        [$in advanced:[mutable_bindings]]
 
         [mutable_bindings_basic]
     ]
@@ -56,9 +56,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):shared-access]
-        [$insert("title"):Shared access]
-        [$insert("advanced"):[shared_access]]
+        [$in key:shared-access]
+        [$in title:Shared access]
+        [$in advanced:[shared_access]]
 
         [shared_access_basic]
     ]
@@ -66,9 +66,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):explicit-copies]
-        [$insert("title"):Explicit copies]
-        [$insert("advanced"):[explicit_copies]]
+        [$in key:explicit-copies]
+        [$in title:Explicit copies]
+        [$in advanced:[explicit_copies]]
 
         [explicit_copies_basic]
     ]
@@ -76,9 +76,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):shadowing]
-        [$insert("title"):Shadowing]
-        [$insert("advanced"):[shadowing]]
+        [$in key:shadowing]
+        [$in title:Shadowing]
+        [$in advanced:[shadowing]]
 
         [shadowing_basic]
     ]
@@ -92,9 +92,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../language-overview/]
-        [$insert("previous_title"):Language basics]
-        [$insert("next_path"):../numbers/]
-        [$insert("next_title"):Numbers]
+        [$in previous_path:../language-overview/]
+        [$in previous_title:Language basics]
+        [$in next_path:../numbers/]
+        [$in next_title:Numbers]
     ]
 ]

@@ -1,0 +1,8 @@
+title #= "Named fallback"
+
+card #= [:named=[$slot title = title]|cast=[$slot title = cast 42]|again=[$slot title = "Again fallback"]|pos=[$slot 1 = "Positional fallback"]|pos_again=[$slot 1 = "Second positional fallback"]|body=[$slot = "Body fallback"]|missing=[$slot absent]]
+
+plain #= [card]
+filled #= [card, "POS":[$in title:Filled]]
+rendered #= [:plain=[plain]|filled=[filled]]
+[rendered]

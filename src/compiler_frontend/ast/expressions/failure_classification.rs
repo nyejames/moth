@@ -1845,6 +1845,7 @@ fn classify_owned_runtime_node(
         // Naming them here keeps this classifier exhaustive without duplicating that recursion.
         OwnedRuntimeTemplateNode::Sequence { .. }
         | OwnedRuntimeTemplateNode::Text { .. }
+        | OwnedRuntimeTemplateNode::ConstantText { .. }
         | OwnedRuntimeTemplateNode::ChildTemplate { .. }
         | OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput

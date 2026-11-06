@@ -21,14 +21,14 @@ Empirical checks ran through `moth check` on minimal projects: tight `<`/`>` com
 ## Authorities read
 
 - `docs/compiler-design-overview.md`: opening authority text, `Architectural invariants`, `Frontend stages > Stage 1: tokenization`
-- `docs/src/developer-docs/language/overview.mtf` (reference routing)
-- `docs/src/docs/numbers/numeric-literals.mtf` - numeric literal contract
-- `docs/src/docs/numbers/operators.mtf` - symbolic operator and compound-assignment spacing contract
-- `docs/src/docs/language-overview/strings-and-characters.mtf` - escapes, chars, templates, raw-backtick status
-- `docs/src/docs/language-overview/comments-and-naming.mtf` - comments, template-body `--` text, naming
-- `docs/src/docs/generics/generic-declarations.mtf` and `type-application.mtf` + `generic-inference.mtf` - generics use `type` declarations and `of` application; explicit call-site type application is rejected
-- `docs/src/docs/cheatsheet/moth-language-cheatsheet.mtf` (value/char/string orientation)
-- `docs/src/docs/progress/@page.moth` rows for source kinds and string escape coverage
+- `docs/developer-docs/language/overview.mtf` (reference routing)
+- `docs/docs/numbers/numeric-literals.mtf` - numeric literal contract
+- `docs/docs/numbers/operators.mtf` - symbolic operator and compound-assignment spacing contract
+- `docs/docs/language-overview/strings-and-characters.mtf` - escapes, chars, templates, raw-backtick status
+- `docs/docs/language-overview/comments-and-naming.mtf` - comments, template-body `--` text, naming
+- `docs/docs/generics/generic-declarations.mtf` and `type-application.mtf` + `generic-inference.mtf` - generics use `type` declarations and `of` application; explicit call-site type application is rejected
+- `docs/docs/cheatsheet/moth-language-cheatsheet.mtf` (value/char/string orientation)
+- `docs/docs/progress/@page.moth` rows for source kinds and string escape coverage
 - `AGENTS.md`, `docs/roadmap/audit-guide.md`, `audit-kinds/README.md`, `audit-kinds/correctness.md`
 
 ## Existing findings and active plans checked
@@ -46,7 +46,7 @@ Empirical checks ran through `moth check` on minimal projects: tight `<`/`>` com
 
 `less_than_is_generic_angle_start` (`lexer.rs:411-421`) suppresses the binary-operator spacing diagnostic whenever the previous token is a `Symbol`, there is no whitespace before `<`, and the next char is uppercase. `greater_than_is_generic_angle_end` (`lexer.rs:423-431`) does the same when the next char is `(` or `,`. Both guards run before the `require_symbolic_spacing` calls at `lexer.rs:1062-1074` and `lexer.rs:1098-1110`.
 
-The canonical contract is unconditional: "Symbolic binary operators require spaces on both sides" (`docs/src/docs/numbers/operators.mtf:54`, with `total=left+right` listed as INVALID). Generic syntax never uses angle brackets: generic declarations use the `type` keyword (`docs/src/docs/generics/generic-declarations.mtf`), instances use `of` (`type-application.mtf:19`), and explicit call-site type application such as `identity<Int>(42)` is rejected (`generic-inference.mtf:100-108`). So no legal construct requires the suppression.
+The canonical contract is unconditional: "Symbolic binary operators require spaces on both sides" (`docs/docs/numbers/operators.mtf:54`, with `total=left+right` listed as INVALID). Generic syntax never uses angle brackets: generic declarations use the `type` keyword (`docs/docs/generics/generic-declarations.mtf`), instances use `of` (`type-application.mtf:19`), and explicit call-site type application such as `identity<Int>(42)` is rejected (`generic-inference.mtf:100-108`). So no legal construct requires the suppression.
 
 Empirically, through `moth check` on a minimal project:
 
@@ -62,7 +62,7 @@ Strongest counter-explanation: the suppression deliberately routes illegal gener
 
 #### Violated contract or cost
 
-`docs/src/docs/numbers/operators.mtf:54-68` - symbolic binary operators require whitespace on both sides. Also the Stage 1 ownership statement (`docs/compiler-design-overview.md:646`, "symbolic operator ... spacing diagnostics"): the tokenizer owns this rule and its suppression lets violating source through silently. The same tight form is rejected for lowercase operands, so the accepted surface is internally inconsistent (`a<b` errors, `a<B` compiles).
+`docs/docs/numbers/operators.mtf:54-68` - symbolic binary operators require whitespace on both sides. Also the Stage 1 ownership statement (`docs/compiler-design-overview.md:646`, "symbolic operator ... spacing diagnostics"): the tokenizer owns this rule and its suppression lets violating source through silently. The same tight form is rejected for lowercase operands, so the accepted surface is internally inconsistent (`a<b` errors, `a<B` compiles).
 
 #### Root owner
 

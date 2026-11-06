@@ -8,9 +8,9 @@
     sidebar,
     init_docs_sidebar
 
-page_title #= "Core math"
-page_description #= "F64 math constants and helper functions."
-page_head #= language_theme_head
+#[$in title:["Core math"]]
+#[$in description:["F64 math constants and helper functions."]]
+#[$in head:[language_theme_head]]
 
 #[navbar]
 #[sidebar]
@@ -26,9 +26,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_level:
-        [$insert("key"):math-helpers]
-        [$insert("title"):Math helpers]
-        [$insert("advanced"):[math_advanced]]
+        [$in key:math-helpers]
+        [$in title:Math helpers]
+        [$in advanced:[math_advanced]]
 
         [math_basic]
     ]
@@ -36,9 +36,9 @@ init_docs_sidebar()!
 
 #[section:
     [doc_pager:
-        [$insert("previous_path"):../collections/]
-        [$insert("previous_title"):Core collections]
-        [$insert("next_path"):../text/]
-        [$insert("next_title"):Core text]
+        [$in previous_path:../collections/]
+        [$in previous_title:Core collections]
+        [$in next_path:../text/]
+        [$in next_title:Core text]
     ]
 ]

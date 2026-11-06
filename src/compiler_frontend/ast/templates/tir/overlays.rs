@@ -12,7 +12,7 @@
 //! Expression and wrapper-context payloads are production surfaces. The
 //! slot-resolution dimension remains part of the canonical exact-view contract
 //! even though no current production path allocates it.
-//! Wrapper-context overlays carry inherited `$children(..)` wrapper sets and
+//! Wrapper-context overlays carry inherited child-wrapper sets and
 //! `$fresh` suppression state for individual child-template occurrences. They
 //! are read by exact-view consumers so finalization can apply inherited wrappers
 //! without mutating shared child-template nodes.

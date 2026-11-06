@@ -1,5 +1,6 @@
 use super::*;
 use crate::compiler_frontend::ast::const_eval::FoldServices;
+use crate::compiler_frontend::ast::const_values::store::ConstValueMetadata;
 
 // ------------------------------
 //  Slot-bearing template classification uses effective view
@@ -9,7 +10,7 @@ use crate::compiler_frontend::ast::const_eval::FoldServices;
 ///
 /// WHAT: gives the resolver a module-local root plus the slot-resolution
 ///       overlay that makes the template an effective wrapper value.
-/// WHY: const-fact classification must preserve the overlay-backed wrapper
+/// WHY: template classification must preserve the overlay-backed wrapper
 ///      category rather than reading only the structural root.
 fn build_resolved_slot_template_store() -> (Template, Rc<RefCell<TemplateIrStore>>) {
     let location = None;
@@ -99,12 +100,216 @@ fn slot_bearing_module_constant_classifies_through_effective_tir_view() {
             value,
             ConstTemplateValue::Public {
                 kind: ConstValueKind::TemplateWrapper,
-                hir_visible: true,
                 folded: Some(_),
                 ..
             }
         ),
         "a wrapper module constant keeps its public projection and its folded string"
+    );
+}
+
+#[test]
+fn const_template_projection_keeps_per_occurrence_public_defaults() {
+    let location = None;
+    let mut strings = StringTable::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let name = strings.intern("title");
+    let member = SyntheticInterfaceMemberIdentity::new(
+        SyntheticInterfaceClass::ProjectContext,
+        "source-config",
+        "title",
+    );
+    let provenance = SyntheticInterfaceProvenance::single(member.clone());
+    let first_default = const_values
+        .insert_value(
+            ConstValueMetadata {
+                synthetic_interface_provenance: provenance.clone(),
+                ..ConstValueMetadata::resolved(
+                    builtin_type_ids::STRING,
+                    location,
+                    ValueMode::ImmutableOwned,
+                )
+            },
+            ConstValuePayload::String(ConstStringValue::Text(strings.intern("first"))),
+        )
+        .expect("first default inserts");
+    let second_default = const_values
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Text(strings.intern("second"))),
+            location,
+        )
+        .expect("second default inserts");
+
+    let mut producer_store = TemplateIrStore::new();
+    let template_id = {
+        let mut builder = TemplateIrBuilder::new(&mut producer_store);
+        let first_slot =
+            builder.push_slot_node_with_default(SlotKey::Named(name), first_default, location);
+        let second_slot =
+            builder.push_slot_node_with_default(SlotKey::Named(name), second_default, location);
+        let root = builder.push_sequence_node(vec![first_slot, second_slot], location);
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            location,
+        )
+    };
+    let template = template_with_reference(
+        TemplateTirReference {
+            root: template_id,
+            phase: TemplateTirPhase::Composed,
+            context: TemplateViewContext::default(),
+        },
+        location,
+    );
+
+    let projected = project_const_template_value(
+        &template,
+        &producer_store,
+        &mut expression_builder,
+        &mut const_values,
+        FoldServices::new(&mut strings, None, None),
+        DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        None,
+    )
+    .expect("defaulted template should project");
+    let public = projected
+        .public
+        .expect("foldable defaulted template should have a public projection");
+
+    let [
+        PublicConstTemplatePiece::Slot(first),
+        PublicConstTemplatePiece::Slot(second),
+    ] = public.pieces.as_slice()
+    else {
+        panic!("public projection must retain both occurrences");
+    };
+    assert_eq!(
+        first.default,
+        Some(OwnedFoldedString::Text("first".to_owned())),
+        "the first occurrence keeps its own fallback"
+    );
+    assert_eq!(
+        second.default,
+        Some(OwnedFoldedString::Text("second".to_owned())),
+        "repeated occurrences of one key keep independent fallbacks"
+    );
+    assert_eq!(
+        first.default_provenance.members(),
+        &[member],
+        "the first occurrence keeps its default constant's stable provenance"
+    );
+    assert!(
+        second.default_provenance.is_empty(),
+        "an occurrence default with no synthetic dependency keeps empty provenance"
+    );
+
+    let mut consumer = ConstTemplateProjectionMaterializer::new();
+    let mut consumer_strings = StringTable::new();
+    let mut consumer_constants = ConstValueStore::default();
+    let imported = materialize_public_folded_value(
+        &mut consumer,
+        &PublicFoldedValue::ConstTemplate {
+            template: public.clone(),
+            folded: None,
+        },
+        builtin_type_ids::STRING,
+        &mut consumer_constants,
+        &mut consumer_strings,
+        location,
+    )
+    .expect("consumer const-template materialization should succeed");
+    let Some(ConstValuePayload::Template {
+        template: imported_template,
+        ..
+    }) = consumer_constants.payload(imported)
+    else {
+        panic!("consumer const-template materialization should keep the template payload");
+    };
+    assert_eq!(
+        imported_template, &public,
+        "import projection must keep occurrence defaults and their stable provenance intact"
+    );
+}
+
+#[test]
+fn const_template_projection_keeps_structural_default_resource_identity() {
+    let location = None;
+    let mut strings = StringTable::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut producer_resources = ModuleResourceTable::new();
+    let module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("slot-default-projection-test"),
+        "pages".to_owned(),
+        ModuleRootRole::Normal,
+    );
+    let resource_origin = StableResourceOriginId::module_owned(
+        module_origin,
+        PortableResourcePath::from_relative_logical_path(Path::new("assets/logo.svg"))
+            .expect("test resource path should be portable"),
+    );
+    let resource_id = producer_resources.intern_origin(resource_origin.clone(), location);
+    let default = const_values
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Pieces(vec![
+                ConstStringPiece::Resource(resource_id),
+                ConstStringPiece::SiteRoot,
+            ])),
+            location,
+        )
+        .expect("structural default inserts");
+
+    let mut producer_store = TemplateIrStore::new();
+    let template_id = {
+        let mut builder = TemplateIrBuilder::new(&mut producer_store);
+        let slot = builder.push_slot_node_with_default(SlotKey::Default, default, location);
+        builder.finish_template(
+            slot,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::default(),
+            location,
+        )
+    };
+    let template = template_with_reference(
+        TemplateTirReference {
+            root: template_id,
+            phase: TemplateTirPhase::Composed,
+            context: TemplateViewContext::default(),
+        },
+        location,
+    );
+
+    let projected = project_const_template_value(
+        &template,
+        &producer_store,
+        &mut expression_builder,
+        &mut const_values,
+        FoldServices::new(&mut strings, None, None),
+        DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        Some(&producer_resources),
+    )
+    .expect("structural default should project");
+    let public = projected
+        .public
+        .expect("defaulted template should have a public projection");
+
+    let [PublicConstTemplatePiece::Slot(slot)] = public.pieces.as_slice() else {
+        panic!("public projection must retain the defaulted occurrence");
+    };
+    assert_eq!(
+        slot.default,
+        Some(OwnedFoldedString::Pieces(vec![
+            OwnedFoldedStringPiece::Resource(resource_origin),
+            OwnedFoldedStringPiece::SiteRoot,
+        ])),
+        "the occurrence fallback must keep its structural resource identity"
     );
 }
 
