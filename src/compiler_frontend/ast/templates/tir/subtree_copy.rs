@@ -18,6 +18,7 @@ use crate::compiler_frontend::ast::templates::tir::node::{
     RetainedControlFlowRenderUnit, RetainedNumericIntakeRole, TemplateIrNode, TemplateIrNodeKind,
     TemplateLoopHeaderExpressionSites,
 };
+use crate::compiler_frontend::ast::templates::tir::slot_layout::template_has_runtime_slot_plan;
 use crate::compiler_frontend::ast::templates::tir::slot_plan::convert_runtime_slot_site;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::{
@@ -397,7 +398,12 @@ fn copy_tir_node_with_active_slot_plan(
         }
 
         TemplateIrNodeKind::Slot { mut placeholder } => {
-            if let Some(plan_id) = active_slot_plan {
+            // A closed occurrence is a fixed fallback, not a site of the enclosing
+            // plan. Keep its slot node and remap its identity like any other copied
+            // slot, but do not consume an active site.
+            if !placeholder.closed
+                && let Some(plan_id) = active_slot_plan
+            {
                 let site_id = copy_state
                     .next_runtime_slot_site_for_key(plan_id, &placeholder.key, store)
                     .ok_or_else(|| {
@@ -859,7 +865,7 @@ fn copy_tir_template_with_active_slot_plan(
     copy_state: &mut TirCopyState,
     mut identity_remap: Option<&mut TirCopyIdentityRemap>,
 ) -> Result<(TemplateIrId, Option<CopyIdentityScope>), TemplateError> {
-    let (source_root, has_runtime_slot_plan) = {
+    let (source_root, is_runtime_plan_application) = {
         let source_template = store.get_template(source_template_id).ok_or_else(|| {
             TemplateError::from(InfrastructureFailure::internal(
                 CompilerStage::AstConstruction,
@@ -868,14 +874,15 @@ fn copy_tir_template_with_active_slot_plan(
         })?;
         (
             source_template.root,
-            source_template.runtime_slot_plan.is_some(),
+            template_has_runtime_slot_plan(source_template),
         )
     };
 
-    // Runtime slot handoff templates already resolved their own placeholders.
-    // Copy them under a suppressed active plan so the outer cursor does not leak
-    // into the nested application.
-    let effective_active_slot_plan = if has_runtime_slot_plan {
+    // A runtime-plan application owns its own occurrences. Copy it under a
+    // suppressed active plan so the outer cursor does not leak into it. A
+    // constant-composed template is not a leaf: its closed placeholders keep their
+    // fallbacks while its open contribution slots still consume this plan's sites.
+    let effective_active_slot_plan = if is_runtime_plan_application {
         None
     } else {
         active_slot_plan

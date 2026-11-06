@@ -46,6 +46,7 @@ use crate::compiler_frontend::instrumentation::{
     AstCounter, add_ast_counter, increment_ast_counter,
 };
 use crate::compiler_frontend::paths::module_resources::ResourceId;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::type_coercion::string::fold_expression_to_string;
 
@@ -447,7 +448,7 @@ fn fold_prepared_emission(
         matches!(
             prepared.outcome,
             TemplatePreparationOutcome::SlotInsertHelper
-        ) && !prepared.facts.has_unresolved_slot_occurrences
+        ) && !prepared.facts.has_unfilled_slot_occurrences
     } else {
         matches!(prepared.outcome, TemplatePreparationOutcome::Foldable)
     };
@@ -652,7 +653,7 @@ fn fold_tir_template_with_view(
         projection_pieces,
         ..
     } = emission;
-    fold_conditional_child_wrappers_around_emission(
+    let result = fold_conditional_child_wrappers_around_emission(
         wrapper_references,
         emission,
         provenance,
@@ -660,12 +661,52 @@ fn fold_tir_template_with_view(
         TirWrapperApplicationMode::IfChildEmits,
         fold_context,
         fold_input,
-    )
+    )?;
+
+    Ok(result)
 }
 
 // -------------------------
 //  Node folding
 // -------------------------
+
+/// Appends one resolved constant `String` to a projection piece list without
+/// touching the emission buffer.
+///
+/// WHAT: converts text runs and structural anchors without flattening a resource or
+///       site-root piece into a literal.
+/// WHY: a closed occurrence's fallback is already part of the emission; its public
+///       projection must carry the same structural identity instead of a marker.
+fn append_const_value_projection_pieces(
+    value: &ConstStringValue,
+    output_state: &mut FoldOutputState,
+    string_table: &StringTable,
+) {
+    match value {
+        ConstStringValue::Text(text) => {
+            output_state.append_projection_text(string_table.resolve(*text));
+        }
+        ConstStringValue::Pieces(structural_pieces) => {
+            for piece in structural_pieces {
+                match piece {
+                    ConstStringPiece::Text(text) => {
+                        output_state.append_projection_text(string_table.resolve(*text));
+                    }
+                    ConstStringPiece::Resource(resource) => {
+                        if let Some(pieces) = &mut output_state.projection_pieces {
+                            pieces.push(FoldedConstTemplatePiece::Resource(*resource));
+                        }
+                    }
+                    ConstStringPiece::SiteRoot => {
+                        if let Some(pieces) = &mut output_state.projection_pieces {
+                            pieces.push(FoldedConstTemplatePiece::SiteRoot);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 /// Folds an independent TIR subtree into its own emission.
 ///
@@ -784,31 +825,39 @@ pub(super) fn fold_tir_node_into_buffer(
         }
 
         TemplateIrNodeKind::Slot { placeholder } => {
-            if let FoldInsertion::Slot {
-                key,
-                output,
-                projection,
-            } = insertion
-                && key == &placeholder.key
-            {
-                if output_state.projection_pieces.is_some() {
-                    output_state.append_pieces(projection)?;
+            let occurrence_closed = placeholder.closed;
+
+            if !occurrence_closed {
+                if let FoldInsertion::Slot {
+                    key,
+                    output,
+                    projection,
+                } = insertion
+                    && key == &placeholder.key
+                {
+                    if output_state.projection_pieces.is_some() {
+                        output_state.append_pieces(projection)?;
+                    }
+                    output_state.append_emission_value(output, fold_context.string_table);
+                    output_state.emitted_output = true;
+                    return Ok(());
                 }
-                output_state.append_emission_value(output, fold_context.string_table);
-                output_state.emitted_output = true;
-                return Ok(());
+
+                if insertion.is_aggregate() {
+                    return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
+                        "TIR fold: malformed aggregate wrapper subtree contains a slot.",
+                    )
+                    .into());
+                }
             }
 
-            if insertion.is_aggregate() {
-                return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction,
-                    "TIR fold: malformed aggregate wrapper subtree contains a slot.",
-                )
-                .into());
-            }
-
-            let resolution = fold_input
-                .view
-                .effective_slot_resolution(placeholder.occurrence_id)?;
+            let resolution = if occurrence_closed {
+                None
+            } else {
+                fold_input
+                    .view
+                    .effective_slot_resolution(placeholder.occurrence_id)?
+            };
 
             if let Some(resolution) = &resolution
                 && let TirSlotResolutionKind::Resolved { sources } = &resolution.kind
@@ -835,12 +884,30 @@ pub(super) fn fold_tir_node_into_buffer(
                     resolve_const_string_value(&*fold_context.const_values, default)?;
                 output_state.provenance.merge(&provenance);
                 output_state.append_emission_value(value, fold_context.string_table);
+
+                // A closed occurrence is already fixed for this application. Its public
+                // projection must carry the fallback's structural pieces directly instead
+                // of a marker an importing receiver could fill.
+                if occurrence_closed
+                    && fold_input.projection_enabled
+                {
+                    if output_state.projection_pieces.is_none() {
+                        return Err(InfrastructureFailure::internal(
+                            CompilerStage::AstConstruction,
+                            "TIR fold: closed slot projection lost its piece buffer.",
+                        )
+                        .into());
+                    }
+                    append_const_value_projection_pieces(value, output_state, fold_context.string_table);
+                }
+
                 output_state.emitted_output = true;
             }
 
-            if fold_input.projection_enabled {
-                // The public projection retains the occurrence and its default, so a
-                // rebuilt template can still fall back after composition.
+            if fold_input.projection_enabled && !occurrence_closed {
+                // An open occurrence keeps a marker so the enclosing application can
+                // still route content into it. The application that composed a closed
+                // occurrence already materialized its fallback above.
                 output_state.append_slot(placeholder.occurrence_id);
                 output_state.emitted_output = true;
             }

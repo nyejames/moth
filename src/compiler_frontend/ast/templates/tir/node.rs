@@ -97,8 +97,8 @@ impl TemplateIr {
     /// Creates a top-level TIR template with no wrapper set or slot plan attached.
     ///
     /// WHAT: stores the root node, style, kind, summary, and source span.
-    /// WHY: side-table links (`conditional_child_wrapper_set`, `runtime_slot_plan`)
-    ///      are attached later by composition or slot-plan materialization.
+    /// WHY: side-table links (`conditional_child_wrapper_set`, `runtime_slot_plan`) are
+    ///      attached later by composition or slot-plan materialization.
     pub(crate) fn new(
         root: TemplateIrNodeId,
         style: Style,
@@ -479,6 +479,18 @@ pub(crate) struct TirSlotPlaceholder {
     /// WHY: some slot directives suppress outer wrappers to avoid double-wrapping
     /// or to force raw child insertion.
     pub(crate) skip_parent_child_wrappers: bool,
+
+    /// Whether this exact occurrence is fixed by the application that composed it.
+    ///
+    /// WHAT: set when constant composition or wrapper filling consumed this
+    ///       occurrence with no routed contribution and an authored fallback. The
+    ///       fallback stays on the placeholder, but no enclosing application may
+    ///       route content into it. Occurrences without a fallback are removed
+    ///       instead of closed.
+    /// WHY: closure belongs to the occurrence, not the template or its key. Embedding
+    ///      it in the placeholder makes it survive node clones and subtree copies and
+    ///      keeps repeated occurrences of one key independently open or closed.
+    pub(crate) closed: bool,
 }
 
 impl TirSlotPlaceholder {
@@ -498,6 +510,7 @@ impl TirSlotPlaceholder {
             applied_child_wrapper_set,
             child_wrapper_set,
             skip_parent_child_wrappers,
+            closed: false,
         }
     }
 }

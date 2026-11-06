@@ -7211,20 +7211,20 @@ The three small opt-level 0 cases the maintainer accepted on 2026-11-01 are unaf
 
 ## Builder slots and template directives (2026-11-06)
 
-The pre-refactor compiler at `919ec4e50` and the implementation after the runtime
-slot fast-path correction were measured on macOS Apple Silicon with
+The pre-refactor compiler at `919ec4e50` and the implementation after the final
+slot-scope corrections were measured on macOS Apple Silicon with
 `just bench-frontend-check` and `just bench-check`. Each used one preflight and
 10 measured iterations. Both trees were dirty with admitted work.
 
 | Workload | Baseline mean ms | Candidate mean ms |
 | --- | ---: | ---: |
-| Frontend template stress | 23.300 | 25.280 |
-| Frontend render-plan churn | 21.243 | 19.881 |
-| CLI template stress | 9.966 | 9.650 |
-| CLI render-plan churn | 9.186 | 9.032 |
-| External-JS imports build | 11.500 | 10.390 |
-| Module-root stress build | 12.004 | 10.450 |
-| External-import churn build | 15.809 | 13.884 |
+| Frontend template stress | 23.300 | 24.648 |
+| Frontend render-plan churn | 21.243 | 18.635 |
+| CLI template stress | 9.966 | 9.598 |
+| CLI render-plan churn | 9.186 | 8.199 |
+| External-JS imports build | 11.500 | 9.697 |
+| Module-root stress build | 12.004 | 9.770 |
+| External-import churn build | 15.809 | 12.863 |
 
 These are not controlled like-for-like comparisons: the cutover migrated
 template syntax, builder slots, common packages and documentation. The benchmark

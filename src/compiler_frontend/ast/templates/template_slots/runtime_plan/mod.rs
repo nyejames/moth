@@ -161,15 +161,21 @@ pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runti
     .build_slot_sites(scratch_tir_root)?;
 
     // The receiver's own occurrence overlay sits outside the copied root, so its
-    // inherited wrapper sets need the same markers directly.
-    let scratch_view_context = fill_receiver_direct_child_names_with_markers(
-        store,
-        expressions,
-        const_values,
-        scratch_view_context,
-        &named_markers,
-        services,
-    )?;
+    // inherited wrapper sets need the same markers directly. A receiver schema with
+    // no named target has nothing to resolve in that overlay, so keep the context
+    // without walking its wrapper sets.
+    let scratch_view_context = if schema.named_slots.is_empty() {
+        scratch_view_context
+    } else {
+        fill_receiver_direct_child_names_with_markers(
+            store,
+            expressions,
+            const_values,
+            scratch_view_context,
+            &named_markers,
+            services,
+        )?
+    };
 
     let slot_plan = TemplateSlotPlan {
         contribution_sources: sources.into_iter().map(|source| source.source).collect(),
@@ -257,10 +263,13 @@ fn fill_receiver_direct_child_names_with_markers(
     named_markers: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
     services: &RuntimeSlotPlanningServices<'_>,
 ) -> Result<TemplateViewContext, TemplateError> {
-    if context.wrapper_context.is_none() || named_markers.is_empty() {
+    if context.wrapper_context.is_none() {
         return Ok(context);
     }
 
+    // An empty marker set still fixes the overlay's unfilled named occurrences;
+    // the plan is a whole-template boundary, so no enclosing application can fill
+    // them after handoff.
     fill_direct_child_wrapper_names_into(
         store,
         expressions,

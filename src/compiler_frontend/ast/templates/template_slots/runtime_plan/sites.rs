@@ -205,7 +205,7 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
         if fill_roots.is_empty()
             && let Some(default) = placeholder.default
         {
-            let default_placeholder = TirSlotPlaceholder::with_wrapper_sets(
+            let mut default_placeholder = TirSlotPlaceholder::with_wrapper_sets(
                 placeholder.key.clone(),
                 self.store.next_slot_occurrence_id(),
                 Some(default),
@@ -213,6 +213,9 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
                 None,
                 false,
             );
+            // The plan selected this fallback, so no later injection may fill the
+            // occurrence the site tree materializes.
+            default_placeholder.closed = true;
             fill_roots.push(self.store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::Slot {
                     placeholder: default_placeholder,
@@ -381,6 +384,7 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
             self.expressions,
             self.const_values,
             wrapper_ref.root,
+            &layout.schema,
             &named_fill,
             self.string_table,
         )?;
@@ -430,10 +434,11 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
         // The wrapper's fixed direct children keep their occurrence-keyed overlay context,
         // so the same named markers must also reach the child-wrapper sets stored there.
         // Reusing the markers keeps one plan source per named contribution while still
-        // replaying it at every wrapper occurrence this application owns.
-        let wrapper_ref = TemplateWrapperReference::new(
-            prepared_template_id,
-            wrapper_ref.phase,
+        // replaying it at every wrapper occurrence this application owns. A wrapper with no
+        // named targets has nothing to fill, so the overlay walk is skipped.
+        let prepared_context = if layout.schema.named_slots.is_empty() {
+            wrapper_ref.context
+        } else {
             fill_direct_child_wrapper_names_into(
                 self.store,
                 self.expressions,
@@ -441,7 +446,12 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
                 wrapper_ref.context,
                 &named_fill,
                 self.string_table,
-            )?,
+            )?
+        };
+        let wrapper_ref = TemplateWrapperReference::new(
+            prepared_template_id,
+            wrapper_ref.phase,
+            prepared_context,
         );
 
         Ok(PreparedRuntimeWrapper {
@@ -717,15 +727,10 @@ fn fill_named_markers_in_wrapper_set(
     resolved_wrapper_sets: &mut FxHashMap<TemplateWrapperSetId, TemplateWrapperSetId>,
     wrapper_set_id: TemplateWrapperSetId,
 ) -> Result<TemplateWrapperSetId, TemplateError> {
-    // Conditional wrappers are the common case and usually carry no named targets.
-    // Skip the per-wrapper layout walk when the plan has no named source at all.
-    if !sources
-        .iter()
-        .any(|draft| matches!(draft.source.target, SlotKey::Named(_)))
-    {
-        return Ok(wrapper_set_id);
-    }
-
+    // The plan may have no named source at all, but a wrapper can still declare
+    // named occurrences that need missing-name closure before handoff. The
+    // per-wrapper layout below is the fast path: it skips preparation only when
+    // that wrapper declares no named target.
     if let Some(resolved_set_id) = resolved_wrapper_sets.get(&wrapper_set_id) {
         return Ok(*resolved_set_id);
     }
@@ -744,31 +749,35 @@ fn fill_named_markers_in_wrapper_set(
     let mut changed = false;
     for wrapper in wrappers {
         let layout = collect_tir_slot_layout_with_context(store, wrapper.root, wrapper.context)?;
+
+        // The collected layout already proves there is no named target to resolve.
+        // Skip both preparation walks; an empty marker set only has closure work when
+        // the wrapper actually declares named occurrences.
+        if layout.schema.named_slots.is_empty() {
+            filled.push(wrapper);
+            continue;
+        }
+
         let named_fill = push_named_source_markers(store, slot_plan_id, sources, &layout.schema);
-        let (filled_root, filled_context) = if named_fill.is_empty() {
-            (None, wrapper.context)
-        } else {
-            // Slots whose own wrappers are deferred to handoff still need the named
-            // content composed now; handoff cannot derive templates.
-            (
-                fill_named_slots_in_wrapper_template(
-                    store,
-                    expressions,
-                    const_values,
-                    wrapper.root,
-                    &named_fill,
-                    string_table,
-                )?,
-                fill_direct_child_wrapper_names_into(
-                    store,
-                    expressions,
-                    const_values,
-                    wrapper.context,
-                    &named_fill,
-                    string_table,
-                )?,
-            )
-        };
+
+        // An empty marker set still fixes the wrapper's unfilled named occurrences:
+        // handoff cannot derive templates, so their fallbacks must be settled now.
+        let filled_root = fill_named_slots_in_wrapper_template(
+            store,
+            expressions,
+            const_values,
+            wrapper.root,
+            &named_fill,
+            string_table,
+        )?;
+        let filled_context = fill_direct_child_wrapper_names_into(
+            store,
+            expressions,
+            const_values,
+            wrapper.context,
+            &named_fill,
+            string_table,
+        )?;
 
         if filled_root.is_none() && filled_context == wrapper.context {
             filled.push(wrapper);

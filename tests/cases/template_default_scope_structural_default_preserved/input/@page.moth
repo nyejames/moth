@@ -1,0 +1,3 @@
+card #= [:<img src="[$slot image = @assets/icon.svg]" alt="icon">[$slot]]
+page #= [:[card:Intro]<main>[$slot]</main>]
+[page:Body]

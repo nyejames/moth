@@ -1,0 +1,27 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["<title>Untitled</title>", "<meta name=\"summary\" content=\"Description\">", "<link rel=\"preload\" href=\"./assets/icon.svg\">"]
+
+[[backends.html.artifact_assertions]]
+path = "assets/icon.svg"
+kind = "binary"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["<title>Untitled</title>", "<meta name=\"summary\" content=\"Description\">", "<link rel=\"preload\" href=\"./assets/icon.svg\">"]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "assets/icon.svg"
+kind = "binary"

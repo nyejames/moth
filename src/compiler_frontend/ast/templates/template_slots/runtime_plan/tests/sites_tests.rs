@@ -1166,28 +1166,14 @@ fn prepared_wrapper_injects_target_through_nested_child_path() {
         }
         other => panic!("expected the wrapper root to stay a child reference, got {other:?}"),
     };
-    let children = match &store
-        .get_node(nested_derived_root)
-        .expect("the derived nested root should exist")
-        .kind
-    {
-        TemplateIrNodeKind::Sequence { children } => children.clone(),
-        other => panic!("expected a nested sequence root, got {other:?}"),
-    };
-
-    assert_eq!(children.len(), 2);
+    let layout = collect_tir_slot_layout_from_root(&store, nested_derived_root)
+        .expect("the prepared wrapper layout should resolve");
     assert!(
-        matches!(
-            &store
-                .get_node(children[0])
-                .expect("the unfilled named occurrence should exist")
-                .kind,
-            TemplateIrNodeKind::Sequence { children } if children.is_empty()
-        ),
-        "a named occurrence without a routed source must resolve to empty output"
+        !layout.schema.named_slots.contains(&unfilled),
+        "an unfilled named occurrence must not remain addressable"
     );
     assert!(node_contains_runtime_source(
-        children[1],
+        nested_derived_root,
         &store,
         plan,
         RuntimeSlotContributionSourceId(0)

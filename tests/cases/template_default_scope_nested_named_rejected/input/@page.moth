@@ -1,0 +1,3 @@
+card #= [:<h1>[$slot title = "Untitled"]</h1><section>[$slot]</section>]
+page #= [:[card:Intro]<main>[$slot]</main>]
+[page: [$in title:Outer]Body]

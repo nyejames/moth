@@ -161,7 +161,7 @@ Separate four consumer lanes:
 
 The local lanes share a publication lifetime. Other modules consume the public interface rather than donor-local semantic state. Linkers and lowerers may consume the validated executable and link lanes through explicit handoffs. Retained compact identities remain paired with their lookup context.
 
-Compile-time page fragments never live in HIR. The artefact validator checks folded fragment values, builder-slot destinations, insertion indexes and their relationship to dormant root activity. HIR validation checks executable fragment operations only.
+Compile-time page fragments never live in HIR. Frontend preparation checks folded fragment values and root activity, and validates builder-slot destinations against the builder schema before publication. The ordered fragment handoff retains runtime insertion indexes. HIR validation checks executable fragment operations only.
 
 ### Module root semantic roles
 

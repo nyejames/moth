@@ -5,8 +5,9 @@
 //! It is not semantic proof. Preparation owns constness, unresolved slots
 //! and helper classification.
 //!
-//! Unresolved structural slots (`slot_count`) are separate from runtime slot
-//! sites (`runtime_slot_site_count`). `has_slots()` is derived from `slot_count`.
+//! Structural slots (`slot_count`), including closed fallback occurrences, are
+//! separate from runtime slot sites (`runtime_slot_site_count`). `has_slots()` is
+//! derived from `slot_count`.
 
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use rustc_hash::FxHashSet;
@@ -41,7 +42,7 @@ pub(crate) struct TemplateIrSummary {
     /// children belong to the authored head; every later child is non-head.
     pub(crate) head_node_count: u32,
 
-    /// Unresolved structural `Slot` placeholders.
+    /// Structural `Slot` placeholders, including closed fallback occurrences.
     pub(crate) slot_count: u32,
 
     /// Converted runtime slot sites. Separate from `slot_count`.

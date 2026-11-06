@@ -1,0 +1,17 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<img src=\"./assets/icon.svg\" alt=\"icon\">Intro<main>Body</main>"
+
+[[backends.html.artifact_assertions]]
+path = "assets/icon.svg"
+kind = "binary"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<img src=\"./assets/icon.svg\" alt=\"icon\">Intro<main>Body</main>"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "assets/icon.svg"
+kind = "binary"

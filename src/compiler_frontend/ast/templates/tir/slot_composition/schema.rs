@@ -17,7 +17,9 @@ use crate::compiler_frontend::ast::templates::tir::overlays::{
 };
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference;
-use crate::compiler_frontend::ast::templates::tir::slot_layout::template_is_independently_planned;
+use crate::compiler_frontend::ast::templates::tir::slot_layout::{
+    TirSlotSchema, template_has_runtime_slot_plan,
+};
 use crate::compiler_frontend::ast::templates::tir::summary::summarize_existing_root;
 use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::ast::templates::tir::wrapper_sets::merge_wrapper_sets;
@@ -50,10 +52,11 @@ struct SlotFillServices<'a> {
 
 /// Which slot occurrences one expansion pass resolves.
 ///
-/// WHAT: `All` replaces every routed occurrence, `NamedOnly` leaves default and
-///       positional placeholders untouched, and `ContextOnly` leaves every
-///       placeholder in place while still resolving composition-owned child-edge
-///       wrapper contexts.
+/// WHAT: `All` replaces every routed occurrence and fixes every unrouted one;
+///       `NamedOnly` fills named occurrences and fixes named occurrences without
+///       content, leaving default and positional placeholders untouched; and
+///       `ContextOnly` leaves every placeholder in place while still resolving
+///       composition-owned child-edge wrapper contexts.
 /// WHY: a wrapper applied to a control-flow contribution must be composed before its
 ///       child output exists. Filling only the named slots keeps the wrapper's own loose
 ///       insertion point unresolved for the later conditional application. Runtime
@@ -66,13 +69,11 @@ enum SlotExpansionScope {
     ContextOnly,
 }
 
-// Boundary ownership: every fill that writes plan markers or routed named content
-// treats a child template with its own runtime slot plan as a leaf. That child owns
-// a separate plan and handoff: its resolved sites and the child-edge overlays under
-// its reference already carry that plan's markers. Writing this application's nodes
-// or markers into its tree or overlay would mix two slot plans, and advertising its
-// named occurrences would accept content no enclosing fill can deliver.
-// `slot_layout::template_is_independently_planned` is the shared predicate.
+// Boundary ownership: a runtime slot plan treats its template as a leaf. Constant
+// composition marks the individual placeholders it fixed closed, so this fill may
+// still descend into a composed receiver to reach contribution-authored slots that
+// belong to the enclosing template. `slot_layout::template_has_runtime_slot_plan`
+// is the shared whole-template predicate.
 
 /// Resolves each named-filled wrapper set at most once per receiving application.
 ///
@@ -84,7 +85,8 @@ enum SlotExpansionScope {
 ///      templates and scans the store's wrapper sets, so the results cannot deduplicate on
 ///      identity and every replay would retain its own equivalent copy. The cache stays
 ///      scoped to the application, so a set resolved against different named content is
-///      never reused.
+///      never reused. An empty fill still fixes the wrapper's named occurrences:
+///      the application has decided not to provide content for them.
 #[derive(Default)]
 struct NamedFilledWrapperSetCache {
     resolved: FxHashMap<TemplateWrapperSetId, TemplateWrapperSetId>,
@@ -99,12 +101,6 @@ impl NamedFilledWrapperSetCache {
         named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
         visiting_wrapper_sets: &mut FxHashSet<TemplateWrapperSetId>,
     ) -> SlotSchemaResult<TemplateWrapperSetId> {
-        // Without named content the set is already final; leaving the map empty keeps
-        // the common case allocation-free.
-        if named_fill.is_empty() {
-            return Ok(wrapper_set_id);
-        }
-
         if let Some(resolved_set_id) = self.resolved.get(&wrapper_set_id) {
             return Ok(*resolved_set_id);
         }
@@ -209,6 +205,14 @@ fn fill_named_slot_placeholders_into_with_guard(
             "TIR slot expansion: wrapper template ID was not present in the store.",
         ));
     };
+
+    // A runtime-plan wrapper owns every occurrence; its named content is already
+    // resolved by the plan. Constant composition marks only its own placeholders
+    // closed, so open contribution slots inside the wrapper remain fillable.
+    if template_has_runtime_slot_plan(template) {
+        return Ok(None);
+    }
+
     let original_root = template.root;
     let no_routed_contributions = TirSlotContributions::default();
     let mut named_filled_wrapper_sets = NamedFilledWrapperSetCache::default();
@@ -322,6 +326,13 @@ fn expand_tir_slot_placeholders_from_node(
         }
 
         TemplateIrNodeKind::Slot { placeholder } => {
+            // A closed occurrence is fixed by the application that composed this
+            // template. It must not accept this fill even when another open occurrence
+            // of the same key exists.
+            if placeholder.closed {
+                return Ok(node_id);
+            }
+
             // Named-only expansion leaves the wrapper's own loose insertion point and
             // positional occurrences untouched for the later wrapper application.
             // Routing owns presence, not content: an explicit empty contribution
@@ -337,7 +348,20 @@ fn expand_tir_slot_placeholders_from_node(
                         return Ok(node_id);
                     };
                     let Some(nodes) = named_fill.get(name) else {
-                        return Ok(node_id);
+                        // The application has no content for this wrapper occurrence, so
+                        // this fill fixes it. A defaulted occurrence keeps a closed
+                        // placeholder so folding can materialize its fallback; an
+                        // occurrence without a fallback is removed, matching the
+                        // established unresolved-slot removal.
+                        if placeholder.default.is_some() {
+                            return close_unrouted_slot(store, &node, placeholder);
+                        }
+                        return Ok(store.push_node(TemplateIrNode::new(
+                            TemplateIrNodeKind::Sequence {
+                                children: Vec::new(),
+                            },
+                            node.span,
+                        )));
                     };
                     (nodes.as_slice(), true)
                 }
@@ -387,14 +411,15 @@ fn expand_tir_slot_placeholders_from_node(
                 wrapped_nodes.push(current_node_id);
             }
 
-            // A defaulted occurrence with no routed contribution keeps its structural
-            // node so the fallback remains occurrence-owned until the final fold or
-            // handoff. An occurrence whose slot was routed but received empty content
-            // still expands to an empty sequence, suppressing the fallback. An
-            // occurrence without a default also expands to an empty sequence,
-            // preserving the established unresolved-slot removal.
-            if wrapped_nodes.is_empty() && placeholder.default.is_some() && !has_routed_presence {
-                return Ok(node_id);
+            // An occurrence with no routed contribution and a default is fixed by this
+            // application: keep a closed placeholder so its fallback stays
+            // occurrence-owned for the fold and handoff, but no enclosing application
+            // can route into it. An occurrence without a fallback is removed, matching
+            // the established unresolved-slot removal; an occurrence whose slot was
+            // routed but received empty content also expands to an empty sequence,
+            // suppressing the fallback.
+            if wrapped_nodes.is_empty() && !has_routed_presence && placeholder.default.is_some() {
+                return close_unrouted_slot(store, &node, placeholder);
             }
 
             // Repeated slot placeholders replay the same contribution nodes.
@@ -420,12 +445,10 @@ fn expand_tir_slot_placeholders_from_node(
                 ));
             };
 
-            // A nested runtime application owns its own plan, overlay context and
-            // handoff. Its resolved sites and the child-edge overlays under this
-            // reference already carry that plan's markers, and this fill's nodes or
-            // markers would belong to a foreign slot plan. The edge is a leaf for
-            // every scope; the wrapper value's own child edges keep descending.
-            if template_is_independently_planned(child_template) {
+            // A runtime-plan child owns every occurrence; the edge is a leaf for every
+            // scope. Constant composition marks only its own placeholders closed, so a
+            // contribution-authored slot inside it remains open for this fill.
+            if template_has_runtime_slot_plan(child_template) {
                 return Ok(node_id);
             }
 
@@ -591,6 +614,28 @@ fn expand_tir_slot_placeholders_from_node(
     }
 }
 
+/// Returns a defaulted slot node whose occurrence is fixed by the current application.
+///
+/// WHAT: clones the placeholder, marks it closed and keeps its fallback and wrapper
+///       context on the new occurrence.
+/// WHY: the original placeholder may belong to a shared template that other
+///      applications still use; only the composed tree's copy is fixed. Occurrences
+///      without a fallback are removed instead, so no unfilled-slot fact is created.
+fn close_unrouted_slot(
+    store: &mut TemplateIrStore,
+    node: &TemplateIrNode,
+    placeholder: &TirSlotPlaceholder,
+) -> SlotSchemaResult<TemplateIrNodeId> {
+    let mut closed = placeholder.clone();
+    closed.closed = true;
+    Ok(store.push_node(TemplateIrNode::new(
+        TemplateIrNodeKind::Slot {
+            placeholder: closed,
+        },
+        node.span,
+    )))
+}
+
 /// Applies a module-local child-wrapper set to a single TIR node.
 ///
 /// WHAT: resolves the wrapper set into module-local wrapper template IDs and
@@ -645,10 +690,6 @@ fn fill_named_slots_in_wrapper_set_inner(
     named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
     visiting_wrapper_sets: &mut FxHashSet<TemplateWrapperSetId>,
 ) -> SlotSchemaResult<TemplateWrapperSetId> {
-    if named_fill.is_empty() {
-        return Ok(wrapper_set_id);
-    }
-
     // A set already under resolution keeps its current wrappers; refilling it from its
     // own descendant context would not add names the cycle did not already expose.
     if !visiting_wrapper_sets.insert(wrapper_set_id) {
@@ -668,6 +709,23 @@ fn fill_named_slots_in_wrapper_set_inner(
     let mut filled_references = Vec::with_capacity(wrapper_references.len());
     let mut changed = false;
     for wrapper_reference in wrapper_references {
+        let has_runtime_plan = {
+            let wrapper_template = store.get_template(wrapper_reference.root).ok_or_else(|| {
+                internal_infrastructure_failure(
+                    "TIR slot expansion: conditional wrapper set referenced a missing template.",
+                )
+            })?;
+            template_has_runtime_slot_plan(wrapper_template)
+        };
+
+        // A runtime-plan wrapper owns every occurrence and already resolved its named
+        // content. Constant composition marks only its own placeholders closed, so
+        // open contribution slots inside the wrapper remain fillable.
+        if has_runtime_plan {
+            filled_references.push(wrapper_reference);
+            continue;
+        }
+
         let filled_root = fill_wrapper_template_named_content(
             store,
             services,
@@ -707,8 +765,16 @@ fn fill_named_slots_in_wrapper_set_inner(
 
 /// Fills routed named content into one wrapper template and its slot-owned wrapper sets.
 ///
-/// WHAT: composes structural named occurrences, then fills the wrapper sets stored on the
-///       template's slot placeholders, returning the derived template when either changed.
+/// WHAT: prepares the wrapper sets stored on the receiver's own loose (default and
+///       positional) slot placeholders, then composes structural named occurrences,
+///       returning the derived template when either changed. Named occurrences apply
+///       their wrapper sets inside expansion, so preparing them here would double-fill
+///       and would reach contribution-owned slots after expansion. Wrapper preparation
+///       runs before expansion so contribution nodes spliced into the tree never have
+///       their fill-owned wrapper names closed against this receiver.
+///       Named occurrences this application does not fill are fixed on the
+///       derived template: defaulted ones are marked closed and fallback-less ones
+///       are removed, so an enclosing application cannot replay content into them.
 /// WHY: a wrapper can be applied structurally by slot expansion or by runtime handoff
 ///      injection, and the handoff store is read-only. Composing every named occurrence a
 ///      stored slot wrapper can render before the wrapper is attached to a set keeps both
@@ -721,10 +787,6 @@ pub(crate) fn fill_named_slots_in_wrapper_template(
     named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
     string_table: &StringTable,
 ) -> SlotSchemaResult<Option<TemplateIrId>> {
-    if named_fill.is_empty() {
-        return Ok(None);
-    }
-
     let mut visiting_wrapper_sets = FxHashSet::default();
     let services = SlotFillServices {
         expressions,
@@ -745,20 +807,24 @@ pub(crate) fn fill_named_slots_in_wrapper_template(
 ///
 /// WHAT: composes structural named occurrences and the composition-owned child-edge
 ///       overlay contexts the walk reaches, returning the derived template when it
-///       changed.
+///       changed. The caller's already-collected schema is the fast path: when it
+///       declares no named targets, no named occurrence can change and the walk is
+///       skipped.
 /// WHY: runtime site planning still owns the store when it applies a wrapper's
 ///      loose-fill slot wrappers, so those sets can resolve the same named content
 ///      per fill without a prepared replacement. Only the wrapper edges that every
-///      child shares need resolving once.
+///      child shares need resolving once. Missing-name closure still runs whenever
+///      the schema does declare names, including with an empty named fill.
 pub(crate) fn fill_named_slots_in_wrapper_root(
     store: &mut TemplateIrStore,
     expressions: &AstExpressionBuilder,
     const_values: &ConstValueStore,
     template_id: TemplateIrId,
+    named_schema: &TirSlotSchema,
     named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
     string_table: &StringTable,
 ) -> SlotSchemaResult<Option<TemplateIrId>> {
-    if named_fill.is_empty() {
+    if named_schema.named_slots.is_empty() {
         return Ok(None);
     }
 
@@ -786,46 +852,61 @@ fn fill_wrapper_template_named_content(
     named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
     visiting_wrapper_sets: &mut FxHashSet<TemplateWrapperSetId>,
 ) -> SlotSchemaResult<Option<TemplateIrId>> {
-    let named_template = fill_named_slot_placeholders_into_with_guard(
+    let Some(template) = store.get_template(template_id) else {
+        return Err(internal_infrastructure_failure(
+            "TIR slot expansion: wrapper template ID was not present while filling wrapper sets.",
+        ));
+    };
+    if template_has_runtime_slot_plan(template) {
+        return Ok(None);
+    }
+    let original_root = template.root;
+
+    // Prepare the receiver-owned occurrences before expansion splices contribution
+    // nodes into the tree. A post-expansion walk would treat those fill-owned slots
+    // as receiver-owned and close their wrapper names against this application.
+    let prepared_root = fill_slot_wrapper_sets_from_node(
         store,
         services,
-        template_id,
+        original_root,
         named_fill,
         visiting_wrapper_sets,
     )?;
-    let candidate_template_id = named_template.unwrap_or(template_id);
-    let Some(candidate_template) = store.get_template(candidate_template_id) else {
-        return Err(internal_infrastructure_failure(
-            "TIR slot expansion: wrapper template ID was not present while filling slot wrapper sets.",
-        ));
+    let prepared_template_id = match prepared_root {
+        Some(filled_root) => store.push_structurally_derived_template(
+            template_id,
+            filled_root,
+            DerivedTemplateMetadata::preserve_source(),
+        )?,
+        None => template_id,
     };
-    let candidate_root = candidate_template.root;
 
-    let Some(filled_root) = fill_slot_wrapper_sets_from_node(
+    let named_template = fill_named_slot_placeholders_into_with_guard(
         store,
         services,
-        candidate_root,
+        prepared_template_id,
         named_fill,
         visiting_wrapper_sets,
-    )?
-    else {
-        return Ok(named_template);
-    };
+    )?;
 
-    Ok(Some(store.push_structurally_derived_template(
-        candidate_template_id,
-        filled_root,
-        DerivedTemplateMetadata::preserve_source(),
-    )?))
+    if prepared_template_id != template_id {
+        return Ok(Some(named_template.unwrap_or(prepared_template_id)));
+    }
+
+    Ok(named_template)
 }
 
-/// Recursively rewrites the slot placeholders of one template tree.
+/// Recursively prepares the loose (default and positional) slot placeholders of one
+/// receiver-owned template tree.
 ///
 /// WHAT: rebuilds sequences, child-template boundaries, conditionals and loops only when a
-///       descendant slot changed; other node kinds are structural owners of other state.
-/// WHY: the same root walk that schema collection uses must reach every slot occurrence whose
-///      wrappers can be applied by a later expansion or handoff injection. Derived child
-///      templates keep their occurrence identity so retained overlays still resolve.
+///       descendant loose slot changed; other node kinds are structural owners of other state.
+/// WHY: expansion itself applies a routed named occurrence's wrapper sets while wrapping the
+///      contribution, so preparing named occurrences here would fill the same set twice and,
+///      after expansion, would reach contribution-owned slots that this receiver must not fix.
+///      Loose occurrences stay in the expanded tree and need their wrapper sets prepared
+///      before expansion splices contributions into it. Derived child templates keep their
+///      occurrence identity so retained overlays still resolve.
 fn fill_slot_wrapper_sets_from_node(
     store: &mut TemplateIrStore,
     services: SlotFillServices<'_>,
@@ -873,6 +954,20 @@ fn fill_slot_wrapper_sets_from_node(
         }
 
         TemplateIrNodeKind::Slot { placeholder } => {
+            // A closed occurrence's fallback and wrapper context are already fixed by
+            // the application that composed it. Replaying named content into its
+            // wrappers would make a fixed fallback depend on an enclosing application.
+            if placeholder.closed {
+                return Ok(None);
+            }
+
+            // Routed named occurrences are replaced by expansion, which applies their
+            // wrapper sets to the contribution. Unfilled ones are fixed by the same
+            // expansion. Preparing them here would double-fill routed sets.
+            if matches!(&placeholder.key, SlotKey::Named(_)) {
+                return Ok(None);
+            }
+
             let filled_child = fill_slot_wrapper_set(
                 store,
                 services,
@@ -926,10 +1021,10 @@ fn fill_slot_wrapper_sets_from_node(
                 ));
             };
 
-            // A child that already owns a runtime slot plan resolved its wrapper
-            // sets under that plan. Rewriting them here would inject this fill's
-            // named content into a completed application, so the edge is opaque.
-            if template_is_independently_planned(child_template) {
+            // A runtime-plan child owns every occurrence and already resolved its
+            // wrapper sets. Constant composition marks only its own placeholders
+            // closed, so open contribution slots inside the child remain fillable.
+            if template_has_runtime_slot_plan(child_template) {
                 return Ok(None);
             }
 
@@ -1138,9 +1233,6 @@ fn fill_direct_child_wrapper_names_inner(
     named_fill: &FxHashMap<StringId, Vec<TemplateIrNodeId>>,
     visiting_wrapper_sets: &mut FxHashSet<TemplateWrapperSetId>,
 ) -> SlotSchemaResult<TemplateViewContext> {
-    if named_fill.is_empty() {
-        return Ok(context);
-    }
     let Some(overlay_id) = context.wrapper_context else {
         return Ok(context);
     };

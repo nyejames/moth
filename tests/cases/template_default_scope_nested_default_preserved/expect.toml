@@ -1,0 +1,9 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "default=<h1>Untitled</h1><section>Intro</section><main>Body</main>|empty=<h1></h1><main>Body</main>|open=<div><h1>Inline</h1>Body</div>|plain=<h1>Stored</h1>Body|positional=pos=Intro|body=Card body<main>Body</main>|mixed=title=Mixed card title fallback|body=<h1>Outer</h1>Mixed named body fallback<main>Body</main>"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "default=<h1>Untitled</h1><section>Intro</section><main>Body</main>|empty=<h1></h1><main>Body</main>|open=<div><h1>Inline</h1>Body</div>|plain=<h1>Stored</h1>Body|positional=pos=Intro|body=Card body<main>Body</main>|mixed=title=Mixed card title fallback|body=<h1>Outer</h1>Mixed named body fallback<main>Body</main>"

@@ -17,12 +17,11 @@
 //! positional slots stay owned by the fixed child they decorate, so exposing those
 //! would accept content the overlay can never consume.
 //!
-//! A child template that already owns a runtime slot plan is an opaque boundary.
-//! Its placeholders are resolved sites and every child-edge overlay inside its tree
-//! was filled with that plan's markers, so the enclosing application can neither
-//! address those names nor fill those contexts. The walk therefore treats such an
-//! edge as a leaf, matching the marker fill that deliberately stops there instead
-//! of writing foreign plan markers.
+//! A child template with a runtime slot plan is an opaque boundary: the plan owns
+//! every occurrence under it. Constant composition instead fixes the individual
+//! placeholders it consumed: defaulted ones stay closed and fallback-less ones are
+//! removed. Those fixed occurrences are skipped, while contribution-authored slots
+//! inside the same tree stay open for the enclosing application.
 
 use std::collections::BTreeSet;
 
@@ -197,16 +196,14 @@ pub(crate) struct TirSlotLayout {
     pub(crate) placeholders: Vec<TirSlotPlaceholderRef>,
 }
 
-/// Whether a template is an independently materialized runtime slot application.
+/// Whether a template carries a runtime slot plan that owns every occurrence.
 ///
-/// WHAT: true when the published template carries a committed `runtime_slot_plan`.
-/// WHY: such a template is a completed application. Its placeholders are resolved
-///      sites and the child-edge overlays inside its tree were filled with its own
-///      plan's markers, so an enclosing application can neither address those names
-///      nor fill those contexts. Slot-layout discovery, structural expansion and
-///      runtime marker fills all use this predicate to treat the edge as a leaf;
-///      keeping it named keeps those three owners on one boundary definition.
-pub(crate) fn template_is_independently_planned(template: &TemplateIr) -> bool {
+/// WHAT: true only for templates published by runtime slot-plan materialization.
+/// WHY: a runtime plan resolves or fixes every occurrence under the template, so the
+///      whole edge is a leaf for an enclosing application. Constant composition
+///      instead fixes the individual placeholders it consumed, marking defaulted
+///      ones closed and removing fallback-less ones.
+pub(crate) fn template_has_runtime_slot_plan(template: &TemplateIr) -> bool {
     template.runtime_slot_plan.is_some()
 }
 
@@ -234,9 +231,9 @@ pub(crate) fn collect_tir_slot_layout(
 ///      replay the receiving application's named content, so the enclosing
 ///      application must be able to address them.
 ///
-/// An independently planned template yields an empty layout: its own plan owns every
-/// occurrence reachable through that reference, so an enclosing application cannot
-/// address any of them and must not treat the reference as a receiver.
+/// Closed placeholders are skipped: the application that composed them already fixed
+/// their fallbacks, so an enclosing application cannot address them. A runtime-plan
+/// template yields an empty layout because its plan owns every occurrence.
 pub(crate) fn collect_tir_slot_layout_with_context(
     store: &TemplateIrStore,
     template_id: TemplateIrId,
@@ -248,7 +245,7 @@ pub(crate) fn collect_tir_slot_layout_with_context(
         )));
     };
 
-    if template_is_independently_planned(template) {
+    if template_has_runtime_slot_plan(template) {
         return Ok(TirSlotLayout::default());
     }
 
@@ -260,9 +257,8 @@ pub(crate) fn collect_tir_slot_layout_with_context(
 ///
 /// A bare node tree has no reference identity, so this form carries no inherited
 /// wrapper context. Nested child references still contribute their own contexts.
-/// A child reference to a template that already owns a runtime slot plan is a
-/// leaf: that plan resolved every occurrence under it, so none belongs to this
-/// tree's layout.
+/// Closed placeholders are skipped; a child reference to a runtime-plan template is
+/// a leaf because its plan owns every occurrence under it.
 pub(crate) fn collect_tir_slot_layout_from_root(
     store: &TemplateIrStore,
     root_node_id: TemplateIrNodeId,
@@ -362,43 +358,40 @@ fn collect_from_node(
         }
 
         TemplateIrNodeKind::Slot { placeholder } => {
-            schema.record_key(&placeholder.key);
+            if !placeholder.closed {
+                schema.record_key(&placeholder.key);
 
-            // A wrapper set applied at this placeholder is part of the slot's receiving
-            // interface. Its named slots are addressable by the enclosing application and
-            // every wrapper occurrence replays the routed named content; its default and
-            // positional slots stay owned by the wrapper's own loose fill.
-            collect_wrapper_named_slots(
-                store,
-                placeholder.child_wrapper_set,
-                schema,
-                visited_wrappers,
-            )?;
-            collect_wrapper_named_slots(
-                store,
-                placeholder.applied_child_wrapper_set,
-                schema,
-                visited_wrappers,
-            )?;
+                // A wrapper set applied at this placeholder is part of the slot's receiving
+                // interface. Its named slots are addressable by the enclosing application and
+                // every wrapper occurrence replays the routed named content; its default and
+                // positional slots stay owned by the wrapper's own loose fill.
+                collect_wrapper_named_slots(
+                    store,
+                    placeholder.child_wrapper_set,
+                    schema,
+                    visited_wrappers,
+                )?;
+                collect_wrapper_named_slots(
+                    store,
+                    placeholder.applied_child_wrapper_set,
+                    schema,
+                    visited_wrappers,
+                )?;
 
-            placeholders.push(TirSlotPlaceholderRef {
-                occurrence_id: placeholder.occurrence_id,
-                key: placeholder.key.clone(),
-                default: placeholder.default,
-                child_wrapper_set: placeholder.child_wrapper_set,
-                applied_child_wrapper_set: placeholder.applied_child_wrapper_set,
-                skip_parent_child_wrappers: placeholder.skip_parent_child_wrappers,
-                span: node.span,
-            });
+                placeholders.push(TirSlotPlaceholderRef {
+                    occurrence_id: placeholder.occurrence_id,
+                    key: placeholder.key.clone(),
+                    default: placeholder.default,
+                    child_wrapper_set: placeholder.child_wrapper_set,
+                    applied_child_wrapper_set: placeholder.applied_child_wrapper_set,
+                    skip_parent_child_wrappers: placeholder.skip_parent_child_wrappers,
+                    span: node.span,
+                });
+            }
             Ok(())
         }
 
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {
-            // An independently planned child is a completed application: its plan
-            // resolved its sites and filled every child-edge overlay under this
-            // reference with its own markers. Descending would advertise names no
-            // enclosing fill may deliver and collect foreign occurrences behind the
-            // plan boundary, so the edge stays opaque.
             let Some(child_template) = store.get_template(reference.root) else {
                 visiting_nodes.remove(&node_id);
                 return Err(layout_error(format!(
@@ -407,7 +400,11 @@ fn collect_from_node(
                 )));
             };
 
-            if template_is_independently_planned(child_template) {
+            // A runtime plan owns every occurrence under its template; the edge is a
+            // whole-template leaf. Constant composition marks only the placeholders it
+            // fixed closed, so the child's open contribution slots remain part of this
+            // interface.
+            if template_has_runtime_slot_plan(child_template) {
                 visiting_nodes.remove(&node_id);
                 return Ok(());
             }
@@ -586,11 +583,8 @@ fn collect_wrapper_reference_named_slots(
         )));
     };
 
-    // A wrapper reference that already owns a runtime plan is a completed
-    // application, not a compile-time wrapper value. Its named occurrences and
-    // child-edge overlays belong to that plan, so an enclosing fill cannot reach
-    // them.
-    if template_is_independently_planned(wrapper) {
+    // A runtime-plan wrapper owns every occurrence; the whole reference is opaque.
+    if template_has_runtime_slot_plan(wrapper) {
         return Ok(());
     }
 
@@ -695,21 +689,24 @@ fn collect_named_slots_from_node(
         }
 
         TemplateIrNodeKind::Slot { placeholder } => {
-            if let SlotKey::Named(name) = &placeholder.key {
-                schema.named_slots.insert(*name);
+            if !placeholder.closed {
+                if let SlotKey::Named(name) = &placeholder.key {
+                    schema.named_slots.insert(*name);
+                }
+                collect_wrapper_named_slots(
+                    store,
+                    placeholder.child_wrapper_set,
+                    schema,
+                    visited_wrappers,
+                )?;
+                collect_wrapper_named_slots(
+                    store,
+                    placeholder.applied_child_wrapper_set,
+                    schema,
+                    visited_wrappers,
+                )?;
             }
-            collect_wrapper_named_slots(
-                store,
-                placeholder.child_wrapper_set,
-                schema,
-                visited_wrappers,
-            )?;
-            collect_wrapper_named_slots(
-                store,
-                placeholder.applied_child_wrapper_set,
-                schema,
-                visited_wrappers,
-            )
+            Ok(())
         }
 
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {

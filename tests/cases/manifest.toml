@@ -7148,6 +7148,55 @@ contract = "language.templates.slot_default_structural_resource"
 role = "primary"
 
 [[case]]
+id = "template_default_scope_nested_named_rejected"
+path = "template_default_scope_nested_named_rejected"
+tags = ["integration", "templates", "slots", "defaults", "nested"]
+contract = "language.templates.default_scope_nested_named_rejected"
+role = "primary"
+
+[[case]]
+id = "template_default_scope_nested_default_preserved"
+path = "template_default_scope_nested_default_preserved"
+tags = ["integration", "templates", "slots", "defaults", "nested"]
+contract = "language.templates.default_scope_nested_default_preserved"
+role = "primary"
+
+[[case]]
+id = "template_default_scope_imported_default_preserved"
+path = "template_default_scope_imported_default_preserved"
+tags = ["integration", "templates", "slots", "defaults", "imports"]
+contract = "language.templates.default_scope_imported_default_preserved"
+role = "primary"
+
+[[case]]
+id = "template_default_scope_imported_named_rejected"
+path = "template_default_scope_imported_named_rejected"
+tags = ["integration", "templates", "slots", "defaults", "imports"]
+contract = "language.templates.default_scope_imported_named_rejected"
+role = "primary"
+
+[[case]]
+id = "template_default_scope_runtime_default_preserved"
+path = "template_default_scope_runtime_default_preserved"
+tags = ["integration", "templates", "slots", "defaults", "runtime"]
+contract = "language.templates.default_scope_runtime_default_preserved"
+role = "primary"
+
+[[case]]
+id = "template_default_scope_structural_default_preserved"
+path = "template_default_scope_structural_default_preserved"
+tags = ["integration", "templates", "slots", "defaults", "resources"]
+contract = "language.templates.default_scope_structural_default_preserved"
+role = "primary"
+
+[[case]]
+id = "template_default_scope_mixed_runtime"
+path = "template_default_scope_mixed_runtime"
+tags = ["integration", "templates", "slots", "defaults", "runtime"]
+contract = "language.templates.default_scope_mixed_runtime"
+role = "primary"
+
+[[case]]
 id = "template_named_slots_ignore_surrounding_whitespace"
 path = "template_named_slots_ignore_surrounding_whitespace"
 tags = ["integration", "templates", "slots", "whitespace"]
@@ -18970,4 +19019,39 @@ id = "html_builder_root_slot_resource_liveness"
 path = "html_builder_root_slot_resource_liveness"
 tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "resources"]
 contract = "backend.html.builder_root_slot_resource_liveness"
+role = "primary"
+
+[[case]]
+id = "template_default_binding_runtime_constants"
+path = "template_default_binding_runtime_constants"
+tags = ["integration", "templates", "slots", "const-folding", "runtime"]
+contract = "language.templates.slot_defaults_runtime_constant_binding"
+role = "primary"
+
+[[case]]
+id = "template_default_binding_runtime_nonconstant_rejected"
+path = "template_default_binding_runtime_nonconstant_rejected"
+tags = ["integration", "templates", "slots", "diagnostics", "runtime"]
+contract = "language.templates.slot_defaults_runtime_nonconstant_rejected"
+role = "primary"
+
+[[case]]
+id = "template_default_whitespace_named_insert_fallbacks"
+path = "template_default_whitespace_named_insert_fallbacks"
+tags = ["integration", "templates", "slots", "whitespace", "runtime"]
+contract = "language.templates.slot_defaults_ignore_formatting_whitespace"
+role = "primary"
+
+[[case]]
+id = "html_builder_slot_composed_defaults"
+path = "html_builder_slot_composed_defaults"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots"]
+contract = "backend.html.builder_slot_composed_defaults"
+role = "primary"
+
+[[case]]
+id = "html_builder_root_slot_runtime_rejected"
+path = "html_builder_root_slot_runtime_rejected"
+tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "diagnostics"]
+contract = "backend.html.builder_root_slot_runtime_rejected"
 role = "primary"

@@ -304,20 +304,26 @@ pub(super) fn compose_wrapper_application(
 
         // Direct-child wrappers are occurrence-keyed overlay state, so the
         // receiver's named contributions must be resolved into that overlay here; expanding
-        // slot placeholders cannot reach a fixed child authored before the slot.
-        let composed_context = super::schema::fill_direct_child_wrapper_names_into(
-            store,
-            inputs.expressions,
-            inputs.const_values,
-            wrapper_reference.context,
-            &routed.named_nodes,
-            inputs.string_table,
-        )?;
+        // slot placeholders cannot reach a fixed child authored before the slot. When the
+        // whole receiver schema has no named target, the overlay can carry no named fill:
+        // skip the preparation walk and keep the exact context.
+        let composed_context = if layout.schema.named_slots.is_empty() {
+            wrapper_reference.context
+        } else {
+            super::schema::fill_direct_child_wrapper_names_into(
+                store,
+                inputs.expressions,
+                inputs.const_values,
+                wrapper_reference.context,
+                &routed.named_nodes,
+                inputs.string_table,
+            )?
+        };
 
-        (
-            build_composed_wrapper_template(store, wrapper_reference.root, expanded_root)?,
-            composed_context,
-        )
+        let composed_template_id =
+            build_composed_wrapper_template(store, wrapper_reference.root, expanded_root)?;
+
+        (composed_template_id, composed_context)
     };
 
     Ok(TemplateWrapperReference::new(

@@ -1,0 +1,2 @@
+card #= [:<h1>[$slot title = "Untitled"]</h1><section>[$slot]</section>]
+applied #= [card:Intro]

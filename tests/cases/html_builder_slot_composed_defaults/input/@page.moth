@@ -1,0 +1,6 @@
+label #= [:[$slot text = "Untitled"]]
+meta #= [:<meta name="summary" content="[$slot]">]
+preload #= [:<link rel="preload" href="[$slot url = @assets/icon.svg]">]
+#[$in title:[label]]
+#[$in head:[meta:Description]]
+#[$in head:[preload]]

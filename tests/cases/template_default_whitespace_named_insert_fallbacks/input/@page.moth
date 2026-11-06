@@ -1,0 +1,34 @@
+identity |value String| -> String:
+    return value
+;
+
+card #= [:title=[$slot title = "Title fallback"]|pos=[$slot 1 = "Positional fallback"]|body=[$slot = "Body fallback"]]
+box #= [:title=[$slot title = "Title fallback"]|body=[$slot = "Body fallback"]]
+
+-- The newlines and indentation around each insert are body formatting, not a
+-- loose contribution. They must not consume the positional occurrence or mark
+-- the default occurrence routed, and they must not suppress the named default.
+named = [card:
+    [$in title:Chosen]
+]
+default_fallback = [box:
+    [$in title:Chosen]
+]
+paired = [card:
+    [$in title:First]
+    [$in title:Second]
+]
+box_paired = [box:
+    [$in title:First]
+    [$in title:Second]
+]
+runtime = [card:
+    [$in title:[identity("Runtime")]]
+]
+emptied = [card:
+    [$in title:]
+]
+head_whitespace = [box, " ":[$in title:Space]]
+head_empty = [box, "":[$in title:Empty]]
+
+[:named=[named]|default=[default_fallback]|paired=[paired]|box_paired=[box_paired]|runtime=[runtime]|emptied=[emptied]|space=[head_whitespace]|empty=[head_empty]]

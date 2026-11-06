@@ -343,7 +343,7 @@ Recheck these anchors at activation:
 | Schema registration | `src/builder_surface/definition.rs`, `config_schema.rs` |
 | Config application | `src/build_system/project_config.rs`, `project_config/validation.rs`, `src/projects/settings.rs` |
 | HTML settings | `src/projects/html_project/html_project_builder.rs`, `document_config.rs`, `src/projects/routing.rs` |
-| Generated project source | `src/projects/html_project/new_html_project/start_page_scaffolding.rs` |
+| Generated project source | `crates/moth-cli/src/scaffold/start_page_scaffolding.rs` |
 | Command inputs and dev retention | `src/projects/cli.rs`, `check.rs`, `dev_server/` |
 
 Extend or consolidate these owners. Do not add a broad `utils` module or a trait hierarchy merely to hide directive dispatch.

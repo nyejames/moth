@@ -70,7 +70,7 @@ pub(crate) enum TemplatePreparationMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TemplatePreparationFacts {
     pub(crate) is_const_evaluable_shape: bool,
-    pub(crate) has_unresolved_slot_occurrences: bool,
+    pub(crate) has_unfilled_slot_occurrences: bool,
     pub(crate) has_escaped_insert_helpers: bool,
     pub(crate) final_value_kind: TemplateConstValueKind,
 }
@@ -127,6 +127,10 @@ struct PreparationWalk<'scope> {
 struct PreparationFacts {
     const_evaluable: bool,
     has_unresolved_slots: bool,
+    /// Occurrences with neither a routed value nor a default in this exact view.
+    has_unfilled_slots: bool,
+    /// Named unfilled occurrences that an inherited wrapper cannot supply itself.
+    has_unfilled_named_slots: bool,
     /// Named occurrences with no routing presence in this exact view.
     ///
     /// WHAT: separates names that an inherited wrapper application cannot fill during
@@ -152,6 +156,7 @@ struct WrapperSetFacts {
     ///      drop the authored content. The enclosing template must keep wrapper-template
     ///      identity instead of being reduced to a renderable String.
     has_unresolved_named_slots: bool,
+    has_unfilled_named_slots: bool,
 }
 
 impl Default for PreparationFacts {
@@ -159,6 +164,8 @@ impl Default for PreparationFacts {
         Self {
             const_evaluable: false,
             has_unresolved_slots: false,
+            has_unfilled_slots: false,
+            has_unfilled_named_slots: false,
             has_unresolved_named_slots: false,
             has_resolved_slot_sources: false,
             has_slot_insertions: false,
@@ -201,6 +208,8 @@ impl PreparationFacts {
     fn merge(&mut self, other: Self) {
         self.const_evaluable &= other.const_evaluable;
         self.has_unresolved_slots |= other.has_unresolved_slots;
+        self.has_unfilled_slots |= other.has_unfilled_slots;
+        self.has_unfilled_named_slots |= other.has_unfilled_named_slots;
         self.has_unresolved_named_slots |= other.has_unresolved_named_slots;
         self.has_resolved_slot_sources |= other.has_resolved_slot_sources;
         self.has_slot_insertions |= other.has_slot_insertions;
@@ -379,7 +388,7 @@ fn prepare_tir_view_in_scope(
         identity: view.identity(),
         facts: TemplatePreparationFacts {
             is_const_evaluable_shape: facts.const_evaluable,
-            has_unresolved_slot_occurrences: facts.has_unresolved_slots,
+            has_unfilled_slot_occurrences: facts.has_unfilled_slots,
             has_escaped_insert_helpers: facts.has_slot_insertions,
             final_value_kind: const_value_kind,
         },
@@ -422,6 +431,7 @@ impl PreparationWalk<'_> {
 
             self.validate_template_identity(template_id, root, view)?;
             let mut conditional_wrapper_unresolved = false;
+            let mut conditional_wrapper_unfilled = false;
             if let Some(wrapper_set_id) = conditional_child_wrapper_set {
                 // The wrapper set keeps the caller's plan ownership because a conditional
                 // wrapper may replay plan-qualified markers created for the enclosing plan.
@@ -438,6 +448,7 @@ impl PreparationWalk<'_> {
                     }
                 }
                 conditional_wrapper_unresolved = wrapper_facts.has_unresolved_named_slots;
+                conditional_wrapper_unfilled = wrapper_facts.has_unfilled_named_slots;
             }
             let mut node_role = role;
             let runtime_slot_plan_facts = if let Some(slot_plan_id) = runtime_slot_plan {
@@ -458,6 +469,10 @@ impl PreparationWalk<'_> {
             if conditional_wrapper_unresolved {
                 facts.has_unresolved_slots = true;
                 facts.has_unresolved_named_slots = true;
+            }
+            if conditional_wrapper_unfilled {
+                facts.has_unfilled_slots = true;
+                facts.has_unfilled_named_slots = true;
             }
 
             if matches!(
@@ -573,6 +588,12 @@ impl PreparationWalk<'_> {
                             facts.has_unresolved_slots = true;
                             facts.has_unresolved_named_slots = true;
                         }
+                        if !context.skip_parent_child_wrappers
+                            && wrapper_facts.has_unfilled_named_slots
+                        {
+                            facts.has_unfilled_slots = true;
+                            facts.has_unfilled_named_slots = true;
+                        }
                     }
                     let child_template_id = reference.root;
                     let child_view = view.structural_child(*reference)?;
@@ -600,6 +621,11 @@ impl PreparationWalk<'_> {
                     facts.has_unresolved_slots = true;
                     let slot_resolution =
                         view.effective_slot_resolution(placeholder.occurrence_id)?;
+                    if slot_resolution.is_none() && placeholder.default.is_none() {
+                        facts.has_unfilled_slots = true;
+                        facts.has_unfilled_named_slots =
+                            matches!(placeholder.key, SlotKey::Named(_));
+                    }
                     if slot_resolution.is_none() && matches!(placeholder.key, SlotKey::Named(_)) {
                         facts.has_unresolved_named_slots = true;
                     }
@@ -1027,6 +1053,7 @@ impl PreparationWalk<'_> {
             foldable: true,
             contains_slot_insert: false,
             has_unresolved_named_slots: false,
+            has_unfilled_named_slots: false,
         };
         for wrapper in &wrapper_set.wrappers {
             let wrapper_view = view.wrapper(*wrapper)?;
@@ -1042,6 +1069,7 @@ impl PreparationWalk<'_> {
                     .get_template(wrapper.root)
                     .is_some_and(|template| matches!(template.kind, TemplateType::SlotInsert(_)));
             facts.has_unresolved_named_slots |= wrapper_facts.has_unresolved_named_slots;
+            facts.has_unfilled_named_slots |= wrapper_facts.has_unfilled_named_slots;
             if !wrapper_facts.wrapper_foldable {
                 facts.foldable = false;
             }

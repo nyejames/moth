@@ -1,0 +1,20 @@
+@helpers/defaults imported_fallback
+
+local_fallback #= "Local fallback"
+
+identity |value String| -> String:
+    return value
+;
+
+-- The receiver is declared with `=`, so its head parses as runtime-capable.
+-- Both defaults are explicit `#=` String constants, not inline literals. The
+-- const receiver below proves the same references keep folding.
+card = [:local=[$slot local = local_fallback]|imported=[$slot imported = imported_fallback]|body=[$slot = "Body fallback"]]
+const_card #= [:local=[$slot local = local_fallback]]
+const_plain #= [const_card]
+
+plain = [card]
+filled = [card:[$in local:[identity("Chosen")]]]
+emptied = [card:[$in imported:[identity("")]]]
+
+[:const=[const_plain]|plain=[plain]|filled=[filled]|emptied=[emptied]]

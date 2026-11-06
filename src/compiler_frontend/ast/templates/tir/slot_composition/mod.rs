@@ -1,13 +1,13 @@
 //! TIR-native slot contribution routing and composition.
 //!
 //! Slot schema and placeholder occurrence facts come from `tir/slot_layout.rs`.
-//! This directory routes fill content, expands placeholders, composes head
-//! chains and owned child-wrapper trees.
+//! This directory routes fill content, expands and closes occurrences, composes
+//! head chains and owned child-wrapper trees.
 //!
 //! ```text
 //! slot_composition/
 //! ├── mod.rs            Structural map and public re-exports
-//! ├── schema.rs         Placeholder expansion
+//! ├── schema.rs         Placeholder expansion, closure and wrapper overlays
 //! ├── contributions.rs  Contribution bucket routing
 //! ├── head_chain.rs     Head-chain wrapper composition
 //! ├── child_wrappers.rs Owned child-wrapper trees

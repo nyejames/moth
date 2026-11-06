@@ -1543,7 +1543,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     );
                     return Err(self.diagnostic_messages(diagnostic, string_table));
                 };
-                if preparation.facts.has_unresolved_slot_occurrences {
+                if preparation.facts.has_unfilled_slot_occurrences {
                     return Err(self.diagnostic_messages(
                         templates::invalid_template_structure(
                             InvalidTemplateStructureReason::NonFoldableConstTemplate,

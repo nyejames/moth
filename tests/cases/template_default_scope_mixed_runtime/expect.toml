@@ -1,0 +1,9 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<h1>Card title fallback</h1><h1>Outer</h1><main>Runtime main</main><footer>End</footer>"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<h1>Card title fallback</h1><h1>Outer</h1><main>Runtime main</main><footer>End</footer>"

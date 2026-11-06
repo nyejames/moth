@@ -279,10 +279,6 @@ fn preparation_keeps_wrapper_identity_for_inherited_named_wrapper_slots() {
     )
     .expect("context-only wrapper slot preparation should succeed");
 
-    assert!(
-        prepared.facts.has_unresolved_slot_occurrences,
-        "an inherited named occurrence must block renderable-String folding"
-    );
     assert_eq!(
         prepared.facts.final_value_kind,
         TemplateConstValueKind::WrapperTemplate,

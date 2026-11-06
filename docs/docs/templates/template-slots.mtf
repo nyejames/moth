@@ -78,6 +78,11 @@ separate fallbacks. Multiple contributions to one named slot concatenate in
 source order. Contributions containing `A-` and `B-` fill both title occurrences
 with `A-B-`. An explicitly empty insert still counts as routed.
 
+An application with routed or loose content closes its own unfilled defaulted
+occurrences: an enclosing template cannot fill them later. A head-only reference
+with no fill stays an open wrapper. Slots authored in supplied content still
+belong to their own enclosing composition.
+
 ### Positional slots
 
 Positive integer slots receive loose head contributions. The number is a
@@ -110,6 +115,8 @@ filled by `$in`.
 - Multiple contributions to one named slot concatenate in source order.
 - An unknown named insert target is diagnosed at the receiving template.
 - One application may combine named, positional and default contributions.
+- Formatting-only body whitespace around named inserts is not a loose contribution;
+  an explicitly supplied empty or whitespace String remains a contribution.
 
 ### Builder root slots
 

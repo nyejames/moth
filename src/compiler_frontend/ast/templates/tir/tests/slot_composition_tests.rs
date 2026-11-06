@@ -20,7 +20,7 @@ use super::super::slot_composition::contributions::route_tir_fill_nodes_against_
 use super::super::slot_composition::helpers::{children_of_node, root_node_id_for_template};
 use super::super::slot_composition::{
     TirSlotContributions, compose_tir_head_chain_from_root, compose_tir_head_chain_from_template,
-    fill_named_slot_placeholders_into,
+    fill_named_slot_placeholders_into, fill_named_slots_in_wrapper_template,
 };
 use super::super::slot_layout::{
     TirSlotSchema, collect_tir_slot_layout, collect_tir_slot_layout_with_context,
@@ -776,12 +776,23 @@ fn expansion_keeps_defaulted_occurrence_without_routed_content() {
     )
     .expect("default-only expansion should succeed");
 
-    assert_eq!(
+    assert_ne!(
         expanded, root,
-        "no routed contribution must leave the occurrence-owned default structural"
+        "an unrouted default must be closed on a derived occurrence"
     );
+    let TemplateIrNodeKind::Slot { placeholder } =
+        &store.get_node(expanded).expect("expanded root exists").kind
+    else {
+        panic!("expanded default occurrence must remain a slot");
+    };
+    assert!(
+        placeholder.closed,
+        "the application must fix the unrouted default occurrence"
+    );
+    assert_eq!(placeholder.default, Some(default));
+
     let layout = collect_tir_slot_layout(&store, wrapper_id)
-        .expect("defaulted occurrence remains in the layout");
+        .expect("the shared receiver keeps its authored occurrence open");
     assert_eq!(layout.placeholders.len(), 1);
     assert_eq!(layout.placeholders[0].default, Some(default));
 }
@@ -3965,6 +3976,148 @@ fn build_named_slot_wrapper_template(
         slot_summary(1),
         None,
     )
+}
+
+/// Filling a receiver named slot must not prepare wrapper sets owned by the
+/// inserted contribution.
+#[test]
+fn wrapper_fill_keeps_inserted_contribution_slot_wrappers_open() {
+    let mut string_table = StringTable::new();
+    let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
+    let tone = string_table.intern("tone");
+    let body = string_table.intern("body");
+
+    let tone_wrapper = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let open = builder.push_text_node(
+            string_table.intern("<i>"),
+            3,
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        let slot = builder.push_slot_node(SlotKey::Named(tone), None);
+        let close = builder.push_text_node(
+            string_table.intern("</i>"),
+            4,
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        let root = builder.push_sequence_node(vec![open, slot, close], None);
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            slot_summary(1),
+            None,
+        )
+    };
+    let tone_wrapper_set = store.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+        tone_wrapper,
+        TemplateTirPhase::Parsed,
+        TemplateViewContext::default(),
+    )]);
+
+    let contribution_occurrence_id = store.next_slot_occurrence_id();
+    let contribution_template = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let slot = builder.push_tir_slot_placeholder_node(
+            TirSlotPlaceholder::with_wrapper_sets(
+                SlotKey::Default,
+                contribution_occurrence_id,
+                None,
+                None,
+                Some(tone_wrapper_set),
+                false,
+            ),
+            None,
+        );
+        builder.finish_template(
+            slot,
+            Style::default(),
+            TemplateType::String,
+            slot_summary(1),
+            None,
+        )
+    };
+    let contribution = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        builder.push_child_template_node_with_reference(
+            TemplateTirChildReference::new(
+                contribution_template,
+                TemplateTirPhase::Parsed,
+                TemplateViewContext::default(),
+            ),
+            None,
+        )
+    };
+
+    let receiver_occurrence_id = store.next_slot_occurrence_id();
+    let receiver = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let slot = builder.push_tir_slot_placeholder_node(
+            TirSlotPlaceholder::with_wrapper_sets(
+                SlotKey::Named(body),
+                receiver_occurrence_id,
+                None,
+                None,
+                None,
+                false,
+            ),
+            None,
+        );
+        let tail = builder.push_text_node(
+            string_table.intern("tail"),
+            4,
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        let root = builder.push_sequence_node(vec![slot, tail], None);
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            slot_summary(1),
+            None,
+        )
+    };
+
+    let named_fill = FxHashMap::from_iter([(body, vec![contribution])]);
+    let filled_template = fill_named_slots_in_wrapper_template(
+        &mut store,
+        &expressions,
+        &const_values,
+        receiver,
+        &named_fill,
+        &string_table,
+    )
+    .expect("wrapper fill should succeed")
+    .expect("the receiver should change");
+
+    let filled_root = store
+        .get_template(filled_template)
+        .expect("filled receiver should exist")
+        .root;
+    let children =
+        children_of_node(&store, filled_root).expect("filled root should expose children");
+    let inserted_child_root = children
+        .iter()
+        .find_map(|child_id| {
+            let child = store.get_node(*child_id)?;
+            match &child.kind {
+                TemplateIrNodeKind::ChildTemplate { reference, .. } => Some(reference.root),
+                _ => None,
+            }
+        })
+        .expect("the contribution child template must remain in the filled receiver");
+
+    let layout = collect_tir_slot_layout(&store, inserted_child_root)
+        .expect("the inserted contribution layout should resolve");
+    assert!(
+        layout.schema.named_slots.contains(&tone),
+        "the inserted contribution's fill-owned wrapper name must stay open"
+    );
 }
 
 /// Fills one named marker whose marker facts are the only classification source.

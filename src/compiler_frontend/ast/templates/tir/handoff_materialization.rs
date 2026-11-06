@@ -547,32 +547,36 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
             }
 
             TemplateIrNodeKind::Slot { placeholder } => {
-                if let Some((fill_target_key, child_handoff)) = injection
-                    && placeholder.key == *fill_target_key
-                {
-                    return self.apply_slot_wrapper_sets_to_injected_child(
-                        view,
-                        placeholder,
-                        child_handoff.clone(),
-                        active_slot_plan,
-                    );
-                }
+                let occurrence_closed = placeholder.closed;
 
-                if let Some(resolution) =
-                    view.effective_slot_resolution(placeholder.occurrence_id)?
-                {
-                    if let TirSlotResolutionKind::Resolved { sources } = &resolution.kind {
-                        return self.materialize_resolved_slot_sources(
+                if !occurrence_closed {
+                    if let Some((fill_target_key, child_handoff)) = injection
+                        && placeholder.key == *fill_target_key
+                    {
+                        return self.apply_slot_wrapper_sets_to_injected_child(
                             view,
-                            sources,
-                            node.span,
+                            placeholder,
+                            child_handoff.clone(),
                             active_slot_plan,
                         );
                     }
 
-                    // `Missing` records routed presence with no content, so it suppresses
-                    // the occurrence default exactly like an explicitly empty source.
-                    return Ok(OwnedRuntimeTemplateNode::Slot { span: node.span });
+                    if let Some(resolution) =
+                        view.effective_slot_resolution(placeholder.occurrence_id)?
+                    {
+                        if let TirSlotResolutionKind::Resolved { sources } = &resolution.kind {
+                            return self.materialize_resolved_slot_sources(
+                                view,
+                                sources,
+                                node.span,
+                                active_slot_plan,
+                            );
+                        }
+
+                        // `Missing` records routed presence with no content, so it suppresses
+                        // the occurrence default exactly like an explicitly empty source.
+                        return Ok(OwnedRuntimeTemplateNode::Slot { span: node.span });
+                    }
                 }
 
                 if let Some(default) = placeholder.default {

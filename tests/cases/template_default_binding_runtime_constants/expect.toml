@@ -1,0 +1,14 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "const=local=Local fallback|plain=local=Local fallback|imported=Imported fallback|body=Body fallback|filled=local=Chosen|imported=Imported fallback|body=Body fallback|emptied=local=Local fallback|imported=|body=Body fallback"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "const=local=Local fallback|plain=local=Local fallback|imported=Imported fallback|body=Body fallback|filled=local=Chosen|imported=Imported fallback|body=Body fallback|emptied=local=Local fallback|imported=|body=Body fallback"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "page.wasm"
+kind = "wasm"
+validate_wasm = true

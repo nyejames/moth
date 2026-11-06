@@ -144,7 +144,7 @@ fn slot_wrappers_remain_compile_time_templates_until_filled() {
             &const_values,
         )
         .expect("wrapper classification should succeed")
-        .has_unresolved_slot_occurrences,
+        .has_unfilled_slot_occurrences,
         "wrapper template should have unresolved slots"
     );
     let expression = expression_builder
@@ -321,7 +321,7 @@ fn wrapper_templates_with_runtime_references_are_not_compile_time_constants() {
             &const_values,
         )
         .expect("runtime wrapper classification should succeed")
-        .has_unresolved_slot_occurrences,
+        .has_unfilled_slot_occurrences,
         "runtime wrapper template should have unresolved slots"
     );
     let expression = expression_builder
@@ -553,7 +553,7 @@ fn assert_slot_is_tir_only_and_const(source: &str, slot_name: &str) {
             &const_values,
         )
         .expect("slot classification should succeed")
-        .has_unresolved_slot_occurrences,
+        .has_unfilled_slot_occurrences,
         "{slot_name} slot should be detected from TIR"
     );
 

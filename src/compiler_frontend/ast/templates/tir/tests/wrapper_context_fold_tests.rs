@@ -842,7 +842,7 @@ fn handoff_fixture_result(
         identity: view.identity(),
         facts: TemplatePreparationFacts {
             is_const_evaluable_shape: false,
-            has_unresolved_slot_occurrences: false,
+            has_unfilled_slot_occurrences: false,
             has_escaped_insert_helpers: false,
             final_value_kind: TemplateConstValueKind::NonConst,
         },

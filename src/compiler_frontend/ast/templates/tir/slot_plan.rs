@@ -17,7 +17,7 @@ use crate::compiler_frontend::ast::templates::tir::contribution_shape::Contribut
 use crate::compiler_frontend::ast::templates::tir::copy_state::TirCopyState;
 use crate::compiler_frontend::ast::templates::tir::ids::{TemplateIrNodeId, TemplateSlotPlanId};
 use crate::compiler_frontend::ast::templates::tir::node::{TemplateIrNode, TemplateIrNodeKind};
-use crate::compiler_frontend::ast::templates::tir::slot_layout::template_is_independently_planned;
+use crate::compiler_frontend::ast::templates::tir::slot_layout::template_has_runtime_slot_plan;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -152,7 +152,8 @@ pub(crate) fn push_runtime_slot_contribution_source(
 /// `ChildTemplate` nodes are recursed into so nested slots inside child
 /// templates are converted in the same document-order pass. A child template
 /// that already owns a runtime slot plan is a leaf: its slots belong to that
-/// plan's sites, and this enclosing plan must not assign its own. When a child
+/// plan's sites, and this enclosing plan must not assign its own. Closed
+/// placeholders are fixed fallbacks and stay as slot nodes. When a child
 /// template has slots converted, its `TemplateIr.summary` is recomputed from
 /// the converted tree.
 ///
@@ -182,6 +183,10 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
 
     let converted = match node_kind {
         TemplateIrNodeKind::Slot { placeholder } => {
+            if placeholder.closed {
+                return Ok(false);
+            }
+
             let site_id = copy_state
                 .next_runtime_slot_site_for_key_in_sites(
                     slot_plan_id,
@@ -226,10 +231,12 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
                 )
             })?;
 
-            // A child that already owns a runtime plan resolved its slots against
-            // that plan's sites. This walk belongs to an enclosing plan, so it must
-            // not assign its sites to occurrences inside the nested application.
-            if template_is_independently_planned(child_template) {
+            // A runtime-plan child owns its own occurrences. This walk belongs to an
+            // enclosing plan and must not assign its sites to occurrences inside that
+            // application. A constant-composed child is not a leaf: its closed
+            // placeholders are skipped individually and its open contribution slots
+            // still belong to this plan.
+            if template_has_runtime_slot_plan(child_template) {
                 return Ok(false);
             }
 

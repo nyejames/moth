@@ -1,0 +1,7 @@
+identity |value String| -> String:
+    return value
+;
+
+card #= [:<h1>[$slot title = "Untitled"]</h1><section>[$slot]</section>]
+page = [:[card:[identity("Runtime body")]]<main>[$slot]</main>]
+[page:Outer body]
