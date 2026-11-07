@@ -13,9 +13,9 @@ This plan also replaces the current duplicated terminality logic with one AST-ow
 ```text
 ACTIVE_PLAN: docs/roadmap/plans/never-return-contract-plan.md
 STATUS: active on the never-returns branch
-CURRENT_SLICE: Phase 1a - normalise ordinary callable return contracts
+CURRENT_SLICE: Phase 3 - add `-> !` syntax and frontend semantics with the frontend return-contract envelopes
 BLOCKERS: none
-NEXT_ACTION: record the clean-tree bench baseline, then slice 1a.0
+NEXT_ACTION: implement Phase 3; Phases 3 to 6 commit together once Never works end to end
 ```
 
 Keep this block concise. Establish the active revision, branch, worktree state and validation baseline in untracked working notes when implementation starts. Do not pin a queued plan to a commit.
@@ -39,8 +39,9 @@ At closeout, delete this plan and remove its roadmap entry in the same commit. K
 Recorded at activation. These correct the plan where the compiler moved after it was written.
 
 - Activated ahead of runtime anonymous records by explicit decision. Never semantics do not depend on them.
-- The ordinary callable return shape was not yet a compact owner. Phase 1 is split: Phase 1a normalises ordinary return contracts, Phase 1b adds `Returns | Never`.
-- Phase 2 runs before Phase 1. Neither depends on the other.
+- The ordinary callable return shape was not yet a compact owner. Phase 1a normalised ordinary return contracts. Each layer's `Returns | Never` envelope lands with its first Never producer: frontend layers in Phase 3, HIR in Phase 4. No dormant variants are added.
+- Phase 2 ran before Phase 1a. Neither depends on the other.
+- Phases 3 to 6 are implemented and audited phase by phase but committed together once `-> !` works through both backends. No intermediate commit may reach an internal error on `-> !` source, and no temporary gating diagnostic is added.
 - Value-producing `if`, `match` and `catch` paths are complete when they produce the required values or transfer control outside the block. `break` and `continue` targeting an enclosing loop qualify, like `return`. Loop control consumed by a loop inside the branch does not. The previous position-dependent early-break acceptance is removed. Loop exits stay distinct from caller returns and divergence. Phase 2 owns this change and its documentation.
 - Implicit built-in failure that can escape a `-> !` body is a closed-boundary diagnostic, like an exported callable without an error slot. The body handles it locally. `NeverCall` has no failure successor.
 - Moth source has no function values. Never on function types is internal only: interning, equality, substitution and display, covered by datatype unit tests. No source function-value coverage.
@@ -759,7 +760,7 @@ just bench-check
 
 - [x] Confirm ordinary source behaviour is unchanged: integration results match the baseline.
 - [x] Record retained record sizes after the cut-over.
-- [ ] Run `just bench-check` on clean committed trees before and after. Investigate any regression before accepting.
+- [x] Run `just bench-check` on clean committed trees before and after. Investigate any regression before accepting.
 - [x] Update `index.md` for the new module.
 
 Delivered measurements:
@@ -776,42 +777,7 @@ Delivered measurements:
 
 Inline success-slot copies fell from 20 to 9. Each remaining copy feeds an owner that stores its own list beyond the signature borrow.
 
-# Phase 1b - Introduce callable return-contract enums
-
-## Goal
-
-Wrap each layer's ordinary representation in an explicit `Returns` versus `Never` contract while preserving ordinary source behaviour. `-> !` syntax stays inactive until Phase 3.
-
-## Work
-
-- [ ] Add `FunctionReturnContractSyntax { Returns(Vec<ReturnSlotSyntax>), Never { location } }` on `FunctionSignatureSyntax`.
-- [ ] Add `FunctionReturnContract { Returns(CallableReturnShape), Never { location } }` on `FunctionSignature` and the imported-callable contract, with `is_never` and ordinary queries that never map Never to empty slots.
-- [ ] Add a fieldless `FunctionTypeReturnContract { Returns(CallableReturnShape), Never }` to function-type keys and definitions. Interning, equality, hashing, substitution and display include the variant. Display renders `-> !` without a type name. The containing function type keeps its ordinary `TypeId`.
-- [ ] Add trait requirement, trait sidecar, public function, receiver-method and trait-surface contracts with a Never variant that carries no type identity.
-- [ ] Add `ExternalFunctionReturnContract { Returns { success, error }, Never }`. Return aliases are impossible on Never. Keep readable builder construction for ordinary functions.
-- [ ] Add `HirFunctionReturnContract { Returns(CallableReturnShape), Never }` to `HirFunction` and the non-local call-contract map. The private failure lane never installs an error channel on Never.
-- [ ] Rename the resulting fields to `return_contract`.
-- [ ] Variants without a producer before Phase 3 or Phase 4 use `#[expect(dead_code, reason = ...)]` as named migration bridges. Phase 3 deletes the frontend bridges and Phase 4 the HIR bridges.
-- [ ] Add datatype unit tests for exact Never function-type identity.
-
-## Audit
-
-- [ ] Confirm every layer uses an enum and no duplicate boolean.
-- [ ] Confirm `TypeEnvironment` gained no Never type definition. Any change is confined to existing function-signature payloads.
-- [ ] Confirm ordinary no-value functions remain ordinary `Returns`.
-- [ ] Confirm fixtures construct the real shape.
-- [ ] Complete the mandatory phase audit and Slice review.
-
-## Validation
-
-Run focused signature, datatype, public-interface, trait, external-package, HIR and backend tests, then:
-
-```bash
-cargo run --quiet -- tests --audit
-just validate
-```
-
-- [ ] Confirm ordinary source behaviour is unchanged.
+`just bench-check` suite average moved from 23.38 ms (`ea9fd60ee`) to 22.45 ms (`02d4fc22a`), with 4 cases faster and none slower.
 
 # Phase 2 - Consolidate control-flow exits
 
@@ -895,6 +861,17 @@ Delivered notes:
 Activate complete source syntax, body validation, exact interfaces and standalone-only call construction without manufacturing a value.
 
 ## Work
+
+### Return-contract envelopes
+
+- [ ] Add `FunctionReturnContractSyntax { Returns(Vec<ReturnSlotSyntax>), Never { location } }` on `FunctionSignatureSyntax`.
+- [ ] Add `FunctionReturnContract { Returns(CallableReturnShape), Never { location } }` on `FunctionSignature` and the imported-callable contract, with `is_never` and ordinary queries that never map Never to empty slots.
+- [ ] Add a fieldless `FunctionTypeReturnContract { Returns(CallableReturnShape), Never }` to function-type keys and definitions. Interning, equality, hashing, substitution and display include the variant. Display renders `-> !` without a type name. The containing function type keeps its ordinary `TypeId`.
+- [ ] Add trait requirement, trait sidecar, public function, receiver-method and trait-surface contracts with a Never variant that carries no type identity.
+- [ ] Add `ExternalFunctionReturnContract { Returns { success, error }, Never }`. Return aliases are impossible on Never. Keep readable builder construction for ordinary functions.
+- [ ] Rename the resulting fields to `return_contract`.
+- [ ] Confirm `TypeEnvironment` gained no Never type definition and ordinary no-value functions remain ordinary `Returns`.
+- [ ] Add datatype unit tests for exact Never function-type identity.
 
 ### Signature syntax
 
@@ -993,6 +970,7 @@ Give HIR an explicit Never function contract and dedicated terminating call with
 
 ### HIR functions
 
+- [ ] Add `HirFunctionReturnContract { Returns(CallableReturnShape), Never }` to `HirFunction` and the non-local call-contract map. The private failure lane never installs an error channel on Never.
 - [ ] Lower ordinary AST returns to `HirFunctionReturnContract::Returns`.
 - [ ] Lower Never to `HirFunctionReturnContract::Never`.
 - [ ] Emit no implicit return for Never functions.
@@ -1525,7 +1503,6 @@ git diff --check
 |---|---|---|
 | Phase 0 | read-only or plan correction | baseline commands, then the gate matching any tracked edit |
 | Phase 1a | code-bearing representation | focused owner tests, `just validate`, before/after `just bench-check` and record sizes |
-| Phase 1b | code-bearing | focused data-model tests plus `just validate` |
 | Phase 2 | code-bearing | control-flow tests plus `just validate` |
 | Phase 3 | code-bearing | frontend/interface tests plus `just validate` |
 | Phase 4 | code-bearing and HIR | HIR tests, `just boracle` and `just validate` |
