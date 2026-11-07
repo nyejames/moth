@@ -34,6 +34,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulat
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::SuccessfulWarningBoundary;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
@@ -41,7 +42,7 @@ use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
-use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionReturnContract};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
@@ -266,8 +267,10 @@ fn generated_sidecar(
         id: FunctionId(0),
         entry: BlockId(0),
         params: Vec::new(),
-        returns: Box::new([]),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [],
+            None,
+        )),
     });
     module
         .executable

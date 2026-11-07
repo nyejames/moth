@@ -939,7 +939,8 @@ fn assert_source_differential_replay(source: &str, expected_classes: &[&str]) ->
     assert_eq!(
         normalized_bodies.len(),
         expected_classes.len() / 2,
-        "each source function should render one normalized problem"
+        "each HIR function, including the implicit entry function, should render one normalized \
+         problem"
     );
     assert!(
         normalized_bodies
@@ -2821,7 +2822,7 @@ result = removed
 #[test]
 fn boracle_source_branch_separates_use_and_mutation() {
     let output = run_source_dump(
-        include_str!("../../../tests/cases/branch_reborrow_after_last_use/input/src/@page.moth"),
+        include_str!("../../../tests/cases/branch_reborrow_after_last_use/input/@page.moth"),
         BoracleDump::Conflicts,
     );
 
@@ -2834,7 +2835,7 @@ fn boracle_source_branch_separates_use_and_mutation() {
 #[test]
 fn boracle_source_loop_copy_keeps_independent_roots() {
     let output = run_source_dump(
-        include_str!("../../../tests/cases/loop_borrow_independent_roots/input/src/@page.moth"),
+        include_str!("../../../tests/cases/loop_borrow_independent_roots/input/@page.moth"),
         BoracleDump::Conflicts,
     );
 
@@ -2842,6 +2843,140 @@ fn boracle_source_loop_copy_keeps_independent_roots() {
         output.trim_end().ends_with("[]"),
         "unexpected loop conflict:\n{output}"
     );
+}
+
+#[test]
+fn boracle_source_never_call_records_arguments_before_terminal_exit() {
+    let source = r#"
+fatal |first String, second ~String| -> !:
+    assert(false, first)
+;
+
+wrapper |first String, second ~String| -> !:
+    fatal(first, ~second)
+;
+"#;
+    let report = solve_source(source);
+    let wrapper = report
+        .functions()
+        .iter()
+        .find(|function| {
+            function.problem.events().iter().any(|event| {
+                matches!(
+                    event.kind,
+                    EventKind::Terminator {
+                        kind: TerminatorEventKind::NeverCall,
+                    }
+                )
+            })
+        })
+        .expect("the wrapper should retain its terminating call");
+    let events = wrapper.problem.events();
+    let call_effect_index = events
+        .iter()
+        .position(|event| matches!(event.kind, EventKind::CallEffect(_)))
+        .expect("the terminating call should retain its call effect");
+    let argument_indices = events
+        .iter()
+        .enumerate()
+        .filter_map(|(index, event)| {
+            matches!(event.kind, EventKind::CallArgument { .. }).then_some(index)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        argument_indices.len(),
+        2,
+        "both evaluated arguments should retain granular call-argument events"
+    );
+    assert!(
+        argument_indices
+            .iter()
+            .all(|index| *index < call_effect_index),
+        "argument access must precede the call effect"
+    );
+    let accesses = events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            EventKind::CallArgument { argument, .. } => Some(argument.access),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(accesses, vec![AccessKind::Shared, AccessKind::Exclusive]);
+    let EventKind::CallEffect(effect) = &events[call_effect_index].kind else {
+        unreachable!("the call effect index was selected by kind")
+    };
+    assert!(
+        effect.results.is_empty(),
+        "a terminating call has no result slots"
+    );
+    assert!(matches!(
+        &events
+            .last()
+            .expect("the block must retain a terminator")
+            .kind,
+        EventKind::Terminator {
+            kind: TerminatorEventKind::NeverCall,
+        }
+    ));
+    assert!(
+        wrapper.problem.control_flow().edges.is_empty(),
+        "a terminating call has no successor"
+    );
+    assert_eq!(
+        wrapper.problem.control_flow().exits.as_ref(),
+        [wrapper.problem.control_flow().entry]
+    );
+    assert!(
+        !wrapper.report.has_conflicts(),
+        "shared and mutable terminating-call arguments are legal here"
+    );
+
+    assert_source_differential_replay(source, &["Agreement"; 6]);
+}
+
+#[test]
+fn boracle_source_never_call_mutable_argument_conflicts_with_live_shared_alias() {
+    let source = r#"
+fatal |value ~String, shared String| -> !:
+    assert(false, shared)
+;
+
+wrapper || -> !:
+    value ~= "a"
+    shared = value
+    fatal(~value, shared)
+;
+"#;
+    let report = solve_source(source);
+    let wrapper = report
+        .functions()
+        .iter()
+        .find(|function| {
+            function.problem.events().iter().any(|event| {
+                matches!(
+                    event.kind,
+                    EventKind::Terminator {
+                        kind: TerminatorEventKind::NeverCall,
+                    }
+                )
+            })
+        })
+        .expect("the wrapper should retain its terminating call");
+    assert!(
+        wrapper.report.has_conflicts(),
+        "the mutable terminating-call argument must conflict with the live shared alias"
+    );
+    assert!(
+        wrapper
+            .report
+            .loans
+            .conflicts()
+            .iter()
+            .any(|witness| witness.keeping_use.is_some()),
+        "the conflict witness should retain the keeping use"
+    );
+
+    assert_source_differential_replay(source, &["Agreement"; 6]);
 }
 
 fn solve_source(source: &str) -> BoracleModuleReport {

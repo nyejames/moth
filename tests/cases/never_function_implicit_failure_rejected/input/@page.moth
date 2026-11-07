@@ -1,0 +1,4 @@
+stop |value I32| -> !:
+    doubled = value + value
+    assert(false, "stop")
+;

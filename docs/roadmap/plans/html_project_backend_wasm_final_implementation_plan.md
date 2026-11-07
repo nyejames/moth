@@ -17,6 +17,7 @@ Implement the HTML project builder mixed JavaScript and Wasm backend strategy, f
 - canonical module compilation with immutable artefacts and graph-aware backend handoff
 - per-function link facts and target validation roots
 - dense HIR values and places, native zero/one/multiple success slots and separate error CFG channels, with the supported JS/Wasm consumers migrated
+- delivered `HirFunctionReturnContract::Never` and `HirTerminator::NeverCall`, zero-result ABI for Never functions, and call plus defensive unreachable semantics for local, cross-module, generated and binding-backed Never targets (see `docs/compiler-design-overview.md` for HIR callable contracts and terminators, and the language function/call references for the source contract)
 - removal of Reactivity V1 without a replacement observation or scheduler runtime
 - exact I*/U*/F* identities and I32/F64 defaults, D15 result domains, per-operation F16 completion, runtime Byte and U32 Error.code, with actual scalar target coverage inventoried
 
@@ -315,6 +316,7 @@ See `docs/build-system-design.md` "Runtime and memory" for the LIR contract.
 - Make Wasm LIR structured and backend-owned. It is not a second frontend semantic authority.
 - Generate runtime helper functions through structured Wasm LIR like user functions.
 - Preserve numeric check order, conversion boundaries and scalar carrier/storage distinctions while moving their existing lowering into the new structure.
+- Preserve `HirFunctionReturnContract::Never` as a zero-result ABI and `NeverCall` as an ordinary result-less call followed by unreachable. Structured LIR must not invent Never from missing results. Cover local, cross-module, generated and binding-backed Never targets. See `docs/compiler-design-overview.md` for the HIR contract.
 
 ### Phase 7: ABI, layouts and runtime helpers
 
@@ -489,6 +491,7 @@ Cover:
 - target-aware binary validation, accurate optional function/local names and
   opt-in WAT inspection without a production runtime dependency
 - native zero/one/multiple results across selected-function wrappers, success/error joins and returns, with undefined success slots inaccessible on error paths
+- NeverCall as call plus unreachable for local, cross-module, generated and binding-backed targets, without inventing Never from missing results
 - exactly-once calls and RHS-before-assignment order, including aliasing results
 - direct dense HIR consumption with no AST/TIR lifetime extension or owned semantic-tree reconstruction
 - imported runtime memory

@@ -226,7 +226,7 @@ fn declaration_initializer_reference_member_return_and_variant_spans_retain_orig
                 signature.parameters[0]
                     .span
                     .expect("authored parameter should retain its span"),
-                signature.returns[0]
+                signature.ordinary_return_slots()[0]
                     .value
                     .span
                     .expect("authored return should retain its span"),
@@ -321,7 +321,7 @@ fn declaration_initializer_reference_member_return_and_variant_spans_retain_orig
     let rebound_member_span = signature.parameters[0]
         .span
         .expect("authored parameter should retain its span");
-    let rebound_return_span = signature.returns[0]
+    let rebound_return_span = signature.ordinary_return_slots()[0]
         .value
         .span
         .expect("authored return should retain its span");
@@ -345,7 +345,7 @@ fn declaration_initializer_reference_member_return_and_variant_spans_retain_orig
     );
     assert_eq!(
         resolve(
-            signature.returns[0]
+            signature.ordinary_return_slots()[0]
                 .value
                 .span
                 .expect("authored return should retain its span")

@@ -167,6 +167,90 @@ fn const_eval_slot_type(signature: &ExternalSignatureType) -> Option<ConstEvalSl
     }
 }
 
+/// The return contract of one binding-backed external function.
+///
+/// WHAT: separates the ordinary success/error signature from an explicit whole-contract
+///       `-> !` binding.
+/// WHY: a Never binding has no success aliases and no error slot, so representing it as an
+///      empty ordinary signature would make it indistinguishable from a void success and
+///      would let call construction manufacture a value. The enum makes that mixing
+///      impossible by construction.
+#[derive(Debug, Clone)]
+pub enum ExternalFunctionReturnContract {
+    /// Ordinary success-channel slots and the optional final error slot, matching source
+    /// callable contracts.
+    Returns {
+        /// Success-channel return slots exposed to Moth callers, in order.
+        success: Vec<ExternalReturnSlot>,
+        /// Optional final error slot. This maps to `T!` on source functions.
+        error: Option<ExternalSignatureType>,
+    },
+    /// An explicit `-> !` binding contract. It has no success slot, no error slot and no
+    /// return alias.
+    Never,
+}
+
+/// Borrowed ordinary channels of an external return contract.
+///
+/// WHAT: the success slots and optional error slot of the `Returns` variant.
+/// WHY: HIR and backend readers that only own an ordinary path can prove the variant once
+///      instead of matching every field access site.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ExternalReturnsView<'a> {
+    pub(crate) success: &'a [ExternalReturnSlot],
+    pub(crate) error: Option<&'a ExternalSignatureType>,
+}
+
+/// Mutable ordinary channels used by unit tests that exercise post-admission validation guards.
+#[cfg(test)]
+pub(crate) struct ExternalReturnsMut<'a> {
+    pub(crate) success: &'a mut Vec<ExternalReturnSlot>,
+    pub(crate) error: &'a mut Option<ExternalSignatureType>,
+}
+
+impl ExternalFunctionReturnContract {
+    /// Returns the ordinary channels, or `None` for a `-> !` contract.
+    pub(crate) fn ordinary(&self) -> Option<ExternalReturnsView<'_>> {
+        match self {
+            Self::Returns { success, error } => Some(ExternalReturnsView {
+                success,
+                error: error.as_ref(),
+            }),
+            Self::Never => None,
+        }
+    }
+
+    /// Mutable ordinary channels for tests that corrupt a registered signature after admission.
+    #[cfg(test)]
+    pub(crate) fn ordinary_mut(&mut self) -> Option<ExternalReturnsMut<'_>> {
+        match self {
+            Self::Returns { success, error } => Some(ExternalReturnsMut { success, error }),
+            Self::Never => None,
+        }
+    }
+
+    pub fn is_never(&self) -> bool {
+        matches!(self, Self::Never)
+    }
+
+    pub(crate) fn is_fallible(&self) -> bool {
+        matches!(self, Self::Returns { error: Some(_), .. })
+    }
+}
+
+/// Builder-friendly ordinary return-contract constructor.
+pub fn external_returns(
+    success: Vec<ExternalReturnSlot>,
+    error: Option<ExternalSignatureType>,
+) -> ExternalFunctionReturnContract {
+    ExternalFunctionReturnContract::Returns { success, error }
+}
+
+/// Builder-friendly explicit whole-contract `-> !` constructor.
+pub fn external_never() -> ExternalFunctionReturnContract {
+    ExternalFunctionReturnContract::Never
+}
+
 /// Full definition of a single external function.
 #[derive(Debug)]
 pub struct ExternalFunctionDef {
@@ -177,16 +261,13 @@ pub struct ExternalFunctionDef {
     /// only needs its leaf identity.
     pub name: String,
     pub parameters: Vec<ExternalParameter>,
-    /// Success-channel return slots exposed to Moth callers.
+    /// The callable return contract supplied by builder metadata.
     ///
-    /// WHAT: external functions use the same success/error signature shape as source
-    /// functions, but the signature is supplied by builder metadata rather than parsed
-    /// source.
+    /// WHAT: ordinary success/error channels or an explicit whole-contract `-> !`.
     /// WHY: fallible external calls must be handled with postfix `!` or `catch` without
-    /// manufacturing public raw `Result` values.
-    pub returns: Vec<ExternalReturnSlot>,
-    /// Optional final error slot. This maps to `T!` on source functions.
-    pub error_return_type: Option<ExternalSignatureType>,
+    /// manufacturing public raw `Result` values, while a Never binding exposes no result at
+    /// all.
+    pub return_contract: ExternalFunctionReturnContract,
     /// Optional compiler-owned constant-evaluation operation.
     pub const_eval: Option<ExternalConstEvalOp>,
     /// Backend-specific lowering metadata.
@@ -199,8 +280,7 @@ impl Clone for ExternalFunctionDef {
         Self {
             name: self.name.clone(),
             parameters: self.parameters.clone(),
-            returns: self.returns.clone(),
-            error_return_type: self.error_return_type.clone(),
+            return_contract: self.return_contract.clone(),
             const_eval: self.const_eval,
             lowerings: self.lowerings.clone(),
         }
@@ -208,32 +288,8 @@ impl Clone for ExternalFunctionDef {
 }
 
 impl ExternalFunctionDef {
-    pub(crate) fn success_return_type_ids(
-        &self,
-        type_environment: &mut crate::compiler_frontend::datatypes::environment::TypeEnvironment,
-        builtin_error_type_id: crate::compiler_frontend::datatypes::ids::TypeId,
-    ) -> Vec<crate::compiler_frontend::datatypes::ids::TypeId> {
-        self.returns
-            .iter()
-            .filter_map(|slot| {
-                slot.value_type
-                    .to_type_id(type_environment, builtin_error_type_id)
-            })
-            .collect()
-    }
-
-    pub(crate) fn error_return_type_id(
-        &self,
-        type_environment: &mut crate::compiler_frontend::datatypes::environment::TypeEnvironment,
-        builtin_error_type_id: crate::compiler_frontend::datatypes::ids::TypeId,
-    ) -> Option<crate::compiler_frontend::datatypes::ids::TypeId> {
-        self.error_return_type
-            .as_ref()
-            .and_then(|error_type| error_type.to_type_id(type_environment, builtin_error_type_id))
-    }
-
     pub(crate) fn is_fallible(&self) -> bool {
-        self.error_return_type.is_some()
+        self.return_contract.is_fallible()
     }
 
     /// Borrow-analysis projection for ordered HIR success destinations.
@@ -242,8 +298,15 @@ impl ExternalFunctionDef {
     /// results remain Unknown even when their individual metadata says Fresh. Calls,
     /// Invoke edges and wrapper summaries consume this same conservative projection.
     /// This does not alter the registry's ordered slots or fuse them into a value.
+    ///
+    /// A Never binding produces no call result, so its alias is `Unknown`. HIR lowers every
+    /// external `NeverCall` through this projection and its transfer discards the resulting
+    /// alias, because the call has no successor that could consume a value.
     pub(crate) fn hir_return_alias(&self) -> ExternalHirReturnAlias<'_> {
-        match self.returns.as_slice() {
+        let Some(returns) = self.return_contract.ordinary() else {
+            return ExternalHirReturnAlias::Unknown;
+        };
+        match returns.success {
             [] => ExternalHirReturnAlias::Fresh,
             [single] => match &single.alias {
                 ExternalReturnAlias::Fresh => ExternalHirReturnAlias::Fresh,
@@ -474,8 +537,7 @@ pub struct ExternalFunctionSpec {
     /// Leaf symbol name within its package.
     pub name: String,
     pub parameters: Vec<ExternalParameter>,
-    pub returns: Vec<ExternalReturnSlot>,
-    pub error_return_type: Option<ExternalSignatureType>,
+    pub return_contract: ExternalFunctionReturnContract,
     /// Optional compiler-owned constant-evaluation operation.
     pub const_eval: Option<ExternalConstEvalOp>,
     pub lowerings: ExternalFunctionLowerings,
@@ -486,8 +548,7 @@ impl From<ExternalFunctionSpec> for ExternalFunctionDef {
         ExternalFunctionDef {
             name: spec.name,
             parameters: spec.parameters,
-            returns: spec.returns,
-            error_return_type: spec.error_return_type,
+            return_contract: spec.return_contract,
             const_eval: spec.const_eval,
             lowerings: spec.lowerings,
         }

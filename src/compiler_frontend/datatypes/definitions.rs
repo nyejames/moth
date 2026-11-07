@@ -9,6 +9,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
+use super::callable_returns::FunctionReturnContract;
 use super::ids::{
     BuiltinTypeKey, GenericParameterId, GenericParameterListId, NominalTypeId, TypeConstructor,
     TypeId,
@@ -107,8 +108,8 @@ pub struct ConstructedTypeDefinition {
 #[derive(Debug, Clone)]
 pub struct FunctionTypeDefinition {
     pub parameters: Box<[FunctionParameterDefinition]>,
-    pub returns: Box<[TypeId]>,
-    pub error_return: Option<TypeId>,
+    /// Whole return contract; `Never` carries no type identity.
+    pub return_contract: FunctionReturnContract,
 }
 
 /// Parameter inside a function type definition.

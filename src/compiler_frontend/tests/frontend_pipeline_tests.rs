@@ -56,6 +56,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
+use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAbiType, ExternalAccessKind, ExternalFunctionDef,
     ExternalFunctionLowerings, ExternalParameter, ExternalReturnSlot, ExternalSignatureType,
@@ -1195,6 +1196,139 @@ fn terminality_observes_the_selected_branch() {
 }
 
 #[test]
+fn never_body_ignores_return_in_inactive_static_branch() {
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@page.moth",
+            "disabled #= false\nstop || -> !:\n    if disabled:\n        return\n    ;\n    assert(false, \"stop\")\n;\n",
+        )],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+
+    let ast = project.ast();
+    let body = named_function_body(&project, &ast, "stop");
+
+    assert!(
+        body.iter()
+            .all(|node| !matches!(node.kind, NodeKind::Return(_))),
+        "static selection must remove the inactive return before the Never proof"
+    );
+    assert!(
+        body.iter()
+            .any(|node| matches!(node.kind, NodeKind::Assert { .. })),
+        "the active folded-false assertion remains in the Never body"
+    );
+}
+
+#[test]
+fn cross_module_never_call_is_accepted_as_a_standalone_statement() {
+    let mut project = FrontendProject::new(
+        &[
+            (
+                "src/@page.moth",
+                "@helper stop\nrun || -> !:\n    stop()\n;\n",
+            ),
+            (
+                "src/helper.moth",
+                "stop || -> !:\n    assert(false, \"stop\")\n;\n",
+            ),
+        ],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+
+    let ast = project.ast();
+    let body = named_function_body(&project, &ast, "run");
+    assert!(
+        matches!(
+            body,
+            [crate::compiler_frontend::ast::ast_nodes::AstNode {
+                kind: NodeKind::NeverCall(_),
+                ..
+            }]
+        ),
+        "an imported Never call must lift to a terminating statement"
+    );
+}
+
+#[test]
+fn cross_module_never_call_is_rejected_in_value_position() {
+    let mut project = FrontendProject::new(
+        &[
+            (
+                "src/@page.moth",
+                "@helper stop\nrun || -> I32:\n    return stop()\n;\n",
+            ),
+            (
+                "src/helper.moth",
+                "stop || -> !:\n    assert(false, \"stop\")\n;\n",
+            ),
+        ],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+
+    let failure = project
+        .ast_result()
+        .expect_ast_failure("an imported Never call cannot be used as a value");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0054",
+        Some("invalid_call_shape.never_call_used_as_value"),
+    );
+}
+
+#[test]
+fn inactive_static_branch_still_reports_type_errors_before_never_validation() {
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@page.moth",
+            "disabled #= false\nstop || -> !:\n    if disabled:\n        broken I32 = \"not a number\"\n    ;\n    assert(false, \"stop\")\n;\n",
+        )],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+
+    let failure = project
+        .ast_result()
+        .expect_ast_failure("the inactive branch type error must still fail AST construction");
+    assert_ast_diagnostic(&failure, "MOTH-TYPE-0001", None);
+}
+
+#[test]
+fn unannotated_function_with_diverging_entry_body_is_exempt() {
+    let mut project = FrontendProject::new(
+        &[("src/@page.moth", "assert(false, \"entry never returns\")\n")],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+
+    let ast = project.ast();
+
+    assert!(
+        ast.nodes
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::EntryStart(..))),
+        "the compiler-owned entry must accept an all-diverging body without a source contract"
+    );
+}
+
+#[test]
+fn explicitly_typed_placeholder_may_diverge_in_ast_finalisation() {
+    let mut project = FrontendProject::new(
+        &[(
+            "src/@page.moth",
+            "placeholder || -> I32:\n    assert(false, \"not implemented\")\n;\ncleanup || -> Error!:\n    assert(false, \"not implemented\")\n;\n",
+        )],
+        "src/@page.moth",
+        StyleDirectiveRegistry::built_ins(),
+    );
+
+    let _ = project.ast();
+}
+
+#[test]
 fn selected_terminating_value_if_body_replaces_its_receiver_before_hir() {
     let mut project = FrontendProject::new(
         &[(
@@ -1285,8 +1419,14 @@ fn synthetic_start_keeps_ast_builtin_error_slot_before_hir_narrowing() {
             })
             .expect("executable root must synthesize the entry start");
 
-        assert_eq!(signature.error_return_type_id(), Some(error_type));
-        assert_eq!(signature.success_return_type_ids().len(), 1);
+        assert_eq!(
+            signature.return_contract.expect_ordinary().error(),
+            Some(error_type)
+        );
+        assert_eq!(
+            signature.return_contract.expect_ordinary().success().len(),
+            1
+        );
     }
 }
 
@@ -1706,7 +1846,11 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
             ));
         }
         assert_eq!(
-            function.error_return,
+            function
+                .return_contract
+                .ordinary()
+                .expect("pipeline fixture function is ordinary")
+                .error(),
             type_environment.type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
                 CanonicalBuiltinType::Error
             )),
@@ -1748,10 +1892,12 @@ fn implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards() {
                 language_type: ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64)),
                 access_kind: ExternalAccessKind::Shared,
             }],
-            returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::Abi(
-                ExternalAbiType::Fixed(FixedScalar::F64),
-            ))],
-            error_return_type: None,
+            return_contract: external_returns(
+                vec![ExternalReturnSlot::fresh(ExternalSignatureType::Abi(
+                    ExternalAbiType::Fixed(FixedScalar::F64),
+                ))],
+                None,
+            ),
             const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
@@ -2141,7 +2287,10 @@ fn private_failure_lane_preserves_unrelated_fatal_fallible_edge() {
         .iter()
         .find(|function| function.id == function_id)
         .expect("private function must remain installed")
-        .error_return
+        .return_contract
+        .ordinary()
+        .expect("pipeline fixture function is ordinary")
+        .error()
         .expect("private failure lane must be fallible");
     assert_eq!(error.ty, error_type);
     assert_eq!(
@@ -3779,7 +3928,7 @@ fn implicit_failure_error_alias_is_canonical_but_lookalike_is_not() {
         })
         .expect("Error alias function");
     assert_eq!(
-        signature.returns.last().expect("error slot").type_id,
+        signature.return_contract.expect_ordinary().error(),
         Some(error_type_id)
     );
     let expression = initializer(&ast, &named_function_body(&project, &ast, "recover")[0]);
@@ -3982,6 +4131,23 @@ fn implicit_failure_infallible_message_keeps_ordinary_assertion() {
                 })
         }),
         "an ordinary infallible message must retain its assertion function at HIR"
+    );
+}
+
+#[test]
+fn implicit_failure_cannot_escape_dormant_generic_never_body() {
+    let mut project = failure_project(
+        "stop type T |marker T, left I32, right I32| -> !:\n\
+             product = left * right\n\
+             assert(false, \"stop\")\n;\n",
+    );
+    let failure = project
+        .ast_result()
+        .expect_ast_failure("a Never body has no error channel");
+    assert_ast_diagnostic(
+        &failure,
+        "MOTH-RULE-0051",
+        Some("invalid_fallible_handling.unhandled_builtin_failure_in_never_function"),
     );
 }
 
@@ -5088,8 +5254,7 @@ fn implicit_failure_zero_success_host_catch_lowers_pending_numeric_argument() {
                 language_type: ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
                 access_kind: ExternalAccessKind::Shared,
             }],
-            returns: vec![],
-            error_return_type: Some(ExternalSignatureType::BuiltinError),
+            return_contract: external_returns(vec![], Some(ExternalSignatureType::BuiltinError)),
             const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
@@ -5162,10 +5327,12 @@ fn implicit_failure_catches_keep_external_float_checks_on_function_boundary() {
                 language_type: ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64)),
                 access_kind: ExternalAccessKind::Shared,
             }],
-            returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::Abi(
-                ExternalAbiType::Fixed(FixedScalar::F64),
-            ))],
-            error_return_type: None,
+            return_contract: external_returns(
+                vec![ExternalReturnSlot::fresh(ExternalSignatureType::Abi(
+                    ExternalAbiType::Fixed(FixedScalar::F64),
+                ))],
+                None,
+            ),
             const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
@@ -5198,10 +5365,12 @@ fn implicit_failure_catches_keep_external_float_checks_on_function_boundary() {
                 language_type: ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64)),
                 access_kind: ExternalAccessKind::Shared,
             }],
-            returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::Abi(
-                ExternalAbiType::Fixed(FixedScalar::F64),
-            ))],
-            error_return_type: None,
+            return_contract: external_returns(
+                vec![ExternalReturnSlot::fresh(ExternalSignatureType::Abi(
+                    ExternalAbiType::Fixed(FixedScalar::F64),
+                ))],
+                None,
+            ),
             const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })

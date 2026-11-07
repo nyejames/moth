@@ -1,0 +1,7 @@
+fatal || -> !:
+    assert(false, "fatal")
+;
+
+compute || -> I32:
+    return fatal()
+;

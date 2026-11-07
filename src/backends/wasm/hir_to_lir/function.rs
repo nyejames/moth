@@ -137,11 +137,16 @@ fn lower_function_signature(
         params.push(lower_type_to_abi(context, type_id));
     }
 
-    let results = function
-        .returns
-        .iter()
-        .map(|type_id| lower_type_to_abi(context, *type_id))
-        .collect();
+    let results = match &function.return_contract {
+        crate::compiler_frontend::hir::functions::HirFunctionReturnContract::Never => Vec::new(),
+        crate::compiler_frontend::hir::functions::HirFunctionReturnContract::Returns(returns) => {
+            returns
+                .success()
+                .iter()
+                .map(|type_id| lower_type_to_abi(context, *type_id))
+                .collect()
+        }
+    };
 
     Ok(WasmLirSignature { params, results })
 }

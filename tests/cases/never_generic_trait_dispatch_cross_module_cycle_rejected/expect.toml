@@ -1,0 +1,14 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0055"]
+message_contains = [
+    "`stop` cannot use a recursive `-> !` group as its own divergence proof",
+]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0055"
+reason = "invalid_return_shape.never_proof_depends_on_cycle"
+path = "input/@page.moth"
+line = 8
+column = 1

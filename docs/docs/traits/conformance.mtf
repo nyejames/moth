@@ -28,6 +28,7 @@ A conformance declaration states that a type implements one or more traits. Matc
   - parameter types
   - return types
   - return channels
+  - whole return contract, so `-> !` matches only `-> !`
 - Parameter names do not affect conformance.
 - Accepted user-authored targets are same-file structs, choices and aligned generic constructors.
 - Rejected targets include builtins, imported types, dependency package types, external opaque types and nominal types declared in another file.

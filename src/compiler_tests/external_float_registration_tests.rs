@@ -37,6 +37,7 @@ use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::CompilationOutcome;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_reports;
+use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalFunctionDef, ExternalFunctionLowerings, ExternalJsLowering,
     ExternalReturnSlot, ExternalSignatureType,
@@ -93,12 +94,13 @@ impl RawFixedF64Function {
         ExternalFunctionDef {
             name: self.name.to_owned(),
             parameters: Vec::new(),
-            returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Fixed(
-                FixedScalar::F64,
-            ))],
-            error_return_type: self
-                .declares_error_slot
-                .then_some(ExternalSignatureType::BuiltinError),
+            return_contract: external_returns(
+                vec![ExternalReturnSlot::fresh(ExternalAbiType::Fixed(
+                    FixedScalar::F64,
+                ))],
+                self.declares_error_slot
+                    .then_some(ExternalSignatureType::BuiltinError),
+            ),
             const_eval: None,
             lowerings: ExternalFunctionLowerings {
                 js: Some(ExternalJsLowering::RuntimeFunction(

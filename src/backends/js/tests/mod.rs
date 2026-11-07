@@ -15,6 +15,7 @@ mod host;
 mod inline_expressions;
 mod io_input_runtime;
 mod map_statements;
+mod never_calls;
 mod number_runtime;
 mod numeric_carrier;
 mod numeric_proofs;

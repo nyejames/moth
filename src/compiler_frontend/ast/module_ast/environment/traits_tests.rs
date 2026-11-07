@@ -19,6 +19,7 @@ use crate::compiler_frontend::builtins::casts::targets::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
+use crate::compiler_frontend::declaration_syntax::signature_members::FunctionReturnContractSyntax;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
     HeaderKind, HeaderParseOptions, parse_file_headers_with_table,
@@ -369,25 +370,29 @@ fn fallible_core_trait_appends_error_return_channel() {
         .first()
         .expect("fallible core trait must have a requirement");
     assert_eq!(
-        requirement.returns.len(),
+        requirement
+            .return_contract
+            .ordinary()
+            .expect("ordinary")
+            .success()
+            .len()
+            + usize::from(
+                requirement
+                    .return_contract
+                    .ordinary()
+                    .expect("ordinary")
+                    .is_fallible()
+            ),
         2,
         "fallible core trait requirement must carry the Error! return slot"
     );
-    assert!(requirement.returns.iter().any(|slot| matches!(
-        slot.channel,
-        crate::compiler_frontend::ast::statements::functions::ReturnChannel::Error
-    )));
     let error_return = requirement
-        .returns
-        .iter()
-        .find(|slot| {
-            matches!(
-                slot.channel,
-                crate::compiler_frontend::ast::statements::functions::ReturnChannel::Error
-            )
-        })
+        .return_contract
+        .ordinary()
+        .expect("ordinary")
+        .error()
         .expect("fallible core trait must have an Error! return slot");
-    assert_eq!(error_return.type_id, error_type_id);
+    assert_eq!(error_return, error_type_id);
 }
 
 #[test]
@@ -645,20 +650,40 @@ fn assert_registered_core_cast_trait(
         BuiltinCastFallibility::Infallible => 1,
         BuiltinCastFallibility::Fallible => 2,
     };
-    assert_eq!(requirement.returns.len(), expected_return_count);
-    assert_eq!(requirement.returns[0].type_id, target_type_id);
-    assert!(matches!(
-        requirement.returns[0].channel,
-        crate::compiler_frontend::ast::statements::functions::ReturnChannel::Success
-    ));
+    assert_eq!(
+        requirement
+            .return_contract
+            .ordinary()
+            .expect("ordinary")
+            .success()
+            .len()
+            + usize::from(
+                requirement
+                    .return_contract
+                    .ordinary()
+                    .expect("ordinary")
+                    .is_fallible()
+            ),
+        expected_return_count
+    );
+    assert_eq!(
+        requirement
+            .return_contract
+            .ordinary()
+            .expect("ordinary")
+            .success(),
+        [target_type_id]
+    );
 
     if fallibility == BuiltinCastFallibility::Fallible {
-        let error_return = &requirement.returns[1];
-        assert_eq!(error_return.type_id, error_type_id);
-        assert!(matches!(
-            error_return.channel,
-            crate::compiler_frontend::ast::statements::functions::ReturnChannel::Error
-        ));
+        assert_eq!(
+            requirement
+                .return_contract
+                .ordinary()
+                .expect("ordinary")
+                .error(),
+            Some(error_type_id)
+        );
     }
 }
 
@@ -713,7 +738,11 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
         .expect("authored trait declaration");
     let signature = &declaration.requirements[0].signature;
     assert_eq!(signature.parameters.len(), 2);
-    assert_eq!(signature.returns.len(), 1);
+    let FunctionReturnContractSyntax::Returns(signature_returns) = &signature.return_contract
+    else {
+        panic!("the authored trait requirement should declare an ordinary return");
+    };
+    assert_eq!(signature_returns.len(), 1);
     let concrete_name = strings.intern("Concrete");
     let original_parameter_type_spans: Vec<_> = signature
         .parameters
@@ -723,7 +752,7 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
             other => panic!("expected authored This parameter, got {other:?}"),
         })
         .collect();
-    let original_return_type_span = match &signature.returns[0].value.type_annotation {
+    let original_return_type_span = match &signature_returns[0].value.type_annotation {
         ParsedTypeRef::This { span, .. } => *span,
         other => panic!("expected authored This return, got {other:?}"),
     };
@@ -749,19 +778,23 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
     );
     let substituted = signature_with_trait_this_as_parameter(signature, concrete_name);
     assert_eq!(substituted.parameters.len(), signature.parameters.len());
-    assert_eq!(substituted.returns.len(), signature.returns.len());
+    let FunctionReturnContractSyntax::Returns(substituted_returns) = &substituted.return_contract
+    else {
+        panic!("substitution must preserve the ordinary return contract");
+    };
+    assert_eq!(substituted_returns.len(), signature_returns.len());
     for (parameter, original) in substituted.parameters.iter().zip(&signature.parameters) {
         assert_eq!(parameter.span, original.span);
     }
     assert_eq!(
-        substituted.returns[0].value.span,
-        signature.returns[0].value.span
+        substituted_returns[0].value.span,
+        signature_returns[0].value.span
     );
     let receiver = substituted.parameters[0]
         .span
         .expect("substituted receiver should retain its span")
         .resolve_with(spans.resolver_for(source_id));
-    let result = substituted.returns[0]
+    let result = substituted_returns[0]
         .value
         .span
         .expect("substituted return should retain its span")
@@ -795,7 +828,7 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
             "This"
         );
     }
-    let (return_type_span, return_type_range) = match &substituted.returns[0].value.type_annotation
+    let (return_type_span, return_type_range) = match &substituted_returns[0].value.type_annotation
     {
         ParsedTypeRef::Named { name, span, .. } if *name == concrete_name => {
             let span = *span;

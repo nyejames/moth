@@ -72,7 +72,8 @@ pub(super) fn order_expression_nodes(
             ExpressionRpnItem::PendingNumericBinding { .. }
             | ExpressionRpnItem::PendingNumericCall { .. }
             | ExpressionRpnItem::PendingNumericCast { .. }
-            | ExpressionRpnItem::PendingNumericExpression { .. } => {
+            | ExpressionRpnItem::PendingNumericExpression { .. }
+            | ExpressionRpnItem::NeverCall(_) => {
                 return Err(pending_expression_item_bug("expression ordering"));
             }
             operator_item @ ExpressionRpnItem::Operator { .. } => {

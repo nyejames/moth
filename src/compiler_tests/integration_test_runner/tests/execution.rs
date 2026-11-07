@@ -408,9 +408,29 @@ fn start_function(module: &Module) -> Option<&HirFunction> {
 fn assert_start_result(module: &Module, fallible: bool) {
     let start = start_function(module).expect("successful frontend should contain entry start");
     let types = &module.executable.type_environment;
-    assert_eq!(start.error_return.is_some(), fallible);
-    assert_eq!(start.returns.len(), 1);
-    let success_type = start.returns[0];
+    assert_eq!(
+        start
+            .return_contract
+            .ordinary()
+            .expect("start fixture is ordinary")
+            .error()
+            .is_some(),
+        fallible
+    );
+    assert_eq!(
+        start
+            .return_contract
+            .ordinary()
+            .expect("start fixture is ordinary")
+            .success()
+            .len(),
+        1
+    );
+    let success_type = start
+        .return_contract
+        .ordinary()
+        .expect("start fixture is ordinary")
+        .success()[0];
     assert_eq!(
         types.collection_element_type(success_type),
         Some(builtin_type_ids::STRING)

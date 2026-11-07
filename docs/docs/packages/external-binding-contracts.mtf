@@ -70,9 +70,11 @@ first.
 
 - parameters are positional and typed
 - mutable parameters use `name ~Type`
-- signatures have zero or one success return
-- an optional final `Error!` channel is allowed
+- signatures have zero or one success return, or the whole Never contract `-> !`
+- an optional final `Error!` channel is allowed on ordinary signatures
 - `Error!` must be final
+- `-> !` is a whole contract and cannot mix with success, optional or error slots
+- mixed forms such as `-> String, !`, `-> Error!, !` or `-> !!` are rejected
 - numeric slots spell `I32`, `I64`, `U32`, `U64`, `F32` or `F64`, alongside `Bool`, `String`, `Char` and opaque handle types
 - annotations do not support `I8`, `I16`, `U8`, `U16`, `F16`, `Byte` or `Dec`
 - generic signatures are rejected
@@ -87,6 +89,20 @@ first.
 Calls to mutable parameters follow ordinary access rules. Pass an existing
 mutable place as `~place` and pass a fresh value or legal `copy` without `~`.
 External binding calls remain positional-only.
+
+An explicit `@moth.sig ... -> !` annotation is the only way an external
+function is Never. Moth does not inspect the foreign body. Calls follow the
+standalone-statement rule. Host Never imports are rejected on Wasm at target
+validation.
+
+[codeblock, $code("js"):
+    /**
+     * @moth.sig halt |message String| -> !
+     */
+    export function halt(message) {
+        throw new Error(message);
+    }
+]
 
 #### Exact literal constant subset
 

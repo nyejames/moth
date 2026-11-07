@@ -324,6 +324,10 @@ impl HirBackendSelection {
                             ..
                         },
                     ..
+                }
+                | HirTerminator::NeverCall {
+                    target: CallTarget::Local(callee),
+                    ..
                 } = &block.terminator
                     && !self.contains_function(*callee)
                 {
@@ -1043,6 +1047,16 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 expression_collector.collect(&mut self.direct_facts, *value, fallback_span);
             }
 
+            HirTerminator::NeverCall { target, args } => {
+                // A Never call is a normal call edge. Its evaluated arguments carry the same
+                // resource and project-context facts as an ordinary call, and the terminator has
+                // no result provenance because it produces no value.
+                self.collect_call_target(target, fallback_span);
+                for value in self.index.hir.expressions.values(*args) {
+                    expression_collector.collect(&mut self.direct_facts, *value, fallback_span);
+                }
+            }
+
             // Jump operands transfer locals, not new expression graphs.
             HirTerminator::Jump { .. }
             | HirTerminator::Break { .. }
@@ -1232,6 +1246,7 @@ fn terminator_successors(
         HirTerminator::Break { target } | HirTerminator::Continue { target } => vec![*target],
         HirTerminator::Return(_)
         | HirTerminator::ReturnError(_)
+        | HirTerminator::NeverCall { .. }
         | HirTerminator::RuntimeFailure { .. }
         | HirTerminator::AssertFailure { .. } => Vec::new(),
         HirTerminator::Uninitialized => {

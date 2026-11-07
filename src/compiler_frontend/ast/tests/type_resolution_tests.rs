@@ -1326,15 +1326,48 @@ make || -> {capacity I32}:
             _ => None,
         })
         .expect("make signature should be registered");
-    let return_type_id = signature.returns[0]
-        .type_id
-        .expect("return slot should have a TypeId");
+    let return_type_id = signature.return_contract.expect_ordinary().success()[0];
 
     assert_eq!(
         ast.type_environment
             .collection_fixed_capacity(return_type_id),
         Some(3),
         "fixed capacity in return annotation should fold into the canonical return TypeId"
+    );
+}
+
+#[test]
+fn never_return_contract_resolves_without_a_return_type_id() {
+    let source = r#"
+fatal || -> !:
+    assert(false, "unreachable")
+;
+"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+
+    let fatal_name = string_table.intern("fatal");
+    let page_path_id = path_fork
+        .try_intern_portable_path("@page.moth", &mut string_table)
+        .expect("test path fits");
+    let fatal_path = path_fork
+        .try_intern_child(page_path_id, fatal_name)
+        .expect("test path fits");
+    let signature = ast
+        .nodes
+        .iter()
+        .find_map(|node| match &node.kind {
+            NodeKind::Function(path, signature, _) if *path == fatal_path => Some(signature),
+            _ => None,
+        })
+        .expect("the Never function signature should be registered");
+
+    assert!(
+        signature.return_contract.is_never(),
+        "`-> !` must resolve to the Never contract variant"
+    );
+    assert!(
+        signature.return_contract.ordinary().is_none(),
+        "Never must never be projected onto empty ordinary slots"
     );
 }
 
@@ -1469,9 +1502,7 @@ use_maps |scores StringScores, direct {Bool = {String = I32}}| -> {Char = String
         builtins.bool,
         scores_type_id,
     );
-    let return_type_id = signature.returns[0]
-        .type_id
-        .expect("map return should have a TypeId");
+    let return_type_id = signature.return_contract.expect_ordinary().success()[0];
     assert_map_shape(&ast, return_type_id, builtins.char, scores_type_id);
 
     let payload_type_id = nominal_type_id(&ast, &mut string_table, &mut path_fork, "Payload");

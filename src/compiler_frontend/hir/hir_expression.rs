@@ -1308,10 +1308,16 @@ impl<'a> HirBuilder<'a> {
         source: ExpressionView<'_>,
         span: &Option<SourceSpan>,
     ) -> Result<EmittedFallibleResults, HirConstructionFailure> {
-        let (types, error_type) = self.result_call_slots(&target)?;
+        let returns = self.result_call_slots(&target)?;
+        let error_type = returns.error().ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::HirConstruction,
+                "Fallible call result contract has no error slot",
+            )
+        })?;
         let source = self.lower_expression_value_to_current_block(source)?;
         let args = self.module.expressions.append_values(&[source], *span)?;
-        let types = self.lower_call_result_types(&types)?;
+        let types = self.lower_call_result_types(returns.success())?;
         let error_type = self.lower_type_id(error_type)?;
         self.emit_fallible_operation(
             crate::compiler_frontend::hir::terminators::HirFallibleOperation::Call { target, args },

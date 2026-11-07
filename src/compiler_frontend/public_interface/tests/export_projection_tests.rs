@@ -16,6 +16,7 @@
 use crate::builder_surface::core_packages::register_core_text_package;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
+use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     ExternalConstEvalOp, ExternalFunctionDef, ExternalFunctionLowerings, ExternalPackageRegistry,
     ExternalSymbolId, TextConstEvalOp,
@@ -636,8 +637,7 @@ fn external_binding_export_identity_resolves_in_independent_registry() {
         .register_function(ExternalFunctionDef {
             name: "length".to_owned(),
             parameters: Vec::new(),
-            returns: Vec::new(),
-            error_return_type: None,
+            return_contract: external_returns(Vec::new(), None),
             const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })

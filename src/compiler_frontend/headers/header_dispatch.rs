@@ -355,7 +355,7 @@ pub(super) fn create_header(
                         &mut capacity_references,
                     )?;
                 }
-                for ret in &requirement.signature.returns {
+                for ret in requirement.signature.ordinary_return_slots() {
                     collect_type_ordering_hints(
                         &ret.value.type_annotation,
                         &generic_parameters,
@@ -467,7 +467,7 @@ pub(super) fn create_header(
                 )?;
             }
 
-            for ret in &signature.returns {
+            for ret in signature.ordinary_return_slots() {
                 collect_type_ordering_hints(
                     &ret.value.type_annotation,
                     &generic_parameters,

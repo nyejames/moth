@@ -9,7 +9,6 @@
 use super::diagnostics::{invalid_conformance, requirement_and_method_labels, requirement_label};
 use super::environment::TraitRequirementEvidence;
 use super::target_resolution::ConformanceTarget;
-use crate::compiler_frontend::ast::statements::functions::ReturnSlot;
 use crate::compiler_frontend::ast::{ReceiverMethodCatalog, ReceiverMethodEntry};
 use crate::compiler_frontend::compiler_messages::InvalidTraitConformanceReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
@@ -251,57 +250,48 @@ fn validate_returns(
     method: &ImplementationMethod<'_>,
     context: &mut RequirementValidationContext<'_>,
 ) -> RequirementValidationResult {
-    let method_returns = &method.entry.signature.returns;
-    if requirement.returns.len() != method_returns.len() {
+    let requirement_contract = &requirement.return_contract;
+    let method_contract = &method.entry.signature.return_contract;
+    let (requirement_returns, method_returns) =
+        match (requirement_contract.ordinary(), method_contract.ordinary()) {
+            (Some(requirement_returns), Some(method_returns)) => {
+                (requirement_returns, method_returns)
+            }
+            (None, None) => return Ok(()),
+            _ => {
+                return Err(invalid_conformance(
+                    context.target_name,
+                    Some(context.trait_name),
+                    InvalidTraitConformanceReason::ReturnContractMismatch {
+                        requirement_name: requirement.name,
+                    },
+                    context.conformance_span,
+                    requirement_and_method_labels(requirement, method.entry),
+                ));
+            }
+        };
+    let requirement_success = requirement_returns.success();
+    let method_success = method_returns.success();
+    let requirement_slot_count =
+        requirement_success.len() + usize::from(requirement_returns.is_fallible());
+    let method_slot_count = method_success.len() + usize::from(method_returns.is_fallible());
+    if requirement_slot_count != method_slot_count {
         return Err(invalid_conformance(
             context.target_name,
             Some(context.trait_name),
             InvalidTraitConformanceReason::ReturnCountMismatch {
                 requirement_name: requirement.name,
-                expected: requirement.returns.len(),
-                found: method_returns.len(),
+                expected: requirement_slot_count,
+                found: method_slot_count,
             },
             context.conformance_span,
             requirement_and_method_labels(requirement, method.entry),
         ));
     }
 
-    for (index, (required, actual)) in requirement.returns.iter().zip(method_returns).enumerate() {
-        if required.channel != actual.channel {
-            return Err(invalid_conformance(
-                context.target_name,
-                Some(context.trait_name),
-                InvalidTraitConformanceReason::ReturnChannelMismatch {
-                    requirement_name: requirement.name,
-                    return_index: index + 1,
-                },
-                context.conformance_span,
-                requirement_and_method_labels(requirement, method.entry),
-            ));
-        }
-
-        let Some(actual_type) = return_type_id(actual) else {
-            return Err(invalid_conformance(
-                context.target_name,
-                Some(context.trait_name),
-                InvalidTraitConformanceReason::ReturnTypeMismatch {
-                    requirement_name: requirement.name,
-                    return_index: index + 1,
-                    expected_type: replace_trait_this(
-                        required.type_id,
-                        trait_this_type,
-                        method.receiver_type_id,
-                    ),
-                    found_type: method.receiver_type_id,
-                },
-                context.conformance_span,
-                requirement_and_method_labels(requirement, method.entry),
-            ));
-        };
-
-        let expected_type =
-            replace_trait_this(required.type_id, trait_this_type, method.receiver_type_id);
-        if expected_type != actual_type {
+    for (index, (required, actual)) in requirement_success.iter().zip(method_success).enumerate() {
+        let expected_type = replace_trait_this(*required, trait_this_type, method.receiver_type_id);
+        if expected_type != *actual {
             return Err(invalid_conformance(
                 context.target_name,
                 Some(context.trait_name),
@@ -309,7 +299,40 @@ fn validate_returns(
                     requirement_name: requirement.name,
                     return_index: index + 1,
                     expected_type,
-                    found_type: actual_type,
+                    found_type: *actual,
+                },
+                context.conformance_span,
+                requirement_and_method_labels(requirement, method.entry),
+            ));
+        }
+    }
+
+    // Counts are equal, so differing fallibility means one side has an extra success slot; report
+    // the channel at the first position past the shorter success prefix.
+    if requirement_returns.is_fallible() != method_returns.is_fallible() {
+        return Err(invalid_conformance(
+            context.target_name,
+            Some(context.trait_name),
+            InvalidTraitConformanceReason::ReturnChannelMismatch {
+                requirement_name: requirement.name,
+                return_index: requirement_success.len().min(method_success.len()) + 1,
+            },
+            context.conformance_span,
+            requirement_and_method_labels(requirement, method.entry),
+        ));
+    }
+
+    if let (Some(required), Some(actual)) = (requirement_returns.error(), method_returns.error()) {
+        let expected_type = replace_trait_this(required, trait_this_type, method.receiver_type_id);
+        if expected_type != actual {
+            return Err(invalid_conformance(
+                context.target_name,
+                Some(context.trait_name),
+                InvalidTraitConformanceReason::ReturnTypeMismatch {
+                    requirement_name: requirement.name,
+                    return_index: requirement_success.len() + 1,
+                    expected_type,
+                    found_type: actual,
                 },
                 context.conformance_span,
                 requirement_and_method_labels(requirement, method.entry),
@@ -318,10 +341,6 @@ fn validate_returns(
     }
 
     Ok(())
-}
-
-fn return_type_id(return_slot: &ReturnSlot) -> Option<TypeId> {
-    return_slot.type_id
 }
 
 fn replace_trait_this(

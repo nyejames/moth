@@ -16,7 +16,7 @@ use crate::compiler_frontend::declaration_syntax::build_config_contract::SourceB
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantSyntax;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
-    FunctionSignatureSyntax, SignatureMemberSyntax,
+    FunctionReturnContractSyntax, FunctionSignatureSyntax, SignatureMemberSyntax,
 };
 use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
 use crate::compiler_frontend::headers::dependency_clause_syntax::{
@@ -1050,9 +1050,17 @@ fn rebind_function_signature_source_identity(
             path_fork,
         )?;
     }
-    for return_slot in &mut signature.returns {
-        rebind_source_span(&mut return_slot.value.span, file_id);
-        rebind_parsed_type_ref_source_identity(&mut return_slot.value.type_annotation, file_id);
+    match &mut signature.return_contract {
+        FunctionReturnContractSyntax::Returns(return_slots) => {
+            for return_slot in return_slots {
+                rebind_source_span(&mut return_slot.value.span, file_id);
+                rebind_parsed_type_ref_source_identity(
+                    &mut return_slot.value.type_annotation,
+                    file_id,
+                );
+            }
+        }
+        FunctionReturnContractSyntax::Never => {}
     }
     Ok(())
 }
@@ -2331,9 +2339,14 @@ fn validate_function_signature(
     for parameter in &signature.parameters {
         validate_signature_member(parameter, file_id, source_file, path_fork, source_tokens)?;
     }
-    for return_slot in &signature.returns {
-        validate_source_span(return_slot.value.span, file_id, "function return")?;
-        validate_parsed_type_ref(&return_slot.value.type_annotation, file_id)?;
+    match &signature.return_contract {
+        FunctionReturnContractSyntax::Returns(return_slots) => {
+            for return_slot in return_slots {
+                validate_source_span(return_slot.value.span, file_id, "function return")?;
+                validate_parsed_type_ref(&return_slot.value.type_annotation, file_id)?;
+            }
+        }
+        FunctionReturnContractSyntax::Never => {}
     }
     Ok(())
 }

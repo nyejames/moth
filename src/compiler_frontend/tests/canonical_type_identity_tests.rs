@@ -20,6 +20,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::{InfrastructureFailure, InfrastructureFailureKind};
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, FieldDefinition, FunctionParameterDefinition,
@@ -883,8 +884,7 @@ fn function_type_returns_infrastructure_failure() {
             name: None,
             type_id: int_id,
         }]),
-        returns: Box::new([int_id]),
-        error_return: None,
+        return_contract: (CallableReturnShape::from_slots([int_id], None)).into(),
     });
 
     let resolver = MapNominalOriginResolver::new();

@@ -105,6 +105,7 @@ pub(crate) mod statements {
     pub(crate) mod branching;
     pub(crate) mod collections;
     pub(crate) mod condition_validation;
+    pub(crate) mod control_flow_exits;
     pub(crate) mod declarations;
     pub(crate) mod declared_regions;
     pub(crate) mod diagnostics;
@@ -118,6 +119,7 @@ pub(crate) mod statements {
     pub(crate) mod match_headers;
     pub(crate) mod match_patterns;
     pub(crate) mod multi_bind;
+    pub(crate) mod never_call;
     pub(crate) mod numeric_body_completion;
     pub(crate) mod terminality;
     pub(crate) mod value_production;
@@ -142,9 +144,7 @@ pub(crate) use module_ast::environment::{
     ResolvedPublicTypeRoot, ResolvedPublicTypeRootKind, ResolvedTraitSourceFact,
 };
 #[cfg(test)]
-pub(crate) use module_ast::environment::{
-    ResolvedTraitParameterFact, ResolvedTraitReceiverFact, ResolvedTraitReturnFact,
-};
+pub(crate) use module_ast::environment::{ResolvedTraitParameterFact, ResolvedTraitReceiverFact};
 pub(crate) use module_ast::scope_context::ScopeDeclarationRef;
 pub use module_ast::scope_context::{ContextKind, ScopeContext};
 pub(crate) use module_ast::scope_context::{FileValueResolutionServices, Stage0ResolutionFacts};
@@ -170,6 +170,7 @@ use crate::compiler_frontend::ast::module_ast::finalization::{
 use crate::compiler_frontend::ast::statements::body_dispatch::{
     ParsedBody, parse_function_body_statements,
 };
+use crate::compiler_frontend::ast::statements::terminality::NeverProofNode;
 use crate::compiler_frontend::ast::templates::top_level_templates::AstConstTopLevelFragment;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::instrumentation::{log_ast_counters, reset_ast_counters};
@@ -181,8 +182,8 @@ use crate::compiler_frontend::ast::generic_functions::{
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, DiagnosticDraft, PreparedFailure,
 };
+use crate::compiler_frontend::datatypes::FunctionReturnContract;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -276,8 +277,7 @@ pub struct Ast {
 pub(crate) struct AstImportedFunctionContract {
     pub(crate) target: crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget,
     pub(crate) summary: crate::compiler_frontend::public_call_summary::PublicCallSummary,
-    pub(crate) returns: Vec<TypeId>,
-    pub(crate) error_return: Option<TypeId>,
+    pub(crate) return_contract: FunctionReturnContract,
 }
 
 /// Closed typed AST construction result carrying executable `Ast` and the three semantic
@@ -318,6 +318,16 @@ pub struct AstBuildResult {
     /// Generic instances needed only to validate retained inactive assertion-message witnesses.
     /// These requests own no executable demand and exclude instances already requested above.
     pub(crate) assertion_validation_generic_requests: Vec<GenericFunctionInstantiationRequest>,
+
+    /// Exact-target divergence-proof nodes for this module's own declared `-> !` functions.
+    ///
+    /// WHAT: one node per declared Never function in the executable AST, whose dependencies are
+    ///       the raw standalone Never call targets, including concrete generic instance paths.
+    /// WHY: the declaring module's template graph remaps instances to template declarations, so it
+    ///      cannot see a cycle that closes through a generated instance's trait-bound call. The
+    ///      requester unions these nodes with every generated sidecar's nodes after materialisation
+    ///      and rejects a cycle that its own source participates in.
+    pub(crate) exact_never_proofs: Vec<NeverProofNode>,
 }
 
 /// Complete header-stage output consumed by AST construction.

@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 
 use crate::build_system::BuildProfile;
 use crate::build_system::create_project_modules::ProjectFrontendCompilation;
@@ -27,7 +28,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::failure_facts::HirFunctionFailureFacts;
-use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionReturnContract};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::{
@@ -110,8 +111,10 @@ fn link_facts_for_calls(targets: Vec<CallTarget>) -> HirModuleLinkFacts {
         id: FunctionId(0),
         entry: BlockId(0),
         params: Vec::new(),
-        returns: Box::new([]),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [],
+            None,
+        )),
     });
     module
         .function_provenance
@@ -152,8 +155,10 @@ fn base_hir(
             id: FunctionId(index as u32),
             entry: BlockId(0),
             params: Vec::new(),
-            returns: Box::new([]),
-            error_return: None,
+            return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         });
         hir.function_provenance
             .insert(FunctionId(index as u32), Default::default());
@@ -819,6 +824,7 @@ fn declared_error_and_export_boundaries_never_forward_builtin_failure_bit() {
         HirBuiltinFailureBoundary::BuiltinErrorSlot,
         HirBuiltinFailureBoundary::CustomErrorSlot(TypeId(7)),
         HirBuiltinFailureBoundary::ExportedNoSlot,
+        HirBuiltinFailureBoundary::Never,
     ] {
         let mut hir = base_hir(&[origin("boundary")], &[]);
         hir.function_failure_facts.insert(
@@ -2008,7 +2014,10 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
             .iter()
             .find(|function| function.id == load)
             .expect("the typed producer survives the service")
-            .error_return
+            .return_contract
+            .ordinary()
+            .expect("load fixture is ordinary")
+            .error()
             .expect("load retains its custom failure channel");
         let diagnostic = type_mismatch(
             custom_type,
@@ -2168,7 +2177,10 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
                 .iter()
                 .find(|function| function.id == operand_root)
                 .expect("the concrete operand retains its native contract")
-                .error_return
+                .return_contract
+                .ordinary()
+                .expect("operand fixture is ordinary")
+                .error()
                 .is_none()
         );
         let sidecar = sidecars
@@ -2212,7 +2224,10 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
             .iter()
             .find(|function| function.id == root)
             .expect("the generated root remains executable")
-            .error_return
+            .return_contract
+            .ordinary()
+            .expect("generated root fixture is ordinary")
+            .error()
             .expect("the generated private lane returns builtin failure");
         assert_eq!(
             sidecar
@@ -2534,7 +2549,12 @@ fn final_generated_failure_lanes_keep_external_candidates_without_validation_onl
             .find(|function| function.id == root)
             .expect("the selected generated root should survive convergence");
         assert!(
-            root_function.error_return.is_some(),
+            root_function
+                .return_contract
+                .ordinary()
+                .expect("generated root fixture is ordinary")
+                .error()
+                .is_some(),
             "the private helper's inferred failure must rewrite the generated root's call lane"
         );
         assert!(hir.blocks.iter().any(|block| matches!(

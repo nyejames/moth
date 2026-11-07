@@ -26,7 +26,7 @@ use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId
 use crate::compiler_frontend::hir::blocks::HirLocal;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
-use crate::compiler_frontend::hir::hir_builder::HirBuilder;
+use crate::compiler_frontend::hir::hir_builder::{HirBuilder, LoopExitPolicy};
 use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
 use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::{
@@ -203,9 +203,13 @@ impl<'a> HirBuilder<'a> {
         span_ref: &Option<SourceSpan>,
         span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        self.lower_while_with_body_emitter(condition, span_ref, span, |builder| {
-            builder.lower_statement_sequence(expressions, body)
-        })
+        self.lower_while_with_body_emitter(
+            condition,
+            LoopExitPolicy::Statement,
+            span_ref,
+            span,
+            |builder| builder.lower_statement_sequence(expressions, body),
+        )
     }
 
     /// Lowers a conditional loop into CFG while letting callers choose the body emitter.
@@ -217,6 +221,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_while_with_body_emitter(
         &mut self,
         condition: ExpressionView<'_>,
+        exit_policy: LoopExitPolicy,
         span_ref: &Option<SourceSpan>,
         span: Option<SourceSpan>,
         emit_body: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), HirConstructionFailure>,
@@ -231,26 +236,38 @@ impl<'a> HirBuilder<'a> {
         self.emit_jump_from_current_block(header_block, span_ref, "while.enter")?;
 
         self.set_current_block(header_block)?;
+
+        // Read the same AST constant-store fact the exit analysis used, before lowering the
+        // condition. Recognising only HIR's lowered literal would disagree with a named or
+        // body-local folded Bool and leave an accepted non-exiting body unterminated.
+        let condition_is_folded_true = exit_policy == LoopExitPolicy::Statement
+            && self.expression_constant_bool(condition) == Some(true);
+
         let condition_value = self.lower_expression_value_to_current_block(condition)?;
         let condition_block = self.current_block_id_or_error()?;
 
-        self.emit_terminator_with_span(
-            condition_block,
-            HirTerminator::If {
-                condition: condition_value,
-                then_block: body_block,
-                else_block: exit_block,
-            },
-            span_ref,
-            span,
-        )?;
+        if condition_is_folded_true {
+            self.emit_jump_from_current_block(body_block, span_ref, "while.true.unconditional")?;
+        } else {
+            self.emit_terminator_with_span(
+                condition_block,
+                HirTerminator::If {
+                    condition: condition_value,
+                    then_block: body_block,
+                    else_block: exit_block,
+                },
+                span_ref,
+                span,
+            )?;
 
-        self.log_control_flow_edge(condition_block, body_block, "while.true");
-        self.log_control_flow_edge(condition_block, exit_block, "while.false");
+            self.log_control_flow_edge(condition_block, body_block, "while.true");
+            self.log_control_flow_edge(condition_block, exit_block, "while.false");
+        }
 
         self.set_current_block(body_block)?;
         self.push_loop_targets(exit_block, header_block);
         let body_result = emit_body(self);
+        let body_breaks = self.current_loop_saw_break();
         self.pop_loop_targets();
         body_result?;
 
@@ -266,6 +283,22 @@ impl<'a> HirBuilder<'a> {
 
             self.set_current_block(backedge_block)?;
             self.emit_jump_to(backedge_block, header_block, span_ref, "while.backedge")?;
+        }
+
+        if condition_is_folded_true && !body_breaks {
+            // Nothing can resume after this loop. Drop the preallocated exit and leave the
+            // cursor on the loop header, whose explicit terminator gives the same
+            // "current path terminated" state as a return block. Later statements are then
+            // not lowered and the function-end check sees an explicit terminator.
+            let removed = self.discard_unreachable_empty_block(exit_block)?;
+            if !removed {
+                return Err(InfrastructureFailure::hir_transformation(
+                    "A folded-true loop without a break left a reachable exit block.",
+                )
+                .into());
+            }
+
+            return Ok(self.set_current_block(header_block)?);
         }
 
         Ok(self.set_current_block(exit_block)?)

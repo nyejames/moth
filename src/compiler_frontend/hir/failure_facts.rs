@@ -38,6 +38,9 @@ pub(crate) enum HirBuiltinFailureBoundary {
     BuiltinErrorSlot,
     CustomErrorSlot(TypeId),
     ExportedNoSlot,
+    /// A declared `-> !` body. It has no error channel, so implicit built-in failure that can
+    /// escape it is a closed-boundary diagnostic rather than an inferred private lane.
+    Never,
 }
 
 #[derive(Debug, Clone)]

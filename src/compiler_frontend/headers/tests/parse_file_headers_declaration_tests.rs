@@ -709,7 +709,7 @@ fn function_without_arrow_has_zero_return_slots() {
     let headers = parse_single_file_headers("f||:\n;\n");
     let signature = first_function_signature(&headers);
 
-    assert!(signature.returns.is_empty());
+    assert!(signature.ordinary_return_slots().is_empty());
 }
 
 #[test]
@@ -718,7 +718,7 @@ fn function_value_return_is_preserved_as_return_syntax_shell() {
     let signature = first_function_signature(&headers);
 
     assert!(matches!(
-        signature.returns.as_slice(),
+        signature.ordinary_return_slots(),
         [ReturnSlotSyntax {
             value: FunctionReturnSyntax {
                 type_annotation: ParsedTypeRef::BuiltinFixedScalar { .. },
@@ -736,7 +736,7 @@ fn function_named_return_is_preserved_for_ast_resolution() {
     let signature = first_function_signature(&headers);
 
     assert!(matches!(
-        signature.returns.as_slice(),
+        signature.ordinary_return_slots(),
         [ReturnSlotSyntax {
             value: FunctionReturnSyntax {
                 type_annotation: ParsedTypeRef::Named { .. },
@@ -1001,7 +1001,7 @@ fn function_signature_preserves_unknown_symbolic_return_for_ast_resolution() {
     let signature = first_function_signature(&headers);
 
     assert!(matches!(
-        signature.returns.as_slice(),
+        signature.ordinary_return_slots(),
         [ReturnSlotSyntax {
             value: FunctionReturnSyntax {
                 type_annotation: ParsedTypeRef::Named { .. },

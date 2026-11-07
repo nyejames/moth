@@ -48,6 +48,7 @@ use crate::compiler_frontend::module_compilation::generated::convergence::{
 };
 use crate::compiler_frontend::module_compilation::generated::known::KnownGeneratedFunctions;
 use crate::compiler_frontend::module_compilation::generated::materialisation::materialise_generated_request_roots;
+use crate::compiler_frontend::module_compilation::generated::never_proofs::GeneratedNeverProofs;
 use crate::compiler_frontend::module_compilation::generated::requests::install_generated_request_contracts;
 use crate::compiler_frontend::module_compilation::generated::transaction::{
     GeneratedFunctionTransaction, GeneratedRequestFacts,
@@ -565,6 +566,7 @@ fn run_semantic_stages(
         materialisation_context: materialisation_context_builder,
         deferred_generic_requests,
         assertion_validation_generic_requests,
+        exact_never_proofs,
     } = module_ast_build;
 
     let module_resources = module_resources.unwrap_or_else(|| {
@@ -724,6 +726,14 @@ fn run_semantic_stages(
                 call_span: request.call_span,
             }
         }));
+    // The Never proof union starts with this module's exact-target nodes translated through its
+    // own registered spellings. Each sidecar adds its nodes under its own domain's spellings, so
+    // equal `__generic_instance_<TypeId>` spellings from different domains never merge.
+    let mut generated_never_proofs = GeneratedNeverProofs::new(
+        exact_never_proofs,
+        &generated_requests,
+        &generated_transaction,
+    );
     // 4b. Extract validated generic-template body artefacts before HIR consumes AST
     //     state. The transient public callable seed table is the exact path-to-origin
     //     authority for every directly exported generic free function or receiver method;
@@ -876,6 +886,10 @@ fn run_semantic_stages(
             None
         )
     )?;
+    // Exact-target Never proof nodes accumulate in materialisation order: this module's own
+    // declarations first, then every generated sidecar's. The declaring module's template graph
+    // cannot see a cycle that closes through a sidecar's trait-bound call, so the domain-keyed
+    // union is checked once materialisation finishes.
     let generated_materialisation = timed_stage_attributed!(
         crate::timing::TimingMetric::FrontendGeneratedMaterialise,
         timing_context,
@@ -884,6 +898,7 @@ fn run_semantic_stages(
             &generated_request_ids,
             &mut generated_transaction,
             materialisation_context_builder.context(),
+            &mut generated_never_proofs,
             compiler,
             entry_file_path,
             #[cfg(feature = "timers")]
@@ -891,6 +906,28 @@ fn run_semantic_stages(
         )
     );
     generated_materialisation?;
+    if let Some((first_cyclic, diagnostic)) = generated_never_proofs.cycle() {
+        // Requester nodes precede sidecar nodes, so a requester index means this module's own
+        // source declaration lies on the cycle and owns the report. An instance-only cycle needs
+        // instance-to-instance edges, which are nested requests, so depth-first materialisation
+        // has already rejected it as recursive generic instantiation.
+        if first_cyclic >= generated_never_proofs.requester_count() {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                "generated Never proof cycle has no requester declaration; recursive generic \
+                 instantiation should have rejected it during materialisation",
+            )
+            .into());
+        }
+        let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+            DiagnosticBag::from(diagnostic),
+            compiler.string_table.take_for_handoff(),
+            None,
+            || Some(Arc::new(compiler.path_fork.shared_table())),
+        )
+        .map_err(PreparedFailure::from)?;
+        return Err(PreparedFailure::Diagnosed(batch));
+    }
     let borrow_analysis = run_generated_summary_convergence(
         context,
         compiler,

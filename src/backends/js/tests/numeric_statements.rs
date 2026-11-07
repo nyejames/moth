@@ -4,6 +4,7 @@ use super::support::*;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::compiler_bug::CompilerBugReport;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -11,7 +12,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
-use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionReturnContract};
 use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::{
@@ -53,8 +54,10 @@ fn trap_mode_loop_step_failure_lowers_to_fatal_throw() {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            returns: Box::new([]),
-            error_return: None,
+            return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         };
         let module = build_module(
             expressions,
@@ -135,8 +138,10 @@ fn lower_minimal_module_with_float_statement(
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: Box::new([]),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [],
+            None,
+        )),
     };
 
     let module = build_module(
@@ -291,11 +296,13 @@ fn lower_float_boundary_module(
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        returns: vec![source_type].into_boxed_slice(),
-        error_return: match lane {
-            FloatBoundaryLane::Scalar => None,
-            FloatBoundaryLane::Fallible => Some(types.error),
-        },
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![source_type],
+            match lane {
+                FloatBoundaryLane::Scalar => None,
+                FloatBoundaryLane::Fallible => Some(types.error),
+            },
+        )),
     };
     let module = build_module(
         expressions,
@@ -424,8 +431,10 @@ fn integer_range_candidate_source(step_scalar: FixedScalar) -> String {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: Box::new([]),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [],
+            None,
+        )),
     };
     let module = build_module(
         expressions,
@@ -1104,8 +1113,10 @@ fn numeric_op_arity_mismatch_raises_compiler_bug() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: Box::new([]),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [],
+            None,
+        )),
     };
 
     let module = build_module(
@@ -1172,8 +1183,10 @@ fn numeric_op_update_uses_value_assignment() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        returns: Box::new([]),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [],
+            None,
+        )),
     };
     let module = build_module(
         expressions,
@@ -1310,8 +1323,10 @@ fn lower_returned_operation(
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![result_type].into_boxed_slice(),
-        error_return: Some(types.error),
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![result_type],
+            Some(types.error),
+        )),
     };
     let module = build_module(
         expressions,

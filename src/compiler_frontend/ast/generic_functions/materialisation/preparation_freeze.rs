@@ -7,9 +7,10 @@ use super::semantic_closure::{StableSemanticClosure, stable_body_symbol_names};
 use super::sidecar_build::bootstrap_call_summary_from_signature;
 use super::stable_types::{
     GenericTemplateArtefact, MaterialisationNominalOriginResolver, MaterialisationNominalSource,
-    StableCallableBinding, StableFunctionParameter, StableFunctionSignature, StableFunctionTarget,
-    StableGenericCallableContract, StableGenericParameter, StableNominalBinding,
-    StableParameterContract, StableReceiverKey,
+    StableCallableBinding, StableFunctionParameter, StableFunctionReturnContract,
+    StableFunctionSignature, StableFunctionTarget, StableGenericCallableContract,
+    StableGenericParameter, StableNominalBinding, StableParameterContract, StableReceiverKey,
+    StableReturns,
 };
 use super::visibility::{
     StableExternalSymbol, StableFileVisibility, StableNamespaceBinding, StableReceiverMethod,
@@ -35,6 +36,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::datatypes::FunctionReturnContract;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -1231,29 +1233,29 @@ impl ModuleMaterialisationCapture {
                 })
             })
             .collect::<Result<Box<[_]>, InfrastructureFailure>>()?;
-        let mut returns = Vec::new();
-        let mut error_return = None;
-        for returned in &signature.returns {
-            let type_id = returned.type_id.ok_or_else(|| {
-                InfrastructureFailure::internal(
-                    CompilerStage::GenericMaterialisation,
-                    "Materialisation function return has no resolved type",
-                )
-            })?;
-            let blueprint = self.materialisation_type_blueprint(type_id, parameter_slots)?;
-            match returned.channel {
-                crate::compiler_frontend::ast::statements::functions::ReturnChannel::Success => {
-                    returns.push(blueprint);
-                }
-                crate::compiler_frontend::ast::statements::functions::ReturnChannel::Error => {
-                    error_return = Some(blueprint);
-                }
+        let return_contract = match &signature.return_contract {
+            FunctionReturnContract::Returns(returns) => {
+                StableFunctionReturnContract::Returns(StableReturns {
+                    success: returns
+                        .success()
+                        .iter()
+                        .map(|&type_id| {
+                            self.materialisation_type_blueprint(type_id, parameter_slots)
+                        })
+                        .collect::<Result<Box<[_]>, InfrastructureFailure>>()?,
+                    error: returns
+                        .error()
+                        .map(|type_id| {
+                            self.materialisation_type_blueprint(type_id, parameter_slots)
+                        })
+                        .transpose()?,
+                })
             }
-        }
+            FunctionReturnContract::Never => StableFunctionReturnContract::Never,
+        };
         Ok(StableFunctionSignature {
             parameters,
-            returns: returns.into_boxed_slice(),
-            error_return,
+            return_contract,
         })
     }
 
@@ -1630,8 +1632,7 @@ impl ModuleMaterialisationCapture {
                 AstImportedFunctionContract {
                     target,
                     summary: bootstrap_call_summary_from_signature(&resolved.signature),
-                    returns: resolved.signature.success_return_type_ids(),
-                    error_return: resolved.signature.error_return_type_id(),
+                    return_contract: resolved.signature.return_contract.clone(),
                 },
             );
         }

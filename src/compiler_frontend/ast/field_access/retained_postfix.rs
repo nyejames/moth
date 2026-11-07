@@ -73,9 +73,9 @@ use crate::compiler_frontend::ast::generic_functions::{
     GenericReceiverMethodReceiver, instantiate_generic_receiver_method,
 };
 use crate::compiler_frontend::ast::numeric_construction::{
-    DeferredCall, DeferredCallArgument, DeferredCallHandling, DeferredExpression,
-    DeferredExpressionCompletion, DeferredExpressionSuffix, NumericRecipe, StatementExpression,
-    binding_reference_shape, retained_known_shape,
+    CompletedExpression, DeferredCall, DeferredCallArgument, DeferredCallHandling,
+    DeferredExpression, DeferredExpressionCompletion, DeferredExpressionSuffix, NumericRecipe,
+    StatementExpression, binding_reference_shape, retained_known_shape,
 };
 use crate::compiler_frontend::ast::numeric_known_shape::{KnownShape, KnownShapeId};
 use crate::compiler_frontend::ast::statements::body_symbol;
@@ -95,6 +95,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidAssignmentTargetReason, InvalidBuiltinCallReason, InvalidFieldAccessReason,
     InvalidReceiverCallReason, ValueReceiverContext,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
@@ -447,12 +448,24 @@ pub(crate) enum RetainedTerminalCall<'a> {
 
 impl<'a> RetainedTerminalCall<'a> {
     /// The success slot types the call's signature declares, when that signature is concrete.
-    pub(crate) fn success_return_type_ids(self) -> Option<Vec<TypeId>> {
+    pub(crate) fn success_types(self) -> Option<&'a [TypeId]> {
         match self {
-            Self::Call(call) => call.success_return_type_ids(),
+            Self::Call(call) => call.success_types(),
+            // A concrete Never record declares no success value, so it reports no slot list
+            // instead of an empty one that a consumer could mistake for a real zero-slot result.
             Self::Method(method) => method
-                .concrete_signature()
-                .map(|signature| signature.success_return_type_ids()),
+                .concrete_signature()?
+                .return_contract
+                .ordinary()
+                .map(CallableReturnShape::success),
+        }
+    }
+
+    /// Whether the call's published contract never returns to its caller.
+    pub(crate) fn is_never(self) -> bool {
+        match self {
+            Self::Call(call) => call.is_never(),
+            Self::Method(method) => method.declared_signature().return_contract.is_never(),
         }
     }
 
@@ -460,7 +473,11 @@ impl<'a> RetainedTerminalCall<'a> {
     pub(crate) fn declared_success_slot_count(self) -> usize {
         match self {
             Self::Call(call) => call.declared_success_slot_count(),
-            Self::Method(method) => method.declared_signature().success_return_slot_count(),
+            Self::Method(method) => method
+                .declared_signature()
+                .return_contract
+                .ordinary()
+                .map_or(0, |shape| shape.success().len()),
         }
     }
 
@@ -1049,7 +1066,7 @@ fn retain_deferred_call_propagation(
     // Only a single success slot can make the operand optional, so the `!` decision reads that one
     // declared type. Any other contract keeps its resolved slots, or classifies a generic call's
     // slots only when neither the declared single nor the resolved slots answer.
-    let resolved_success_types = call.success_return_type_ids();
+    let resolved_success_types = call.success_types();
     let declared_single_success_type_id = call.declared_single_success_return_type_id();
     let declared_slot_count = call.declared_success_slot_count();
     let generic_slots =
@@ -1071,7 +1088,7 @@ fn retain_deferred_call_propagation(
             value_required: declared_slot_count > 0,
             success_contract: retained_success_contract(
                 declared_single_success_type_id.as_ref(),
-                resolved_success_types.as_deref(),
+                resolved_success_types,
                 generic_slots.as_ref(),
             ),
             error_return: call.error_return(),
@@ -1111,10 +1128,18 @@ fn retain_receiver_method_propagation(
 
     let resolved_success_types = method
         .concrete_signature()
-        .map(|signature| signature.success_return_type_ids());
-    let declared_single_success_type_id =
-        method.declared_signature().single_success_return_type_id();
-    let declared_slot_count = method.declared_signature().success_return_slot_count();
+        .and_then(|signature| signature.return_contract.ordinary())
+        .map(CallableReturnShape::success);
+    let declared_single_success_type_id = method
+        .declared_signature()
+        .return_contract
+        .ordinary()
+        .and_then(CallableReturnShape::single_success_slot);
+    let declared_slot_count = method
+        .declared_signature()
+        .return_contract
+        .ordinary()
+        .map_or(0, |shape| shape.success().len());
     let generic_slots =
         if resolved_success_types.is_none() && declared_single_success_type_id.is_none() {
             Some(RetainedTerminalCall::Method(&*method).generic_success_slots(scope_context))
@@ -1134,7 +1159,7 @@ fn retain_receiver_method_propagation(
             value_required: declared_slot_count > 0,
             success_contract: retained_success_contract(
                 declared_single_success_type_id.as_ref(),
-                resolved_success_types.as_deref(),
+                resolved_success_types,
                 generic_slots.as_ref(),
             ),
             error_return: method.error_return(),
@@ -1565,7 +1590,7 @@ pub(crate) fn complete_retained_operand_continuation<
 >(
     payload: RetainedOperandContinuation,
     session: &mut S,
-) -> Result<OwnedExpr, ExpressionParseError> {
+) -> Result<CompletedExpression, ExpressionParseError> {
     let RetainedOperandContinuation {
         operand,
         steps,
@@ -1579,7 +1604,7 @@ pub(crate) fn complete_retained_operand_continuation<
         // receiver completed through the steps before the rejected member. Like any member access,
         // the receiver is a closed receiving site unless a catch protects its pending error.
         let receiver = session.resolve_fragment(operand, ExpectedType::Infer, &value_mode)?;
-        let receiver = complete_retained_postfix_steps(receiver, steps, session)?;
+        let receiver = complete_retained_postfix_steps(receiver, steps, session)?.into_value()?;
         if !session.typed_errors_are_protected() {
             let services = session.session_services();
             validate_completed_typed_errors(services.expression_builder.view_owned(receiver)?)?;
@@ -1597,9 +1622,12 @@ pub(crate) fn complete_retained_operand_continuation<
     }
 
     let value = session.resolve_fragment(operand, expected, &value_mode)?;
-    let value = complete_retained_postfix_steps(value, steps, session)?;
+    let value = match complete_retained_postfix_steps(value, steps, session)? {
+        CompletedExpression::NeverCall(call) => return Ok(CompletedExpression::NeverCall(call)),
+        CompletedExpression::Value(value) => value,
+    };
     if matches!(suffix, DeferredExpressionSuffix::None) {
-        return Ok(value);
+        return Ok(CompletedExpression::Value(value));
     }
     let services = session.session_services();
     apply_completed_handling_suffix(
@@ -1609,6 +1637,7 @@ pub(crate) fn complete_retained_operand_continuation<
         services.type_interner,
         services.expression_builder,
     )
+    .map(CompletedExpression::Value)
 }
 
 /// Complete every retained postfix step on one already-completed receiver value.
@@ -1619,8 +1648,9 @@ pub(crate) fn complete_retained_postfix_steps<
     mut value: OwnedExpr,
     steps: Vec<RetainedPostfixStep>,
     session: &mut S,
-) -> Result<OwnedExpr, ExpressionParseError> {
-    for step in steps {
+) -> Result<CompletedExpression, ExpressionParseError> {
+    let mut steps = steps.into_iter().peekable();
+    while let Some(step) = steps.next() {
         // A value still carrying an unhandled typed producer cannot receive a further step. The
         // ready lane rejects it at this closed receiving site, on the producer's own span. A catch
         // that protects this subtree owns that producer, so the step receives it open instead.
@@ -1657,11 +1687,23 @@ pub(crate) fn complete_retained_postfix_steps<
                 // shared receiver-call constructor the completed chain also uses.
                 let mut call = *call;
                 call.receiver = DeferredCallReceiver::Ready(value.id());
-                complete_deferred_receiver_call(call, session)?
+                let completion = call.completion();
+                match complete_deferred_receiver_call(call, session, completion)? {
+                    CompletedExpression::Value(value) => value,
+                    CompletedExpression::NeverCall(call) => {
+                        if steps.peek().is_some() {
+                            crate::compiler_bug!(
+                                CompilerStage::AstConstruction,
+                                "a retained Never method was followed by another postfix step"
+                            );
+                        }
+                        return Ok(CompletedExpression::NeverCall(call));
+                    }
+                }
             }
         };
     }
-    Ok(value)
+    Ok(CompletedExpression::Value(value))
 }
 
 /// Rebuild one retained collection builtin member on its completed receiver value.
@@ -2109,6 +2151,12 @@ fn parse_retained_postfix_steps(
                 [shape] => Some(*shape),
                 _ => None,
             };
+            let never = template.signature.return_contract.is_never();
+            if never {
+                crate::compiler_frontend::ast::expressions::function_calls::reject_never_call_continuation(
+                    token_stream, member_name, member_span,
+                )?;
+            }
             // The ticket fixes this call's ledger position now. Completion publishes into it, and a
             // failed completion abandons it. A validation lane records no instance request, so it
             // reserves none.
@@ -2127,6 +2175,9 @@ fn parse_retained_postfix_steps(
                     private_failure_candidate,
                 ),
             )));
+            if never {
+                break;
+            }
             current_shape = step_result_shape;
             receiver_access = RetainedReceiverAccess::temporary();
             continue;
@@ -2521,18 +2572,27 @@ fn parse_retained_postfix_steps(
 
             let private_failure_lane =
                 scope_context.source_call_has_private_failure_lane(method_entry.function_path);
-            let private_failure_candidate =
-                (private_failure_lane && signature.error_return_type_id().is_none()).then(|| {
-                    if scope_context.generic_template_validation {
-                        method_entry.function_path
-                    } else {
-                        method_path.to_owned()
-                    }
-                });
+            let private_failure_candidate = (private_failure_lane
+                && signature.return_contract.error_slot().is_none())
+            .then(|| {
+                if scope_context.generic_template_validation {
+                    method_entry.function_path
+                } else {
+                    method_path.to_owned()
+                }
+            });
             let step_result_shape = signature
-                .single_success_return_type_id()
+                .return_contract
+                .ordinary()
+                .and_then(CallableReturnShape::single_success_slot)
                 .map(|type_id| intern_concrete_shape(scope_context, type_id))
                 .transpose()?;
+            let never = signature.return_contract.is_never();
+            if never {
+                crate::compiler_frontend::ast::expressions::function_calls::reject_never_call_continuation(
+                    token_stream, member_name, member_span,
+                )?;
+            }
             // The concrete request takes its ledger slot here, after every fallible step above, so a
             // failed parse never leaves a reserved slot behind. Template validation publishes
             // nothing and keeps no slot.
@@ -2566,6 +2626,9 @@ fn parse_retained_postfix_steps(
                     authored_handling: DeferredCallHandling::Unhandled,
                 },
             )));
+            if never {
+                break;
+            }
             // A multi-slot call has no single value, so the next member, if any, is rejected at
             // its own step instead of ending the chain with a pending error.
             current_shape = step_result_shape;

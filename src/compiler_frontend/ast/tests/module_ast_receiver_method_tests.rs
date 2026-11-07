@@ -21,6 +21,7 @@ use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::datatypes::{BuiltinScalarReceiver, ReceiverKey, builtin_type_ids};
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -55,7 +56,10 @@ fn empty_receiver_entry(
         value_carried: true,
         signature: FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
     }
 }

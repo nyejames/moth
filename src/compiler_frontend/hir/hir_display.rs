@@ -6,6 +6,8 @@
 //! Under the `show_hir` feature and in tests, they also print whole HIR structures for debugging.
 
 #[cfg(any(test, feature = "show_hir"))]
+use crate::compiler_frontend::datatypes::FunctionReturnContract;
+#[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::datatypes::definitions::{
     BuiltinTypeDefinition, ChoiceTypeDefinition, ConstructedTypeDefinition, FunctionTypeDefinition,
     StructTypeDefinition, TypeDefinition,
@@ -211,15 +213,24 @@ impl<'a> HirDisplayContext<'a> {
         let _ = write!(out, "{}({})", self.function_label(function.id), params);
 
         if self.options.include_types {
-            let mut slots = function
-                .returns
-                .iter()
-                .map(|ty| self.type_label(*ty))
-                .collect::<Vec<_>>();
-            if let Some(error) = function.error_return {
-                slots.push(format!("{}!", self.type_label(error)));
+            match &function.return_contract {
+                crate::compiler_frontend::hir::functions::HirFunctionReturnContract::Never => {
+                    let _ = write!(out, " -> !");
+                }
+                crate::compiler_frontend::hir::functions::HirFunctionReturnContract::Returns(
+                    returns,
+                ) => {
+                    let mut slots = returns
+                        .success()
+                        .iter()
+                        .map(|ty| self.type_label(*ty))
+                        .collect::<Vec<_>>();
+                    if let Some(error) = returns.error() {
+                        slots.push(format!("{}!", self.type_label(error)));
+                    }
+                    let _ = write!(out, " -> {}", slots.join(", "));
+                }
             }
-            let _ = write!(out, " -> {}", slots.join(", "));
         }
 
         let _ = write!(out, " [entry: {}]", self.block_label(function.entry));
@@ -603,6 +614,15 @@ impl<'a> HirDisplayContext<'a> {
             HirTerminator::ReturnError(value) => {
                 format!("return! {}", self.render_expression(expressions, *value))
             }
+            HirTerminator::NeverCall { target, args } => {
+                let args = expressions
+                    .values(*args)
+                    .iter()
+                    .map(|value| self.render_expression(expressions, *value))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("never_call {}({args})", self.render_call_target(target))
+            }
             HirTerminator::Uninitialized => "uninitialized".to_owned(),
             HirTerminator::RuntimeFailure { message, .. } => {
                 format!("runtime_failure \"{}\"", message.escape_debug())
@@ -967,9 +987,7 @@ impl<'a> HirDisplayContext<'a> {
             }
             TypeDefinition::Function(FunctionTypeDefinition {
                 parameters,
-                returns,
-                error_return,
-                ..
+                return_contract,
             }) => {
                 let params = parameters
                     .iter()
@@ -983,32 +1001,48 @@ impl<'a> HirDisplayContext<'a> {
                     .collect::<Vec<_>>()
                     .join(", ");
 
-                let returns = if returns.is_empty() {
-                    "()".to_owned()
-                } else if returns.len() == 1 {
-                    self.render_type_with_environment(type_environment, returns[0], depth + 1)
-                } else {
-                    let joined = returns
-                        .iter()
-                        .map(|ret| {
-                            self.render_type_with_environment(type_environment, *ret, depth + 1)
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    format!("({joined})")
+                let rendered_returns = match return_contract {
+                    FunctionReturnContract::Never => "!".to_owned(),
+                    FunctionReturnContract::Returns(returns) => {
+                        let success = returns.success();
+                        let rendered_success = if success.is_empty() {
+                            "()".to_owned()
+                        } else if success.len() == 1 {
+                            self.render_type_with_environment(
+                                type_environment,
+                                success[0],
+                                depth + 1,
+                            )
+                        } else {
+                            let joined = success
+                                .iter()
+                                .map(|ret| {
+                                    self.render_type_with_environment(
+                                        type_environment,
+                                        *ret,
+                                        depth + 1,
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            format!("({joined})")
+                        };
+
+                        match returns.error() {
+                            Some(error) => format!(
+                                "{rendered_success} throws {}",
+                                self.render_type_with_environment(
+                                    type_environment,
+                                    error,
+                                    depth + 1,
+                                )
+                            ),
+                            None => rendered_success,
+                        }
+                    }
                 };
 
-                let error = error_return.map(|err| {
-                    format!(
-                        " throws {}",
-                        self.render_type_with_environment(type_environment, err, depth + 1)
-                    )
-                });
-
-                match error {
-                    Some(error) => format!("fn({params})->{returns}{error}"),
-                    None => format!("fn({params})->{returns}"),
-                }
+                format!("fn({params})->{rendered_returns}")
             }
             TypeDefinition::Constructed(ConstructedTypeDefinition {
                 constructor,

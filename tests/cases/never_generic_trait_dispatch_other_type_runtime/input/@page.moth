@@ -1,0 +1,14 @@
+@provider STOPPABLE, abort, Other
+
+Thing = |
+    code I32,
+|
+
+-- abort of Other diverges through Other's own proof, not through this method.
+stop |this Thing| -> !:
+    abort(Other(code = this.code))
+;
+
+Thing must STOPPABLE
+
+Thing(code = 1).stop()

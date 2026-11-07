@@ -1,0 +1,25 @@
+STOPPABLE must:
+    stop |This| -> !
+;
+
+abort type T is STOPPABLE |value T| -> !:
+    value.stop()
+;
+
+Thing = |
+    code I32,
+|
+
+-- abort of Thing reaches this method, which diverges through its own proof.
+stop |this Thing| -> !:
+    assert(false, "thing stops")
+;
+
+Thing must STOPPABLE
+
+-- This proof depends on abort of Thing without forming a cycle.
+crash || -> !:
+    abort(Thing(code = 1))
+;
+
+crash()

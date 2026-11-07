@@ -318,9 +318,11 @@ There is no `Void` type and a no-success function may fall through.
     ;
 ]
 
-`-> !` declares a function that never returns normally. It replaces the return contract, not a value type.
-Every reachable path must diverge. Propagating an error or option doesn't count.
-These calls terminate their statement or branch and can't be received as values or handled with `!`, `?` or `catch`.
+`-> !` is a whole callable contract, not a value type or a suffix on a type.
+It cannot mix with success, optional or error slots. Every reachable path must
+diverge. Propagating an error or option doesn't count. These calls terminate
+their statement or branch and can't be received as values or handled with `!`,
+`?` or `catch`. Only an explicit `-> !` signature makes callers see divergence.
 
 ## Options: `T?`, `none` and postfix `?`
 

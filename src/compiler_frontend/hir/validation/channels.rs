@@ -86,12 +86,19 @@ impl HirValidator<'_> {
                 .external_packages
                 .get_function_by_id(*function_id)
                 .ok_or_else(|| self.error_with_hir("Call references missing external function"))?;
+            // A Never binding is invoked through a dedicated terminating terminator, never an
+            // ordinary call with result channels.
+            let Some(returns) = function.return_contract.ordinary() else {
+                return Err(
+                    self.error_with_hir("Ordinary HIR call targets a Never external binding")
+                );
+            };
             if function.is_fallible() != fallible {
                 return Err(self.error_with_hir(
                     "Call channel compatibility does not match external signature",
                 ));
             }
-            if args.len() != function.parameters.len() || results.len() != function.returns.len() {
+            if args.len() != function.parameters.len() || results.len() != returns.success.len() {
                 return Err(self.error_with_hir(
                     "Call argument/result slot arity does not match external signature",
                 ));
@@ -106,7 +113,7 @@ impl HirValidator<'_> {
                     );
                 }
             }
-            for (result, expected) in results.zip(&function.returns) {
+            for (result, expected) in results.zip(returns.success) {
                 self.require_local_id(result)?;
                 if !self
                     .external_signature_matches(&expected.value_type, self.local_types[&result])?
@@ -143,24 +150,29 @@ impl HirValidator<'_> {
                 .ok_or_else(|| {
                     self.error_with_hir("Nonlocal call has no resolved result contract")
                 })?;
-            if contract.error_return.is_some() != fallible {
+            let Some(returns) = contract.ordinary() else {
+                return Err(
+                    self.error_with_hir("Ordinary HIR call targets a Never nonlocal contract")
+                );
+            };
+            if returns.is_fallible() != fallible {
                 return Err(self.error_with_hir(
                     "Call channel compatibility does not match resolved contract",
                 ));
             }
-            if results.len() != contract.returns.len() {
+            if results.len() != returns.success().len() {
                 return Err(
                     self.error_with_hir("Call result slot arity does not match resolved contract")
                 );
             }
-            for (result, expected) in results.zip(contract.returns.iter()) {
+            for (result, expected) in results.zip(returns.success()) {
                 self.require_local_id(result)?;
                 if self.local_types.get(&result) != Some(expected) {
                     return Err(self
                         .error_with_hir("Call result slot type does not match resolved contract"));
                 }
             }
-            return Ok(contract.error_return);
+            return Ok(returns.error());
         };
         let function = self
             .module
@@ -168,12 +180,15 @@ impl HirValidator<'_> {
             .iter()
             .find(|function| function.id == function_id)
             .ok_or_else(|| self.error_with_hir("Call references missing local function"))?;
-        if function.error_return.is_some() != fallible {
+        let Some(returns) = function.return_contract.ordinary() else {
+            return Err(self.error_with_hir("Ordinary HIR call targets a declared Never function"));
+        };
+        if returns.is_fallible() != fallible {
             return Err(
                 self.error_with_hir("Call channel compatibility does not match function signature")
             );
         }
-        if args.len() != function.params.len() || results.len() != function.returns.len() {
+        if args.len() != function.params.len() || results.len() != returns.success().len() {
             return Err(self.error_with_hir(
                 "Call argument/result slot arity does not match function signature",
             ));
@@ -185,7 +200,7 @@ impl HirValidator<'_> {
                 );
             }
         }
-        for (result, expected) in results.zip(function.returns.iter()) {
+        for (result, expected) in results.zip(returns.success()) {
             self.require_local_id(result)?;
             if self.local_types.get(&result) != Some(expected) {
                 return Err(
@@ -193,7 +208,115 @@ impl HirValidator<'_> {
                 );
             }
         }
-        Ok(function.error_return)
+        Ok(returns.error())
+    }
+
+    /// Validate one dedicated terminating call against its resolved target contract.
+    ///
+    /// WHAT: arguments are validated like ordinary call arguments, and the target must publish an
+    ///       explicit Never contract.
+    /// WHY: a Never call has no result channel or successor, so channel validation must reject an
+    ///       ordinary target instead of fabricating an empty result shape.
+    pub(super) fn validate_never_call(
+        &self,
+        target: &CallTarget,
+        args: HirValueRange,
+        anchor: Option<HirLocation>,
+    ) -> Result<(), InfrastructureFailure> {
+        let args = self.value_ids(args)?;
+        for arg in args {
+            self.validate_expression(*arg, anchor)?;
+        }
+
+        let local_function_id = match target {
+            CallTarget::Local(function_id) => Some(*function_id),
+            CallTarget::Generated(identity) => self
+                .module
+                .function_ids_by_generated
+                .get(identity.as_ref())
+                .copied(),
+            CallTarget::ModulePrivate(identity) => self
+                .module
+                .function_ids_by_private_origin
+                .get(identity)
+                .copied(),
+            CallTarget::CrossModule(identity) => {
+                self.module.function_ids_by_origin.get(identity).copied()
+            }
+            CallTarget::External(_) => None,
+        };
+
+        if let Some(function_id) = local_function_id {
+            let function = self
+                .module
+                .functions
+                .iter()
+                .find(|function| function.id == function_id)
+                .ok_or_else(|| {
+                    self.error_with_hir("NeverCall references missing local function")
+                })?;
+            if !function.return_contract.is_never() {
+                return Err(
+                    self.error_with_hir("NeverCall targets an ordinary local function contract")
+                );
+            }
+            if args.len() != function.params.len() {
+                return Err(self
+                    .error_with_hir("NeverCall argument arity does not match function signature"));
+            }
+            for (arg, parameter) in args.iter().zip(&function.params) {
+                if Some(&self.expression_row(*arg)?.ty) != self.local_types.get(parameter) {
+                    return Err(self.error_with_hir(
+                        "NeverCall argument type does not match function parameter",
+                    ));
+                }
+            }
+            return Ok(());
+        }
+
+        if let CallTarget::External(function_id) = target {
+            let function = self
+                .external_packages
+                .get_function_by_id(*function_id)
+                .ok_or_else(|| {
+                    self.error_with_hir("NeverCall references missing external function")
+                })?;
+            if !matches!(
+                function.return_contract,
+                crate::compiler_frontend::external_packages::ExternalFunctionReturnContract::Never
+            ) {
+                return Err(
+                    self.error_with_hir("NeverCall targets an ordinary external binding contract")
+                );
+            }
+            if args.len() != function.parameters.len() {
+                return Err(self
+                    .error_with_hir("NeverCall argument arity does not match external signature"));
+            }
+            for (arg, parameter) in args.iter().zip(&function.parameters) {
+                if !self.external_signature_matches(
+                    &parameter.language_type,
+                    self.expression_row(*arg)?.ty,
+                )? {
+                    return Err(self.error_with_hir(
+                        "NeverCall argument type does not match external signature",
+                    ));
+                }
+            }
+            return Ok(());
+        }
+
+        let contract = self
+            .module
+            .call_result_contracts
+            .get(target)
+            .ok_or_else(|| self.error_with_hir("NeverCall has no resolved target contract"))?;
+        if !contract.is_never() {
+            return Err(
+                self.error_with_hir("NeverCall targets an ordinary nonlocal function contract")
+            );
+        }
+        Ok(())
     }
 
     pub(super) fn validate_invoke(
@@ -241,7 +364,8 @@ impl HirValidator<'_> {
                 let signature = self
                     .external_packages
                     .get_function_by_id(*function_id)
-                    .and_then(|function| function.error_return_type.as_ref())
+                    .and_then(|function| function.return_contract.ordinary())
+                    .and_then(|returns| returns.error)
                     .ok_or_else(|| {
                         self.error_with_hir("Invoke external function has no error slot")
                     })?;

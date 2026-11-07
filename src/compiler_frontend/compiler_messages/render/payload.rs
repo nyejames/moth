@@ -647,6 +647,10 @@ fn invalid_trait_conformance_message(
             "'{target}' cannot conform{trait_text} because return {return_index} of '{}' uses a different return channel.",
             reason_name()
         ),
+        Shape::ReturnContractMismatch => format!(
+            "'{target}' cannot conform{trait_text} because the return contract of '{}' differs from the requirement; a `-> !` contract and an ordinary return contract never match.",
+            reason_name()
+        ),
         Shape::InferredFailureInInfallibleCast => format!(
             "'{target}' cannot conform{trait_text} because method '{}' has escaping inferred failure, which violates the infallible cast evidence contract. Handle the failure locally or use the corresponding TRY_CASTABLE_TO_* trait with its try_to_* method and declared Error! return slot.",
             reason_name()

@@ -1,9 +1,10 @@
 //! Local binding, alias, and computed-place JavaScript emission tests.
 
 use super::support::*;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
-use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionReturnContract};
 use crate::compiler_frontend::hir::ids::{
     BlockId, FieldId, FunctionId, LocalId, RegionId, StructId,
 };
@@ -48,8 +49,10 @@ fn value_definition_emits_fresh_binding() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![],
+            None,
+        )),
     };
 
     let module = build_module(
@@ -114,8 +117,10 @@ fn function_parameters_emit_param_binding() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![],
+            None,
+        )),
     };
 
     let module = build_module(
@@ -196,8 +201,10 @@ fn place_definition_emits_fresh_alias_binding() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![],
+            None,
+        )),
     };
 
     let module = build_module(
@@ -265,8 +272,10 @@ fn place_update_emits_assign_borrow() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(1)],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![],
+            None,
+        )),
     };
     let module = build_module(
         expressions,
@@ -354,8 +363,10 @@ fn place_update_from_alias_of_destination_does_not_create_cycle() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        returns: (vec![types.i32]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![types.i32],
+            None,
+        )),
     };
     let module = build_module(
         expressions,
@@ -454,8 +465,10 @@ fn alias_local_read_emits_bs_read() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![],
+            None,
+        )),
     };
 
     let module = build_module(
@@ -515,8 +528,10 @@ fn value_update_emits_assign_value() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![],
+            None,
+        )),
     };
 
     let module = build_module(
@@ -584,8 +599,10 @@ fn field_place_emits_bs_field() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![],
+            None,
+        )),
     };
 
     let mut module = build_module(
@@ -667,8 +684,10 @@ fn index_place_emits_bs_index() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![],
+            None,
+        )),
     };
 
     let module = build_module(
@@ -743,8 +762,10 @@ fn computed_place_read_composes_with_bs_read() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![],
+            None,
+        )),
     };
 
     let mut module = build_module(

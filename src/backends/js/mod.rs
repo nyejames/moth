@@ -27,6 +27,7 @@ mod tests;
 
 pub(crate) use emitter::JsEmitter;
 pub use emitter::lower_hir_to_js;
+pub(crate) use js_expr::escape_js_string;
 pub(crate) use numeric_carrier::JsNumericCarrier;
 pub(crate) use runtime::collection_javascript_helpers;
 pub(crate) use symbols::{builtin_error_code_js_field_name, builtin_error_message_js_field_name};
@@ -43,6 +44,13 @@ use std::sync::Arc;
 
 /// Generic terminal report for an unsuccessful entry invocation, independent of application data.
 pub(crate) const ENTRY_FAILURE_NOTICE: &str = "Moth entry failed\n";
+
+/// Compiler-owned unrecoverable report for a callable that violated its `-> !` contract.
+///
+/// WHAT: the message every defensive Never-call fallback throws when control returns.
+/// WHY: a returning implementation is an explicit contract violation, and the message must name
+///      the contract without exposing internal callable or block identities.
+pub(crate) const NEVER_RETURNED_MESSAGE: &str = "Moth `-> !` function returned unexpectedly";
 
 /// Policy controlling which HIR functions are emitted in a JS bundle.
 ///

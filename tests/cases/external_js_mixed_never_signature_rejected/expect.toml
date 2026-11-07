@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-IMPORT-0022"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-IMPORT-0022"
+reason = "invalid_external_module.mixed_never_return_contract"
+path = "input/module.js"
+line = 2
+column = 4

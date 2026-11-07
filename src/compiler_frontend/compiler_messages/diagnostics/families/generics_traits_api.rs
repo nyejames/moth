@@ -337,6 +337,7 @@ unit_code! {
         MultipleErrorReturnSlots = 12,
         ErrorSlotNotLast = 13,
         GenericWhereConstraintsUnsupported = 14,
+        NeverCannotCombine = 15,
     }
 }
 
@@ -371,6 +372,7 @@ impl InvalidFunctionSignatureCode {
             Reason::GenericWhereConstraintsUnsupported => {
                 (Self::GenericWhereConstraintsUnsupported, None)
             }
+            Reason::NeverCannotCombine { found } => (Self::NeverCannotCombine, Some(*found)),
         }
     }
 
@@ -394,6 +396,7 @@ impl InvalidFunctionSignatureCode {
             Self::MultipleErrorReturnSlots => Reason::MultipleErrorReturnSlots,
             Self::ErrorSlotNotLast => Reason::ErrorSlotNotLast,
             Self::GenericWhereConstraintsUnsupported => Reason::GenericWhereConstraintsUnsupported,
+            Self::NeverCannotCombine => Reason::NeverCannotCombine { found: found? },
         })
     }
 }
@@ -1069,6 +1072,7 @@ unit_code! {
         ReturnTypeMismatch = 17,
         ReturnChannelMismatch = 18,
         InferredFailureInInfallibleCast = 19,
+        ReturnContractMismatch = 20,
     }
 }
 
@@ -1094,6 +1098,7 @@ impl InvalidTraitConformanceCode {
             Reason::ReturnCountMismatch { .. } => Self::ReturnCountMismatch,
             Reason::ReturnTypeMismatch { .. } => Self::ReturnTypeMismatch,
             Reason::ReturnChannelMismatch { .. } => Self::ReturnChannelMismatch,
+            Reason::ReturnContractMismatch { .. } => Self::ReturnContractMismatch,
             Reason::InferredFailureInInfallibleCast { .. } => Self::InferredFailureInInfallibleCast,
         }
     }
@@ -1141,6 +1146,7 @@ pub(crate) enum InvalidTraitConformanceShape<Type> {
     ReturnChannelMismatch {
         return_index: usize,
     },
+    ReturnContractMismatch,
     InferredFailureInInfallibleCast,
 }
 
@@ -1182,6 +1188,7 @@ impl<Type> InvalidTraitConformanceShape<Type> {
             Shape::ReturnChannelMismatch { .. } => {
                 InvalidTraitConformanceCode::ReturnChannelMismatch
             }
+            Shape::ReturnContractMismatch => InvalidTraitConformanceCode::ReturnContractMismatch,
             Shape::InferredFailureInInfallibleCast => {
                 InvalidTraitConformanceCode::InferredFailureInInfallibleCast
             }
@@ -1288,6 +1295,7 @@ impl FactCodec for InvalidTraitConformanceFact {
             Code::ReturnChannelMismatch => Shape::ReturnChannelMismatch {
                 return_index: CountFact::decode(words.get(1..2)?)?,
             },
+            Code::ReturnContractMismatch => Shape::ReturnContractMismatch,
             Code::InferredFailureInInfallibleCast => Shape::InferredFailureInInfallibleCast,
         })
     }
@@ -1322,6 +1330,7 @@ pub(crate) fn decode_invalid_trait_conformance_names(
             | InvalidTraitConformanceCode::ReturnCountMismatch
             | InvalidTraitConformanceCode::ReturnTypeMismatch
             | InvalidTraitConformanceCode::ReturnChannelMismatch
+            | InvalidTraitConformanceCode::ReturnContractMismatch
             | InvalidTraitConformanceCode::InferredFailureInInfallibleCast
     );
     match (has_reason_name, ids) {
@@ -1440,6 +1449,10 @@ fn split_invalid_trait_conformance(
         } => {
             reason_name = Some(requirement_name);
             Shape::ReturnChannelMismatch { return_index }
+        }
+        Reason::ReturnContractMismatch { requirement_name } => {
+            reason_name = Some(requirement_name);
+            Shape::ReturnContractMismatch
         }
         Reason::InferredFailureInInfallibleCast { requirement_name } => {
             reason_name = Some(requirement_name);

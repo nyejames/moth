@@ -353,22 +353,27 @@ impl<'a> BorrowChecker<'a> {
                     _ => {}
                 }
             }
+            // A terminating call mutates its arguments before divergence exactly like an ordinary
+            // call. Its effects must still reach this function's public summary even though the
+            // block has no successor.
             if let HirTerminator::Invoke {
                 operation: HirFallibleOperation::Call { target, args },
                 ..
-            } = &block.terminator
+            }
+            | HirTerminator::NeverCall { target, args } = &block.terminator
             {
                 for (index, argument) in self.module.expressions.values(*args).iter().enumerate() {
-                    if self.call_argument_writes(target, index)? {
-                        let Some(fact) = report.analysis.value_facts.get(argument) else {
-                            return Err(self.diagnostics.internal_error(
-                                "Missing Invoke argument borrow fact during call-summary publication",
-                            ));
-                        };
-                        for root in &fact.roots {
-                            if let Some(position) = parameter_positions.get(root) {
-                                mutation_positions.insert(*position);
-                            }
+                    if !self.call_argument_writes(target, index)? {
+                        continue;
+                    }
+                    let Some(fact) = report.analysis.value_facts.get(argument) else {
+                        return Err(self.diagnostics.internal_error(
+                            "Missing call argument borrow fact during call-summary publication",
+                        ));
+                    };
+                    for root in &fact.roots {
+                        if let Some(position) = parameter_positions.get(root) {
+                            mutation_positions.insert(*position);
                         }
                     }
                 }
@@ -1281,6 +1286,11 @@ fn collect_terminator_loaded_locals(
         }
         HirTerminator::ReturnError(value) => {
             collect_expression_loaded_locals(expressions, *value, visitor);
+        }
+        HirTerminator::NeverCall { args, .. } => {
+            for value in expressions.values(*args) {
+                collect_expression_loaded_locals(expressions, *value, visitor);
+            }
         }
         HirTerminator::AssertFailure { message, .. } => {
             collect_expression_loaded_locals(expressions, *message, visitor);

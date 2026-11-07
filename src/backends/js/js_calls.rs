@@ -4,8 +4,8 @@
 //! WHY: call-target lowering (user function, runtime helper, inline expression, or external
 //! module export with generated glue) is a distinct concern from general statement orchestration.
 
-use crate::backends::js::JsEmitter;
 use crate::backends::js::value_use::JsValueUse;
+use crate::backends::js::{JsEmitter, NEVER_RETURNED_MESSAGE};
 use crate::compiler_frontend::compiler_messages::{
     CompilerStage, compiler_errors::InfrastructureFailure,
 };
@@ -170,6 +170,24 @@ impl<'hir> JsEmitter<'hir> {
         };
 
         Ok(call)
+    }
+
+    /// Emit a `HirTerminator::NeverCall` as one ordinary call followed by the defensive stop.
+    ///
+    /// WHAT: evaluates and emits the declared target exactly once, then throws the
+    ///       compiler-owned violated-contract error.
+    /// WHY: a `-> !` callee has no success continuation. Argument evaluation, mutation and
+    ///      parameter-capability effects must happen in ordinary call order, but control must
+    ///      never continue into code the frontend proved unreachable if a foreign or generated
+    ///      implementation returns anyway.
+    pub(crate) fn emit_never_call_terminator(
+        &mut self,
+        target: &CallTarget,
+        args: HirValueRange,
+    ) -> Result<(), InfrastructureFailure> {
+        self.emit_call_statement(target, args, &[])?;
+        self.emit_runtime_failure_terminator(NEVER_RETURNED_MESSAGE);
+        Ok(())
     }
 }
 

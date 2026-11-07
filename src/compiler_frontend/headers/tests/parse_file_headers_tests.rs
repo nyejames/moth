@@ -27,6 +27,7 @@ use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSy
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     FunctionReturnSyntax, FunctionSignatureSyntax, ReturnChannelSyntax, ReturnSlotSyntax,
 };
+use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings,
     ExternalPackageRegistry, ExternalReturnAlias, ExternalSymbolId, ExternalSymbolPath,
@@ -1068,8 +1069,10 @@ fn empty_void_function_def(name: &str) -> ExternalFunctionDef {
     ExternalFunctionDef {
         name: name.to_owned(),
         parameters: Vec::new(),
-        returns: external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
-        error_return_type: None,
+        return_contract: external_returns(
+            external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
+            None,
+        ),
         const_eval: None,
         lowerings: ExternalFunctionLowerings::default(),
     }

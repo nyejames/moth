@@ -10,7 +10,6 @@
 //!      summaries produced after borrow validation. Local finalization creates the completed
 //!      type once, and this module gives projection and finalization one vocabulary owner.
 
-use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
     ExportedGenericParameterIdentity, StableTraitRequirementIdentity,
@@ -102,6 +101,23 @@ impl PublicParameterTypeSlot {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct PublicReturnTypeSlot {
     pub(crate) type_identity: CanonicalTypeIdentity,
+}
+
+/// Whole return contract of one public function or receiver method.
+///
+/// WHAT: either the ordered success slots plus the independent error channel, as canonical
+///       identities, or a declared Never contract with no slot identity at all.
+/// WHY: canonical identities are not `TypeId`s, so this owner keeps its own local shape instead
+///      of borrowing the frontend's `CallableReturnShape`. A Never contract must stay
+///      distinguishable from an ordinary no-value contract across the public boundary; the enum
+///      makes the difference part of interface equality and hashing.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum PublicCallableReturnContract {
+    Returns {
+        success: Vec<PublicReturnTypeSlot>,
+        error: Option<CanonicalTypeIdentity>,
+    },
+    Never,
 }
 
 /// One generic parameter with its ordered canonical trait bound identities in a public
@@ -216,11 +232,22 @@ impl PublicTraitRequirementParameter {
     }
 }
 
-/// One return slot in a trait requirement surface.
+/// Whole return contract of one trait requirement surface.
+///
+/// WHAT: either the ordered success identities plus the independent error identity, or a
+///       declared Never contract. Trait `This` stays a separate
+///       [`TraitSurfaceTypeIdentity`] variant inside the ordinary shape.
+/// WHY: a trait-surface slot is not a `CanonicalTypeIdentity`, so the public trait layer keeps
+///      its own local shape. A Never requirement carries no fake self or concrete identity, and
+///      exact conformance matching must be able to tell it apart from an ordinary no-value
+///      requirement.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PublicTraitRequirementReturn {
-    pub(crate) channel: ReturnChannel,
-    pub(crate) type_identity: TraitSurfaceTypeIdentity,
+pub(crate) enum PublicTraitReturnContract {
+    Returns {
+        success: Vec<TraitSurfaceTypeIdentity>,
+        error: Option<TraitSurfaceTypeIdentity>,
+    },
+    Never,
 }
 
 /// One method requirement in a trait surface, in authored order.
@@ -229,7 +256,7 @@ pub(crate) struct PublicTraitRequirementSurface {
     pub(crate) name: String,
     pub(crate) receiver_access: PublicTraitReceiverAccess,
     pub(crate) parameters: Vec<PublicTraitRequirementParameter>,
-    pub(crate) returns: Vec<PublicTraitRequirementReturn>,
+    pub(crate) return_contract: PublicTraitReturnContract,
 }
 
 // ===========================================================================
@@ -295,16 +322,15 @@ pub(crate) enum PublicFunctionCategory {
     GenericTemplate(PublicGenericTemplateDescriptor),
 }
 
-/// The semantic facts for one exported free function: callable category, parameter types,
-/// success returns and error return.
+/// The semantic facts for one exported free function: callable category, parameter types and
+/// return contract.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PublicFunctionSemantics {
     /// The callable category: concrete-local or generic-template. Concrete-local callables
     /// receive exactly one summary after borrow validation; generic declarations do not.
     pub(crate) category: PublicFunctionCategory,
     pub(crate) parameters: Vec<PublicParameterTypeSlot>,
-    pub(crate) returns: Vec<PublicReturnTypeSlot>,
-    pub(crate) error_return: Option<CanonicalTypeIdentity>,
+    pub(crate) return_contract: PublicCallableReturnContract,
 }
 
 /// The explicit callable category for one exported receiver method.
@@ -335,8 +361,7 @@ pub(crate) struct PublicReceiverMethodSemantics {
     /// The callable category: concrete-local or generic-template.
     pub(crate) category: PublicReceiverMethodCategory,
     pub(crate) parameters: Vec<PublicParameterTypeSlot>,
-    pub(crate) returns: Vec<PublicReturnTypeSlot>,
-    pub(crate) error_return: Option<CanonicalTypeIdentity>,
+    pub(crate) return_contract: PublicCallableReturnContract,
 }
 
 /// The semantic facts for one exported nominal struct: generic parameters/bounds, fields and
@@ -398,10 +423,13 @@ impl PublicTraitSemantics {
                     .parameters
                     .iter()
                     .flat_map(|parameter| parameter.semantic_type_identities());
-                let return_identities = requirement
-                    .returns
-                    .iter()
-                    .map(|return_slot| &return_slot.type_identity);
+                let (return_success, return_error) = match &requirement.return_contract {
+                    PublicTraitReturnContract::Returns { success, error } => {
+                        (success.as_slice(), error.as_ref())
+                    }
+                    PublicTraitReturnContract::Never => (&[][..], None),
+                };
+                let return_identities = return_success.iter().chain(return_error);
                 parameter_identities.chain(return_identities)
             })
             .filter_map(|identity| match identity {

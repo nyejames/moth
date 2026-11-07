@@ -169,6 +169,10 @@ pub(super) fn parse_mutable_receiver_expression(
     // boundary decides whether the fragment completes here or defers to the body root.
     let receiver_expression = match receiver_expression {
         ParsedPostfixExpression::Value(value) => value,
+        // A Never call cannot open an expression fragment or supply a receiver value.
+        ParsedPostfixExpression::Terminating(never_call) => {
+            return Err(never_call.used_as_value_diagnostic().into());
+        }
         ParsedPostfixExpression::RetainedOperand(item) => {
             expression.push(item);
             return Ok(());
@@ -332,6 +336,10 @@ pub(super) fn parse_copy_place_expression(
                         path_fork,
                     )? {
                         ParsedPostfixExpression::Value(value) => value,
+                        // A Never call has no value and can never be a copy operand.
+                        ParsedPostfixExpression::Terminating(never_call) => {
+                            return Err(never_call.used_as_value_diagnostic().into());
+                        }
                         // A retained receiver call has no value and can never be a place.
                         ParsedPostfixExpression::RetainedOperand(item) => {
                             return Err(calls_data::invalid_copy_target(

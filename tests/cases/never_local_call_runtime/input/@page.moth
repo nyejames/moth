@@ -1,0 +1,17 @@
+-- A local `-> !` function may end in `assert(false)`. The implicit entry may
+-- call it without annotating its own contract.
+halt || -> !:
+    assert(false, "halted")
+;
+
+-- A normalised-true loop stays divergent when a nested loop consumes its own break.
+spin || -> !:
+    loop true:
+        loop true:
+            break
+        ;
+        halt()
+    ;
+;
+
+spin()

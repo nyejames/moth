@@ -1,0 +1,22 @@
+STOPPABLE must:
+    stop |This| -> !
+;
+
+Box type T = |
+    value T,
+|
+
+-- A generic receiver method reaches the requirement on its type argument.
+halt type T is STOPPABLE |this Box of T| -> !:
+    this.value.stop()
+;
+
+Thing = |
+    code I32,
+|
+
+stop |this Thing| -> !:
+    Box(this).halt()
+;
+
+Thing must STOPPABLE

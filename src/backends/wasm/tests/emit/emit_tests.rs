@@ -31,6 +31,7 @@ use crate::backends::wasm::tests::lowering::test_support::{
 };
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::compiler_messages::compiler_errors::InfrastructureFailureKind;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -39,7 +40,9 @@ use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirVar
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
 };
-use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
+use crate::compiler_frontend::hir::functions::{
+    HirFunction, HirFunctionOrigin, HirFunctionReturnContract,
+};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
@@ -83,8 +86,10 @@ fn lowers_hir_to_wasm_module_bytes() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![fixed_scalar_type(FixedScalar::I32)].into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![fixed_scalar_type(FixedScalar::I32)],
+            None,
+        )),
     };
 
     let hir_module = build_module(
@@ -198,8 +203,9 @@ fn emitted_assertions_deliver_static_messages_to_host_before_trapping_in_node() 
                 id: function_id,
                 entry: block_id,
                 params: vec![],
-                returns: vec![].into_boxed_slice(),
-                error_return: None,
+                return_contract: HirFunctionReturnContract::Returns(
+                    CallableReturnShape::from_slots(vec![], None),
+                ),
             },
             path,
             if index == 0 {
@@ -488,8 +494,10 @@ fn rejects_invalid_helper_export_policy() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![fixed_scalar_type(FixedScalar::I32)].into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![fixed_scalar_type(FixedScalar::I32)],
+            None,
+        )),
     };
     let hir_module = build_module(
         &mut path_fork,
@@ -2285,8 +2293,10 @@ fn rejects_unsupported_wasm_feature_flags() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![fixed_scalar_type(FixedScalar::I32)].into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![fixed_scalar_type(FixedScalar::I32)],
+            None,
+        )),
     };
     let hir_module = build_module(
         &mut path_fork,
@@ -2339,8 +2349,10 @@ fn rejects_unsupported_cfg_lowering_strategy() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: vec![fixed_scalar_type(FixedScalar::I32)].into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![fixed_scalar_type(FixedScalar::I32)],
+            None,
+        )),
     };
     let hir_module = build_module(
         &mut path_fork,
@@ -4528,8 +4540,10 @@ fn build_uint_scalar_fixture(
             id: FunctionId(0),
             entry: BlockId(100),
             params: vec![],
-            returns: vec![int_type].into_boxed_slice(),
-            error_return: None,
+            return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                vec![int_type],
+                None,
+            )),
         },
         start_path,
         HirFunctionOrigin::EntryStart,
@@ -4590,8 +4604,9 @@ fn build_uint_scalar_fixture(
                 id,
                 entry: block_id,
                 params: vec![LocalId(0), LocalId(1)],
-                returns: vec![uint_type].into_boxed_slice(),
-                error_return: None,
+                return_contract: HirFunctionReturnContract::Returns(
+                    CallableReturnShape::from_slots(vec![uint_type], None),
+                ),
             },
             path,
             HirFunctionOrigin::Normal,
@@ -4643,8 +4658,9 @@ fn build_uint_scalar_fixture(
                 id,
                 entry: block_id,
                 params: vec![LocalId(0), LocalId(1)],
-                returns: vec![bool_type].into_boxed_slice(),
-                error_return: None,
+                return_contract: HirFunctionReturnContract::Returns(
+                    CallableReturnShape::from_slots(vec![bool_type], None),
+                ),
             },
             path,
             HirFunctionOrigin::Normal,
@@ -4701,8 +4717,9 @@ fn build_uint_scalar_fixture(
                 id,
                 entry: block_id,
                 params: vec![LocalId(0), LocalId(1)],
-                returns: vec![bool_type].into_boxed_slice(),
-                error_return: None,
+                return_contract: HirFunctionReturnContract::Returns(
+                    CallableReturnShape::from_slots(vec![bool_type], None),
+                ),
             },
             path,
             HirFunctionOrigin::Normal,
@@ -4765,8 +4782,9 @@ fn build_uint_scalar_fixture(
                 id,
                 entry: block_id,
                 params: vec![],
-                returns: vec![return_type].into_boxed_slice(),
-                error_return: None,
+                return_contract: HirFunctionReturnContract::Returns(
+                    CallableReturnShape::from_slots(vec![return_type], None),
+                ),
             },
             path,
             HirFunctionOrigin::Normal,

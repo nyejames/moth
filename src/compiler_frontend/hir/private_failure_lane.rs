@@ -159,13 +159,22 @@ impl LaneInstaller<'_> {
             if !self.lane_functions.contains(&function.id) {
                 continue;
             }
-            if function.error_return.is_some() {
+            // Lane selection only picks inferred private functions, so a Never body here means
+            // selection and installation disagree. A Never body never returns to its caller and
+            // owns no error channel; escaping implicit failure is a closed-boundary diagnostic.
+            let returns = function.return_contract.ordinary_mut().ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::HirConstruction,
+                    "private failure lane selected a declared Never function",
+                )
+            })?;
+            if returns.is_fallible() {
                 return Err(InfrastructureFailure::internal(
                     CompilerStage::HirConstruction,
                     "private internal failure lane cannot coexist with a source error slot",
                 ));
             }
-            function.error_return = Some(error_type);
+            returns.set_error(Some(error_type));
         }
         Ok(())
     }
@@ -318,8 +327,15 @@ impl LaneInstaller<'_> {
                         CompilerStage::HirConstruction,
                         "private failure lane call is missing its nonlocal result contract",
                     )
+                })?
+                .ordinary_mut()
+                .ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::HirConstruction,
+                        "private failure lane call targets a Never contract",
+                    )
                 })?;
-            contract.error_return = Some(error_type);
+            contract.set_error(Some(error_type));
         }
         let old_terminator = std::mem::replace(
             &mut self.hir.blocks[block_id.0 as usize].terminator,
@@ -400,6 +416,11 @@ impl LaneInstaller<'_> {
         };
         self.hir.blocks[success.0 as usize].statements = statements;
         self.hir.blocks[success.0 as usize].terminator = old_terminator;
+        // The authored terminator moves with its block location; the replacement Invoke is a
+        // generated terminator and stays span-free.
+        self.hir
+            .side_table
+            .move_terminator_location(block_id, success);
         self.hir.blocks[block_id.0 as usize].terminator = HirTerminator::Invoke {
             id: statement.id,
             span: statement.span,
@@ -564,10 +585,14 @@ impl LaneInstaller<'_> {
             return Ok(false);
         };
         let function_index = self.function_index(function_id)?;
-        if self.hir.functions[function_index].error_return.is_none() {
+        let entry = self.hir.functions[function_index].entry;
+        let entry_is_fallible = self.hir.functions[function_index]
+            .return_contract
+            .ordinary()
+            .is_some_and(|returns| returns.is_fallible());
+        if !entry_is_fallible {
             return Ok(false);
         }
-        let entry = self.hir.functions[function_index].entry;
         let blocks = reachable_blocks(self.hir, entry);
         if blocks.iter().any(|block_id| {
             matches!(
@@ -578,7 +603,12 @@ impl LaneInstaller<'_> {
             return Ok(false);
         }
 
-        self.hir.functions[function_index].error_return = None;
+        if let Some(returns) = self.hir.functions[function_index]
+            .return_contract
+            .ordinary_mut()
+        {
+            returns.set_error(None);
+        }
         Ok(true)
     }
 
@@ -589,7 +619,10 @@ impl LaneInstaller<'_> {
         if self.lane_functions.contains(&function_id) {
             return Ok(true);
         }
-        let error_type = self.hir.functions[self.function_index(function_id)?].error_return;
+        let error_type = self.hir.functions[self.function_index(function_id)?]
+            .return_contract
+            .ordinary()
+            .and_then(|returns| returns.error());
         Ok(error_type.is_some() && self.builtin_error == error_type)
     }
 

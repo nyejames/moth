@@ -88,5 +88,10 @@ failure-edge message is lowered.
 
 They may end a function path that otherwise requires a value.
 
+A compile-time-false assertion proves that the current path diverges. It is
+not a Never value and does not create a `-> !` contract. Only an explicit
+`-> !` signature propagates divergence across a call. See
+@../functions/#function-declarations (Function declarations).
+
 A dynamic `assert(condition)` is not statically terminal because the condition
 may succeed.

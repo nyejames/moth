@@ -15,6 +15,20 @@ use crate::compiler_frontend::module_compilation::{Module, ModuleExternalImport}
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use std::collections::HashSet;
 
+/// Return metadata about one referenced external module export.
+///
+/// WHAT: selects the generated wrapper shape together with the slots that shape needs.
+/// WHY: `Never` and ordinary completion are mutually exclusive, so keeping the ordinary
+///      return slots and fallibility beside a boolean would allow mixed states that no registry
+///      can produce.
+pub(super) enum ReferencedExportReturn {
+    Returns {
+        return_types: Vec<ExternalSignatureType>,
+        is_fallible: bool,
+    },
+    Never,
+}
+
 /// Metadata about one referenced external module export.
 pub(super) struct ReferencedExport {
     pub(super) function_id: ExternalFunctionId,
@@ -22,8 +36,7 @@ pub(super) struct ReferencedExport {
     pub(super) export_name: String,
     pub(super) raw_import_name: String,
     pub(super) parameter_types: Vec<ExternalSignatureType>,
-    pub(super) return_types: Vec<ExternalSignatureType>,
-    pub(super) is_fallible: bool,
+    pub(super) return_contract: ReferencedExportReturn,
 }
 
 /// Checks selected JS inputs and collects only exports needing module wrappers.
@@ -111,6 +124,20 @@ pub(super) fn collect_referenced_exports(
             ));
         }
 
+        // A Never binding has no ordinary success or error channel. Collecting it here keeps the
+        // external import and glue wrapper; the generated wrapper throws if the raw export
+        // returns instead of exposing a foreign result.
+        let return_contract = match function_def.return_contract.ordinary() {
+            Some(returns) => ReferencedExportReturn::Returns {
+                return_types: returns
+                    .success
+                    .iter()
+                    .map(|slot| slot.value_type.clone())
+                    .collect(),
+                is_fallible: returns.error.is_some(),
+            },
+            None => ReferencedExportReturn::Never,
+        };
         exports.push(ReferencedExport {
             function_id: *function_id,
             package_id,
@@ -121,12 +148,7 @@ pub(super) fn collect_referenced_exports(
                 .iter()
                 .map(|parameter| parameter.language_type.clone())
                 .collect(),
-            return_types: function_def
-                .returns
-                .iter()
-                .map(|slot| slot.value_type.clone())
-                .collect(),
-            is_fallible: function_def.is_fallible(),
+            return_contract,
         });
     }
 

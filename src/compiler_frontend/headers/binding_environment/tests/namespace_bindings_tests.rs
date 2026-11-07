@@ -26,6 +26,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::{
     view::DiagnosticView,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticBag, ReservedNameOwner};
+use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalConstantDef, ExternalConstantId, ExternalConstantValue,
     ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings, ExternalPackageRegistry,
@@ -53,10 +54,10 @@ use crate::compiler_frontend::public_call_summary::{
 };
 use crate::compiler_frontend::public_interface::{
     ConcreteCallSummaryRecord, ProviderDependencyKind, PublicBindingExport,
-    PublicConstantSemantics, PublicDeclarationRecord, PublicDeclarationSemantics,
-    PublicEvidenceOwnership, PublicEvidenceRecord, PublicReceiverMethodCategory,
-    PublicReceiverMethodSemantics, PublicSemanticInterface, PublicStructSemantics,
-    SourceProviderDependency, SourceProviderDependencySet,
+    PublicCallableReturnContract, PublicConstantSemantics, PublicDeclarationRecord,
+    PublicDeclarationSemantics, PublicEvidenceOwnership, PublicEvidenceRecord,
+    PublicReceiverMethodCategory, PublicReceiverMethodSemantics, PublicSemanticInterface,
+    PublicStructSemantics, SourceProviderDependency, SourceProviderDependencySet,
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
@@ -94,8 +95,10 @@ fn empty_void_function(name: &str) -> ExternalFunctionDef {
     ExternalFunctionDef {
         name: name.to_owned(),
         parameters: Vec::new(),
-        returns: external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
-        error_return_type: None,
+        return_contract: external_returns(
+            external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
+            None,
+        ),
         const_eval: None,
         lowerings: ExternalFunctionLowerings::default(),
     }
@@ -2150,8 +2153,10 @@ fn struct_provider_with_receiver_method() -> PublicSemanticInterface {
                     method_origin: method_origin.clone(),
                     category: PublicReceiverMethodCategory::ConcreteLocal,
                     parameters: Vec::new(),
-                    returns: Vec::new(),
-                    error_return: None,
+                    return_contract: PublicCallableReturnContract::Returns {
+                        success: Vec::new(),
+                        error: None,
+                    },
                 }],
             }),
         }],

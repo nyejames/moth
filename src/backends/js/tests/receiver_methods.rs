@@ -1,9 +1,12 @@
 //! Receiver-method call emission tests for JavaScript output.
 
 use super::support::*;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
-use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
+use crate::compiler_frontend::hir::functions::{
+    HirFunction, HirFunctionOrigin, HirFunctionReturnContract,
+};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::places::HirPlace;
@@ -41,8 +44,10 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
         id: FunctionId(1),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        returns: (vec![types.i32]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![types.i32],
+            None,
+        )),
     };
 
     // Caller: let receiver = 7; let result = bump(receiver); return result
@@ -90,8 +95,10 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
         id: FunctionId(0),
         entry: BlockId(1),
         params: vec![],
-        returns: (vec![types.i32]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![types.i32],
+            None,
+        )),
     };
 
     let mut module = HirModule::new();
@@ -176,8 +183,10 @@ fn receiver_method_call_assigns_value_for_return() {
         id: FunctionId(1),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        returns: (vec![types.i32]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![types.i32],
+            None,
+        )),
     };
 
     let call_bump = statement(
@@ -211,8 +220,10 @@ fn receiver_method_call_assigns_value_for_return() {
         id: FunctionId(0),
         entry: BlockId(1),
         params: vec![],
-        returns: (vec![types.i32]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![types.i32],
+            None,
+        )),
     };
 
     let mut module = HirModule::new();

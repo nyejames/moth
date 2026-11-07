@@ -238,6 +238,12 @@ pub(crate) fn invalid_function_signature_message(
             "`where` syntax is not part of Moth generic constraints. Use declaration-site bounds such as `type A is TRAIT`."
                 .to_string()
         }
+        InvalidFunctionSignatureReason::NeverCannotCombine { found } => {
+            format!(
+                "`-> !` is a whole return contract and cannot be combined with other return syntax, but found {}.",
+                token_kind_name(found, string_table)
+            )
+        }
     }
 }
 

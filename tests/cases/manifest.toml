@@ -8996,6 +8996,13 @@ contract = "language.functions.partial_if_return_rejected"
 role = "primary"
 
 [[case]]
+id = "function_typed_true_loop_terminality_acceptance"
+path = "function_typed_true_loop_terminality_acceptance"
+tags = ["integration", "language", "control-flow", "loops"]
+contract = "language.functions.typed_true_loop_terminality_acceptance"
+role = "primary"
+
+[[case]]
 id = "generic_function_fallthrough_rejected"
 path = "generic_function_fallthrough_rejected"
 tags = ["integration", "language", "generics", "control-flow", "diagnostics"]
@@ -12900,6 +12907,13 @@ path = "value_if_branch_fallthrough_rejected"
 tags = ["integration", "diagnostics", "value-blocks"]
 contract = "language.expressions.value_if_branch_must_produce_value_rejected"
 role = "primary"
+
+[[case]]
+id = "value_if_nested_loop_break_fallthrough_rejected"
+path = "value_if_nested_loop_break_fallthrough_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "loops"]
+contract = "language.expressions.value_if_branch_must_produce_value_rejected"
+role = "boundary"
 
 [[case]]
 id = "header_qualified_match_arm_not_declaration"
@@ -19055,3 +19069,171 @@ path = "html_builder_root_slot_runtime_rejected"
 tags = ["integration", "html", "html-wasm", "html-builder", "templates", "slots", "diagnostics"]
 contract = "backend.html.builder_root_slot_runtime_rejected"
 role = "primary"
+
+[[case]]
+id = "never_function_implicit_failure_rejected"
+path = "never_function_implicit_failure_rejected"
+tags = ["integration", "language", "control-flow", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "boundary"
+
+[[case]]
+id = "never_function_body_falls_through_rejected"
+path = "never_function_body_falls_through_rejected"
+tags = ["integration", "language", "control-flow", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "boundary"
+
+[[case]]
+id = "never_function_body_returns_rejected"
+path = "never_function_body_returns_rejected"
+tags = ["integration", "language", "control-flow", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "boundary"
+
+[[case]]
+id = "unannotated_diverging_function_rejected"
+path = "unannotated_diverging_function_rejected"
+tags = ["integration", "language", "control-flow", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "boundary"
+
+[[case]]
+id = "never_call_used_as_value_rejected"
+path = "never_call_used_as_value_rejected"
+tags = ["integration", "language", "functions", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "boundary"
+
+[[case]]
+id = "never_recursion_proof_cycle_rejected"
+path = "never_recursion_proof_cycle_rejected"
+tags = ["integration", "language", "control-flow", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "adversarial"
+
+[[case]]
+id = "never_call_cross_module_used_as_value_rejected"
+path = "never_call_cross_module_used_as_value_rejected"
+tags = ["integration", "language", "functions", "imports", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "adversarial"
+
+[[case]]
+id = "never_trait_requires_never_implementation_returns_rejected"
+path = "never_trait_requires_never_implementation_returns_rejected"
+tags = ["integration", "language", "traits", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "adversarial"
+
+[[case]]
+id = "never_trait_requires_ordinary_implementation_never_rejected"
+path = "never_trait_requires_ordinary_implementation_never_rejected"
+tags = ["integration", "language", "traits", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "adversarial"
+
+[[case]]
+id = "external_js_mixed_never_signature_rejected"
+path = "external_js_mixed_never_signature_rejected"
+tags = ["integration", "external-packages", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "boundary"
+
+[[case]]
+id = "never_local_call_runtime"
+path = "never_local_call_runtime"
+tags = ["integration", "language", "functions", "never"]
+contract = "language.functions.never_return_contract"
+role = "primary"
+
+[[case]]
+id = "never_signature_combinations_rejected"
+path = "never_signature_combinations_rejected"
+tags = ["integration", "language", "functions", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "boundary"
+
+[[case]]
+id = "never_callable_surfaces_runtime"
+path = "never_callable_surfaces_runtime"
+tags = ["integration", "language", "functions", "traits", "imports", "never"]
+contract = "language.functions.never_return_contract"
+role = "boundary"
+
+[[case]]
+id = "never_generic_trait_dispatch_cycle_rejected"
+path = "never_generic_trait_dispatch_cycle_rejected"
+tags = ["integration", "language", "generics", "traits", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "adversarial"
+
+[[case]]
+id = "never_generic_trait_dispatch_cross_module_cycle_rejected"
+path = "never_generic_trait_dispatch_cross_module_cycle_rejected"
+tags = ["integration", "language", "generics", "traits", "imports", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "adversarial"
+
+[[case]]
+id = "never_generic_trait_dispatch_shared_instance_cycle_rejected"
+path = "never_generic_trait_dispatch_shared_instance_cycle_rejected"
+tags = ["integration", "language", "generics", "traits", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "adversarial"
+
+[[case]]
+id = "never_generic_receiver_method_cycle_rejected"
+path = "never_generic_receiver_method_cycle_rejected"
+tags = ["integration", "language", "generics", "traits", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "adversarial"
+
+[[case]]
+id = "never_generic_trait_dispatch_generic_evidence_cycle_rejected"
+path = "never_generic_trait_dispatch_generic_evidence_cycle_rejected"
+tags = ["integration", "language", "generics", "traits", "imports", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "adversarial"
+
+[[case]]
+id = "never_generic_trait_dispatch_other_type_runtime"
+path = "never_generic_trait_dispatch_other_type_runtime"
+tags = ["integration", "language", "generics", "traits", "imports", "never"]
+contract = "language.functions.never_return_contract"
+role = "boundary"
+
+[[case]]
+id = "never_generic_trait_dispatch_requester_method_runtime"
+path = "never_generic_trait_dispatch_requester_method_runtime"
+tags = ["integration", "language", "generics", "traits", "never"]
+contract = "language.functions.never_return_contract"
+role = "boundary"
+
+[[case]]
+id = "never_generated_call_runtime"
+path = "never_generated_call_runtime"
+tags = ["integration", "language", "functions", "generics", "never"]
+contract = "language.functions.never_return_contract"
+role = "boundary"
+
+[[case]]
+id = "external_js_never_contract_runtime"
+path = "external_js_never_contract_runtime"
+tags = ["integration", "external-packages", "html", "never"]
+contract = "language.functions.never_return_contract"
+role = "boundary"
+
+[[case]]
+id = "never_cross_module_never_call_runtime"
+path = "never_cross_module_never_call_runtime"
+tags = ["integration", "language", "functions", "imports", "never"]
+contract = "language.functions.never_return_contract"
+role = "boundary"
+
+[[case]]
+id = "never_call_fallible_argument_rejected"
+path = "never_call_fallible_argument_rejected"
+tags = ["integration", "language", "functions", "diagnostics", "never"]
+contract = "language.functions.never_return_contract"
+role = "boundary"

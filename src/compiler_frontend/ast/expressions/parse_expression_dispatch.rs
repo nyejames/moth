@@ -460,6 +460,12 @@ pub(super) fn push_expression_operand_with_span(
     // can) or defers to the body root with this item in place, so the call resumes exactly once.
     let expression_after_postfix = match expression_after_postfix {
         ParsedPostfixExpression::Value(value) => value,
+        // A Never method call has no value: it occupies one operand position so the statement
+        // owner can lift it into `NeverCall`, while every value owner rejects it at evaluation.
+        ParsedPostfixExpression::Terminating(never_call) => {
+            expression.push(ExpressionRpnItem::NeverCall(never_call));
+            return Ok(());
+        }
         ParsedPostfixExpression::RetainedOperand(item) => {
             expression.push(item);
             return Ok(());
@@ -1975,7 +1981,8 @@ fn group_content_facts(
             | ExpressionRpnItem::PendingNumericBinding { .. }
             | ExpressionRpnItem::PendingNumericCall { .. }
             | ExpressionRpnItem::PendingNumericCast { .. }
-            | ExpressionRpnItem::PendingNumericExpression { .. } => {
+            | ExpressionRpnItem::PendingNumericExpression { .. }
+            | ExpressionRpnItem::NeverCall(_) => {
                 facts.operands += 1;
                 facts.first_operand = Some(index);
             }

@@ -5,6 +5,7 @@
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
@@ -12,6 +13,7 @@ use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
 };
+use crate::compiler_frontend::hir::functions::HirFunctionReturnContract;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
@@ -46,10 +48,10 @@ impl<'a> HirBuilder<'a> {
         {
             self.module.call_result_contracts.insert(
                 target.clone(),
-                crate::compiler_frontend::hir::module::HirCallResultContract {
-                    returns: success_types.into(),
-                    error_return: Some(err_type),
-                },
+                HirFunctionReturnContract::returns(CallableReturnShape::from_slots(
+                    success_types.iter().copied(),
+                    Some(err_type),
+                )),
             );
         }
         let block = self.current_block_id_or_error()?;
@@ -115,10 +117,15 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
     ) -> Result<Vec<HirValueId>, HirConstructionFailure> {
         let function_id = self.current_function_id_or_error()?;
-        let Some(error_type) = self.function_by_id_or_error(function_id)?.error_return else {
+        let Some(error_type) = self
+            .function_by_id_or_error(function_id)?
+            .return_contract
+            .ordinary()
+            .and_then(|returns| returns.error())
+        else {
             crate::compiler_bug!(
                 CompilerStage::HirConstruction,
-                "Fallible propagation outside an error-returning function",
+                "Fallible propagation outside an ordinary error-returning function",
             );
         };
         if !is_postfix_error_compatible(error_type, results.err_type, &self.type_environment) {
@@ -214,17 +221,19 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn result_call_slots(
         &self,
         target: &CallTarget,
-    ) -> Result<(Vec<TypeId>, TypeId), HirConstructionFailure> {
-        let slots = match target {
+    ) -> Result<CallableReturnShape, HirConstructionFailure> {
+        let results = match target {
             CallTarget::Local(id) => {
                 let function = self.function_by_id_or_error(*id)?;
                 return function
-                    .error_return
-                    .map(|error| (function.returns.to_vec(), error))
+                    .return_contract
+                    .ordinary()
+                    .filter(|returns| returns.is_fallible())
+                    .cloned()
                     .ok_or_else(|| {
                         InfrastructureFailure::internal(
                             CompilerStage::HirConstruction,
-                            "Fallible call targets an infallible signature",
+                            "Fallible call targets an infallible or Never signature",
                         )
                         .into()
                     });
@@ -238,14 +247,12 @@ impl<'a> HirBuilder<'a> {
                 .get(identity.as_ref()),
             CallTarget::External(_) => None,
         };
-        slots
-            .map(|(returns, error)| (returns.to_vec(), *error))
-            .ok_or_else(|| {
-                InfrastructureFailure::internal(
-                    CompilerStage::HirConstruction,
-                    "Fallible call has no projected native result signature",
-                )
-                .into()
-            })
+        results.cloned().ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::HirConstruction,
+                "Fallible call has no projected native result signature",
+            )
+            .into()
+        })
     }
 }

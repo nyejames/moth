@@ -21,7 +21,7 @@ BLOCKERS: normal serial roadmap position and the prerequisite capabilities below
 NEXT_ACTION: activate explicitly after Never return contracts, then refresh owners and establish evidence
 ```
 
-Insert the following single entry in `docs/roadmap/roadmap.md`, immediately after the existing Never return contracts entry:
+Insert the following single entry in `docs/roadmap/roadmap.md`, immediately after the Runtime anonymous records entry (the delivered Never return contracts no longer have a roadmap entry):
 
 ```markdown
 - [Reusable generics, type-parametric Core bindings and file-backed JS/WAT](./plans/generics-core-bindings-and-file-backed-js-wat-plan.md) - Queued: file-private reusable generic declarations, closed numeric-family limits, bounded nested-call context, trusted scalar-parametric Core bindings and file-backed JS/WAT implementations. Deliver generic min, max, clamp and uniformly fallible abs. Consume exact numeric semantics and existing backend capabilities without waiting for the later mixed-Wasm implementation.
@@ -132,7 +132,7 @@ Every code-bearing slice ends with the repository Slice review. Structured audit
 | G15 | Mandatory consumers are generic `min`, `max`, `clamp` and `abs`. Only `abs` adds a uniform public `Error!` slot. | Phase 9, M01-M20 |
 | G16 | Conditional generic error signatures, general effect-polymorphism and generic error-presence directives remain outside scope. | Phases 4/6/9, B13, M10-M11, M17 |
 | G17 | Further Core generic opportunities, precision expansion, decimal algorithms and generic constants are recorded as later work, not delivered incidentally. | Phases 9/11, M20 and Section 15.3 |
-| G18 | Place this entry immediately after Never return contracts. Remove the old generics deferred heading at initial activation without removing its permanent handoff or adjacent tooling work. | Phase 0 and Section 13.3 |
+| G18 | Place this entry immediately after Runtime anonymous records, where the delivered Never return contracts entry stood. Remove the old generics deferred heading at initial activation without removing its permanent handoff or adjacent tooling work. | Phase 0 and Section 13.3 |
 
 The family names are `NUMERIC`, `INTEGER`, `SIGNED_INTEGER`, `FLOAT`, `DEC`, `INT_16_PLUS`, `INT_32_PLUS` and `FLOAT_32_PLUS`.
 
@@ -897,7 +897,7 @@ Package/provider work then builds on that frontend. The complete plan finishes w
 
 - [ ] Read the current repository rules and routed authorities. Verify that the prerequisite capabilities are actually delivered at activation, distinguishing accepted design from implementation status.
 - [ ] Establish the working-tree, branch, toolchain and effective feature/parallelism configuration. Preserve unrelated uncommitted work and accepted earlier checkpoints. Record the activation revision in untracked working notes.
-- [ ] Confirm the linked queued entry is immediately after Never return contracts. Mark it active there only after activation, without moving it to a separate heading or reordering surrounding work.
+- [ ] Confirm the linked queued entry is immediately after Runtime anonymous records. Mark it active there only after activation, without moving it to a separate heading or reordering surrounding work.
 - [ ] Remove the exact old `## Generics, type-parametric Core bindings and file-backed JS/WAT` placeholder section. Stop deletion at the next same-level heading. Preserve the optional catch advisory and all unrelated notes.
 - [ ] Transfer the placeholder's D15, numeric-origin, explicit-limit and exclusion facts into the permanent generic/design-scope/architecture references. Keep the existing `Numeric and generic extensions` heading as the stable handoff.
 - [ ] Publish Sections 3 through 8 into the appropriate permanent semantic owners. Mark implementation support separately. Replace contradictory old exclusions only within the approved scope.
@@ -1459,7 +1459,7 @@ Show file-local generic privacy and invalid `Type` at least once in the Basic ma
 
 ### 13.3 Roadmap and later-owner coordination
 
-The authoring/insertion change adds the queued plan bullet immediately after Never return contracts. **Phase 0 activation** removes the exact obsolete deferred heading and paragraphs if still present. Preserve the optional catch tooling heading and the permanent Numeric and generic extensions anchor. The latter is updated rather than deleted, so incoming links keep their meaning.
+The authoring/insertion change added the queued plan bullet immediately after the Never return contracts entry, which was retired when that capability was delivered; the bullet now follows Runtime anonymous records. **Phase 0 activation** removes the exact obsolete deferred heading and paragraphs if still present. Preserve the optional catch tooling heading and the permanent Numeric and generic extensions anchor. The latter is updated rather than deleted, so incoming links keep their meaning.
 
 Coordinate these existing owners by capability, not by creating links between temporary implementation plans:
 

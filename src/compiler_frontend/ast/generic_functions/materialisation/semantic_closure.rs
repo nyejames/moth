@@ -16,12 +16,14 @@ use super::visibility::collect_namespace_source_paths;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionBody;
 use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment;
-use crate::compiler_frontend::ast::statements::functions::{ParameterContract, ReturnChannel};
+use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::{CompilerStage, PreparedFailure};
+use crate::compiler_frontend::datatypes::CallableReturnShape;
+use crate::compiler_frontend::datatypes::FunctionReturnContract;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -38,7 +40,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, Path
 use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::traits::definitions::{
-    ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement, ResolvedTraitReturn,
+    ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement,
     TraitReceiverRequirement, TraitVisibility,
 };
 use crate::compiler_frontend::traits::environment::trait_this_name;
@@ -161,8 +163,38 @@ struct StablePrivateTraitRequirement {
     name: String,
     receiver_mutable: bool,
     parameters: Box<[StablePrivateTraitParameter]>,
-    returns: Box<[StablePrivateTraitReturn]>,
+    return_contract: StableTraitReturnContract,
     span: Option<crate::compiler_frontend::source::SourceSpan>,
+}
+
+/// Frozen whole return contract of one private trait requirement.
+///
+/// WHAT: either the ordinary success/error blueprints or a declared Never contract.
+/// WHY: trait requirements are matched exactly against implementing methods, so the frozen
+///      contract must preserve the Never variant instead of collapsing it into no-value slots.
+#[derive(Clone)]
+enum StableTraitReturnContract {
+    Returns(StableTraitReturns),
+    Never,
+}
+
+impl StableTraitReturnContract {
+    fn ordinary(&self) -> Option<&StableTraitReturns> {
+        match self {
+            Self::Returns(returns) => Some(returns),
+            Self::Never => None,
+        }
+    }
+}
+
+/// Frozen ordinary success and error blueprints inside one private trait requirement contract.
+///
+/// WHAT: the ordered success blueprints and the independent error blueprint. Stored locally
+/// because the slot type is a trait-blueprint resolver, not a shared `TypeId`.
+#[derive(Clone)]
+struct StableTraitReturns {
+    success: Box<[StableTraitTypeBlueprint]>,
+    error: Option<StableTraitTypeBlueprint>,
 }
 
 #[derive(Clone)]
@@ -203,13 +235,6 @@ impl StablePrivateTraitParameter {
     fn semantic_type_blueprints(&self) -> impl Iterator<Item = &StableTraitTypeBlueprint> {
         std::iter::once(&self.parameter_type).chain(self.contract.input_blueprint())
     }
-}
-
-#[derive(Clone)]
-struct StablePrivateTraitReturn {
-    return_type: StableTraitTypeBlueprint,
-    channel: ReturnChannel,
-    span: Option<crate::compiler_frontend::source::SourceSpan>,
 }
 
 #[derive(Clone)]
@@ -283,11 +308,13 @@ impl StableFunctionSignature {
                 });
             }
         }
-        for returned in &self.returns {
-            returned.collect_nominal_identities(identities);
-        }
-        if let Some(error_return) = &self.error_return {
-            error_return.collect_nominal_identities(identities);
+        if let Some(returns) = self.return_contract.ordinary() {
+            for returned in &returns.success {
+                returned.collect_nominal_identities(identities);
+            }
+            if let Some(error_return) = &returns.error {
+                error_return.collect_nominal_identities(identities);
+            }
         }
     }
 }
@@ -415,32 +442,51 @@ pub(super) fn install_private_semantic_closure(
                     })
                 })
                 .collect::<Result<Vec<_>, PreparedFailure>>()?;
-            let returns = stable_requirement
-                .returns
-                .iter()
-                .map(|returned| {
-                    Ok(ResolvedTraitReturn {
-                        type_id: intern_stable_trait_type(
-                            &returned.return_type,
-                            this_type,
-                            nominal_source,
-                            &mut environment.type_environment,
-                            external_package_registry,
-                            template_ir_store,
-                            string_table,
-                            path_fork,
-                        )?,
-                        channel: returned.channel,
-                        span: returned.span,
-                    })
-                })
-                .collect::<Result<Vec<_>, PreparedFailure>>()?;
+            let return_contract = match &stable_requirement.return_contract {
+                StableTraitReturnContract::Returns(returns) => {
+                    FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                        returns
+                            .success
+                            .iter()
+                            .map(|returned| {
+                                intern_stable_trait_type(
+                                    returned,
+                                    this_type,
+                                    nominal_source,
+                                    &mut environment.type_environment,
+                                    external_package_registry,
+                                    template_ir_store,
+                                    string_table,
+                                    path_fork,
+                                )
+                            })
+                            .collect::<Result<Vec<_>, PreparedFailure>>()?,
+                        returns
+                            .error
+                            .as_ref()
+                            .map(|returned| {
+                                intern_stable_trait_type(
+                                    returned,
+                                    this_type,
+                                    nominal_source,
+                                    &mut environment.type_environment,
+                                    external_package_registry,
+                                    template_ir_store,
+                                    string_table,
+                                    path_fork,
+                                )
+                            })
+                            .transpose()?,
+                    ))
+                }
+                StableTraitReturnContract::Never => FunctionReturnContract::Never,
+            };
             requirements.push(ResolvedTraitRequirement {
                 id: requirement_id,
                 name: string_table.intern(&stable_requirement.name),
                 receiver,
                 parameters,
-                returns,
+                return_contract,
                 span: stable_requirement.span,
             });
         }
@@ -727,20 +773,26 @@ impl ModuleMaterialisationCapture {
                             })
                         })
                         .collect::<Result<Box<[_]>, InfrastructureFailure>>()?;
-                    let returns = requirement
-                        .returns
-                        .iter()
-                        .map(|returned| {
-                            Ok(StablePrivateTraitReturn {
-                                return_type: self.stable_trait_type(
-                                    returned.type_id,
-                                    definition.this_type,
-                                )?,
-                                channel: returned.channel,
-                                span: returned.span,
+                    let return_contract = match &requirement.return_contract {
+                        FunctionReturnContract::Returns(returns) => {
+                            StableTraitReturnContract::Returns(StableTraitReturns {
+                                success: returns
+                                    .success()
+                                    .iter()
+                                    .map(|type_id| {
+                                        self.stable_trait_type(*type_id, definition.this_type)
+                                    })
+                                    .collect::<Result<Box<[_]>, InfrastructureFailure>>()?,
+                                error: returns
+                                    .error()
+                                    .map(|type_id| {
+                                        self.stable_trait_type(type_id, definition.this_type)
+                                    })
+                                    .transpose()?,
                             })
-                        })
-                        .collect::<Result<Box<[_]>, InfrastructureFailure>>()?;
+                        }
+                        FunctionReturnContract::Never => StableTraitReturnContract::Never,
+                    };
                     let receiver_mutable = matches!(
                         requirement.receiver,
                         crate::compiler_frontend::traits::definitions::TraitReceiverRequirement::Mutable { .. }
@@ -749,7 +801,7 @@ impl ModuleMaterialisationCapture {
                         name: self.string_table.resolve(requirement.name).to_owned(),
                         receiver_mutable,
                         parameters,
-                        returns,
+                        return_contract,
                         span: requirement.span,
                     })
                 })
@@ -1168,9 +1220,11 @@ impl ModuleMaterialisationCapture {
                         }
                     }
                 }
-                for returned in &requirement.returns {
-                    if let StableTraitTypeBlueprint::Type(blueprint) = &returned.return_type {
-                        blueprint.collect_nominal_identities(&mut identities);
+                if let Some(returns) = requirement.return_contract.ordinary() {
+                    for returned in returns.success.iter().chain(returns.error.iter()) {
+                        if let StableTraitTypeBlueprint::Type(blueprint) = returned {
+                            blueprint.collect_nominal_identities(&mut identities);
+                        }
                     }
                 }
             }

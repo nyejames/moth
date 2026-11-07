@@ -315,7 +315,8 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), InfrastructureFail
                 TerminatorEventKind::Return
                 | TerminatorEventKind::ReturnError
                 | TerminatorEventKind::RuntimeFailure
-                | TerminatorEventKind::AssertFailure => BTreeSet::new(),
+                | TerminatorEventKind::AssertFailure
+                | TerminatorEventKind::NeverCall => BTreeSet::new(),
             },
             _ => {
                 return Err(internal_failure(format!(
@@ -332,6 +333,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), InfrastructureFail
                         | TerminatorEventKind::ReturnError
                         | TerminatorEventKind::RuntimeFailure
                         | TerminatorEventKind::AssertFailure
+                        | TerminatorEventKind::NeverCall
                 }
             )
         {
@@ -863,7 +865,8 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), InfrastructureFail
                 TerminatorEventKind::Return
                 | TerminatorEventKind::ReturnError
                 | TerminatorEventKind::RuntimeFailure
-                | TerminatorEventKind::AssertFailure => {}
+                | TerminatorEventKind::AssertFailure
+                | TerminatorEventKind::NeverCall => {}
             },
             EventKind::Access { use_id } => {
                 let use_index =

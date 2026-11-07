@@ -8,7 +8,7 @@
 
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalAccessKind, ExternalFunctionLowerings, ExternalFunctionSpec,
-    ExternalParameter, ExternalReturnSlot, ExternalSignatureType,
+    ExternalParameter, ExternalReturnSlot, ExternalSignatureType, external_returns,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
@@ -138,8 +138,10 @@ impl HostFunction {
         Ok(ExternalFunctionSpec {
             name: self.name.clone(),
             parameters,
-            returns,
-            error_return_type: self.fallible.then_some(ExternalSignatureType::BuiltinError),
+            return_contract: external_returns(
+                returns,
+                self.fallible.then_some(ExternalSignatureType::BuiltinError),
+            ),
             const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })

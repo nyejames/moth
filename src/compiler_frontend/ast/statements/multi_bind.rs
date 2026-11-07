@@ -266,9 +266,13 @@ pub(crate) fn parse_multi_bind_statement(
                 rhs_span: view.span(),
             }
         }
-        ParsedMultiBindValue::Retained(value) => {
-            retained_multi_bind_slot_facts(value, &rhs_context, expression_builder, const_values)?
-        }
+        ParsedMultiBindValue::Retained(value) => retained_multi_bind_slot_facts(
+            value,
+            &rhs_context,
+            expression_builder,
+            const_values,
+            path_fork,
+        )?,
     };
 
     if slot_facts.rhs_slots.len() != parsed_targets.len() {
@@ -749,10 +753,11 @@ fn retained_multi_bind_slot_facts(
     context: &ScopeContext,
     expression_builder: &AstExpressionBuilder,
     const_values: &ConstValueStore,
+    path_fork: &PathInternerFork,
 ) -> MultiBindResult<MultiBindSlotFacts> {
     match value {
         DeferredMultiBindValue::Call(call) => {
-            let rhs_slots = retained_bare_call_slots(call)?;
+            let rhs_slots = retained_bare_call_slots(call, path_fork)?;
             let producers = (0..rhs_slots.len()).map(|_| Vec::new()).collect();
             Ok(MultiBindSlotFacts {
                 rhs_slots,
@@ -901,7 +906,15 @@ fn retained_catch_slots(payload: &DeferredCatchHandler) -> MultiBindResult<Vec<M
 /// WHY: the retained path must accept exactly what the parse-time path accepts; a bare method call
 ///      is not a multi-bind value (only free source calls, host calls and value blocks are), so
 ///      its retained form must not become legal by accident of retention.
-fn retained_bare_call_slots(call: &DeferredCall) -> MultiBindResult<Vec<MultiBindSlot>> {
+fn retained_bare_call_slots(
+    call: &DeferredCall,
+    path_fork: &PathInternerFork,
+) -> MultiBindResult<Vec<MultiBindSlot>> {
+    // A Never call has no value to destructure, whatever its call kind. Report the same placement
+    // diagnostic a completed Never call uses instead of a call-kind or arity diagnostic.
+    if let Some(diagnostic) = call.never_value_diagnostic(path_fork) {
+        return Err(diagnostic.into());
+    }
     if matches!(
         call,
         DeferredCall::Receiver(_)
@@ -924,7 +937,7 @@ fn retained_bare_call_slots(call: &DeferredCall) -> MultiBindResult<Vec<MultiBin
 /// WHAT: a generic call contributes one `Generic` slot per declared success shape; every other
 ///       call contributes its parsed success types as `Known` slots.
 /// WHY: a generic slot's type is fixed only by the call's numeric origins at completion, so its
-///      target links to the declared shape instead of a guessed `TypeId`.
+///       target links to the declared shape instead of a guessed `TypeId`.
 fn retained_call_slots(call: RetainedTerminalCall<'_>) -> MultiBindResult<Vec<MultiBindSlot>> {
     if let Some(shapes) = call.generic_result_shapes() {
         return Ok(shapes
@@ -932,7 +945,7 @@ fn retained_call_slots(call: RetainedTerminalCall<'_>) -> MultiBindResult<Vec<Mu
             .map(|shape| MultiBindSlot::Generic(*shape))
             .collect());
     }
-    let Some(slots) = call.success_return_type_ids() else {
+    let Some(slots) = call.success_types() else {
         return Err(InfrastructureFailure::internal(
             CompilerStage::AstConstruction,
             "a non-generic retained call reported no parsed success slot types",
@@ -940,8 +953,8 @@ fn retained_call_slots(call: RetainedTerminalCall<'_>) -> MultiBindResult<Vec<Mu
         .into());
     };
     Ok(slots
-        .into_iter()
-        .map(|type_id| MultiBindSlot::Known(Some(type_id)))
+        .iter()
+        .map(|type_id| MultiBindSlot::Known(Some(*type_id)))
         .collect())
 }
 

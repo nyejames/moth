@@ -28,6 +28,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::datatypes::FunctionReturnContract;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_bindings::GenericTypeBindings;
@@ -48,7 +49,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::definitions::{
-    ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement, ResolvedTraitReturn,
+    ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement,
     TraitReceiverRequirement,
 };
 use crate::compiler_frontend::traits::environment::trait_this_name;
@@ -721,8 +722,7 @@ fn generated_requester_template_contract(
     Ok(AstImportedFunctionContract {
         target,
         summary: bootstrap_call_summary_from_signature(&template.signature),
-        returns: template.signature.success_return_type_ids(),
-        error_return: template.signature.error_return_type_id(),
+        return_contract: template.signature.return_contract.clone(),
     })
 }
 
@@ -1357,33 +1357,51 @@ fn install_generated_requester_bound_trait<N: MaterialisationNominalSource>(
                 })
             })
             .collect::<Result<Vec<_>, PreparedFailure>>()?;
-        let returns = requirement
-            .returns
-            .iter()
-            .map(|returned| {
-                Ok(ResolvedTraitReturn {
-                    type_id: intern_generated_trait_requirement_slot(
-                        returned.type_id,
-                        source.this_type,
-                        this_type,
-                        requester_context,
-                        &mut environment.type_environment,
-                        external_registry,
-                        nominal_source,
-                        string_table,
-                        path_fork,
-                    )?,
-                    channel: returned.channel,
-                    span: returned.span,
-                })
-            })
-            .collect::<Result<Vec<_>, PreparedFailure>>()?;
+        let return_contract = match &requirement.return_contract {
+            FunctionReturnContract::Returns(returns) => {
+                let success = returns
+                    .success()
+                    .iter()
+                    .map(|type_id| {
+                        intern_generated_trait_requirement_slot(
+                            *type_id,
+                            source.this_type,
+                            this_type,
+                            requester_context,
+                            &mut environment.type_environment,
+                            external_registry,
+                            nominal_source,
+                            string_table,
+                            path_fork,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, PreparedFailure>>()?;
+                let error = returns
+                    .error()
+                    .map(|type_id| {
+                        intern_generated_trait_requirement_slot(
+                            type_id,
+                            source.this_type,
+                            this_type,
+                            requester_context,
+                            &mut environment.type_environment,
+                            external_registry,
+                            nominal_source,
+                            string_table,
+                            path_fork,
+                        )
+                    })
+                    .transpose()?;
+                FunctionReturnContract::from_slots(success, error)
+            }
+            FunctionReturnContract::Never => FunctionReturnContract::Never,
+        };
         requirements.push(ResolvedTraitRequirement {
             id: next_requirement_id,
             name: requirement.name,
             receiver,
             parameters,
-            returns,
+            return_contract,
             span: requirement.span,
         });
         next_requirement_id.0 += 1;

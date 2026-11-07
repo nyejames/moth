@@ -10,8 +10,8 @@ use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_front
 
 use super::abi::{ExternalAccessKind, ExternalReturnAlias};
 use super::definitions::{
-    ExternalConstantDef, ExternalFunctionDef, ExternalFunctionSpec, ExternalPackage,
-    ExternalTypeDef, ExternalTypeSpec,
+    ExternalConstantDef, ExternalFunctionDef, ExternalFunctionReturnContract, ExternalFunctionSpec,
+    ExternalPackage, ExternalTypeDef, ExternalTypeSpec,
 };
 use super::ids::{
     CanonicalBindingSymbolIdentity, ExternalConstantId, ExternalFunctionId, ExternalPackageId,
@@ -245,12 +245,16 @@ impl ExternalPackageRegistry {
                     .parameters
                     .iter()
                     .all(|parameter| parameter.access_kind == ExternalAccessKind::Shared)
-                && function
-                    .returns
-                    .iter()
-                    .all(|slot| matches!(&slot.alias, ExternalReturnAlias::Fresh))
-                && function.error_return_type.is_none()
-                && op.matches_signature(&function.parameters, &function.returns);
+                && match &function.return_contract {
+                    ExternalFunctionReturnContract::Returns { success, error } => {
+                        error.is_none()
+                            && success
+                                .iter()
+                                .all(|slot| matches!(&slot.alias, ExternalReturnAlias::Fresh))
+                            && op.matches_signature(&function.parameters, success)
+                    }
+                    ExternalFunctionReturnContract::Never => false,
+                };
             if !valid_registration {
                 return Err(ExternalRegistrationError::Infrastructure(
                     InfrastructureFailure::internal(
@@ -1202,7 +1206,8 @@ fn invalid_external_symbol_path_error(
 /// WHAT: every parameter and success slot names a Moth value, and every alias names an existing
 /// parameter.
 /// WHY: later projections skip slots without a `TypeId`, which would misalign ordered success
-/// slots with their aliases and skip parameter compatibility checks.
+/// slots with their aliases and skip parameter compatibility checks. A `Never` contract has no
+/// slots or aliases by construction, so only the ordinary variant validates slots.
 fn validate_signature_slots(function: &ExternalFunctionDef) -> Result<(), &'static str> {
     if function
         .parameters
@@ -1211,7 +1216,10 @@ fn validate_signature_slots(function: &ExternalFunctionDef) -> Result<(), &'stat
     {
         return Err("declares a parameter without a Moth value");
     }
-    for slot in &function.returns {
+    let Some(returns) = function.return_contract.ordinary() else {
+        return Ok(());
+    };
+    for slot in returns.success {
         if !slot.value_type.represents_moth_value() {
             return Err("declares a success slot without a Moth value");
         }
@@ -1233,7 +1241,7 @@ pub(crate) mod test_support {
         ExternalSignatureType,
     };
     use super::super::definitions::{
-        ExternalFunctionDef, ExternalFunctionLowerings, external_success_returns,
+        ExternalFunctionDef, ExternalFunctionLowerings, external_returns, external_success_returns,
     };
     use super::super::ids::ExternalFunctionId;
     use super::ExternalPackageRegistry;
@@ -1306,8 +1314,10 @@ pub(crate) mod test_support {
                     access_kind: access_kind.into(),
                 })
                 .collect(),
-            returns: external_success_returns(return_type, return_alias.into()),
-            error_return_type: None,
+            return_contract: external_returns(
+                external_success_returns(return_type, return_alias.into()),
+                None,
+            ),
             const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
@@ -1326,8 +1336,12 @@ pub(crate) mod test_support {
             .functions_by_id
             .get_mut(&id)
             .expect("test external function should be registered");
-        let return_slot = function
-            .returns
+        let super::super::definitions::ExternalFunctionReturnContract::Returns { success, .. } =
+            &mut function.return_contract
+        else {
+            panic!("test external function should have an ordinary return contract");
+        };
+        let return_slot = success
             .first_mut()
             .expect("test external function should have a success slot");
         return_slot.alias = return_alias.into();

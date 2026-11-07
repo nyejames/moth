@@ -347,6 +347,15 @@ pub enum NodeKind {
     /// WHY: expression internals own calls/operators/literals; this statement
     ///      node carries the expression value when a body position needs it.
     ExpressionStatement(ExprId),
+
+    /// A resolved call whose contract is `-> !`, valid only as a standalone statement.
+    ///
+    /// WHAT: carries the target and routed argument IDs without a result expression or result
+    ///       `TypeId`.
+    /// WHY: a Never call has no value and no continuation. Keeping it out of the expression store
+    ///      stops every value consumer from treating it as an empty result, while the shared exit
+    ///      analysis can still sequence the rest of the body as unreachable.
+    NeverCall(Box<crate::compiler_frontend::ast::statements::never_call::NeverCall>),
 }
 
 /// One pending row of the immutable expression walk.
@@ -499,6 +508,14 @@ fn visit_node_expressions<'a>(
         NodeKind::VariableDeclaration(declaration) => {
             visit_declaration_expressions(declaration, stack, visitor);
         }
+        NodeKind::NeverCall(call) => {
+            if let Some(receiver) = call.receiver {
+                visitor(receiver);
+            }
+            for argument in &call.arguments {
+                visitor(argument.value);
+            }
+        }
         NodeKind::StructDefinition(_, fields) => push_declarations(stack, fields),
         NodeKind::Break | NodeKind::Continue => {}
     }
@@ -633,6 +650,14 @@ fn visit_node_expressions_mut<'a>(
         NodeKind::VariableDeclaration(declaration) => {
             visit_declaration_expressions_mut(declaration, stack, visitor);
         }
+        NodeKind::NeverCall(call) => {
+            if let Some(receiver) = &mut call.receiver {
+                visitor(receiver);
+            }
+            for argument in &mut call.arguments {
+                visitor(&mut argument.value);
+            }
+        }
         NodeKind::StructDefinition(_, fields) => push_declarations_mut(stack, fields),
         NodeKind::Break | NodeKind::Continue => {}
     }
@@ -687,6 +712,7 @@ impl AstNode {
                 | NodeKind::PushStartRuntimeFragment(_)
                 | NodeKind::StructDefinition(_, _)
                 | NodeKind::MultiBind { .. }
+                | NodeKind::NeverCall(_)
                 | NodeKind::ExpressionStatement(_) => {}
             }
             next = stack.pop();
@@ -746,9 +772,31 @@ impl AstNode {
                 | NodeKind::PushStartRuntimeFragment(_)
                 | NodeKind::StructDefinition(_, _)
                 | NodeKind::MultiBind { .. }
+                | NodeKind::NeverCall(_)
                 | NodeKind::ExpressionStatement(_) => {}
             }
             next = stack.pop();
+        }
+    }
+
+    /// Visit expression roots owned directly by this statement.
+    ///
+    /// WHAT: yields expressions in the statement's own positions and declarations or patterns
+    /// attached to those positions.
+    /// WHY: control-flow exit analysis walks nested statement bodies separately, so it must not
+    /// leak exits from those bodies back into the enclosing statement.
+    pub(crate) fn visit_immediate_expression_ids(&self, visitor: &mut dyn FnMut(ExprId)) {
+        let mut stack = Vec::new();
+        visit_node_expressions(self, &mut stack, visitor);
+        while let Some(item) = stack.pop() {
+            match item {
+                ExpressionVisit::Node(_) => {}
+                ExpressionVisit::Declaration(declaration) => {
+                    visit_declaration_expressions(declaration, &mut stack, visitor)
+                }
+                ExpressionVisit::Pattern(pattern) => pattern.visit_expression_ids(visitor),
+                ExpressionVisit::Expression(expression) => visitor(expression),
+            }
         }
     }
 

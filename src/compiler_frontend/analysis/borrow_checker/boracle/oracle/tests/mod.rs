@@ -2668,6 +2668,11 @@ fn boracle_oracle_assert_failure_is_explicit_trace_scanned_exit() {
     assert_failure_terminator(TerminatorEventKind::AssertFailure);
 }
 
+#[test]
+fn boracle_oracle_never_call_is_explicit_trace_scanned_exit() {
+    assert_failure_terminator(TerminatorEventKind::NeverCall);
+}
+
 fn assert_failure_terminator(kind: TerminatorEventKind) {
     let mut fixture = Fixture::new(2);
     let owner = fixture.place(0, []);

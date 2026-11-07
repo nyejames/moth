@@ -24,4 +24,15 @@ Add an arrow when the function returns a value:
     ;
 ]
 
+Write `-> !` when the function never returns:
+
+[codeblock, $code("moth"):
+    fatal |message String| -> !:
+        assert(false, message)
+    ;
+]
+
+That spelling is a whole return contract, not a type. See
+@./ (Function declarations advanced) for the full rules.
+
 The colon opens the body. The semicolon closes it.

@@ -103,6 +103,9 @@ pub enum JsDiagnosticKind {
     GenericExternalType,
     VoidReturn,
     MultiSuccessReturn,
+    /// An explicit `-> !` return clause was followed by a success, error or other return
+    /// syntax instead of being the whole contract.
+    MixedNeverReturnContract,
     UnknownExternalType,
     ArityMismatch,
     InvalidReceiverParameter,
@@ -143,17 +146,43 @@ pub struct ParsedReturnType {
     pub type_name: String,
 }
 
+/// The parsed return clause of one `@moth.sig` signature.
+///
+/// WHAT: states whether the annotation declares ordinary success/error returns or the whole
+///       `-> !` contract.
+/// WHY: a Never binding has no success slot and no error slot. Keeping it in the enum makes a
+///      malformed mixed signature unrepresentable after parsing, so registration cannot read
+///      Never as an ordinary void success or invent a defensive invariant check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParsedReturnClause {
+    /// Ordinary success returns and the optional final error return.
+    Returns {
+        returns: Vec<ParsedReturnType>,
+        has_error_return: bool,
+    },
+    /// The explicit whole-contract `-> !`.
+    Never,
+}
+
+impl Default for ParsedReturnClause {
+    fn default() -> Self {
+        Self::Returns {
+            returns: Vec::new(),
+            has_error_return: false,
+        }
+    }
+}
+
 /// The parsed body of a `@moth.sig` annotation.
 ///
-/// WHAT: represents the Moth-facing parameter list and return types after
+/// WHAT: represents the Moth-facing parameter list and return clause after
 ///       light-weight signature parsing.
 /// WHY: the provider layer will validate type names against known builtins and
 ///      `@moth.opaque` declarations and then construct `ExternalFunctionDef` values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedSignature {
     pub parameters: Vec<ParsedParameter>,
-    pub returns: Vec<ParsedReturnType>,
-    pub has_error_return: bool,
+    pub return_clause: ParsedReturnClause,
     /// Parser-local recovery flag for rejected generic-looking `@moth.sig`
     /// preambles. This is not external package metadata; provider registration
     /// stops before converting a module with parser diagnostics.

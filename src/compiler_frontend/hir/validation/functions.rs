@@ -37,20 +37,24 @@ impl<'a> HirValidator<'a> {
                     self.error_with_hir("Call result contract mirrors a reachable signature owner")
                 );
             }
-            for return_type in contract.returns.iter() {
-                self.require_type_id(*return_type)?;
-            }
-            if let Some(error_type) = contract.error_return {
-                self.require_type_id(error_type)?;
+            if let Some(returns) = contract.ordinary() {
+                for return_type in returns.success() {
+                    self.require_type_id(*return_type)?;
+                }
+                if let Some(error_type) = returns.error() {
+                    self.require_type_id(error_type)?;
+                }
             }
         }
         for function in &self.module.functions {
             self.require_block_id(function.entry)?;
-            for return_type in function.returns.iter() {
-                self.require_type_id(*return_type)?;
-            }
-            if let Some(error_type) = function.error_return {
-                self.require_type_id(error_type)?;
+            if let Some(returns) = function.return_contract.ordinary() {
+                for return_type in returns.success() {
+                    self.require_type_id(*return_type)?;
+                }
+                if let Some(error_type) = returns.error() {
+                    self.require_type_id(error_type)?;
+                }
             }
 
             let mut parameter_ids = FxHashSet::default();

@@ -542,6 +542,9 @@ fn external_module_reason(
             directive: *directive,
             moth_name: string_table.intern(moth_name),
         },
+        JsDiagnosticKind::MixedNeverReturnContract => {
+            InvalidExternalModuleReason::MixedNeverReturnContract
+        }
         _ => {
             let parser_detail = string_table.intern(&parser_diagnostic.message);
             InvalidExternalModuleReason::ParserDiagnostic { parser_detail }

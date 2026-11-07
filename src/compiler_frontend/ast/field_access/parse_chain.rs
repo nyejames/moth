@@ -53,12 +53,15 @@ use super::{MemberStepContext, ParsedBuiltinMemberCall, PostfixChainAccess, Rece
 ///      completes at the site or defers to the body root with the item in place.
 pub(crate) enum ParsedPostfixExpression {
     Value(OwnedExpr),
+    /// A terminal receiver method whose contract is `-> !`; valid only as a statement.
+    Terminating(Box<crate::compiler_frontend::ast::statements::never_call::NeverCall>),
     RetainedOperand(ExpressionRpnItem),
 }
 
 /// Internal chain result before a position converts it into an expression payload.
 enum ParsedPostfixChain {
     Node(AstNode),
+    Terminating(Box<crate::compiler_frontend::ast::statements::never_call::NeverCall>),
     RetainedOperand(ExpressionRpnItem),
 }
 
@@ -418,6 +421,9 @@ pub(crate) fn parse_postfix_chain_expression(
     match postfix {
         ParsedPostfixChain::Node(node) => expression_from_postfix_node(&node)
             .map(|expression| ParsedPostfixExpression::Value(expression_builder.own(expression))),
+        ParsedPostfixChain::Terminating(never_call) => {
+            Ok(ParsedPostfixExpression::Terminating(never_call))
+        }
         ParsedPostfixChain::RetainedOperand(item) => {
             Ok(ParsedPostfixExpression::RetainedOperand(item))
         }
@@ -591,6 +597,11 @@ fn parse_postfix_chain_typed(
                     receiver_node = node;
                     encountered_receiver_call = true;
                     continue;
+                }
+                // A Never method ends the chain. The call construction already rejected every
+                // following member, suffix and catch, so no further step can consume its value.
+                ParsedReceiverMethodCall::Terminating(never_call) => {
+                    return Ok(ParsedPostfixChain::Terminating(never_call));
                 }
                 // The call's declared success slots are already concrete, so every authored step
                 // that follows resolves against known receiver structure and travels with the
@@ -778,6 +789,15 @@ pub fn parse_field_access(
 
     let postfix_node = match postfix {
         ParsedPostfixChain::Node(node) => node,
+        ParsedPostfixChain::Terminating(never_call) => {
+            // The chain parsed under a pending typed-error context; this early outcome has no
+            // enclosing expression to close it, so the authored receiver and arguments are
+            // validated here unless an outer protected parse owns that boundary.
+            if !context.defer_typed_error_validation {
+                never_call.validate_typed_errors(expression_builder)?;
+            }
+            return Ok(ParsedPostfixExpression::Terminating(never_call));
+        }
         ParsedPostfixChain::RetainedOperand(item) => {
             return Ok(ParsedPostfixExpression::RetainedOperand(item));
         }

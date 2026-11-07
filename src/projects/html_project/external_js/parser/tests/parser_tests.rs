@@ -3,7 +3,8 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::projects::html_project::external_js::parser::{
     parse_js_module, parsed_js_module::JsDiagnosticKind, parsed_js_module::JsSourceSpan,
-    scan_exports,
+    parsed_js_module::ParsedReturnClause, parsed_js_module::ParsedReturnType,
+    parsed_js_module::ParsedSignature, scan_exports,
 };
 use crate::projects::html_project::external_js::runtime_module_registry::{
     RUNTIME_ERROR_CODE_EXPORTS, RuntimeModuleRegistry,
@@ -43,6 +44,17 @@ fn assert_free_functions(
         .map(|f| f.moth_name.as_str())
         .collect();
     assert_eq!(names, expected, "free functions mismatch");
+}
+
+/// Ordinary success returns and error-return flag of one parsed signature.
+fn ordinary_returns(signature: &ParsedSignature) -> (&[ParsedReturnType], bool) {
+    match &signature.return_clause {
+        ParsedReturnClause::Returns {
+            returns,
+            has_error_return,
+        } => (returns, *has_error_return),
+        ParsedReturnClause::Never => panic!("expected an ordinary return clause"),
+    }
 }
 
 fn assert_receiver_methods(
@@ -173,9 +185,10 @@ export function getCanvas(id) {
     assert_eq!(func.signature.parameters[0].name, "id");
     assert_eq!(func.signature.parameters[0].type_name, "String");
     assert!(!func.signature.parameters[0].is_receiver);
-    assert_eq!(func.signature.returns.len(), 1);
-    assert_eq!(func.signature.returns[0].type_name, "Canvas");
-    assert!(func.signature.has_error_return);
+    let (returns, has_error_return) = ordinary_returns(&func.signature);
+    assert_eq!(returns.len(), 1);
+    assert_eq!(returns[0].type_name, "Canvas");
+    assert!(has_error_return);
 }
 
 #[test]
@@ -192,8 +205,9 @@ export function logMessage(msg) {
     assert_no_diagnostics(&parsed);
     assert_free_functions(&parsed, &["log_message"]);
     let func = &parsed.free_functions[0];
-    assert_eq!(func.signature.returns.len(), 0);
-    assert!(!func.signature.has_error_return);
+    let (returns, has_error_return) = ordinary_returns(&func.signature);
+    assert_eq!(returns.len(), 0);
+    assert!(!has_error_return);
 }
 
 #[test]
@@ -209,8 +223,65 @@ export function doFallible() {
     let parsed = parse(source);
     assert_no_diagnostics(&parsed);
     assert_free_functions(&parsed, &["do_fallible"]);
-    assert!(parsed.free_functions[0].signature.has_error_return);
-    assert_eq!(parsed.free_functions[0].signature.returns.len(), 0);
+    let (returns, has_error_return) = ordinary_returns(&parsed.free_functions[0].signature);
+    assert!(has_error_return);
+    assert_eq!(returns.len(), 0);
+}
+
+#[test]
+fn never_return_signature_parses_as_a_whole_contract() {
+    let source = r#"
+/**
+ * @moth.sig exit_now || -> !
+ */
+export function exitNow() {
+    throw new Error("terminated");
+}
+"#;
+    let parsed = parse(source);
+    assert_no_diagnostics(&parsed);
+    assert_free_functions(&parsed, &["exit_now"]);
+    let signature = &parsed.free_functions[0].signature;
+    assert!(matches!(signature.return_clause, ParsedReturnClause::Never));
+}
+
+#[test]
+fn never_return_signature_rejects_mixed_contract_forms() {
+    for tail in [", I32", ", Error!", " Error!", " !", "?"] {
+        let source = format!(
+            "/** @moth.sig exit_now || -> !{tail} */\nexport function exitNow() {{ throw new Error(\"terminated\"); }}"
+        );
+        let parsed = parse(&source);
+        assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::MixedNeverReturnContract]);
+        let signature = &parsed.free_functions[0].signature;
+        assert!(
+            matches!(signature.return_clause, ParsedReturnClause::Never),
+            "`-> !{tail}` must still parse as the whole-contract variant"
+        );
+    }
+}
+
+#[test]
+fn never_contract_after_success_returns_reports_mixed_contract() {
+    let source = r#"
+/**
+ * @moth.sig exit_now || -> I32, !
+ */
+export function exitNow() {
+    throw new Error("terminated");
+}
+"#;
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::MixedNeverReturnContract]);
+    let signature = &parsed.free_functions[0].signature;
+    assert!(
+        matches!(signature.return_clause, ParsedReturnClause::Returns { .. }),
+        "a trailing `!` must recover the ordinary success slots it followed"
+    );
+    let (returns, has_error_return) = ordinary_returns(signature);
+    assert_eq!(returns.len(), 1);
+    assert_eq!(returns[0].type_name, "I32");
+    assert!(!has_error_return);
 }
 
 #[test]
@@ -245,7 +316,7 @@ export function identityUint(value) {
     assert_free_functions(&parsed, &["identity_uint"]);
     let func = &parsed.free_functions[0];
     assert_eq!(func.signature.parameters[0].type_name, "U32");
-    assert_eq!(func.signature.returns[0].type_name, "U32");
+    assert_eq!(ordinary_returns(&func.signature).0[0].type_name, "U32");
     assert_eq!(func.signature.abi_parameter_count(), 1);
 }
 
@@ -260,8 +331,9 @@ fn delivered_fixed_scalar_signatures_parse_parameters_and_both_result_lanes() {
             assert_no_diagnostics(&parsed);
             let function = &parsed.free_functions[0];
             assert_eq!(function.signature.parameters[0].type_name, scalar);
-            assert_eq!(function.signature.returns[0].type_name, scalar);
-            assert_eq!(function.signature.has_error_return, !error_slot.is_empty());
+            let (returns, has_error_return) = ordinary_returns(&function.signature);
+            assert_eq!(returns[0].type_name, scalar);
+            assert_eq!(has_error_return, !error_slot.is_empty());
         }
     }
 }
@@ -1374,7 +1446,7 @@ export function getNumber() {
     let parsed = parse(source);
     assert_no_diagnostics(&parsed);
     assert_eq!(parsed.free_functions.len(), 1);
-    assert!(!parsed.free_functions[0].signature.has_error_return);
+    assert!(!ordinary_returns(&parsed.free_functions[0].signature).1);
     assert_runtime_imports(&parsed, &[("@moth/runtime", &["mothOk"])]);
 }
 

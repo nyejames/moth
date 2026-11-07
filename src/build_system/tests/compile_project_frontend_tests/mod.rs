@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::display::display_type;
+use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAbiType, ExternalAccessKind, ExternalFunctionId, ExternalFunctionLowerings,
     ExternalFunctionSpec, ExternalJsLowering, ExternalReturnSlot, ExternalSignatureType,

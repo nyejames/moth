@@ -9,14 +9,18 @@ use crate::build_system::build::{FileKind, OutputFile};
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering,
     ExternalPackageRegistry,
 };
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
-use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
+use crate::compiler_frontend::hir::functions::{
+    HirFunction, HirFunctionOrigin, HirFunctionReturnContract,
+};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::collect_module_function_link_facts;
@@ -57,8 +61,10 @@ pub(crate) fn create_test_hir_module() -> HirModule {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: Box::new([]),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [],
+            None,
+        )),
     }];
     module
         .function_provenance
@@ -143,8 +149,7 @@ pub(crate) fn add_reachable_external_import(
             ExternalFunctionSpec {
                 name: format!("runtime_call_{import_index}"),
                 parameters: vec![],
-                returns: vec![],
-                error_return_type: None,
+                return_contract: external_returns(vec![], None),
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression("undefined".to_owned())),

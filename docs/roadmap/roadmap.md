@@ -37,8 +37,6 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 - [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md) - Queued: consume delivered shared MON syntax, exact numeric types and bounded known-leaf inference. Wait for the required compact typed-expression and ordinary-struct construction capabilities. Support recursive local anonymous records through ordinary hidden nominal structs, with explicit nominal children and transitive escape checks.
 
-- [Never return contracts](./plans/never-return-contract-plan.md)
-
 - [Reusable generics, type-parametric Core bindings and file-backed JS/WAT](./plans/generics-core-bindings-and-file-backed-js-wat-plan.md) - Queued: file-private reusable generic declarations, closed numeric-family limits, bounded nested-call context, trusted scalar-parametric Core bindings and file-backed JS/WAT implementations. Deliver generic min, max, clamp and uniformly fallible abs. Consume exact numeric semantics and existing backend capabilities without waiting for the later mixed-Wasm implementation.
 
 - TODO plan: Struct layout directives. Consume the delivered numeric scalar sizes, natural alignment and element strides. Define compiler-owned $layout contracts, permitted field types, aggregate alignment/padding, target validation and semantic/interface fingerprints before physical memory-layout decisions and Wasm struct lowering consume them. The nominal type model stays unchanged.
@@ -83,6 +81,21 @@ This roadmap owns the normal serial order. A plan owns its own work and nothing 
 # Deferred design and follow-ups
 
 This is a bunch of notes for work that will likely be picked up in the future, but has no set design plan yet.
+
+## Never return proof follow-ups
+
+Accepted `-> !` body proof covers false assertions, explicit Never calls,
+normalised-true loops with no reachable self-targeting break, lexical scopes,
+branches and exhaustive matches. These extensions remain:
+
+- direct and mutual recursion proof for declared Never bodies
+- richer data-flow proof of permanently true runtime loop conditions
+- broader deterministic structural, SCC or whole-program non-termination proof
+
+They may accept more correctly declared `-> !` bodies later. They are not a
+path to first-class Never values, bottom coercion, value-position Never calls
+or implicit ordinary-call divergence. The progress matrix keeps the same gaps
+on the Never return contracts row.
 
 ## Builder slot and template constraints
 

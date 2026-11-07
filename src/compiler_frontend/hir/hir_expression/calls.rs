@@ -17,12 +17,14 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp, ValueKind};
+use crate::compiler_frontend::hir::functions::HirFunctionReturnContract;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::places::HirPlace;
@@ -34,7 +36,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use super::{LoweredExpression, LoweredResults};
 
 impl<'a> HirBuilder<'a> {
-    pub(super) fn call_target_requires_result_projection(&self, target: &CallTarget) -> bool {
+    pub(crate) fn call_target_requires_result_projection(&self, target: &CallTarget) -> bool {
         match target {
             CallTarget::Local(_) | CallTarget::External(_) => false,
             CallTarget::CrossModule(origin) => {
@@ -238,10 +240,10 @@ impl<'a> HirBuilder<'a> {
         if self.call_target_requires_result_projection(&target) {
             self.module.call_result_contracts.insert(
                 target.clone(),
-                crate::compiler_frontend::hir::module::HirCallResultContract {
-                    returns: types.as_slice().into(),
-                    error_return: None,
-                },
+                HirFunctionReturnContract::returns(CallableReturnShape::from_slots(
+                    types.iter().copied(),
+                    None,
+                )),
             );
         }
         let mut results = Vec::with_capacity(types.len());
@@ -299,8 +301,31 @@ impl<'a> HirBuilder<'a> {
         call_span: &Option<SourceSpan>,
         argument_index: usize,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
-        let value = argument.value();
         let metadata = argument.metadata();
+        self.lower_call_argument_value_parts(
+            argument.value(),
+            metadata.passing_mode,
+            metadata.span,
+            call_span,
+            argument_index,
+        )
+    }
+
+    /// Lower one call argument from already-resolved metadata and value.
+    ///
+    /// WHAT: the shared argument lowering used by stored call views and the AST `NeverCall`
+    ///       payload, which keeps its arguments outside the expression store.
+    /// WHY: terminating calls must evaluate arguments exactly like ordinary calls, including
+    ///      fresh-rvalue materialisation for mutable arguments, without constructing a second
+    ///      call representation.
+    pub(crate) fn lower_call_argument_value_parts(
+        &mut self,
+        value: ExpressionView<'_>,
+        passing_mode: CallPassingMode,
+        source_span: Option<SourceSpan>,
+        call_span: &Option<SourceSpan>,
+        argument_index: usize,
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let lowered_value = if self.expression_needs_current_block_lowering(value) {
             LoweredExpression {
                 prelude: vec![],
@@ -310,7 +335,7 @@ impl<'a> HirBuilder<'a> {
             self.lower_expression(value)?
         };
 
-        if metadata.passing_mode != CallPassingMode::FreshMutableValue {
+        if passing_mode != CallPassingMode::FreshMutableValue {
             return Ok(lowered_value);
         }
 
@@ -332,8 +357,7 @@ impl<'a> HirBuilder<'a> {
             },
             span: None,
         };
-        self.side_table
-            .map_statement(metadata.span, &write_statement);
+        self.side_table.map_statement(source_span, &write_statement);
         prelude.push(write_statement);
 
         let region = self.current_region_or_error()?;
@@ -349,7 +373,7 @@ impl<'a> HirBuilder<'a> {
         Ok(LoweredExpression { prelude, value })
     }
 
-    fn flush_pending_call_prelude(
+    pub(crate) fn flush_pending_call_prelude(
         &mut self,
         prelude: &mut Vec<HirStatement>,
     ) -> Result<(), HirConstructionFailure> {

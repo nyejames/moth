@@ -302,6 +302,7 @@ unit_code! {
         UnhandledBuiltinFailureInCustomErrorFunction = 34,
         UnhandledBuiltinFailureInExportedFunction = 35,
         FallibleSuffixOnAssertion = 36,
+        UnhandledBuiltinFailureInNeverFunction = 38,
     }
 }
 
@@ -364,6 +365,15 @@ impl InvalidFallibleHandlingCode {
                 witness,
             } => (
                 Self::UnhandledBuiltinFailureInExportedFunction,
+                None,
+                None,
+                Some(
+                    usize::try_from(witness.elided_call_hops)
+                        .expect("call-hop counts fit in usize"),
+                ),
+            ),
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInNeverFunction { witness } => (
+                Self::UnhandledBuiltinFailureInNeverFunction,
                 None,
                 None,
                 Some(
@@ -450,7 +460,8 @@ impl InvalidFallibleHandlingCode {
             | InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
                 ..
             }
-            | InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { .. } => {
+            | InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { .. }
+            | InvalidFallibleHandlingReason::UnhandledBuiltinFailureInNeverFunction { .. } => {
                 crate::compiler_bug!(
                     CompilerStage::DiagnosticReporting,
                     "data-bearing fallible reasons are split before unit mapping"
@@ -532,7 +543,8 @@ impl InvalidFallibleHandlingCode {
             | Self::IncompatibleCatchErrorTypes
             | Self::CustomErrorMixedWithImplicitFailure
             | Self::UnhandledBuiltinFailureInCustomErrorFunction
-            | Self::UnhandledBuiltinFailureInExportedFunction => return None,
+            | Self::UnhandledBuiltinFailureInExportedFunction
+            | Self::UnhandledBuiltinFailureInNeverFunction => return None,
         })
     }
 }

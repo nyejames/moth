@@ -3,12 +3,14 @@
 use super::hir_validation_tests::builtin_error_type_id;
 use super::minimal_lowered_hir_module;
 use crate::compiler_frontend::compiler_errors::{InfrastructureFailure, InfrastructureFailureKind};
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp, ValueKind};
+use crate::compiler_frontend::hir::functions::HirFunctionReturnContract;
 use crate::compiler_frontend::hir::hir_builder::validate_module_for_tests;
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
@@ -244,8 +246,9 @@ fn module_with_ordered_returns() -> (
     let entry = module.functions[function.0 as usize].entry;
     let region = module.blocks[entry.0 as usize].region;
     let integer_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-    module.functions[function.0 as usize].returns =
-        vec![integer_type, builtin_type_ids::BOOL].into_boxed_slice();
+    module.functions[function.0 as usize].return_contract = HirFunctionReturnContract::Returns(
+        CallableReturnShape::from_slots([integer_type, builtin_type_ids::BOOL], None),
+    );
     let integer = expression(
         HirExpressionKind::FixedScalar(
             FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32"),

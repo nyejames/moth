@@ -53,6 +53,8 @@ pub(super) fn generic_parameter_receiver_type(
 ///      and must never be represented by a fabricated node.
 pub(super) enum ParsedReceiverMethodCall {
     Value(AstNode),
+    /// A receiver method whose contract is `-> !`; valid only as a standalone statement.
+    Terminating(Box<crate::compiler_frontend::ast::statements::never_call::NeverCall>),
     RetainedOperand(ExpressionRpnItem),
 }
 

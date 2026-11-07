@@ -1056,6 +1056,7 @@ fn remap_terminator_kind(
         }),
         TerminatorEventKind::RuntimeFailure => Some(TerminatorEventKind::RuntimeFailure),
         TerminatorEventKind::AssertFailure => Some(TerminatorEventKind::AssertFailure),
+        TerminatorEventKind::NeverCall => Some(TerminatorEventKind::NeverCall),
     }
 }
 
@@ -1316,7 +1317,8 @@ pub(super) fn terminator_after_edge_removal(
         TerminatorEventKind::Return
         | TerminatorEventKind::ReturnError
         | TerminatorEventKind::RuntimeFailure
-        | TerminatorEventKind::AssertFailure => None,
+        | TerminatorEventKind::AssertFailure
+        | TerminatorEventKind::NeverCall => None,
     }
 }
 
@@ -2332,6 +2334,7 @@ fn render_terminator(kind: &TerminatorEventKind) -> String {
         ),
         TerminatorEventKind::RuntimeFailure => "TerminatorEventKind::RuntimeFailure".to_string(),
         TerminatorEventKind::AssertFailure => "TerminatorEventKind::AssertFailure".to_string(),
+        TerminatorEventKind::NeverCall => "TerminatorEventKind::NeverCall".to_string(),
     }
 }
 

@@ -17,11 +17,13 @@
 
 use super::type_display_snapshot::{
     CONST_RECORD_FLAG, CallableSummary, ChildRange, ChoiceSummary, CollectionSummary,
-    DiagnosticTypeRecord, DiagnosticTypeTag, GenericInstanceSummary, TypeDisplaySnapshot,
-    encode_path, push_range, push_summary,
+    DiagnosticTypeRecord, DiagnosticTypeTag, GenericInstanceSummary, NEVER_RETURN_FLAG,
+    TypeDisplaySnapshot, encode_path, push_range, push_summary,
 };
 use super::{TypeDisplayCapacityError, TypeDisplayId};
-use crate::compiler_frontend::datatypes::display::{TypeDisplayShape, TypeDisplayView};
+use crate::compiler_frontend::datatypes::display::{
+    TypeDisplayFunctionReturn, TypeDisplayShape, TypeDisplayView,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use rustc_hash::FxHashMap;
@@ -202,12 +204,18 @@ impl<'environment> TypeDisplaySnapshotBuilder<'environment> {
                 DiagnosticTypeTag::OptionType,
                 environment.argument_ids(type_id),
             )?,
-            TypeDisplayShape::Function { error_return } => {
+            TypeDisplayShape::Function { return_contract } => {
                 let parameters = self.child_range(environment.function_parameter_ids(type_id))?;
                 let returns = self.child_range(environment.function_return_ids(type_id))?;
-                let error_return = error_return
-                    .map(|error| self.display_id(error))
-                    .transpose()?;
+                let (error_return, is_never) = match return_contract {
+                    TypeDisplayFunctionReturn::Returns { error_return } => (
+                        error_return
+                            .map(|error| self.display_id(error))
+                            .transpose()?,
+                        false,
+                    ),
+                    TypeDisplayFunctionReturn::Never => (None, true),
+                };
                 let index = push_summary(
                     &mut self.snapshot.callables,
                     CallableSummary {
@@ -216,7 +224,11 @@ impl<'environment> TypeDisplaySnapshotBuilder<'environment> {
                         error_return,
                     },
                 )?;
-                DiagnosticTypeRecord::new(DiagnosticTypeTag::Function, index, 0)
+                let mut record = DiagnosticTypeRecord::new(DiagnosticTypeTag::Function, index, 0);
+                if is_never {
+                    record.flags = NEVER_RETURN_FLAG;
+                }
+                record
             }
             TypeDisplayShape::External(external) => {
                 DiagnosticTypeRecord::new(DiagnosticTypeTag::External, external, 0)

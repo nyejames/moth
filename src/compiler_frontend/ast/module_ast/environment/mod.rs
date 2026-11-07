@@ -43,7 +43,7 @@ pub(crate) use resolved_public_trait_roots::{
 };
 #[cfg(test)]
 pub(crate) use resolved_public_trait_roots::{
-    ResolvedTraitParameterFact, ResolvedTraitReceiverFact, ResolvedTraitReturnFact,
+    ResolvedTraitParameterFact, ResolvedTraitReceiverFact,
 };
 pub(in crate::compiler_frontend::ast) use resolved_public_type_roots::{
     BuildResolvedPublicTypeRootsInput, build_resolved_public_type_roots,

@@ -529,8 +529,17 @@ fn collect_type_parameter_ids_from_signature_type_ids(
         }
     }
 
-    for return_slot in &signature.returns {
-        if let Some(return_type_id) = return_slot.type_id {
+    // A Never contract names no return type, so it contributes no generic parameter uses.
+    if let Some(returns) = signature.return_contract.ordinary() {
+        for return_type_id in returns.success() {
+            collect_type_parameter_ids_from_type_id(
+                *return_type_id,
+                type_environment,
+                canonical_by_local,
+                used_parameters,
+            );
+        }
+        if let Some(return_type_id) = returns.error() {
             collect_type_parameter_ids_from_type_id(
                 return_type_id,
                 type_environment,
@@ -577,22 +586,24 @@ fn collect_type_parameter_ids_from_type_id(
                 );
             }
 
-            for return_type_id in function.returns.iter() {
-                collect_type_parameter_ids_from_type_id(
-                    *return_type_id,
-                    type_environment,
-                    canonical_by_local,
-                    used_parameters,
-                );
-            }
+            if let Some(returns) = function.return_contract.ordinary() {
+                for return_type_id in returns.success() {
+                    collect_type_parameter_ids_from_type_id(
+                        *return_type_id,
+                        type_environment,
+                        canonical_by_local,
+                        used_parameters,
+                    );
+                }
 
-            if let Some(error_return) = function.error_return {
-                collect_type_parameter_ids_from_type_id(
-                    error_return,
-                    type_environment,
-                    canonical_by_local,
-                    used_parameters,
-                );
+                if let Some(error_return) = returns.error() {
+                    collect_type_parameter_ids_from_type_id(
+                        error_return,
+                        type_environment,
+                        canonical_by_local,
+                        used_parameters,
+                    );
+                }
             }
         }
 

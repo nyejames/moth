@@ -1,0 +1,12 @@
+@provider STOPPABLE, abort, Box
+
+Thing = |
+    code I32,
+|
+
+-- abort of Box of Thing dispatches to Box's generic evidence, which calls back here.
+stop |this Thing| -> !:
+    abort(Box(this))
+;
+
+Thing must STOPPABLE

@@ -383,6 +383,33 @@ impl HirSideTable {
         self.terminator_spans.insert(block_id, span);
     }
 
+    /// Moves one block-terminator location to a rewritten block.
+    ///
+    /// WHAT: rekeys the exact span, AST->HIR and HIR->source entries from `from` to `to`, each
+    ///       independently because generated terminators carry the mapping entries without an
+    ///       exact authored span.
+    /// WHY: a private-lane split moves the old terminator into its success continuation.
+    ///      The location must move with it, and the generated replacement must stay span-free.
+    pub(crate) fn move_terminator_location(&mut self, from: BlockId, to: BlockId) {
+        if let Some(span) = self.terminator_spans.remove(&from) {
+            self.terminator_spans.insert(to, span);
+        }
+
+        let from_location = HirLocation::Terminator(from);
+        let to_location = HirLocation::Terminator(to);
+        if let Some(ast_span) = self.hir_to_ast.remove(&from_location) {
+            let locations = self.ast_to_hir.entry(ast_span).or_default();
+            locations.retain(|location| *location != from_location);
+            if !locations.contains(&to_location) {
+                locations.push(to_location);
+            }
+            self.hir_to_ast.insert(to_location, ast_span);
+        }
+        if let Some(source_span) = self.hir_to_source.remove(&from_location) {
+            self.hir_to_source.insert(to_location, source_span);
+        }
+    }
+
     /// Registers the exact source span for a local variable if provided.
     pub(crate) fn map_local_source(&mut self, local: &HirLocal) {
         self.map_hir_source_span(HirLocation::Local(local.id), local.span);

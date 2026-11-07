@@ -56,6 +56,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::TypeMismatchContext;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::type_mismatch;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::instrumentation::ast_counters::{AstCounter, increment_ast_counter};
@@ -603,16 +604,22 @@ pub(crate) enum DeferredCallHandling {
 /// A non-generic source function call retained until its numeric arguments resolve.
 ///
 /// WHAT: stable callee identity, the ordered success result types and optional error type, the
-///       expectations used at argument intake, and the ordered arguments, each completed or
-///       retained.
+///       contract-derived completion kind, the expectations used at argument intake, and the
+///       ordered arguments, each completed or retained.
 /// WHY: compatibility cannot run before argument types are selected; retaining the unchanged
-///      expectations and only the result facts completion reads avoids rebuilding parameter views
-///      or cloning the complete signature when the call resumes.
+///      expectations and only the result and contract facts completion reads avoids rebuilding
+///      parameter views or cloning the complete signature when the call resumes.
 #[derive(Debug, Clone)]
 pub(crate) struct DeferredSourceCall {
     pub(crate) function_path: PathId,
     pub(crate) success_result_type_ids: Vec<TypeId>,
     pub(crate) error_return_type_id: Option<TypeId>,
+    /// Whether the callee's settled return contract completes as a value or terminates.
+    ///
+    /// This is the contract fact, settled from the resolved signature at retention; completion
+    /// reads it back instead of accepting a caller's preference. Zero success slots are also valid
+    /// for ordinary no-value completion, so the slots alone cannot distinguish the two.
+    pub(crate) completion: CallCompletion,
     pub(crate) expectations: Vec<ParameterExpectation>,
     pub(crate) arguments: Vec<DeferredCallArgument>,
     pub(crate) call_span: Option<SourceSpan>,
@@ -652,6 +659,40 @@ pub(crate) struct DeferredGenericCall {
     /// The source-order slot this call publishes its instantiation request into. `None` marks the
     /// template-validation lane, which instantiates nothing.
     pub(crate) ticket: Option<GenericRequestTicket>,
+}
+
+/// The outcome of completing one retained expression fragment or call.
+///
+/// WHAT: either an ordinary value expression, or a standalone terminating call that only
+///       statement position may accept.
+/// WHY: a `-> !` call has no value, so completion must carry the call payload itself instead of
+///      fabricating an empty result; every value consumer rejects it through one diagnostic.
+#[derive(Debug)]
+pub(crate) enum CompletedExpression {
+    Value(OwnedExpr),
+    NeverCall(Box<crate::compiler_frontend::ast::statements::never_call::NeverCall>),
+}
+
+impl CompletedExpression {
+    /// Requires an ordinary value; a terminating call cannot be used here.
+    pub(crate) fn into_value(self) -> Result<OwnedExpr, ExpressionParseError> {
+        match self {
+            Self::Value(value) => Ok(value),
+            Self::NeverCall(never_call) => Err(never_call.used_as_value_diagnostic().into()),
+        }
+    }
+}
+
+/// The result kind of one retained callable, settled from its return contract.
+///
+/// WHAT: distinguishes an ordinary completion, which yields a value expression, from a `-> !`
+///       contract, which completes only as a statement-terminating `NeverCall`.
+/// WHY: zero success slots are also valid for an ordinary no-value completion, so the contract
+///      itself, settled once at retention, must travel with the retained call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CallCompletion {
+    Value,
+    Never,
 }
 
 /// A call-shaped expression retained in one RPN operand position.
@@ -701,22 +742,97 @@ pub(crate) enum DeferredCall {
 }
 
 impl DeferredCall {
+    /// Whether this retained call's published contract completes as a value or terminates.
+    ///
+    /// WHAT: the one owner of the value-versus-Never decision, read from the retained record's
+    ///       contract-derived fact rather than from an outer marker.
+    /// WHY: completion, statement lifting and value-position rejection must agree. A second
+    ///      wrapper could disagree with the inner record and silently produce a value from a
+    ///      call whose contract never returns.
+    pub(crate) fn completion(&self) -> CallCompletion {
+        match self {
+            DeferredCall::Source(deferred) => deferred.completion,
+            DeferredCall::Receiver(deferred) => deferred.completion(),
+            DeferredCall::External(deferred) => deferred.completion,
+            DeferredCall::Generic(deferred) => {
+                if deferred.template.signature.return_contract.is_never() {
+                    CallCompletion::Never
+                } else {
+                    CallCompletion::Value
+                }
+            }
+            DeferredCall::Struct(_) | DeferredCall::Choice(_) | DeferredCall::GenericNominal(_) => {
+                CallCompletion::Value
+            }
+        }
+    }
+
+    /// Whether the call never returns to its caller.
+    pub(crate) fn is_never(&self) -> bool {
+        self.completion() == CallCompletion::Never
+    }
+
+    /// The shared value-position diagnostic for a retained Never call, when this call is one.
+    ///
+    /// WHAT: resolves the visible callee name and returns the same
+    ///       `invalid_call_shape.never_call_used_as_value` diagnostic a completed `NeverCall`
+    ///       reports.
+    /// WHY: a retained call is rejected before its argument list completes, so the placement
+    ///      owner must diagnose it from the retained callee identity instead of projecting an
+    ///      empty success-slot list into a different error.
+    pub(crate) fn never_value_diagnostic(
+        &self,
+        path_fork: &PathInternerFork,
+    ) -> Option<DiagnosticDraft> {
+        if !self.is_never() {
+            return None;
+        }
+        let name = match self {
+            DeferredCall::Source(deferred) => path_fork.component(deferred.function_path),
+            DeferredCall::Receiver(deferred) => Some(deferred.method_name),
+            DeferredCall::External(deferred) => Some(deferred.callee_name),
+            DeferredCall::Generic(deferred) => path_fork.component(deferred.template.function_path),
+            DeferredCall::Struct(_) | DeferredCall::Choice(_) | DeferredCall::GenericNominal(_) => {
+                None
+            }
+        }
+        .unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "a retained Never call has no terminal path component"
+            )
+        });
+        Some(
+            crate::compiler_frontend::ast::statements::never_call::NeverCall::used_as_value_diagnostic_for(
+                name,
+                self.call_span(),
+            ),
+        )
+    }
+
     /// The ordered success-slot types of this retained call's parsed signature.
     ///
     /// WHAT: the concrete result slots the authored callee declares, read without completing the
     ///       call. A generic call has none until its numeric origins resolve, so it reports `None`
-    ///       instead of a declared slot list that still names generic parameters.
+    ///       instead of a declared slot list that still names generic parameters. A Never call has
+    ///       no success value, so it reports `None` instead of an empty list a consumer could
+    ///       mistake for a real zero-slot result.
     /// WHY: multi-bind targets and catch sites need exact slot types while the value is pending;
     ///      the external lane supplies its own host-signature projection.
-    pub(crate) fn success_return_type_ids(&self) -> Option<Vec<TypeId>> {
+    pub(crate) fn success_types(&self) -> Option<&[TypeId]> {
+        if self.is_never() {
+            return None;
+        }
         Some(match self {
-            DeferredCall::Source(deferred) => deferred.success_result_type_ids.clone(),
-            DeferredCall::Receiver(deferred) => {
-                deferred.concrete_signature()?.success_return_type_ids()
-            }
-            DeferredCall::External(deferred) => deferred.result_type_ids.clone(),
-            DeferredCall::Struct(deferred) => vec![deferred.type_id],
-            DeferredCall::Choice(deferred) => vec![deferred.choice_type_id],
+            DeferredCall::Source(deferred) => &deferred.success_result_type_ids,
+            DeferredCall::Receiver(deferred) => deferred
+                .concrete_signature()?
+                .return_contract
+                .ordinary()
+                .map(CallableReturnShape::success)?,
+            DeferredCall::External(deferred) => &deferred.result_type_ids,
+            DeferredCall::Struct(deferred) => std::slice::from_ref(&deferred.type_id),
+            DeferredCall::Choice(deferred) => std::slice::from_ref(&deferred.choice_type_id),
             DeferredCall::Generic(_) | DeferredCall::GenericNominal(_) => return None,
         })
     }
@@ -730,16 +846,21 @@ impl DeferredCall {
     pub(crate) fn declared_success_slot_count(&self) -> usize {
         match self {
             DeferredCall::Source(deferred) => deferred.success_result_type_ids.len(),
-            DeferredCall::Receiver(deferred) => {
-                deferred.declared_signature().success_return_slot_count()
-            }
+            DeferredCall::Receiver(deferred) => deferred
+                .declared_signature()
+                .return_contract
+                .ordinary()
+                .map_or(0, |shape| shape.success().len()),
             DeferredCall::External(deferred) => deferred.result_type_ids.len(),
             DeferredCall::Struct(_) | DeferredCall::Choice(_) | DeferredCall::GenericNominal(_) => {
                 1
             }
-            DeferredCall::Generic(deferred) => {
-                deferred.template.signature.success_return_slot_count()
-            }
+            DeferredCall::Generic(deferred) => deferred
+                .template
+                .signature
+                .return_contract
+                .ordinary()
+                .map_or(0, |shape| shape.success().len()),
         }
     }
 
@@ -751,12 +872,17 @@ impl DeferredCall {
     ///      answers exactly; the generic type never reaches a value or a diagnostic.
     pub(crate) fn declared_single_success_return_type_id(&self) -> Option<TypeId> {
         match self {
-            DeferredCall::Generic(deferred) => {
-                deferred.template.signature.single_success_return_type_id()
-            }
+            DeferredCall::Generic(deferred) => deferred
+                .template
+                .signature
+                .return_contract
+                .ordinary()
+                .and_then(CallableReturnShape::single_success_slot),
             DeferredCall::Receiver(deferred) => deferred
                 .declared_signature()
-                .single_success_return_type_id(),
+                .return_contract
+                .ordinary()
+                .and_then(CallableReturnShape::single_success_slot),
             other => other.single_success_return_type_id(),
         }
     }
@@ -2751,15 +2877,18 @@ pub(crate) fn items_contain_pending(items: &[ExpressionRpnItem]) -> bool {
 ///
 /// WHAT: pending numeric literals resolve during ordinary evaluation; a binding reference, retained
 ///       cast or retained call needs body-root completion before the expression can be evaluated.
-/// WHY: only the unresolvable items force a position to defer. Group markers are structural, so one
-///      flat scan reaches every item inside a group at its own operand position.
+/// WHY: only the unresolvable numeric items force a position to defer. Group markers are structural,
+///      so one flat scan reaches every item inside a group at its own operand position. A standalone
+///      Never call is not a numeric deferral: the evaluator owns its value-position rejection, so
+///      deferring it would hide the placement diagnostic behind numeric completion.
 pub(crate) fn items_contain_unresolvable_numeric(items: &[ExpressionRpnItem]) -> bool {
     items.iter().any(|item| match item {
         ExpressionRpnItem::PendingNumericBinding { .. }
         | ExpressionRpnItem::PendingNumericCast { .. }
         | ExpressionRpnItem::PendingNumericCall { .. }
         | ExpressionRpnItem::PendingNumericExpression { .. } => true,
-        ExpressionRpnItem::PendingNumericLiteral { .. }
+        ExpressionRpnItem::NeverCall(_)
+        | ExpressionRpnItem::PendingNumericLiteral { .. }
         | ExpressionRpnItem::GroupOpen { .. }
         | ExpressionRpnItem::GroupClose { .. }
         | ExpressionRpnItem::Operand(_)
@@ -3291,6 +3420,7 @@ pub(crate) fn item_is_literal_recipe_shape(item: &ExpressionRpnItem) -> bool {
         | ExpressionRpnItem::PendingNumericCast { .. }
         | ExpressionRpnItem::PendingNumericCall { .. }
         | ExpressionRpnItem::PendingNumericExpression { .. } => false,
+        ExpressionRpnItem::NeverCall(_) => false,
     }
 }
 

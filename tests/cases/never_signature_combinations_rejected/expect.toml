@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0062"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0062"
+reason = "invalid_function_signature.never_cannot_combine"
+path = "input/@page.moth"
+line = 1
+column = 27

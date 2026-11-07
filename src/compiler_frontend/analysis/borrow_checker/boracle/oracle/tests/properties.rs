@@ -1476,7 +1476,8 @@ fn renumber_branch_blocks(
             TerminatorEventKind::Return
             | TerminatorEventKind::ReturnError
             | TerminatorEventKind::RuntimeFailure
-            | TerminatorEventKind::AssertFailure => {}
+            | TerminatorEventKind::AssertFailure
+            | TerminatorEventKind::NeverCall => {}
         }
     }
 

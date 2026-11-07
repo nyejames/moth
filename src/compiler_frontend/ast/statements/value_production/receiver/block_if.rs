@@ -15,9 +15,8 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
 use crate::compiler_frontend::ast::numeric_construction::StatementExpression;
-use crate::compiler_frontend::ast::statements::value_production::completeness::{
-    analyze_branch_exits, validate_closed_branch_pair,
-};
+use crate::compiler_frontend::ast::statements::control_flow_exits::analyze_control_flow_exits;
+use crate::compiler_frontend::ast::statements::value_production::completeness::validate_closed_branch_pair;
 use crate::compiler_frontend::ast::statements::value_production::expression_build::build_value_if_expression;
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ParsedReceiverValue, ValueBlock, ValueIfBlock, ValueReceiverKind,
@@ -154,8 +153,10 @@ pub(super) fn finish_block_value_if(
         const_values,
     } = input;
 
-    let then_exits = analyze_branch_exits(&then_body, &*expression_builder, &*const_values);
-    let else_exits = analyze_branch_exits(&else_body, &*expression_builder, &*const_values);
+    let then_exits =
+        analyze_control_flow_exits(&then_body, expression_builder.store(), &*const_values);
+    let else_exits =
+        analyze_control_flow_exits(&else_body, expression_builder.store(), &*const_values);
     validate_closed_branch_pair(then_exits, else_exits, span)?;
 
     if needs_slot_inference {

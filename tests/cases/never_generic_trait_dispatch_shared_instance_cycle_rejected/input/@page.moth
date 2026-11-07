@@ -1,0 +1,27 @@
+STOPPABLE must:
+    stop |This| -> !
+;
+
+settle type T is STOPPABLE |value T| -> !:
+    value.stop()
+;
+
+abort type T is STOPPABLE |value T| -> !:
+    settle(value)
+;
+
+Thing = |
+    code I32,
+|
+
+-- Generated requests run in identity order, so abort of Thing generates settle of Thing first.
+crash || -> !:
+    abort(Thing(code = 1))
+;
+
+-- The later direct request reuses the generated settle of Thing and still closes the cycle.
+stop |this Thing| -> !:
+    settle(this)
+;
+
+Thing must STOPPABLE

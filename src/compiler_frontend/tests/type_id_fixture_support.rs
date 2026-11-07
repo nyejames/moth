@@ -20,8 +20,8 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::expressions::expression_types::{
     ConstRecordState, FallibleExpressionHandling, FallibleHandling,
 };
-use crate::compiler_frontend::ast::statements::functions::{ReturnChannel, ReturnSlot};
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     StructTypeDefinition,
@@ -51,11 +51,8 @@ pub(crate) struct HirTestChoiceDefinition {
 // Return-slot helpers
 // ---------------------------------------------------------------------------
 
-pub(crate) fn error_return_slot(type_id: TypeId) -> ReturnSlot {
-    ReturnSlot {
-        type_id: Some(type_id),
-        channel: ReturnChannel::Error,
-    }
+pub(crate) fn error_return_slot(type_id: TypeId) -> CallableReturnShape {
+    CallableReturnShape::from_slots([], Some(type_id))
 }
 
 // ---------------------------------------------------------------------------

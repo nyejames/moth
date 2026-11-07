@@ -1,0 +1,12 @@
+@provider STOPPABLE, abort
+
+Thing = |
+    code I32,
+|
+
+-- The imported template reaches the requirement through a nested generic call.
+stop |this Thing| -> !:
+    abort(this)
+;
+
+Thing must STOPPABLE

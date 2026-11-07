@@ -90,8 +90,12 @@ fn finish_registers_source_and_host_packages_with_builder_provenance() {
             ),
         ]
     );
-    let return_types = function
-        .returns
+    let returns = function
+        .return_contract
+        .ordinary()
+        .expect("host function has an ordinary return contract");
+    let return_types = returns
+        .success
         .iter()
         .map(|slot| &slot.value_type)
         .collect::<Vec<_>>();
@@ -101,10 +105,7 @@ fn finish_registers_source_and_host_packages_with_builder_provenance() {
             FixedScalar::U32
         ))]
     );
-    assert_eq!(
-        function.error_return_type,
-        Some(ExternalSignatureType::BuiltinError)
-    );
+    assert_eq!(returns.error, Some(&ExternalSignatureType::BuiltinError));
 }
 
 #[test]
@@ -143,13 +144,17 @@ fn byte_and_u8_keep_distinct_identities_and_optionals_keep_their_payload() {
     let (_, maybe_name) = registry
         .resolve_package_function("@platform", "maybe_name")
         .expect("function should register");
+    let maybe_name_returns = maybe_name
+        .return_contract
+        .ordinary()
+        .expect("host function has an ordinary return contract");
     assert_eq!(
-        maybe_name.returns[0].value_type,
+        maybe_name_returns.success[0].value_type,
         ExternalSignatureType::Optional(Box::new(ExternalSignatureType::Abi(
             ExternalAbiType::Utf8Str
         )))
     );
-    assert_eq!(maybe_name.error_return_type, None);
+    assert_eq!(maybe_name_returns.error, None);
 }
 
 #[test]

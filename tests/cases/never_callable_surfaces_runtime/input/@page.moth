@@ -1,0 +1,50 @@
+@helper future_value
+
+-- A local Never function ending in a compile-time false assertion.
+halt || -> !:
+    assert(false, "halted")
+;
+
+-- A receiver method may carry the same whole-callable contract.
+Controller = |
+    code I32,
+|
+
+stop |this Controller| -> !:
+    halt()
+;
+
+-- A trait requirement with `-> !` accepts an exactly matching implementation.
+STOPPABLE must:
+    stop |This| -> !
+;
+
+Controller must STOPPABLE
+
+-- A block-form value producer may complete one branch by diverging.
+describe |ready Bool| -> String:
+    value = if ready:
+        then "ready"
+    else
+        halt()
+    ;
+    return value
+;
+
+-- An ordinary typed placeholder may currently diverge without becoming Never.
+future_local || -> String:
+    assert(false, "future local")
+;
+
+-- Same-file and cross-module ordinary callers must not infer divergence from these bodies.
+pending_local ||:
+    text = future_local()
+;
+
+pending_remote ||:
+    text = future_value()
+;
+
+-- The producing branch of `describe` is observable; the receiver method then terminates.
+io.line(describe(true))
+Controller(code = 1).stop()

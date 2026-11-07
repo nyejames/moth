@@ -94,13 +94,13 @@ pub(crate) use model::LocalPublicInterface;
 #[cfg(test)]
 pub(crate) use model::PublicExportDiagnosticProvenance;
 pub(crate) use model::{
-    ConcreteCallSummaryRecord, PublicChoiceSemantics, PublicConstantSemantics,
-    PublicDeclarationRecord, PublicDeclarationSemantics, PublicEvidenceRecord,
-    PublicFunctionCategory, PublicGenericParameterSurface, PublicInterfaceDraft,
-    PublicParameterContract, PublicParameterTypeSlot, PublicReceiverMethodCategory,
-    PublicReceiverMethodSemantics, PublicReturnTypeSlot, PublicSemanticInterface,
+    ConcreteCallSummaryRecord, PublicCallableReturnContract, PublicChoiceSemantics,
+    PublicConstantSemantics, PublicDeclarationRecord, PublicDeclarationSemantics,
+    PublicEvidenceRecord, PublicFunctionCategory, PublicGenericParameterSurface,
+    PublicInterfaceDraft, PublicParameterContract, PublicParameterTypeSlot,
+    PublicReceiverMethodCategory, PublicReceiverMethodSemantics, PublicSemanticInterface,
     PublicStructSemantics, PublicTraitParameterContract, PublicTraitReceiverAccess,
-    PublicTraitRequirementSurface, TraitSurfaceTypeIdentity,
+    PublicTraitRequirementSurface, PublicTraitReturnContract, TraitSurfaceTypeIdentity,
 };
 pub(crate) use receiver_projection::CallableSeed;
 
@@ -111,7 +111,8 @@ use evidence_projection::{EvidenceProjectionContext, project_reusable_evidence};
 #[cfg(test)]
 pub(crate) use model::{
     PublicBindingExport, PublicEvidenceOwnership, PublicEvidenceRequirementMapping,
-    PublicFunctionSemantics, PublicGenericTemplateDescriptor, PublicTraitSemantics,
+    PublicFunctionSemantics, PublicGenericTemplateDescriptor, PublicReturnTypeSlot,
+    PublicTraitSemantics,
 };
 #[cfg(test)]
 pub(crate) use receiver_projection::CallableSeedKind;

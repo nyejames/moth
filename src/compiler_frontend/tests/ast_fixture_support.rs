@@ -11,12 +11,11 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOp, PlaceId, PlaceRecord, SuccessShape,
 };
 use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot,
-};
+use crate::compiler_frontend::ast::statements::functions::{FunctionParameter, FunctionSignature};
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateHandoff,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source::SourceSpan;
@@ -117,18 +116,17 @@ pub(crate) fn entry_start_node(signature: FunctionSignature, body: Vec<AstNode>)
     node(NodeKind::EntryStart(signature, body), None)
 }
 
-pub(crate) fn success_return_slot(type_id: TypeId) -> ReturnSlot {
-    ReturnSlot {
-        type_id: Some(type_id),
-        channel: ReturnChannel::Success,
-    }
+pub(crate) fn fresh_success_returns(
+    result_type_ids: Vec<TypeId>,
+) -> crate::compiler_frontend::datatypes::CallableReturnShape {
+    CallableReturnShape::from_slots(result_type_ids, None)
 }
 
-pub(crate) fn fresh_success_returns(result_type_ids: Vec<TypeId>) -> Vec<ReturnSlot> {
-    result_type_ids
-        .into_iter()
-        .map(success_return_slot)
-        .collect()
+pub(crate) fn fresh_returns(
+    success_type_ids: Vec<TypeId>,
+    error_type_id: Option<TypeId>,
+) -> crate::compiler_frontend::datatypes::CallableReturnShape {
+    CallableReturnShape::from_slots(success_type_ids, error_type_id)
 }
 
 pub(crate) fn symbol(

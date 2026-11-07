@@ -37,7 +37,7 @@ fn trait_declaration_headers_parse_requirement_shells() {
         ParsedTypeRef::This { .. }
     ));
     assert!(matches!(
-        copy_requirement.signature.returns[0].value,
+        copy_requirement.signature.ordinary_return_slots()[0].value,
         FunctionReturnSyntax {
             type_annotation: ParsedTypeRef::This { .. },
             ..

@@ -155,12 +155,14 @@ fn register_dummy_draw_function(
             ExternalFunctionSpec {
                 name: "draw".to_owned(),
                 parameters: Vec::new(),
-                returns: vec![ExternalReturnSlot::fresh(
-                    crate::compiler_frontend::external_packages::ExternalSignatureType::Abi(
-                        ExternalAbiType::Fixed(FixedScalar::I32),
-                    ),
-                )],
-                error_return_type: None,
+                return_contract: external_returns(
+                    vec![ExternalReturnSlot::fresh(
+                        crate::compiler_frontend::external_packages::ExternalSignatureType::Abi(
+                            ExternalAbiType::Fixed(FixedScalar::I32),
+                        ),
+                    )],
+                    None,
+                ),
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings::default(),
             },
@@ -180,10 +182,12 @@ fn register_dummy_make_widget_function(
             ExternalFunctionSpec {
                 name: "make_widget".to_owned(),
                 parameters: Vec::new(),
-                returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::External(
-                    widget_type_id,
-                ))],
-                error_return_type: None,
+                return_contract: external_returns(
+                    vec![ExternalReturnSlot::fresh(ExternalSignatureType::External(
+                        widget_type_id,
+                    ))],
+                    None,
+                ),
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings::default(),
             },
@@ -208,12 +212,14 @@ fn register_dummy_use_widget_function(
                         access_kind: ExternalAccessKind::Shared,
                     },
                 ],
-                returns: vec![ExternalReturnSlot::fresh(
-                    crate::compiler_frontend::external_packages::ExternalSignatureType::Abi(
-                        ExternalAbiType::Fixed(FixedScalar::I32),
-                    ),
-                )],
-                error_return_type: None,
+                return_contract: external_returns(
+                    vec![ExternalReturnSlot::fresh(
+                        crate::compiler_frontend::external_packages::ExternalSignatureType::Abi(
+                            ExternalAbiType::Fixed(FixedScalar::I32),
+                        ),
+                    )],
+                    None,
+                ),
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings::default(),
             },
@@ -372,12 +378,14 @@ fn register_dummy_draw_function_with_js_lowering(
             ExternalFunctionSpec {
                 name: "draw".to_owned(),
                 parameters: Vec::new(),
-                returns: vec![ExternalReturnSlot::fresh(
-                    crate::compiler_frontend::external_packages::ExternalSignatureType::Abi(
-                        ExternalAbiType::Fixed(FixedScalar::I32),
-                    ),
-                )],
-                error_return_type: None,
+                return_contract: external_returns(
+                    vec![ExternalReturnSlot::fresh(
+                        crate::compiler_frontend::external_packages::ExternalSignatureType::Abi(
+                            ExternalAbiType::Fixed(FixedScalar::I32),
+                        ),
+                    )],
+                    None,
+                ),
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction("draw".to_owned())),

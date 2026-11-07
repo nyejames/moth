@@ -936,6 +936,9 @@ pub(crate) fn invalid_external_module_message(
         InvalidExternalModuleReason::ParserDiagnostic { parser_detail } => {
             string_table.resolve(*parser_detail).to_owned()
         }
+        InvalidExternalModuleReason::MixedNeverReturnContract => {
+            "`-> !` is a whole return contract and cannot be combined with success returns, `Error!` or return aliases.".to_owned()
+        }
         InvalidExternalModuleReason::PathContainsPackageSeparator => {
             "Its path contains `#`, which Moth package paths reserve. Rename the file.".to_owned()
         }

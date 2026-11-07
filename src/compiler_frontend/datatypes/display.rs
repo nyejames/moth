@@ -78,6 +78,17 @@ fn path_name(
 //  Shared Spelling View
 // -----------------------------------------------------------
 
+/// Return spelling class of one function type.
+///
+/// WHAT: selects the arrow spelling and the data it needs.
+/// WHY: `Never` and ordinary completion are mutually exclusive, so an error channel beside a
+///      Never flag would allow spelling states no function type can have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TypeDisplayFunctionReturn<Id> {
+    Returns { error_return: Option<Id> },
+    Never,
+}
+
 /// The spelling class of one type, carrying the data that class needs to render itself.
 ///
 /// WHAT: names every spelling rule with its identity ids left generic, so the live environment
@@ -107,7 +118,7 @@ pub(crate) enum TypeDisplayShape<Id> {
     OrderedMap,
     OptionType,
     Function {
-        error_return: Option<Id>,
+        return_contract: TypeDisplayFunctionReturn<Id>,
     },
     External(u32),
     GenericParameter {
@@ -198,7 +209,12 @@ impl TypeDisplayView for TypeEnvironment {
                 }
             },
             TypeDefinition::Function(function) => TypeDisplayShape::Function {
-                error_return: function.error_return,
+                return_contract: match function.return_contract.ordinary() {
+                    Some(returns) => TypeDisplayFunctionReturn::Returns {
+                        error_return: returns.error(),
+                    },
+                    None => TypeDisplayFunctionReturn::Never,
+                },
             },
             TypeDefinition::External(external) => TypeDisplayShape::External(external.type_id.0),
             TypeDefinition::GenericParameter(parameter) => TypeDisplayShape::GenericParameter {
@@ -239,7 +255,12 @@ impl TypeDisplayView for TypeEnvironment {
                 "function returns are read only after the shape reports a function"
             );
         };
-        function.returns.iter().copied()
+        function
+            .return_contract
+            .ordinary()
+            .map(|returns| returns.success().iter().copied())
+            .into_iter()
+            .flatten()
     }
 
     fn choice_variants(&self, type_id: TypeId) -> impl Iterator<Item = ChoiceVariantShape> {
@@ -358,21 +379,26 @@ pub(crate) fn display_view_type<View: TypeDisplayView>(
             Some(inner) => format!("{}?", display_view_type(view, *inner, table, path_table)),
             None => "Option".to_owned(),
         },
-        TypeDisplayShape::Function { error_return } => {
+        TypeDisplayShape::Function { return_contract } => {
             let parameter_parts: Vec<String> = view
                 .function_parameter_ids(type_id)
                 .map(|parameter| display_view_type(view, parameter, table, path_table))
                 .collect();
-            let success_parts: Vec<String> = view
-                .function_return_ids(type_id)
-                .map(|success| display_view_type(view, success, table, path_table))
-                .collect();
-            let return_display = match error_return {
-                Some(error) => format_fallible_signature_parts(
-                    success_parts,
-                    display_view_type(view, error, table, path_table),
-                ),
-                None => success_parts.join(", "),
+            let return_display = match return_contract {
+                TypeDisplayFunctionReturn::Never => "!".to_owned(),
+                TypeDisplayFunctionReturn::Returns { error_return } => {
+                    let success_parts: Vec<String> = view
+                        .function_return_ids(type_id)
+                        .map(|success| display_view_type(view, success, table, path_table))
+                        .collect();
+                    match error_return {
+                        Some(error) => format_fallible_signature_parts(
+                            success_parts,
+                            display_view_type(view, error, table, path_table),
+                        ),
+                        None => success_parts.join(", "),
+                    }
+                }
             };
             format!(
                 "Function({} -> {})",

@@ -134,9 +134,12 @@ Inline recovery uses `then` on one logical line and has no statement body:
 
 When a receiving site needs success values, every reachable handler path must
 produce the required number and types with `then`, leave the function with
-`return` or `return!`, or end in a proven terminal assertion. A path cannot
-fall through without producing or terminating. Multi-success handlers match
-the expression's arity:
+`return` or `return!`, diverge through a standalone Never call or a proven
+terminal assertion, or leave through `break` or `continue` targeting a loop
+outside the handler. A `break` or `continue` consumed by a loop inside the
+handler does not complete it. The handler path must still produce, exit or
+diverge after that loop, and it cannot fall through without producing or
+exiting. Multi-success handlers match the expression's arity:
 
 [codeblock, $code("moth"):
     name, score = load_user(id) catch |err|:

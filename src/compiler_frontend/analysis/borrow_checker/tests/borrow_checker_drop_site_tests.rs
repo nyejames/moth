@@ -10,6 +10,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{AstExpression
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::hir::expression_store::HirProjection;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatementKind, HirWriteTarget,
@@ -60,7 +61,10 @@ fn emits_advisory_return_drop_sites() {
     let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
@@ -122,7 +126,10 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
     let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(

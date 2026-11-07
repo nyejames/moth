@@ -340,6 +340,7 @@ define_stable_reason_keys! {
         &InvalidExternalModuleCode::PathContainsPackageSeparator => "invalid_external_module.path_contains_package_separator",
         &InvalidExternalModuleCode::MissingExportKeyword => "invalid_external_module.missing_export_keyword",
         &InvalidExternalModuleCode::OrphanedAnnotation => "invalid_external_module.orphaned_annotation",
+        &InvalidExternalModuleCode::MixedNeverReturnContract => "invalid_external_module.mixed_never_return_contract",
     },
 
 
@@ -543,6 +544,7 @@ define_stable_reason_keys! {
         &InvalidFunctionSignatureCode::MultipleErrorReturnSlots => "invalid_function_signature.multiple_error_return_slots",
         &InvalidFunctionSignatureCode::ErrorSlotNotLast => "invalid_function_signature.error_slot_not_last",
         &InvalidFunctionSignatureCode::GenericWhereConstraintsUnsupported => "invalid_function_signature.generic_where_constraints_unsupported",
+        &InvalidFunctionSignatureCode::NeverCannotCombine => "invalid_function_signature.never_cannot_combine",
     },
 
     InvalidChoiceVariantReason => {
@@ -676,6 +678,7 @@ define_stable_reason_keys! {
         &InvalidTraitConformanceCode::ReturnCountMismatch => "invalid_trait_conformance.return_count_mismatch",
         &InvalidTraitConformanceCode::ReturnTypeMismatch => "invalid_trait_conformance.return_type_mismatch",
         &InvalidTraitConformanceCode::ReturnChannelMismatch => "invalid_trait_conformance.return_channel_mismatch",
+        &InvalidTraitConformanceCode::ReturnContractMismatch => "invalid_trait_conformance.return_contract_mismatch",
         &InvalidTraitConformanceCode::InferredFailureInInfallibleCast => "invalid_trait_conformance.inferred_failure_in_infallible_cast",
     },
 
@@ -855,6 +858,7 @@ define_stable_reason_keys! {
     &InvalidFallibleHandlingCode::CustomErrorMixedWithImplicitFailure => "invalid_fallible_handling.custom_error_mixed_with_implicit_failure",
     &InvalidFallibleHandlingCode::UnhandledBuiltinFailureInCustomErrorFunction => "invalid_fallible_handling.unhandled_builtin_failure_in_custom_error_function",
     &InvalidFallibleHandlingCode::UnhandledBuiltinFailureInExportedFunction => "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function",
+    &InvalidFallibleHandlingCode::UnhandledBuiltinFailureInNeverFunction => "invalid_fallible_handling.unhandled_builtin_failure_in_never_function",
     },
 
     InvalidTemplateSlotReason => {
@@ -927,6 +931,8 @@ define_stable_reason_keys! {
         &InvalidCallShapeCode::MutableAccessOnNonPlace => "invalid_call_shape.mutable_access_on_non_place",
         &InvalidCallShapeCode::MutableAccessOnImmutablePlace => "invalid_call_shape.mutable_access_on_immutable_place",
         &InvalidCallShapeCode::ImmutablePlaceMutableAccessRequired => "invalid_call_shape.immutable_place_mutable_access_required",
+        &InvalidCallShapeCode::NeverCallUsedAsValue => "invalid_call_shape.never_call_used_as_value",
+        &InvalidCallShapeCode::NeverCallHandled => "invalid_call_shape.never_call_handled",
     },
 
     InvalidReturnShapeReason => {
@@ -939,6 +945,10 @@ define_stable_reason_keys! {
         &InvalidReturnShapeCode::TooFewReturnValues => "invalid_return_shape.too_few_return_values",
         &InvalidReturnShapeCode::MissingReturnBangValue => "invalid_return_shape.missing_return_bang_value",
         &InvalidReturnShapeCode::FunctionMayFallThrough => "invalid_return_shape.function_may_fall_through",
+        &InvalidReturnShapeCode::NeverBodyMayCompleteNormally => "invalid_return_shape.never_body_may_complete_normally",
+        &InvalidReturnShapeCode::NeverBodyReturnsToCaller => "invalid_return_shape.never_body_returns_to_caller",
+        &InvalidReturnShapeCode::UnannotatedFunctionAlwaysDiverges => "invalid_return_shape.unannotated_function_always_diverges",
+        &InvalidReturnShapeCode::NeverProofDependsOnCycle => "invalid_return_shape.never_proof_depends_on_cycle",
     },
 
     DeferredFeatureReason => {

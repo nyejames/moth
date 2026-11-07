@@ -34,6 +34,7 @@ use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, DiagnosticDraft, DiagnosticSeverity,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE;
 use crate::compiler_frontend::external_packages::{
@@ -44,7 +45,9 @@ use crate::compiler_frontend::hir::expression_store::HirValueRange;
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
 };
-use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
+use crate::compiler_frontend::hir::functions::{
+    HirFunction, HirFunctionOrigin, HirFunctionReturnContract,
+};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::{
@@ -119,8 +122,10 @@ fn minimal_hir_module() -> HirModule {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: Box::new([]),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [],
+            None,
+        )),
     }];
     module.start_function = Some(FunctionId(0));
     module

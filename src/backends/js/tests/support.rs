@@ -14,6 +14,7 @@ use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, StructTypeDefinition,
 };
@@ -32,7 +33,9 @@ pub(super) use crate::compiler_frontend::hir::expression_store::{
     HirExpressionStore, HirValueRange,
 };
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapEntry, ValueKind};
-use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
+use crate::compiler_frontend::hir::functions::{
+    HirFunction, HirFunctionOrigin, HirFunctionReturnContract,
+};
 use crate::compiler_frontend::hir::ids::{
     BlockId, ChoiceId, FunctionId, HirNodeId, LocalId, RegionId,
 };
@@ -357,8 +360,10 @@ pub(super) fn lower_minimal_module(function_name: &str) -> String {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![],
+            None,
+        )),
     };
 
     let module = build_module(
@@ -423,8 +428,10 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![],
+            None,
+        )),
     };
 
     let module = build_module(
@@ -492,8 +499,10 @@ pub(super) fn lower_minimal_module_with_numeric_op(
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![],
+            None,
+        )),
     };
 
     let module = build_module(
@@ -589,8 +598,10 @@ fn lower_minimal_module_with_cast(
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![],
+            None,
+        )),
     };
 
     let module = build_module(
@@ -702,8 +713,10 @@ pub(super) fn lower_minimal_module_with_io_call(
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![],
+            None,
+        )),
     };
 
     let module = build_module(
@@ -790,8 +803,10 @@ pub(super) fn lower_minimal_module_with_io_input_call(
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: (vec![]).into_boxed_slice(),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            vec![],
+            None,
+        )),
     };
 
     let module = build_module(

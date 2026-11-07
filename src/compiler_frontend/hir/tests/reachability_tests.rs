@@ -7,6 +7,7 @@
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -14,10 +15,11 @@ use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings,
     ExternalPackageRegistry, ExternalSignatureType,
 };
+use crate::compiler_frontend::external_packages::{external_never, external_returns};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirValueRange};
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, HirMapOp};
-use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionReturnContract};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
@@ -41,9 +43,12 @@ use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
 };
 use crate::compiler_frontend::semantic_identity::{
-    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModuleRootRole, OriginFunctionId,
+    StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
@@ -60,8 +65,7 @@ fn direct_external_calls_retains_lowered_call_and_invoke_sites_in_order() {
         .register_function(ExternalFunctionDef {
             name: "notify".to_owned(),
             parameters: vec![],
-            returns: vec![],
-            error_return_type: None,
+            return_contract: external_returns(vec![], None),
             const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
@@ -70,8 +74,7 @@ fn direct_external_calls_retains_lowered_call_and_invoke_sites_in_order() {
         .register_function(ExternalFunctionDef {
             name: "attempt".to_owned(),
             parameters: vec![],
-            returns: vec![],
-            error_return_type: Some(ExternalSignatureType::BuiltinError),
+            return_contract: external_returns(vec![], Some(ExternalSignatureType::BuiltinError)),
             const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
@@ -1275,13 +1278,52 @@ fn collect_test_reachability(
     collect_reachability_from_function_link_facts(&function_facts, roots)
 }
 
+fn lowered_function_id(
+    module: &HirModule,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    name: &str,
+) -> FunctionId {
+    module
+        .functions
+        .iter()
+        .find(|function| {
+            module
+                .side_table
+                .resolve_function_name(function.id, path_fork, string_table)
+                == Some(name)
+        })
+        .unwrap_or_else(|| panic!("function '{name}' should lower to HIR"))
+        .id
+}
+
+fn never_call_target_mut(module: &mut HirModule, runner: FunctionId) -> &mut CallTarget {
+    let entry = module
+        .functions
+        .iter()
+        .find(|function| function.id == runner)
+        .expect("runner should resolve")
+        .entry;
+    let block = module
+        .blocks
+        .iter_mut()
+        .find(|block| block.id == entry)
+        .expect("the runner entry block should resolve");
+    let HirTerminator::NeverCall { target, .. } = &mut block.terminator else {
+        panic!("runner should end in a terminating call")
+    };
+    target
+}
+
 fn function(id: FunctionId, entry: BlockId) -> HirFunction {
     HirFunction {
         id,
         entry,
         params: vec![],
-        returns: Box::new([]),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [],
+            None,
+        )),
     }
 }
 
@@ -1676,6 +1718,150 @@ fn reachability_records_reachable_float_statements_only() {
     assert_eq!(
         reachability.reachable_float_statements[0].kind,
         ReachableFloatStatementKind::FormatFloat
+    );
+}
+
+#[test]
+fn never_call_reachability_keeps_nested_argument_calls_and_map_facts() {
+    let registry = ExternalPackageRegistry::new();
+    let (build_result, mut path_fork, mut string_table) =
+        parse_single_file_ast_build_result_with_registry(
+            r#"callee |value I32, values {I32 = {I32 = I32}}| -> !:
+    assert(false)
+;
+
+empty || -> I32:
+    return 1
+;
+
+runner || -> !:
+    callee(empty(), {1 = {2 = 3}})
+;
+"#,
+            registry.clone(),
+        )
+        .expect("Never source must parse through the frontend");
+    let module = lower_hir(
+        build_result.ast,
+        &mut string_table,
+        &mut path_fork,
+        &registry,
+    );
+    let empty = lowered_function_id(&module, &path_fork, &string_table, "empty");
+    let runner = lowered_function_id(&module, &path_fork, &string_table, "runner");
+    let reachability = collect_test_reachability(&module, &[runner])
+        .expect("reachability from the runner should build");
+
+    assert!(
+        reachability.backend_selection().contains_function(empty),
+        "an ordinary call nested inside a Never argument keeps its callee reachable"
+    );
+    let map_uses = reachability
+        .reachable_map_uses
+        .iter()
+        .filter(|use_row| use_row.kind == ReachableMapUseKind::Literal)
+        .count();
+    assert_eq!(
+        map_uses, 2,
+        "nested map-literal arguments remain reachable expression facts"
+    );
+}
+
+#[test]
+fn never_call_reachability_keeps_a_generated_target_requirement() {
+    let registry = ExternalPackageRegistry::new();
+    let (build_result, mut path_fork, mut string_table) =
+        parse_single_file_ast_build_result_with_registry(
+            r#"callee || -> !:
+    assert(false)
+;
+
+runner || -> !:
+    callee()
+;
+"#,
+            registry.clone(),
+        )
+        .expect("Never source must parse through the frontend");
+    let mut module = lower_hir(
+        build_result.ast,
+        &mut string_table,
+        &mut path_fork,
+        &registry,
+    );
+    let runner = lowered_function_id(&module, &path_fork, &string_table, "runner");
+    let origin = OriginFunctionId::new_free(
+        StableModuleOriginIdentity::from_portable_path(
+            StablePackageIdentity::project_local("test"),
+            "provider".to_owned(),
+            ModuleRootRole::Normal,
+        ),
+        "callee".to_owned(),
+    );
+    let identity = GeneratedFunctionIdentity::new(
+        GeneratedDeclarationIdentity::Public(origin),
+        Box::new([]),
+        Box::new([]),
+    );
+    *never_call_target_mut(&mut module, runner) = CallTarget::Generated(Box::new(identity.clone()));
+
+    let reachability = collect_test_reachability(&module, &[runner])
+        .expect("reachability from the runner should build");
+    assert!(
+        reachability
+            .reachable_generated_functions
+            .contains(&identity),
+        "a standalone Never call retains its generated target requirement"
+    );
+}
+
+#[test]
+fn never_call_reachability_keeps_a_binding_backed_target_import() {
+    let registry = ExternalPackageRegistry::new();
+    let (build_result, mut path_fork, mut string_table) =
+        parse_single_file_ast_build_result_with_registry(
+            r#"callee || -> !:
+    assert(false)
+;
+
+runner || -> !:
+    callee()
+;
+"#,
+            registry.clone(),
+        )
+        .expect("Never source must parse through the frontend");
+    let mut module = lower_hir(
+        build_result.ast,
+        &mut string_table,
+        &mut path_fork,
+        &registry,
+    );
+    let runner = lowered_function_id(&module, &path_fork, &string_table, "runner");
+    let mut registry = ExternalPackageRegistry::new();
+    let external = registry
+        .register_function(ExternalFunctionDef {
+            name: "exit_now".to_owned(),
+            parameters: vec![],
+            return_contract: external_never(),
+            const_eval: None,
+            lowerings: ExternalFunctionLowerings::default(),
+        })
+        .expect("synthetic Never binding should register");
+    *never_call_target_mut(&mut module, runner) = CallTarget::External(external);
+
+    let reachability = collect_test_reachability(&module, &[runner])
+        .expect("reachability from the runner should build");
+    assert!(
+        reachability
+            .reachable_external_functions
+            .contains(&external),
+        "the binding-backed terminating target stays imported"
+    );
+    assert_eq!(
+        reachability.reachable_external_calls.len(),
+        1,
+        "the external call site is retained exactly once"
     );
 }
 

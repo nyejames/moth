@@ -87,6 +87,14 @@ pub(crate) enum ExpressionRpnItem {
         call: Box<crate::compiler_frontend::ast::numeric_construction::DeferredCall>,
         span: Option<SourceSpan>,
     },
+    /// One resolved call whose contract is `-> !`, valid only as a standalone statement.
+    ///
+    /// WHAT: occupies one operand position so the enclosing expression owner can reject it, or
+    ///       so statement parsing can lift it out as `NodeKind::NeverCall`.
+    /// WHY: a Never call has no value. It cannot enter ordering or evaluation, so the evaluator
+    ///      rejects it through the single value-position choke point while the statement entry
+    ///      accepts a fragment made of exactly this item.
+    NeverCall(Box<crate::compiler_frontend::ast::statements::never_call::NeverCall>),
     /// A cast whose source must resolve before its pair can be classified.
     ///
     /// WHAT: carries the retained source fragment in one operand position plus the already-known
@@ -275,6 +283,7 @@ impl ExpressionRpnItem {
             | ExpressionRpnItem::PendingNumericCall { span, .. }
             | ExpressionRpnItem::PendingNumericCast { span, .. }
             | ExpressionRpnItem::PendingNumericExpression { span, .. } => *span,
+            ExpressionRpnItem::NeverCall(never_call) => never_call.span,
             ExpressionRpnItem::Operator { span, .. } => *span,
             ExpressionRpnItem::ResolvedOperator(operation) => operation.span,
         })
@@ -300,6 +309,7 @@ impl ExpressionRpnItem {
             | ExpressionRpnItem::PendingNumericCall { span, .. }
             | ExpressionRpnItem::PendingNumericCast { span, .. }
             | ExpressionRpnItem::PendingNumericExpression { span, .. } => *span,
+            ExpressionRpnItem::NeverCall(never_call) => never_call.span,
             ExpressionRpnItem::Operator { span, .. } => *span,
             ExpressionRpnItem::ResolvedOperator(operation) => operation.span,
         }
@@ -318,6 +328,7 @@ impl ExpressionRpnItem {
                 | ExpressionRpnItem::GroupClose { .. }
                 | ExpressionRpnItem::PendingNumericBinding { .. }
                 | ExpressionRpnItem::PendingNumericCall { .. }
+                | ExpressionRpnItem::NeverCall(_)
                 | ExpressionRpnItem::PendingNumericCast { .. }
                 | ExpressionRpnItem::PendingNumericExpression { .. }
         )

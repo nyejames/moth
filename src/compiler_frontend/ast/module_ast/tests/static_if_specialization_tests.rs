@@ -6,6 +6,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOp;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueLexicalScope;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -351,7 +352,10 @@ fn authored_start_and_entry_record_provenance_under_distinct_identities() {
         entry_start_node(
             FunctionSignature {
                 parameters: vec![],
-                returns: vec![],
+                return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                    [],
+                    None,
+                )),
             },
             vec![entry_if],
         ),

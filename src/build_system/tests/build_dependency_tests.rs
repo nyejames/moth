@@ -780,11 +780,15 @@ impl BackendBuilder for RegisteredJsPackageBuilder {
                     .expect("a resolved function must have a definition");
                 assert_eq!(definition.name, "provider_value");
                 assert!(definition.parameters.is_empty());
+                let returns = definition
+                    .return_contract
+                    .ordinary()
+                    .expect("provider function has an ordinary return contract");
                 assert_eq!(
-                    definition.returns,
+                    returns.success,
                     [ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)]
                 );
-                assert!(definition.error_return_type.is_none());
+                assert!(returns.error.is_none());
                 assert!(matches!(
                     &definition.lowerings.js,
                     Some(ExternalJsLowering::ExternalModuleExport { export_name: actual })

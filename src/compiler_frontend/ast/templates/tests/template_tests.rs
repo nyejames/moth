@@ -4,9 +4,7 @@ use crate::compiler_frontend::ast::const_values::store::{
     ConstStringPiece, ConstStringValue, ConstValueStore,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionSignature, ReturnChannel, ReturnSlot,
-};
+use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::styles::markdown::markdown_formatter;
 use crate::compiler_frontend::ast::templates::template::Template;
@@ -20,6 +18,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::templates::top_level_templates::FoldedConstTemplateResult;
 use crate::compiler_frontend::builder_root_slots::{BuilderRootSlotName, ConstFragmentDestination};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
@@ -45,10 +44,10 @@ fn start_function_node(body: Vec<AstNode>) -> AstNode {
     entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![ReturnSlot {
-                type_id: Some(builtin_type_ids::STRING),
-                channel: ReturnChannel::Success,
-            }],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [builtin_type_ids::STRING],
+                None,
+            )),
         },
         body,
     )

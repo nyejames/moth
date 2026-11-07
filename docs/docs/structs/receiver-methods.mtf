@@ -24,6 +24,8 @@ A receiver method is a top-level function whose first parameter is named
 - `this` is reserved for receiver declarations and the receiver method body.
 - A receiver method is called only with receiver syntax.
 - Calling it as `method(value, ...)` is invalid.
+- A receiver method may declare `-> !`. The contract is exact, like any
+  other callable.
 
 ### Supported receiver ownership
 

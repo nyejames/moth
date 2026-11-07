@@ -12,11 +12,11 @@ use super::super::model::{
     PublicGenericParameterSurface,
 };
 use super::super::{
-    LocalPublicInterface, PublicDeclarationRecord, PublicDeclarationSemantics,
-    PublicEvidenceOwnership, PublicEvidenceRecord, PublicEvidenceRequirementMapping,
-    PublicFunctionCategory, PublicFunctionSemantics, PublicInterfaceDraft, PublicParameterTypeSlot,
-    PublicSemanticInterface, PublicStructSemantics, PublicTraitSemantics, SourceProviderDependency,
-    SourceProviderDependencySet,
+    LocalPublicInterface, PublicCallableReturnContract, PublicDeclarationRecord,
+    PublicDeclarationSemantics, PublicEvidenceOwnership, PublicEvidenceRecord,
+    PublicEvidenceRequirementMapping, PublicFunctionCategory, PublicFunctionSemantics,
+    PublicInterfaceDraft, PublicParameterTypeSlot, PublicSemanticInterface, PublicStructSemantics,
+    PublicTraitSemantics, SourceProviderDependency, SourceProviderDependencySet,
 };
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
@@ -98,8 +98,10 @@ fn function_record(
                 contract: crate::compiler_frontend::public_interface::PublicParameterContract::Value,
             })
             .collect(),
-        returns: Vec::new(),
-        error_return: None,
+        return_contract: PublicCallableReturnContract::Returns {
+            success: Vec::new(),
+            error: None,
+        },
     }) }
 }
 

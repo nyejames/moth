@@ -11,10 +11,10 @@
 //! beside the module rather than an end-to-end case.
 
 use super::super::{
-    PublicDeclarationRecord, PublicDeclarationSemantics, PublicFunctionCategory,
-    PublicFunctionSemantics, PublicGenericTemplateDescriptor, PublicInterfaceDraft,
-    PublicParameterTypeSlot, PublicReceiverMethodCategory, PublicReceiverMethodSemantics,
-    PublicStructSemantics,
+    PublicCallableReturnContract, PublicDeclarationRecord, PublicDeclarationSemantics,
+    PublicFunctionCategory, PublicFunctionSemantics, PublicGenericTemplateDescriptor,
+    PublicInterfaceDraft, PublicParameterTypeSlot, PublicReceiverMethodCategory,
+    PublicReceiverMethodSemantics, PublicStructSemantics,
 };
 use super::test_support::{module_origin, struct_origin};
 
@@ -89,8 +89,10 @@ fn function_draft_record(
         semantics: PublicDeclarationSemantics::Function(PublicFunctionSemantics {
             category: PublicFunctionCategory::ConcreteLocal,
             parameters,
-            returns: vec![],
-            error_return: None,
+            return_contract: PublicCallableReturnContract::Returns {
+                success: vec![],
+                error: None,
+            },
         }),
     }
 }
@@ -123,8 +125,10 @@ fn receiver_draft_record_with_template(
                     PublicReceiverMethodCategory::ConcreteLocal
                 },
                 parameters: vec![],
-                returns: vec![],
-                error_return: None,
+                return_contract: PublicCallableReturnContract::Returns {
+                    success: vec![],
+                    error: None,
+                },
             }],
         }),
     }
@@ -139,8 +143,10 @@ fn generic_function_draft_record(origin: OriginFunctionId) -> PublicDeclarationR
                 generic_parameters: vec![],
             }),
             parameters: vec![],
-            returns: vec![],
-            error_return: None,
+            return_contract: PublicCallableReturnContract::Returns {
+                success: vec![],
+                error: None,
+            },
         }),
     }
 }

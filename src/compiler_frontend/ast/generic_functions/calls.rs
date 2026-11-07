@@ -44,8 +44,9 @@ use crate::compiler_frontend::ast::generic_functions::{
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::numeric_construction::{
-    DeferredCall, DeferredCallArgument, DeferredCallHandling, DeferredExpressionCompletion,
-    DeferredExpressionServices, DeferredGenericCall, merged_receiver_type, numeric_witness_type,
+    CompletedExpression, DeferredCall, DeferredCallArgument, DeferredCallHandling,
+    DeferredExpressionCompletion, DeferredExpressionServices, DeferredGenericCall,
+    merged_receiver_type, numeric_witness_type,
 };
 use crate::compiler_frontend::ast::numeric_known_shape::{KnownShape, materialise_known_shape};
 use crate::compiler_frontend::ast::statements::fallible_handling::{
@@ -54,6 +55,7 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
     token_stream_starts_typed_propagation_suffix, validate_postfix_propagation_contract,
 };
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ParameterContract};
+use crate::compiler_frontend::ast::statements::never_call::{NeverCall, NeverCallTarget};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CapacityResource;
@@ -65,6 +67,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, InvalidCallShapeReason, ValueReceiverContext,
 };
+use crate::compiler_frontend::datatypes::FunctionReturnContract;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_bindings::{BindingConflict, GenericTypeBindings};
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
@@ -172,15 +175,14 @@ fn parse_generic_call_in_lane(
         }
     };
 
-    let expression = match lane {
+    match lane {
         GenericCallLane::Instance => {
-            parse_ready_instance_call(input, raw_arguments, &parameter_expectations)?
+            parse_ready_instance_call(input, raw_arguments, &parameter_expectations)
         }
         GenericCallLane::TemplateValidation => {
-            validate_ready_template_call(input, raw_arguments, &parameter_expectations)?
+            validate_ready_template_call(input, raw_arguments, &parameter_expectations)
         }
-    };
-    Ok(ParsedFunctionCallExpression::Value(expression))
+    }
 }
 
 /// Retains one generic call whose argument values still depend on pending numeric resolution.
@@ -212,6 +214,12 @@ fn retain_generic_call(
         string_table,
         path_fork,
     } = input;
+    // A Never call has no result, so no receiving site may supply expected-result evidence.
+    let expected_context = if template.signature.return_contract.is_never() {
+        GenericCallExpectedContext::None
+    } else {
+        expected_context
+    };
 
     let numeric_signature = link_generic_numeric_signature(GenericNumericSignatureInput {
         template,
@@ -231,14 +239,54 @@ fn retain_generic_call(
         }
         GenericCallExpectedContext::None => None,
     };
-    let success_result_type_ids = template.signature.success_return_type_ids();
+    if template.signature.return_contract.is_never() {
+        // The call has no success or error channel, so no authored `!` or `catch` can apply.
+        let callee_name = path_fork
+            .component(template.function_path)
+            .unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::AstConstruction,
+                    "a resolved Never generic call has no terminal path component"
+                )
+            });
+        crate::compiler_frontend::ast::expressions::function_calls::reject_never_call_continuation(
+            token_stream,
+            callee_name,
+            call_span,
+        )?;
+        let ticket = match lane {
+            GenericCallLane::Instance => Some(context.reserve_pending_generic_request()),
+            GenericCallLane::TemplateValidation => None,
+        };
+        let call = DeferredCall::Generic(Box::new(DeferredGenericCall {
+            template: template_for_deferred_generic_call(template),
+            parameter_expectations,
+            arguments,
+            call_span,
+            authored_handling: DeferredCallHandling::Unhandled,
+            result_shapes: numeric_signature.result_shapes,
+            expected_result_type_ids: None,
+            error_return: None,
+            ticket,
+        }));
+        return Ok(retained_pending_call_operand(call, call_span));
+    }
+
+    let success_result_type_ids = match &template.signature.return_contract {
+        FunctionReturnContract::Returns(shape) => shape.success(),
+        // The explicit Never arm above returns before any ordinary completion runs.
+        FunctionReturnContract::Never => crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "a Never generic call reached ordinary retained completion"
+        ),
+    };
     let authored_handling = parse_retained_call_authored_handling(RetainedCallHandlingInput {
         token_stream,
         context,
         type_interner,
         expression_builder,
         const_values,
-        success_result_type_ids: &success_result_type_ids,
+        success_result_type_ids,
         error_return: numeric_signature.error_return,
         authored_failure_lane: context.source_call_has_private_failure_lane(template.function_path),
         value_required,
@@ -268,6 +316,37 @@ fn retain_generic_call(
     Ok(retained_pending_call_operand(call, call_span))
 }
 
+/// Lifts one generic call whose contract is `-> !` into the shared statement payload.
+///
+/// WHAT: resolves the visible template name and builds the `NeverCall` with the completed
+///       argument routing and the instance-or-template target.
+/// WHY: ready instance calls, ready template validation and body-root completion all lift the
+///      same call shape; one constructor keeps target, name and span consistent.
+fn never_generic_call(
+    path_fork: &PathInternerFork,
+    name_path: PathId,
+    target: PathId,
+    arguments: Vec<CallArgument<OwnedExpr>>,
+    span: Option<SourceSpan>,
+) -> NeverCall {
+    let name = path_fork.component(name_path).unwrap_or_else(|| {
+        crate::compiler_bug!(
+            CompilerStage::AstConstruction,
+            "a resolved Never generic call has no terminal path component"
+        )
+    });
+    NeverCall {
+        target: NeverCallTarget::Source(target),
+        receiver: None,
+        arguments: arguments
+            .into_iter()
+            .map(|argument| argument.map_value(OwnedExpr::id))
+            .collect(),
+        name,
+        span,
+    }
+}
+
 fn template_for_deferred_generic_call(
     template: &GenericFunctionTemplate,
 ) -> GenericFunctionTemplate {
@@ -287,7 +366,7 @@ fn parse_ready_instance_call(
     input: GenericFunctionCallParseInput<'_, '_, '_>,
     raw_arguments: Vec<CallArgument<OwnedExpr>>,
     parameter_expectations: &[ParameterExpectation],
-) -> Result<OwnedExpr, ExpressionParseError> {
+) -> Result<ParsedFunctionCallExpression, ExpressionParseError> {
     let GenericFunctionCallParseInput {
         token_stream,
         template,
@@ -304,6 +383,8 @@ fn parse_ready_instance_call(
         path_fork,
     } = input;
 
+    // Expected-result evidence is already ignored for a Never template inside inference, whose
+    // evidence collection is gated on an ordinary `Returns` contract.
     let inference = infer_generic_function_call_with_expectations(
         GenericFunctionInferenceInput {
             template,
@@ -358,10 +439,47 @@ fn parse_ready_instance_call(
     )
     .map_err(ExpressionParseError::from)?;
 
+    // A Never template has no success or error channel. The standalone statement owner lifts the
+    // terminating outcome, and the instantiation request still publishes because the active call
+    // is real executable work.
+    if inference.signature.return_contract.is_never() {
+        let never_call = never_generic_call(
+            path_fork,
+            template.function_path,
+            inference.instance_path,
+            arguments,
+            call_span,
+        );
+        crate::compiler_frontend::ast::expressions::function_calls::reject_never_call_continuation(
+            token_stream,
+            never_call.name,
+            call_span,
+        )?;
+        context.record_generic_function_instantiation_request(
+            GenericFunctionInstantiationRequest {
+                declaration_identity: template.declaration_identity.clone(),
+                evidence: selected_evidence,
+                key: inference.key,
+                instance_path: inference.instance_path,
+                call_span,
+            },
+        );
+        return Ok(ParsedFunctionCallExpression::Terminating(Box::new(
+            never_call,
+        )));
+    }
+
     let call = HandledFallibleCall {
         name: inference.instance_path,
         args: arguments,
-        result_type_ids: inference.signature.success_return_type_ids(),
+        result_type_ids: match &inference.signature.return_contract {
+            FunctionReturnContract::Returns(shape) => shape.success().to_vec(),
+            // The explicit Never arm above returns before this ordinary call is built.
+            FunctionReturnContract::Never => crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "a Never generic instance reached ordinary call completion"
+            ),
+        },
         call_span,
     };
 
@@ -370,7 +488,7 @@ fn parse_ready_instance_call(
         context,
         call,
         declaration_path: template.function_path,
-        error_return_type_id: inference.signature.error_return_type_id(),
+        error_return_type_id: inference.signature.return_contract.error_slot(),
         value_required,
         allow_boundary_catch,
         warnings,
@@ -389,14 +507,14 @@ fn parse_ready_instance_call(
         call_span,
     });
 
-    Ok(expression)
+    Ok(ParsedFunctionCallExpression::Value(expression))
 }
 
 fn validate_ready_template_call(
     input: GenericFunctionCallParseInput<'_, '_, '_>,
     raw_arguments: Vec<CallArgument<OwnedExpr>>,
     parameter_expectations: &[ParameterExpectation],
-) -> Result<OwnedExpr, ExpressionParseError> {
+) -> Result<ParsedFunctionCallExpression, ExpressionParseError> {
     let GenericFunctionCallParseInput {
         token_stream,
         template,
@@ -413,6 +531,8 @@ fn validate_ready_template_call(
         path_fork,
     } = input;
 
+    // Expected-result evidence is already ignored for a Never template inside inference, whose
+    // evidence collection is gated on an ordinary `Returns` contract.
     let inference = infer_generic_function_call_with_expectations(
         GenericFunctionInferenceInput {
             template,
@@ -456,10 +576,35 @@ fn validate_ready_template_call(
     )
     .map_err(ExpressionParseError::from)?;
 
+    if inference.signature.return_contract.is_never() {
+        let never_call = never_generic_call(
+            path_fork,
+            template.function_path,
+            template.function_path,
+            arguments,
+            call_span,
+        );
+        crate::compiler_frontend::ast::expressions::function_calls::reject_never_call_continuation(
+            token_stream,
+            never_call.name,
+            call_span,
+        )?;
+        return Ok(ParsedFunctionCallExpression::Terminating(Box::new(
+            never_call,
+        )));
+    }
+
     let call = HandledFallibleCall {
         name: template.function_path,
         args: arguments,
-        result_type_ids: inference.signature.success_return_type_ids(),
+        result_type_ids: match &inference.signature.return_contract {
+            FunctionReturnContract::Returns(shape) => shape.success().to_vec(),
+            // The explicit Never arm above returns before this ordinary call is built.
+            FunctionReturnContract::Never => crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "a Never generic template reached ordinary call validation"
+            ),
+        },
         call_span,
     };
 
@@ -468,7 +613,7 @@ fn validate_ready_template_call(
         context,
         call,
         declaration_path: template.function_path,
-        error_return_type_id: inference.signature.error_return_type_id(),
+        error_return_type_id: inference.signature.return_contract.error_slot(),
         value_required,
         allow_boundary_catch,
         warnings,
@@ -478,6 +623,7 @@ fn validate_ready_template_call(
         string_table,
         path_fork,
     })
+    .map(ParsedFunctionCallExpression::Value)
 }
 
 pub(crate) fn parse_generic_function_call_expression(
@@ -495,17 +641,19 @@ pub(crate) fn validate_generic_function_template_call_expression(
 /// Completes a generic call retained while its numeric arguments were pending.
 ///
 /// WHAT: completes the argument list through the body session, then infers, validates, and resolves
-///       the call the same way the ready path does for its parse lane. The authored `!` decided at
-///       parse time is applied, and the reserved instantiation request publishes last.
+///       the call the same way the ready path does for its parse lane. The completed signature's
+///       return contract decides whether the result is a value or a terminating `NeverCall`, and
+///       the reserved instantiation request publishes last.
 /// WHY: the call's routing was fixed at its source position, so completion supplies only concrete
-///      argument values; the reserved ticket keeps the request in parse order.
+///      argument values; the inferred signature is the authoritative contract owner, so no caller
+///      preference is needed. The reserved ticket keeps the request in parse order.
 pub(crate) fn complete_deferred_generic_call<
     'env,
     S: DeferredExpressionCompletion<'env> + ?Sized,
 >(
     deferred: DeferredGenericCall,
     session: &mut S,
-) -> Result<OwnedExpr, ExpressionParseError> {
+) -> Result<CompletedExpression, ExpressionParseError> {
     let ticket = deferred.ticket;
     let completion = complete_reserved_generic_call(deferred, &mut *session);
     match (completion, ticket) {
@@ -575,7 +723,7 @@ pub(crate) fn choose_retained_argument_destination<
 fn complete_reserved_generic_call<'env, S: DeferredExpressionCompletion<'env> + ?Sized>(
     deferred: DeferredGenericCall,
     session: &mut S,
-) -> Result<OwnedExpr, ExpressionParseError> {
+) -> Result<CompletedExpression, ExpressionParseError> {
     let DeferredGenericCall {
         template,
         parameter_expectations,
@@ -623,14 +771,14 @@ fn complete_reserved_generic_call<'env, S: DeferredExpressionCompletion<'env> + 
     )?;
     verify_completed_error_return(
         error_return,
-        inference.signature.error_return_type_id(),
+        inference.signature.return_contract.error_slot(),
         context,
         type_interner,
     )?;
     if let Some(GenericErrorReturn::Retained(_)) = error_return {
         verify_retained_propagation_error(
             &authored_handling,
-            inference.signature.error_return_type_id(),
+            inference.signature.return_contract.error_slot(),
             context,
             type_interner.environment(),
         )?;
@@ -695,20 +843,36 @@ fn complete_reserved_generic_call<'env, S: DeferredExpressionCompletion<'env> + 
         }
     };
 
-    let call = HandledFallibleCall {
-        name: call_name,
-        args: arguments,
-        result_type_ids: inference.signature.success_return_type_ids(),
-        call_span,
+    let completed = match &inference.signature.return_contract {
+        // The completed signature owns the contract: a Never template has no success or error
+        // slot. Completion keeps the resolved instance (or template) target and the completed
+        // argument routing for statement lifting.
+        FunctionReturnContract::Never => {
+            CompletedExpression::NeverCall(Box::new(never_generic_call(
+                path_fork,
+                template.function_path,
+                call_name,
+                arguments,
+                call_span,
+            )))
+        }
+        FunctionReturnContract::Returns(shape) => {
+            let call = HandledFallibleCall {
+                name: call_name,
+                args: arguments,
+                result_type_ids: shape.success().to_vec(),
+                call_span,
+            };
+            CompletedExpression::Value(finish_retained_generic_call(
+                call,
+                shape.error(),
+                authored_handling,
+                template.function_path,
+                context,
+                expression_builder,
+            )?)
+        }
     };
-    let expression = finish_retained_generic_call(
-        call,
-        inference.signature.error_return_type_id(),
-        authored_handling,
-        template.function_path,
-        context,
-        expression_builder,
-    )?;
 
     if let Some(ticket) = ticket {
         context.publish_pending_generic_request(
@@ -722,7 +886,7 @@ fn complete_reserved_generic_call<'env, S: DeferredExpressionCompletion<'env> + 
             },
         )?;
     }
-    Ok(expression)
+    Ok(completed)
 }
 
 /// Checks that a completed generic call agrees with the error role linked when it was retained.
@@ -1067,11 +1231,13 @@ fn infer_generic_function_call_with_expectations(
     let mut type_arguments =
         bindings.concrete_arguments_for(template.generic_parameter_list_id, type_environment);
     if type_arguments.is_none()
-        && let Some(expected_result_type_ids) = expected_context
-            .matching_success_results(template.signature.success_return_slot_count())
+        && let FunctionReturnContract::Returns(shape) = &template.signature.return_contract
+        && let Some(expected_result_type_ids) =
+            expected_context.matching_success_results(shape.success().len())
     {
         collect_expected_result_bindings(
             template,
+            shape.success(),
             expected_result_type_ids,
             &mut bindings,
             &mut evidence_locations,
@@ -1382,6 +1548,7 @@ fn collect_call_argument_bindings(
 )]
 fn collect_expected_result_bindings(
     template: &GenericFunctionTemplate,
+    template_return_type_ids: &[TypeId],
     expected_result_type_ids: &[TypeId],
     bindings: &mut GenericTypeBindings,
     evidence_locations: &mut GenericBindingEvidenceLocations,
@@ -1399,9 +1566,9 @@ fn collect_expected_result_bindings(
         path_fork,
     };
 
-    for (template_return_type, expected_type) in template
-        .signature
-        .success_return_type_ids_iter()
+    for (template_return_type, expected_type) in template_return_type_ids
+        .iter()
+        .copied()
         .zip(expected_result_type_ids.iter())
     {
         collect_binding_evidence(
@@ -1501,11 +1668,9 @@ pub(crate) fn substitute_function_signature(
             *input = type_environment.substitute_type_id(*input, mapping);
         }
     }
-    for slot in &mut concrete.returns {
-        slot.type_id = slot
-            .type_id
-            .map(|type_id| type_environment.substitute_type_id(type_id, mapping));
-    }
+    concrete.return_contract = concrete
+        .return_contract
+        .map_type_ids(|type_id| type_environment.substitute_type_id(type_id, mapping));
     concrete
 }
 

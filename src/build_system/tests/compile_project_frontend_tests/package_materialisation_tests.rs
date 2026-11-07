@@ -21,7 +21,8 @@ use crate::compiler_frontend::hir::reachability::{
 };
 use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::public_interface::{
-    PublicDeclarationSemantics, PublicFunctionCategory, PublicSemanticInterface,
+    PublicCallableReturnContract, PublicDeclarationSemantics, PublicFunctionCategory,
+    PublicSemanticInterface,
 };
 use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginDeclarationId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -2408,9 +2409,12 @@ export:
         product.category,
         PublicFunctionCategory::GenericTemplate(_),
     ));
+    let PublicCallableReturnContract::Returns { error, .. } = &product.return_contract else {
+        panic!("product must not project a Never return contract");
+    };
     assert_eq!(
-        product.error_return,
-        Some(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error)),
+        error,
+        &Some(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error)),
         "product must keep its public Error! slot",
     );
 

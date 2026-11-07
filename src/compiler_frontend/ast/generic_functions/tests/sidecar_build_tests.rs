@@ -179,21 +179,39 @@ fn requester_template_contract_slots_use_nonidentity_generated_domain_remap() {
                 .expect("generated parameter should have a local type handle")
         })
         .collect::<Vec<_>>();
-    assert_eq!(contract.returns, slots);
-    assert_eq!(contract.error_return, Some(slots[1]));
+    assert_eq!(
+        contract.return_contract.expect_ordinary().success(),
+        slots.as_slice()
+    );
+    assert_eq!(
+        contract.return_contract.expect_ordinary().error(),
+        Some(slots[1])
+    );
     for (generated_slot, requester_slot) in contract
-        .returns
+        .return_contract
+        .expect_ordinary()
+        .success()
         .iter()
-        .zip(requester_template.signature.success_return_type_ids())
+        .zip(
+            requester_template
+                .signature
+                .return_contract
+                .expect_ordinary()
+                .success(),
+        )
     {
         assert_ne!(
-            *generated_slot, requester_slot,
+            *generated_slot, *requester_slot,
             "fixture must remap every success slot"
         );
     }
     assert_ne!(
-        contract.error_return,
-        requester_template.signature.error_return_type_id(),
+        contract.return_contract.expect_ordinary().error(),
+        requester_template
+            .signature
+            .return_contract
+            .expect_ordinary()
+            .error(),
         "fixture must remap the error slot",
     );
     let default = installed.signature.parameters[2]

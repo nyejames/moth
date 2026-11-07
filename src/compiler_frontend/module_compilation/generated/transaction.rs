@@ -124,6 +124,14 @@ impl<'a> GeneratedFunctionTransaction<'a> {
         request_ids
     }
 
+    /// The request registered here for one identity, absent when it was already published.
+    pub(crate) fn request_id(
+        &self,
+        identity: &GeneratedFunctionIdentity,
+    ) -> Option<GeneratedRequestId> {
+        self.ids_by_identity.get(identity).copied()
+    }
+
     pub(crate) fn identity(&self, request_id: GeneratedRequestId) -> &GeneratedFunctionIdentity {
         self.records
             .get(request_id.index())

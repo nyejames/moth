@@ -76,6 +76,7 @@ impl RouteArgumentContext {
 
 /// Policy that controls how the expression parser handles trailing tokens
 /// such as closing delimiters and recovery boundaries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ExpressionTrailingPolicy {
     pub(crate) consume_closing_parenthesis: bool,
     pub(crate) skip_trailing_newlines: bool,

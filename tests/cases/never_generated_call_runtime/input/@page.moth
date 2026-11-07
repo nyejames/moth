@@ -1,0 +1,17 @@
+-- A local Never function ending in a compile-time false assertion.
+halt || -> !:
+    assert(false, "halted")
+;
+
+-- A generic Never template infers its argument type from the concrete call argument.
+abort type A |value A| -> !:
+    halt()
+;
+
+-- A concrete request whose body is a standalone generic Never call.
+generated |value I32| -> !:
+    abort(value)
+;
+
+-- The compiler-owned entry executes the generated concrete function.
+generated(1)

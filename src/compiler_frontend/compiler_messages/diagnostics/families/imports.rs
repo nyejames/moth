@@ -60,6 +60,7 @@ unit_code! {
         PathContainsPackageSeparator = 4,
         MissingExportKeyword = 5,
         OrphanedAnnotation = 6,
+        MixedNeverReturnContract = 7,
     }
 }
 
@@ -168,6 +169,7 @@ impl InvalidExternalModuleCode {
         match reason {
             InvalidExternalModuleReason::ReceiverMethod { .. } => Self::ReceiverMethod,
             InvalidExternalModuleReason::ParserDiagnostic { .. } => Self::ParserDiagnostic,
+            InvalidExternalModuleReason::MixedNeverReturnContract => Self::MixedNeverReturnContract,
             InvalidExternalModuleReason::NonUtf8Source { .. } => Self::NonUtf8Source,
             InvalidExternalModuleReason::PathContainsPackageSeparator => {
                 Self::PathContainsPackageSeparator
@@ -193,6 +195,11 @@ impl InvalidExternalModuleCode {
                     strings: vec![*parser_detail],
                 }
             }
+            InvalidExternalModuleReason::MixedNeverReturnContract => InvalidExternalModuleColumns {
+                code: Self::MixedNeverReturnContract,
+                binding: None,
+                strings: Vec::new(),
+            },
             InvalidExternalModuleReason::NonUtf8Source { utf8_detail } => {
                 InvalidExternalModuleColumns {
                     code: Self::NonUtf8Source,
@@ -254,6 +261,8 @@ impl InvalidExternalModuleCode {
                         parser_detail: *parser_detail,
                     })
             }
+            Self::MixedNeverReturnContract => (binding.is_none() && strings.is_empty())
+                .then_some(InvalidExternalModuleReason::MixedNeverReturnContract),
             Self::NonUtf8Source => {
                 let [utf8_detail] = strings else {
                     return None;

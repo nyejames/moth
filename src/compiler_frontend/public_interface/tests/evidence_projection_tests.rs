@@ -16,21 +16,21 @@
 //! beside the module rather than an end-to-end case.
 
 use super::super::{
-    EvidenceProjectionContext, PublicDeclarationRecord, PublicDeclarationSemantics,
-    PublicEvidenceOwnership, PublicEvidenceRecord, PublicReceiverMethodCategory,
-    PublicReceiverMethodSemantics, PublicStructSemantics, TransientNominalOriginResolver,
-    project_reusable_evidence,
+    EvidenceProjectionContext, PublicCallableReturnContract, PublicDeclarationRecord,
+    PublicDeclarationSemantics, PublicEvidenceOwnership, PublicEvidenceRecord,
+    PublicReceiverMethodCategory, PublicReceiverMethodSemantics, PublicStructSemantics,
+    TransientNominalOriginResolver, project_reusable_evidence,
 };
 use super::test_support::{
     empty_fields, module_origin, path, register_struct, struct_origin, this_type, trait_origin,
 };
 
-use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalCoreTraitIdentity, CanonicalEvidenceIdentity, CanonicalTraitIdentity,
     CanonicalTypeIdentity, CanonicalTypeProjectionContext,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::datatypes::FunctionReturnContract;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -43,8 +43,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::definitions::{
-    ResolvedTraitDefinition, ResolvedTraitRequirement, ResolvedTraitReturn,
-    TraitReceiverRequirement, TraitVisibility,
+    ResolvedTraitDefinition, ResolvedTraitRequirement, TraitReceiverRequirement, TraitVisibility,
 };
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
@@ -74,11 +73,7 @@ fn trait_definition(
                 name: string_table.intern(req_name),
                 receiver: TraitReceiverRequirement::Immutable { this_type },
                 parameters: vec![],
-                returns: vec![ResolvedTraitReturn {
-                    type_id: *return_type,
-                    channel: ReturnChannel::Success,
-                    span: None,
-                }],
+                return_contract: FunctionReturnContract::from_slots([*return_type], None),
                 span: None,
             },
         )
@@ -192,8 +187,10 @@ fn declarations_with_receiver_methods(
                 method_origin,
                 category: PublicReceiverMethodCategory::ConcreteLocal,
                 parameters: vec![],
-                returns: vec![],
-                error_return: None,
+                return_contract: PublicCallableReturnContract::Returns {
+                    success: vec![],
+                    error: None,
+                },
             });
         by_receiver_name.insert(receiver_path, receiver_name);
     }
@@ -319,8 +316,10 @@ fn project_label_display_evidence_with_method_origins(
             method_origin,
             category: PublicReceiverMethodCategory::ConcreteLocal,
             parameters: vec![],
-            returns: vec![],
-            error_return: None,
+            return_contract: PublicCallableReturnContract::Returns {
+                success: vec![],
+                error: None,
+            },
         })
         .collect();
     let declarations = vec![PublicDeclarationRecord {
@@ -1163,11 +1162,7 @@ fn evidence_rejects_core_trait_without_classifier() {
             name: string_table.intern("display"),
             receiver: TraitReceiverRequirement::Immutable { this_type: this_id },
             parameters: vec![],
-            returns: vec![ResolvedTraitReturn {
-                type_id: env.builtins().string,
-                channel: ReturnChannel::Success,
-                span: None,
-            }],
+            return_contract: FunctionReturnContract::from_slots([env.builtins().string], None),
             span: None,
         }],
         declaration_span: None,

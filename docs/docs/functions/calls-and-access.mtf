@@ -34,6 +34,47 @@ Exported signatures stay closed and must discharge failure or declare a
 compatible error slot. See @#returns-and-multiple-values (Returns and multiple
 values) and @../progress (Progress) for the contract and current support.
 
+### Never calls
+
+A call whose declared contract is `-> !` is valid only as a standalone
+statement:
+
+[codeblock, $code("moth"):
+    fatal |message String| -> !:
+        assert(false, message)
+    ;
+
+    fatal("unreachable")
+]
+
+It may appear wherever an ordinary executable statement is legal, including
+branches, loops, lexical scopes and root runtime work.
+
+It is invalid in every value-consuming position:
+
+[codeblock, $code("moth"):
+    -- Invalid: Never call used as a value
+    value String = fatal("x")
+    return fatal("x")
+    consume(fatal("x"))
+    if fatal("x"):
+        io.line("unreachable")
+    ;
+]
+
+The same restriction applies inside arguments, operators, constructors,
+casts, templates, collections, maps, conditions and assertion arguments.
+
+A Never call cannot be followed by postfix `!`, postfix `?`, `catch` or
+member continuation. It has no success, error or optional value to handle.
+
+A standalone Never call may complete one branch of a block-form value
+producer because that branch diverges rather than producing a value. The
+inline `then`/`else` form remains invalid because it places the call in a
+value slot. See @../branching/#value-producing-if (Value-producing if).
+
+Never calls use the ordinary argument grammar.
+
 ### Shared MON syntax
 
 @../language-overview/#mon-syntax (MON syntax) names the shared parenthesised

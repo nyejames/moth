@@ -163,6 +163,12 @@ pub(crate) fn invalid_call_shape_message(
                 string_table,
             )
         }
+        InvalidCallShapeReason::NeverCallUsedAsValue => {
+            format!("{prefix} never returns and cannot be used as a value. Call it as a standalone terminating statement instead.")
+        }
+        InvalidCallShapeReason::NeverCallHandled => {
+            format!("{prefix} never returns, so it has no success, error, optional or receiver value to handle. Call it as a standalone terminating statement instead.")
+        }
     }
 }
 
@@ -218,7 +224,14 @@ fn immutable_place_mutable_access_message(
     }
 }
 
-pub(crate) fn invalid_return_shape_message(reason: InvalidReturnShapeReason) -> String {
+pub(crate) fn invalid_return_shape_message(
+    reason: InvalidReturnShapeReason,
+    function_name: Option<StringId>,
+    string_table: &dyn StringTableResolver,
+) -> String {
+    let name_text = function_name
+        .map(|name| format!("`{}`", string_table.resolve(name)))
+        .unwrap_or_else(|| "This function".to_owned());
     match reason {
         InvalidReturnShapeReason::BareReturnWithExpectedValues { expected_count } => {
             format!("Bare 'return' in a function that expects {expected_count} return value(s).")
@@ -245,6 +258,18 @@ pub(crate) fn invalid_return_shape_message(reason: InvalidReturnShapeReason) -> 
         InvalidReturnShapeReason::FunctionMayFallThrough => {
             "This function can fall through without returning on every path. Add a return, a terminal else branch, or an `assert(false)` guard to ensure all reachable paths produce a value.".to_string()
         }
+        InvalidReturnShapeReason::NeverBodyMayCompleteNormally => format!(
+            "{name_text} is declared `-> !`, but its active body can complete normally. Every reachable path must diverge; remove the falling-through path or the loop `break` that exposes the post-loop continuation."
+        ),
+        InvalidReturnShapeReason::NeverBodyReturnsToCaller => format!(
+            "{name_text} is declared `-> !`, but a reachable active path returns to its caller. A `-> !` body cannot use `return`, `return!` or a hidden return in a value block; remove the return or make every path around it diverge."
+        ),
+        InvalidReturnShapeReason::UnannotatedFunctionAlwaysDiverges => format!(
+            "{name_text} cannot complete normally. Declare `-> !` when it is intended never to return, or declare the ordinary return type it is expected to produce when this implementation is temporary."
+        ),
+        InvalidReturnShapeReason::NeverProofDependsOnCycle => format!(
+            "{name_text} cannot use a recursive `-> !` group as its own divergence proof. Make one callable in the cycle diverge independently before relying on another member's contract."
+        ),
     }
 }
 
@@ -253,13 +278,13 @@ pub(crate) fn invalid_return_shape_message(reason: InvalidReturnShapeReason) -> 
 pub(crate) fn render_invalid_return_shape(
     _diagnostic: &DiagnosticView<'_>,
     view: &InvalidReturnShapeView,
-    _context: DiagnosticRenderContext<'_>,
+    context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
     let reason = view
         .reason
         .to_reason(view.expected_count, view.provided_count);
     RenderedPayload {
-        message: invalid_return_shape_message(reason),
+        message: invalid_return_shape_message(reason, view.function_name, context.string_table),
         guidance: Vec::new(),
     }
 }

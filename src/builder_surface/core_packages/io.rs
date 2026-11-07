@@ -10,7 +10,7 @@ use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalAccessKind, ExternalFunctionDef, ExternalFunctionId,
     ExternalFunctionLowerings, ExternalJsLowering, ExternalPackageRegistry, ExternalReturnAlias,
     ExternalReturnSlot, ExternalSignatureType, ExternalSymbolPath, ExternalTypeDef,
-    IO_INPUT_EXTERNAL_TYPE_ID, external_success_returns,
+    IO_INPUT_EXTERNAL_TYPE_ID, external_returns, external_success_returns,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
@@ -242,8 +242,10 @@ fn register_io_console_function(
                 access_kind: ExternalAccessKind::Shared,
             },
         ],
-        returns: external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
-        error_return_type: None,
+        return_contract: external_returns(
+            external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
+            None,
+        ),
         const_eval: None,
         lowerings: ExternalFunctionLowerings {
             js: Some(ExternalJsLowering::RuntimeFunction(
@@ -292,8 +294,7 @@ fn register_io_input_function(
                 }
             })
             .collect(),
-        returns: spec.returns,
-        error_return_type: spec.error_return_type,
+        return_contract: external_returns(spec.returns, spec.error_return_type),
         const_eval: None,
         lowerings: ExternalFunctionLowerings {
             js: Some(ExternalJsLowering::RuntimeFunction(

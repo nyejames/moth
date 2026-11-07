@@ -74,7 +74,7 @@ pub(crate) fn invalid_control_flow_statement_message(
             "Value-producing 'if' requires an 'else' branch.".to_string()
         }
         InvalidControlFlowStatementReason::ValueIfBranchFallsThrough => {
-            "Every reachable branch of a value-producing 'if' must produce a value or terminate.".to_string()
+            "Every reachable value-producing branch must produce a value or leave the branch.".to_string()
         }
         InvalidControlFlowStatementReason::ValueIfNoProducingPath => {
             "Value-producing 'if' has no reachable path that produces a value.".to_string()
@@ -165,6 +165,14 @@ fn invalid_fallible_handling_message(
             message.push_str(
                 " Use an assertion only if unrecoverable failure is an explicit invariant choice.",
             );
+            append_elided_builtin_failure_hops(
+                &mut message,
+                count.expect("builtin failure reason stores its elided-hop count"),
+            );
+            message
+        }
+        InvalidFallibleHandlingCode::UnhandledBuiltinFailureInNeverFunction => {
+            let mut message = "Implicit built-in failure cannot escape a `-> !` function, which has no error channel. Recover locally with `catch`.".to_owned();
             append_elided_builtin_failure_hops(
                 &mut message,
                 count.expect("builtin failure reason stores its elided-hop count"),

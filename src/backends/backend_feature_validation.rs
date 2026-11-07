@@ -378,6 +378,12 @@ fn validate_wasm_cross_module_calls(
                     span,
                     ..
                 } => Some(*span),
+                // A Never call is an ordinary call edge for target selection. The terminator's
+                // authored span keeps the diagnostic at the call site.
+                HirTerminator::NeverCall {
+                    target: crate::compiler_frontend::external_packages::CallTarget::CrossModule(_),
+                    ..
+                } => Some(hir.side_table.terminator_span(block.id).copied()),
                 _ => None,
             }
         })
@@ -861,7 +867,11 @@ fn validate_wasm_fallible_control_flow(
     }
     if authored_occurrence.is_none() {
         for function in &hir.functions {
-            if !selection.contains_function(function.id) || function.error_return.is_none() {
+            let function_is_fallible = function
+                .return_contract
+                .ordinary()
+                .is_some_and(|returns| returns.is_fallible());
+            if !selection.contains_function(function.id) || !function_is_fallible {
                 continue;
             }
             let occurrence = ReachableTypeOccurrence {
@@ -1155,6 +1165,18 @@ pub fn validate_hir_linked_function_targets(
                 );
             }
         }
+        // A Never call selects its target exactly like an ordinary call, so a linked target has
+        // no lowerable body here either. The terminator span keeps the diagnostic authored.
+        if let HirTerminator::NeverCall {
+            target: CallTarget::ModulePrivate(_) | CallTarget::Generated(_),
+            ..
+        } = &block.terminator
+        {
+            search.record(
+                UnsupportedBackendFeatureReason::LinkedFunctionTargets,
+                input.hir.side_table.terminator_span(block.id).copied(),
+            );
+        }
     }
 
     let Some(occurrence) = search.preferred() else {
@@ -1273,6 +1295,11 @@ fn search_terminator(
         | HirTerminator::Continue { .. }
         | HirTerminator::Uninitialized
         | HirTerminator::RuntimeFailure { .. } => {}
+        HirTerminator::NeverCall { args, .. } => {
+            for value in expressions.values(*args) {
+                search_expression(hir, type_environment, *value, search);
+            }
+        }
         HirTerminator::If { condition, .. } => {
             search_expression(hir, type_environment, *condition, search);
         }
@@ -1601,14 +1628,16 @@ where
     let mut authored = None;
 
     for function in &module.functions {
-        if !selection.contains_function(function.id)
-            || !function
-                .returns
-                .iter()
-                .copied()
-                .chain(function.error_return)
-                .any(&mut *search.is_unsupported)
-        {
+        let has_unsupported_return_type =
+            function.return_contract.ordinary().is_some_and(|returns| {
+                returns
+                    .success()
+                    .iter()
+                    .copied()
+                    .chain(returns.error())
+                    .any(&mut *search.is_unsupported)
+            });
+        if !selection.contains_function(function.id) || !has_unsupported_return_type {
             continue;
         }
 
@@ -1831,6 +1860,11 @@ where
         HirTerminator::AssertFailure { message, .. } => {
             first_unsupported_expression_occurrence(*message, module, search)
         }
+        HirTerminator::NeverCall { args, .. } => module
+            .expressions
+            .values(*args)
+            .iter()
+            .find_map(|value| first_unsupported_expression_occurrence(*value, module, search)),
         HirTerminator::Jump { .. }
         | HirTerminator::Break { .. }
         | HirTerminator::Continue { .. }
@@ -2025,11 +2059,13 @@ impl<'environment> BackendTypeFacts<'environment> {
                 for parameter in function.parameters.iter() {
                     visit.merge(self.visit(parameter.type_id));
                 }
-                for returned in function.returns.iter() {
-                    visit.merge(self.visit(*returned));
-                }
-                if let Some(error_return) = function.error_return {
-                    visit.merge(self.visit(error_return));
+                if let Some(returns) = function.return_contract.ordinary() {
+                    for returned in returns.success() {
+                        visit.merge(self.visit(*returned));
+                    }
+                    if let Some(error_return) = returns.error() {
+                        visit.merge(self.visit(error_return));
+                    }
                 }
             }
             TypeDefinition::GenericInstance(instance) => {

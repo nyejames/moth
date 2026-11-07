@@ -3,7 +3,7 @@
 use super::ResolvedFunctionSignature;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ParameterContract, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, ParameterContract, UnresolvedFunctionReturnContract,
     UnresolvedFunctionSignature,
 };
 use crate::compiler_frontend::ast::type_resolution::{
@@ -18,11 +18,13 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidReceiverDeclarationReason, InvalidRouteOutputReason, InvalidThisUsageReason,
     InvalidTypeAnnotationReason, TypeAnnotationContext,
 };
+use crate::compiler_frontend::datatypes::FunctionReturnContract;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::ids::{FunctionTypeKey, GenericParameterListId, TypeId};
+use crate::compiler_frontend::declaration_syntax::signature_members::ReturnChannelSyntax;
 use crate::compiler_frontend::declaration_syntax::type_syntax::ParsedParameterContractSyntax;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -38,22 +40,9 @@ pub(crate) fn intern_resolved_function_signature(
         .iter()
         .map(|parameter| parameter.type_id)
         .collect();
-    let mut returns = Vec::with_capacity(signature.success_return_slot_count());
-    let mut error_return = None;
-    for return_slot in &signature.returns {
-        // Signature resolution populates every slot before the callable contract is interned.
-        let type_id = return_slot
-            .type_id
-            .expect("resolved callable return slot has no type ID");
-        match return_slot.channel {
-            ReturnChannel::Success => returns.push(type_id),
-            ReturnChannel::Error => error_return = Some(type_id),
-        }
-    }
     type_environment.intern_function(FunctionTypeKey {
         parameters,
-        returns: returns.into_boxed_slice(),
-        error_return,
+        return_contract: signature.return_contract.clone(),
     })
 }
 
@@ -205,54 +194,64 @@ pub(crate) fn resolve_function_signature(
     //  Resolve returns
     // -----------------
 
-    let mut resolved_returns = Vec::with_capacity(signature.returns.len());
-    for return_slot in &signature.returns {
-        let type_id = if let Some(type_syntax) = &return_slot.type_syntax {
-            if let Some(type_id) = reusable_type_id_for_parsed_ref(
-                type_syntax,
-                return_slot.type_id,
-                type_resolution_context,
-            ) {
-                Some(type_id)
-            } else {
-                resolve_parsed_type_annotation(
-                    type_syntax,
-                    function_span,
-                    type_resolution_context,
-                    string_table,
-                    scope_context,
-                )?
-                .type_id
-            }
-        } else {
-            return_slot.type_id
-        }
-        .filter(|type_id| {
-            *type_id != builtin_type_ids::NONE
-                && type_resolution_context
-                    .type_environment
-                    .get(*type_id)
-                    .is_some()
-        })
-        .ok_or_else(|| {
-            names_declarations::invalid_type_annotation(
-                TypeAnnotationContext::SignatureReturn,
-                InvalidTypeAnnotationReason::NoneNotAllowed,
-                function_span,
-            )
-        })?;
+    let return_contract = match &signature.return_contract {
+        UnresolvedFunctionReturnContract::Returns(return_slots) => {
+            let mut resolved_success = Vec::with_capacity(return_slots.len());
+            let mut resolved_error = None;
+            for return_slot in return_slots {
+                let type_id = if let Some(type_syntax) = &return_slot.type_syntax {
+                    if let Some(type_id) = reusable_type_id_for_parsed_ref(
+                        type_syntax,
+                        return_slot.type_id,
+                        type_resolution_context,
+                    ) {
+                        Some(type_id)
+                    } else {
+                        resolve_parsed_type_annotation(
+                            type_syntax,
+                            function_span,
+                            type_resolution_context,
+                            string_table,
+                            scope_context,
+                        )?
+                        .type_id
+                    }
+                } else {
+                    return_slot.type_id
+                }
+                .filter(|type_id| {
+                    *type_id != builtin_type_ids::NONE
+                        && type_resolution_context
+                            .type_environment
+                            .get(*type_id)
+                            .is_some()
+                })
+                .ok_or_else(|| {
+                    names_declarations::invalid_type_annotation(
+                        TypeAnnotationContext::SignatureReturn,
+                        InvalidTypeAnnotationReason::NoneNotAllowed,
+                        function_span,
+                    )
+                })?;
 
-        resolved_returns.push(ReturnSlot {
-            type_id: Some(type_id),
-            channel: return_slot.channel,
-        });
-    }
+                match return_slot.channel {
+                    ReturnChannelSyntax::Success => resolved_success.push(type_id),
+                    ReturnChannelSyntax::Error => resolved_error = Some(type_id),
+                }
+            }
+
+            FunctionReturnContract::from_slots(resolved_success, resolved_error)
+        }
+        // Never is a contract, not a value type: resolution interns no `TypeId` and resolves no
+        // authored return annotation.
+        UnresolvedFunctionReturnContract::Never => FunctionReturnContract::Never,
+    };
 
     Ok(ResolvedFunctionSignature {
         receiver,
         signature: FunctionSignature {
             parameters: resolved_parameters,
-            returns: resolved_returns,
+            return_contract,
         },
     })
 }

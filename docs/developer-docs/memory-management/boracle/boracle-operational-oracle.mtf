@@ -447,6 +447,12 @@ Terminator events carry these control-flow kinds:
         [: `AssertFailure`]
         [: the execution ends as an explicit failure exit]
     ]
+
+    [td:
+        [: `NeverCall`]
+        [: the call's argument and effect events precede it; the execution ends as a terminal
+        exit with no successor]
+    ]
 ]
 
 The builder projects HIR `Invoke` into distinct outcome edge blocks, even when both HIR successors

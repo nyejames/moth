@@ -13,9 +13,10 @@
 //! `ModuleSemanticResult`, `Module`, or a cross-module interface.
 
 use crate::compiler_frontend::ast::module_ast::environment::resolved_public_type_roots::ResolvedPublicTypeRootTable;
-use crate::compiler_frontend::ast::statements::functions::{ParameterContract, ReturnChannel};
+use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::datatypes::FunctionReturnContract;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::source::SourceId;
@@ -60,13 +61,6 @@ pub(crate) struct ResolvedTraitParameterFact {
     pub(crate) contract: ParameterContract,
 }
 
-/// One requirement return slot, location-free.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ResolvedTraitReturnFact {
-    pub(crate) type_id: TypeId,
-    pub(crate) channel: ReturnChannel,
-}
-
 /// One resolved trait method requirement, location-free and transient.
 ///
 /// WHAT: carries the owned requirement name (`StringId`), the receiver access plus embedded
@@ -79,7 +73,7 @@ pub(crate) struct ResolvedTraitRequirementFact {
     pub(crate) name: StringId,
     pub(crate) receiver: ResolvedTraitReceiverFact,
     pub(crate) parameters: Vec<ResolvedTraitParameterFact>,
-    pub(crate) returns: Vec<ResolvedTraitReturnFact>,
+    pub(crate) return_contract: FunctionReturnContract,
 }
 
 /// One directly-defined active-root public trait root, transient and donor-local.
@@ -296,19 +290,10 @@ fn build_trait_requirement_fact(
         })
         .collect();
 
-    let returns = requirement
-        .returns
-        .iter()
-        .map(|return_slot| ResolvedTraitReturnFact {
-            type_id: return_slot.type_id,
-            channel: return_slot.channel,
-        })
-        .collect();
-
     ResolvedTraitRequirementFact {
         name: requirement.name,
         receiver: ResolvedTraitReceiverFact { access, this_type },
         parameters,
-        returns,
+        return_contract: requirement.return_contract.clone(),
     }
 }

@@ -37,7 +37,8 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
-    FunctionReturnSyntax, FunctionSignatureSyntax, ReturnSlotSyntax, SignatureMemberSyntax,
+    FunctionReturnContractSyntax, FunctionReturnSyntax, FunctionSignatureSyntax, ReturnSlotSyntax,
+    SignatureMemberSyntax,
 };
 use crate::compiler_frontend::declaration_syntax::type_syntax::ParsedParameterContractSyntax;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
@@ -46,8 +47,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::definitions::{
-    ResolvedTraitDefinition, ResolvedTraitRequirement, ResolvedTraitReturn,
-    TraitReceiverRequirement, TraitVisibility,
+    ResolvedTraitDefinition, ResolvedTraitRequirement, TraitReceiverRequirement, TraitVisibility,
 };
 use crate::compiler_frontend::traits::environment::{
     CoreTraitKind, TraitEnvironment, requirement_parameter_from_type, trait_this_name,
@@ -498,30 +498,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             ));
         }
 
-        let mut returns = Vec::with_capacity(resolved_signature.signature.returns.len());
-        for return_slot in &resolved_signature.signature.returns {
-            let Some(type_id) = return_slot.type_id else {
-                let diagnostic = generics_traits_api::unsupported_trait_feature(
-                    declaration.name,
-                    string_table.intern("unresolved requirement return"),
-                    requirement_span,
-                );
-                return Err(diagnostic.into());
-            };
-
-            returns.push(ResolvedTraitReturn {
-                type_id,
-                channel: return_slot.channel,
-                span: requirement_span,
-            });
-        }
-
         Ok(ResolvedTraitRequirement {
             id: requirement_id,
             name: requirement.name,
             receiver,
             parameters,
-            returns,
+            return_contract: resolved_signature.signature.return_contract.clone(),
             span: requirement_span,
         })
     }
@@ -795,14 +777,25 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
             }
 
-            for return_slot in &requirement.returns {
-                self.validate_public_trait_type(
-                    trait_name,
-                    return_slot.type_id,
-                    public_root_file,
-                    return_slot.span,
-                    trait_environment,
-                )?;
+            if let Some(returns) = requirement.return_contract.ordinary() {
+                for type_id in returns.success() {
+                    self.validate_public_trait_type(
+                        trait_name,
+                        *type_id,
+                        public_root_file,
+                        requirement.span,
+                        trait_environment,
+                    )?;
+                }
+                if let Some(error_type_id) = returns.error() {
+                    self.validate_public_trait_type(
+                        trait_name,
+                        error_type_id,
+                        public_root_file,
+                        requirement.span,
+                        trait_environment,
+                    )?;
+                }
             }
         }
 
@@ -868,11 +861,17 @@ fn signature_with_trait_this_as_parameter(
             .iter()
             .map(|parameter| signature_member_with_trait_this(parameter, this_name))
             .collect(),
-        returns: signature
-            .returns
-            .iter()
-            .map(|return_slot| return_slot_with_trait_this(return_slot, this_name))
-            .collect(),
+        return_contract: match &signature.return_contract {
+            FunctionReturnContractSyntax::Returns(return_slots) => {
+                FunctionReturnContractSyntax::Returns(
+                    return_slots
+                        .iter()
+                        .map(|return_slot| return_slot_with_trait_this(return_slot, this_name))
+                        .collect(),
+                )
+            }
+            FunctionReturnContractSyntax::Never => FunctionReturnContractSyntax::Never,
+        },
     }
 }
 

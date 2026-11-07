@@ -127,6 +127,11 @@ pub(super) fn parse_external_namespace_function_member(
                 path_fork,
             )?;
         }
+        // A Never external occupies one operand position until statement placement accepts it
+        // or a value consumer rejects it.
+        ParsedFunctionCallExpression::Terminating(never_call) => {
+            expression.push(ExpressionRpnItem::NeverCall(never_call));
+        }
         // A call whose numeric-dependent arguments were retained takes its authored operand
         // position as one pending item; the enclosing fragment either completes where it was
         // parsed or defers to the body root with this item in place, so the call resumes exactly

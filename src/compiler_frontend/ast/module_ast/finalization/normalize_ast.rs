@@ -459,6 +459,16 @@ fn normalize_ast_node_templates(
 
         NodeKind::ReturnError(value) => normalize_expression_templates(value, context),
 
+        NodeKind::NeverCall(call) => {
+            if let Some(receiver) = &mut call.receiver {
+                normalize_expression_templates(receiver, context)?;
+            }
+            for argument in &mut call.arguments {
+                normalize_expression_templates(&mut argument.value, context)?;
+            }
+            Ok(())
+        }
+
         // Runtime fragment push — normalize the template expression it carries.
         NodeKind::PushStartRuntimeFragment(expression) => {
             normalize_expression_templates(expression, context)

@@ -34,6 +34,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::external_packages::{
     ConstEvalLeafType, ConstEvalSlotType, ExternalFunctionId, ExternalPackageRegistry,
 };
@@ -85,7 +86,7 @@ fn entry_path(path_fork: &mut PathInternerFork, string_table: &mut StringTable) 
 fn no_returns() -> FunctionSignature {
     FunctionSignature {
         parameters: vec![],
-        returns: vec![],
+        return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots([], None)),
     }
 }
 
@@ -660,7 +661,10 @@ fn return_of_two_result_carrier_yields_constants_in_order() {
     );
     let pair_signature = FunctionSignature {
         parameters: vec![],
-        returns: fresh_success_returns(vec![i32_type, builtin_type_ids::BOOL]),
+        return_contract: FunctionReturnContract::Returns(fresh_success_returns(vec![
+            i32_type,
+            builtin_type_ids::BOOL,
+        ])),
     };
     let pair_body = vec![node(NodeKind::Return(vec![carrier]), None)];
     let pair_function = function_node(pair_path, pair_signature, pair_body, None);
@@ -1025,7 +1029,9 @@ fn folded_slot_types_survive_constant_storage_export_and_import() {
             .id();
         let imported_signature = FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![consumer_type]),
+            return_contract: FunctionReturnContract::Returns(fresh_success_returns(vec![
+                consumer_type,
+            ])),
         };
         let imported_body = vec![node(NodeKind::Return(vec![returned]), None)];
         let imported_function =

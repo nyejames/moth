@@ -54,6 +54,17 @@ pub enum HirTerminator {
         target: BlockId,
     },
 
+    /// Invoke a callable whose published contract is `Never`.
+    ///
+    /// WHAT: one semantic call with evaluated arguments and no result local or successor.
+    /// WHY: a declared Never call is a terminating operation, not an ordinary call with an empty
+    ///      result or a source-level failure. Backends may lower it to a call followed by
+    ///      unreachable machinery, but HIR records only the call.
+    NeverCall {
+        target: CallTarget,
+        args: HirValueRange,
+    },
+
     /// Return the function's ordered success slots, including an empty success result.
     Return(HirValueRange),
 

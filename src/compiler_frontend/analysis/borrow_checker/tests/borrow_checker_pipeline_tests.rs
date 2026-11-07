@@ -10,6 +10,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{AstExpression
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::module_compilation::artefact::{
     ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
 };
@@ -68,10 +69,7 @@ fn frontend_check_borrows_propagates_failures() {
         crate::compiler_frontend::source::LocalSpan::source_start(),
     );
 
-    let start_fn = entry_start_node(FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    }, vec![
+    let start_fn = entry_start_node(FunctionSignature { parameters: vec![], return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots([], None)),  }, vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
                 x,
@@ -193,7 +191,10 @@ fn successful_borrow_report_can_be_stored_on_module() {
     let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(

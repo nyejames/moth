@@ -13,7 +13,8 @@
 use super::{TypeDisplayCapacityError, TypeDisplayId};
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::display::{
-    ChoiceVariantShape, TypeDisplayShape, TypeDisplayView, display_view_type,
+    ChoiceVariantShape, TypeDisplayFunctionReturn, TypeDisplayShape, TypeDisplayView,
+    display_view_type,
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{
@@ -55,6 +56,8 @@ pub(super) enum DiagnosticTypeTag {
 /// - `Number`: `data_0` is the `Dec` scale.
 /// - `FixedScalar`: `data_0` is the scalar discriminant.
 /// - `Struct`: `data_0` is the path id. `flags` holds `CONST_RECORD_FLAG` for const records.
+/// - `Function`: `data_0` indexes the callable summary. `flags` holds `NEVER_RETURN_FLAG` for a
+///   Never return contract.
 /// - `Choice`, `Collection`, `Function`, `GenericInstance`: `data_0` indexes the matching summary.
 /// - `OrderedMap`, `OptionType`: `data_0` and `data_1` are the start and length of an argument range.
 /// - `External`: `data_0` is the raw external type id.
@@ -85,6 +88,9 @@ impl DiagnosticTypeRecord {
 
 /// Set in `flags` when a `Struct` record names a const record.
 pub(super) const CONST_RECORD_FLAG: u16 = 1;
+
+/// Set in `flags` when a `Function` record declares a whole Never return contract.
+pub(super) const NEVER_RETURN_FLAG: u16 = 1;
 
 /// A run of items in one arena, addressed by its start index and length.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -549,7 +555,13 @@ impl TypeDisplayView for TypeDisplaySnapshot {
             DiagnosticTypeTag::OrderedMap => TypeDisplayShape::OrderedMap,
             DiagnosticTypeTag::OptionType => TypeDisplayShape::OptionType,
             DiagnosticTypeTag::Function => TypeDisplayShape::Function {
-                error_return: self.callable(type_id).error_return,
+                return_contract: if (record.flags & NEVER_RETURN_FLAG) != 0 {
+                    TypeDisplayFunctionReturn::Never
+                } else {
+                    TypeDisplayFunctionReturn::Returns {
+                        error_return: self.callable(type_id).error_return,
+                    }
+                },
             },
             DiagnosticTypeTag::External => TypeDisplayShape::External(record.data_0),
             DiagnosticTypeTag::GenericParameter => TypeDisplayShape::GenericParameter {

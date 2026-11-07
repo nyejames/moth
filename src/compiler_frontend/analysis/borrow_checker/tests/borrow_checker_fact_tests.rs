@@ -15,14 +15,14 @@ use crate::compiler_frontend::ast::expressions::expression::{
     FallibleExpressionHandling, HandledFallibleHostFunctionCallInput,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionSignature, ReturnChannel, ReturnSlot,
-};
+use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
     SharedMutableConflictView, UseOfUninitializedLocalView,
 };
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
+use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAbiType, ExternalFunctionDef, ExternalFunctionLowerings, ExternalParameter,
     ExternalReturnSlot, ExternalSignatureType,
@@ -381,7 +381,10 @@ fn statement_terminator_and_value_facts_are_populated() {
     let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -566,10 +569,7 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
     let sink = symbol("sink", &mut path_fork, &mut string_table);
     let second_ref = symbol("second_ref", &mut path_fork, &mut string_table);
 
-    let start_fn = entry_start_node(FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    }, vec![
+    let start_fn = entry_start_node(FunctionSignature { parameters: vec![], return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots([], None)),  }, vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(data, i32_expression(&mut expression_builder, &mut const_values, 7, test_source_location(1), ValueMode::MutableOwned), &expression_builder)),
             test_source_location(1),
@@ -641,10 +641,7 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
     let target = symbol("target", &mut path_fork, &mut string_table);
     let sentinel = symbol("sentinel", &mut path_fork, &mut string_table);
 
-    let start_fn = entry_start_node(FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    }, vec![
+    let start_fn = entry_start_node(FunctionSignature { parameters: vec![], return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots([], None)),  }, vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(source, i32_expression(&mut expression_builder, &mut const_values, 7, test_source_location(10), ValueMode::MutableOwned), &expression_builder)),
             test_source_location(10),
@@ -2533,11 +2530,13 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                 access_kind:
                     crate::compiler_frontend::external_packages::ExternalAccessKind::Shared,
             }],
-            returns: vec![
-                ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
-                ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
-            ],
-            error_return_type: Some(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
+            return_contract: external_returns(
+                vec![
+                    ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
+                    ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
+                ],
+                Some(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
+            ),
             const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
@@ -2585,20 +2584,10 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                 false,
                 test_source_location(1),
             )],
-            returns: vec![
-                ReturnSlot {
-                    type_id: Some(builtin_type_ids::STRING),
-                    channel: ReturnChannel::Success,
-                },
-                ReturnSlot {
-                    type_id: Some(builtin_type_ids::STRING),
-                    channel: ReturnChannel::Success,
-                },
-                ReturnSlot {
-                    type_id: Some(builtin_type_ids::STRING),
-                    channel: ReturnChannel::Error,
-                },
-            ],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [builtin_type_ids::STRING, builtin_type_ids::STRING],
+                Some(builtin_type_ids::STRING),
+            )),
         },
         vec![node(
             NodeKind::Return(vec![external_call]),
@@ -2610,20 +2599,10 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
         caller_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                ReturnSlot {
-                    type_id: Some(builtin_type_ids::STRING),
-                    channel: ReturnChannel::Success,
-                },
-                ReturnSlot {
-                    type_id: Some(builtin_type_ids::STRING),
-                    channel: ReturnChannel::Success,
-                },
-                ReturnSlot {
-                    type_id: Some(builtin_type_ids::STRING),
-                    channel: ReturnChannel::Error,
-                },
-            ],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [builtin_type_ids::STRING, builtin_type_ids::STRING],
+                Some(builtin_type_ids::STRING),
+            )),
         },
         vec![
             node(
@@ -2731,7 +2710,10 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
     let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
     );
@@ -2953,6 +2935,7 @@ fn collect_reachable_blocks(
             }
             HirTerminator::Return(_)
             | HirTerminator::ReturnError(_)
+            | HirTerminator::NeverCall { .. }
             | HirTerminator::RuntimeFailure { .. }
             | HirTerminator::Uninitialized
             | HirTerminator::AssertFailure { .. } => {}
@@ -3049,6 +3032,11 @@ fn collect_terminator_values(
         }
         HirTerminator::ReturnError(value) => {
             collect_expression_values(expressions, *value, out);
+        }
+        HirTerminator::NeverCall { args, .. } => {
+            for value in expressions.values(*args) {
+                collect_expression_values(expressions, *value, out);
+            }
         }
         HirTerminator::AssertFailure { message, .. } => {
             collect_expression_values(expressions, *message, out);

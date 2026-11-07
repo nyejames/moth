@@ -206,18 +206,25 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             }
         }
 
-        for return_slot in &signature.returns {
-            let Some(type_id) = return_slot.type_id else {
-                continue;
-            };
-
-            self.validate_public_type_id(
-                exported_name,
-                type_id,
-                public_root_file,
-                return_span,
-                trait_environment,
-            )?;
+        if let Some(returns) = signature.return_contract.ordinary() {
+            for type_id in returns.success() {
+                self.validate_public_type_id(
+                    exported_name,
+                    *type_id,
+                    public_root_file,
+                    return_span,
+                    trait_environment,
+                )?;
+            }
+            if let Some(type_id) = returns.error() {
+                self.validate_public_type_id(
+                    exported_name,
+                    type_id,
+                    public_root_file,
+                    return_span,
+                    trait_environment,
+                )?;
+            }
         }
 
         Ok(())
@@ -293,20 +300,22 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         _trait_environment,
                         visited_types,
                     )
-                }) && definition.returns.iter().all(|return_type| {
-                    self.public_type_id_is_nameable(
-                        *return_type,
-                        public_root_file,
-                        _trait_environment,
-                        visited_types,
-                    )
-                }) && definition.error_return.is_none_or(|error_type| {
-                    self.public_type_id_is_nameable(
-                        error_type,
-                        public_root_file,
-                        _trait_environment,
-                        visited_types,
-                    )
+                }) && definition.return_contract.ordinary().is_none_or(|returns| {
+                    returns.success().iter().all(|return_type| {
+                        self.public_type_id_is_nameable(
+                            *return_type,
+                            public_root_file,
+                            _trait_environment,
+                            visited_types,
+                        )
+                    }) && returns.error().is_none_or(|error_type| {
+                        self.public_type_id_is_nameable(
+                            error_type,
+                            public_root_file,
+                            _trait_environment,
+                            visited_types,
+                        )
+                    })
                 })
             }
 

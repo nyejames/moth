@@ -3,6 +3,7 @@
 use crate::backends::wasm::hir_to_lir::context::WasmFunctionLoweringContext;
 use crate::backends::wasm::hir_to_lir::expr::{lower_concrete_string, lower_expression};
 use crate::backends::wasm::hir_to_lir::imports::ensure_host_import;
+use crate::backends::wasm::hir_to_lir::stmt::lower_call_callee;
 use crate::backends::wasm::lir::instructions::{WasmCalleeRef, WasmLirStmt, WasmLirTerminator};
 use crate::backends::wasm::runtime::imports::WasmHostFunction;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -63,6 +64,26 @@ pub(crate) fn lower_terminator(
             CompilerStage::BackendLowering,
             "Wasm Invoke reached lowering before backend feature validation"
         ),
+        HirTerminator::NeverCall { target, args } => {
+            // WHAT: lower the declared target and its evaluated arguments exactly like an
+            //       ordinary result-less call, then end this invocation.
+            // WHY: a `-> !` call has no success continuation. Arguments keep their ordinary
+            //      evaluation order and effects, and a returning implementation must not fall
+            //      through into code the frontend proved unreachable.
+            let values = context.module_context.hir_module.expressions.values(*args);
+            let mut lowered_args = Vec::with_capacity(values.len());
+            for value in values {
+                lowered_args.push(lower_expression(context, *value, statements)?.value);
+            }
+            let callee = lower_call_callee(context, target)?;
+            statements.push(WasmLirStmt::Call {
+                results: Vec::new(),
+                callee,
+                args: lowered_args,
+            });
+            // Unreachable: a returned foreign implementation still has no continuation.
+            Ok(WasmLirTerminator::Trap)
+        }
         HirTerminator::Uninitialized => crate::compiler_bug!(
             CompilerStage::BackendLowering,
             "Wasm lowering encountered Uninitialized terminator"

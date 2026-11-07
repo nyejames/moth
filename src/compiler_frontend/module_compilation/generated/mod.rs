@@ -14,6 +14,7 @@
 //! - [`requests`]: canonicalising a concrete request from requester AST facts
 //! - [`provider_materialisations`]: resolving the declaring template for one request
 //! - [`materialisation`]: materialising, lowering, borrow-checking and completing one request
+//! - [`never_proofs`]: the requester's Never proof union across its generated instances
 //! - [`convergence`]: the HIR-derived call model and monotone summary propagation
 //!
 //! # What this module does NOT own
@@ -28,6 +29,7 @@ pub(in crate::compiler_frontend::module_compilation) mod artefacts;
 pub(in crate::compiler_frontend::module_compilation) mod convergence;
 pub(in crate::compiler_frontend::module_compilation) mod known;
 pub(in crate::compiler_frontend::module_compilation) mod materialisation;
+pub(in crate::compiler_frontend::module_compilation) mod never_proofs;
 pub(in crate::compiler_frontend::module_compilation) mod provider_materialisations;
 pub(in crate::compiler_frontend::module_compilation) mod requests;
 pub(in crate::compiler_frontend::module_compilation) mod transaction;

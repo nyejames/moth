@@ -5,6 +5,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::public_interface::PublicCallableReturnContract;
 
 fn collect_semantic_type_origins(
     semantics: &PublicDeclarationSemantics,
@@ -15,12 +16,7 @@ fn collect_semantic_type_origins(
             for parameter in &function.parameters {
                 collect_parameter_type_origins(parameter, origins);
             }
-            for returned in &function.returns {
-                collect_canonical_type_origins(&returned.type_identity, origins);
-            }
-            if let Some(error) = &function.error_return {
-                collect_canonical_type_origins(error, origins);
-            }
+            collect_return_contract_type_origins(&function.return_contract, origins);
         }
         PublicDeclarationSemantics::Struct(structure) => {
             for field in &structure.fields {
@@ -63,10 +59,28 @@ fn collect_receiver_method_type_origins(
     for parameter in &method.parameters {
         collect_parameter_type_origins(parameter, origins);
     }
-    for returned in &method.returns {
+    collect_return_contract_type_origins(&method.return_contract, origins);
+}
+
+/// Collect every canonical type origin named by one public return contract.
+///
+/// WHAT: walks the ordinary success slots and error channel, and visits nothing for a declared
+///       Never contract, which names no type identity at all.
+/// WHY: both function and receiver-method projection need the same walk; matching the contract
+///      keeps Never explicit instead of reading it through an ordinary-slots accessor.
+fn collect_return_contract_type_origins(
+    contract: &PublicCallableReturnContract,
+    origins: &mut FxHashSet<OriginTypeId>,
+) {
+    let PublicCallableReturnContract::Returns { success, error } = contract else {
+        return;
+    };
+
+    for returned in success {
         collect_canonical_type_origins(&returned.type_identity, origins);
     }
-    if let Some(error) = &method.error_return {
+
+    if let Some(error) = error {
         collect_canonical_type_origins(error, origins);
     }
 }

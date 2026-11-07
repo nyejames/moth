@@ -1,0 +1,15 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0055"]
+message_contains = [
+    "`ping` cannot use a recursive `-> !` group as its own divergence proof",
+    "diverge independently",
+]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0055"
+reason = "invalid_return_shape.never_proof_depends_on_cycle"
+path = "input/@page.moth"
+line = 1
+column = 1

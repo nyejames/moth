@@ -575,6 +575,8 @@ pub enum InvalidExternalModuleReason {
     ParserDiagnostic {
         parser_detail: StringId,
     },
+    /// An external signature combines the whole Never contract with other return syntax.
+    MixedNeverReturnContract,
     NonUtf8Source {
         utf8_detail: StringId,
     },
@@ -1120,6 +1122,7 @@ pub enum InvalidFunctionSignatureReason {
     MultipleErrorReturnSlots,
     ErrorSlotNotLast,
     GenericWhereConstraintsUnsupported,
+    NeverCannotCombine { found: DiagnosticToken },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1295,6 +1298,9 @@ pub enum InvalidTraitConformanceReason {
     ReturnChannelMismatch {
         requirement_name: StringId,
         return_index: usize,
+    },
+    ReturnContractMismatch {
+        requirement_name: StringId,
     },
     InferredFailureInInfallibleCast {
         requirement_name: StringId,
@@ -1528,6 +1534,9 @@ pub enum InvalidFallibleHandlingReason {
     UnhandledBuiltinFailureInExportedFunction {
         witness: Box<BuiltinFailureWitness>,
     },
+    UnhandledBuiltinFailureInNeverFunction {
+        witness: Box<BuiltinFailureWitness>,
+    },
 }
 
 /// Boundary-inward evidence for one escaping built-in failure.
@@ -1575,6 +1584,10 @@ impl InvalidFallibleHandlingReason {
 
             InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { .. } => {
                 "This exported function has no error slot but implicit built-in failure may escape. Recover locally with catch or declare a final Error! return slot."
+            }
+
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInNeverFunction { .. } => {
+                "Implicit built-in failure cannot escape a `-> !` function. Recover locally with catch."
             }
 
             InvalidFallibleHandlingReason::CatchOutsideBoundary => {
@@ -1921,6 +1934,21 @@ pub enum InvalidCallShapeReason {
         parameter_index: usize,
         binding_name: Option<StringId>,
     },
+
+    /// A call whose contract is `-> !` appeared where a value is required.
+    ///
+    /// WHAT: names a Never call in a declaration, return, argument, condition, operator,
+    ///       constructor, collection, map, template, cast or assertion position.
+    /// WHY: a Never call has no success value, so every value context must report the same
+    /// targeted placement mistake instead of treating the call as an empty result.
+    NeverCallUsedAsValue,
+
+    /// A Never call was followed by postfix `!`, `?`, `catch` or member access.
+    ///
+    /// WHAT: names handling or continuation syntax authored after a call that never returns.
+    /// WHY: there is no success, error, optional or receiver value to handle, so the syntax has no
+    /// meaning and the call must stay a standalone terminating statement.
+    NeverCallHandled,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1943,6 +1971,27 @@ pub enum InvalidReturnShapeReason {
     MissingReturnBangValue,
 
     FunctionMayFallThrough,
+
+    /// A body declared `-> !` can complete normally on a reachable active path.
+    NeverBodyMayCompleteNormally,
+
+    /// A body declared `-> !` has a reachable active path that returns to its caller.
+    NeverBodyReturnsToCaller,
+
+    /// An unannotated function body diverges on every reachable active path.
+    ///
+    /// WHAT: the omitted return contract states an ordinary completion the body never reaches.
+    /// WHY: the author must choose the permanent `-> !` contract or the ordinary type this
+    ///      temporary implementation will produce, so the omission cannot silently become Never.
+    UnannotatedFunctionAlwaysDiverges,
+
+    /// A `-> !` proof depends on its own unvalidated Never-call group.
+    ///
+    /// WHAT: names a self-edge or strongly connected group whose divergence proof needs the
+    ///       contracts inside that same group.
+    /// WHY: accepting the cycle would validate each callable against an unproven peer. The source
+    ///      must make one member's divergence independent of the cycle before the group is valid.
+    NeverProofDependsOnCycle,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

@@ -1,21 +1,28 @@
-//! Value-production helper regression tests.
+//! Value-production consumer regression tests.
 //!
-//! WHAT: checks the all-path exit summary and reachable produced-value traversal
-//! that value `if`, match and catch share.
-//! WHY: mixed produce/terminate completeness and inferred result slots are hidden
-//! invariants that integration output cannot fully inspect.
+//! WHAT: checks the completeness policy that consumes the shared exit summary and the
+//! reachable produced-value traversal used by inference.
+//! WHY: mixed producing and exiting branches, nested-loop exit consumption, invalid fallthrough
+//! and inferred result slots are hidden invariants that integration output cannot fully inspect.
+//! Pure exit facts are covered by `control_flow_exits_tests.rs`.
 
-use super::types::BranchExitSummary;
-use super::{ProducedValues, analyze_branch_exits};
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness, NodeKind};
+use super::ProducedValues;
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
+    AstExpressionBuilder, ExprId, ExpressionOperationView,
+};
+use crate::compiler_frontend::ast::statements::control_flow_exits::{
+    ControlFlowExitSummary, analyze_control_flow_exits,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchArm, MatchPattern, PatternValue,
 };
-use crate::compiler_frontend::ast::statements::value_production::completeness::validate_closed_branch_pair;
+use crate::compiler_frontend::ast::statements::never_call::{NeverCall, NeverCallTarget};
+use crate::compiler_frontend::ast::statements::value_production::completeness::{
+    validate_closed_branch_pair, validate_value_match_completeness,
+};
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueIfBlock,
 };
@@ -30,9 +37,9 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, InvalidControlFlowStatementReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_body_by_name, node, test_if_branch_metadata,
-};
+use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::string_interning::StringId;
+use crate::compiler_frontend::tests::ast_fixture_support::{function_body_by_name, node};
 use crate::compiler_frontend::tests::parse_support::{
     assert_ast_diagnostic, ast_first_error_type_display, parse_single_file_ast,
     parse_single_file_ast_diagnostic,
@@ -78,10 +85,6 @@ impl TestExpressions {
             .expect("fixture bool")
             .id()
     }
-
-    fn view(&self, id: ExprId) -> ExpressionView<'_> {
-        self.builder.view(id).expect("fixture expression view")
-    }
 }
 
 fn then_value(fx: &mut TestExpressions, _line: i32) -> AstNode {
@@ -100,306 +103,48 @@ fn return_value(fx: &mut TestExpressions, line: i32) -> AstNode {
     node(NodeKind::Return(vec![value]), None)
 }
 
-fn expression_statement(fx: &mut TestExpressions, line: i32) -> AstNode {
-    let value = fx.int(i64::from(line));
-    node(NodeKind::ExpressionStatement(value), None)
-}
-
-fn assert_statement(fx: &mut TestExpressions, condition: bool, _line: i32) -> AstNode {
-    let condition = fx.bool(condition);
-    let message = fx.bool(true);
-    node(NodeKind::Assert { condition, message }, None)
-}
-
-fn bool_if(
-    fx: &mut TestExpressions,
-    then_body: Vec<AstNode>,
-    else_body: Option<Vec<AstNode>>,
-    _line: i32,
-) -> AstNode {
-    let branch_metadata = test_if_branch_metadata(else_body.is_some());
+fn true_loop(fx: &mut TestExpressions, body: Vec<AstNode>) -> AstNode {
     let condition = fx.bool(true);
+    node(NodeKind::WhileLoop(condition, body), None)
+}
+
+/// One standalone terminating call node; it owns no produced value.
+fn never_call_statement() -> AstNode {
     node(
-        NodeKind::If(condition, then_body, else_body, branch_metadata),
+        NodeKind::NeverCall(Box::new(NeverCall {
+            target: NeverCallTarget::Source(PathId::ROOT),
+            receiver: None,
+            arguments: Vec::new(),
+            name: StringId::from_index(0),
+            span: None,
+        })),
         None,
     )
 }
 
-fn literal_match(
-    fx: &mut TestExpressions,
-    arm_body: Vec<AstNode>,
-    default: Option<Vec<AstNode>>,
-    line: i32,
-) -> AstNode {
-    let scrutinee = fx.int(i64::from(line));
-    let pattern_expression = fx.int(i64::from(line));
+fn branch_exits(fx: &TestExpressions, node: &AstNode) -> ControlFlowExitSummary {
+    analyze_control_flow_exits(
+        std::slice::from_ref(node),
+        fx.builder.store(),
+        &fx.constants,
+    )
+}
+
+fn literal_arm(fx: &mut TestExpressions, body: Vec<AstNode>) -> MatchArm {
+    let pattern_expression = fx.int(1);
     let pattern = MatchPattern::Literal(
-        PatternValue::from_expression(fx.view(pattern_expression))
-            .expect("fixture literal pattern"),
+        PatternValue::from_expression(
+            fx.builder
+                .view(pattern_expression)
+                .expect("fixture pattern view"),
+        )
+        .expect("fixture literal pattern"),
     );
-    node(
-        NodeKind::Match {
-            scrutinee,
-            arms: vec![MatchArm {
-                pattern,
-                guard: None,
-                body: arm_body,
-            }],
-            default,
-            exhaustiveness: MatchExhaustiveness::HasDefault,
-        },
-        None,
-    )
-}
-
-#[test]
-fn branch_exits_report_direct_value_production() {
-    let mut fx = TestExpressions::new();
-    let first = expression_statement(&mut fx, 1);
-    let second = then_value(&mut fx, 2);
-    let third = expression_statement(&mut fx, 3);
-    let summary = analyze_branch_exits(&[first, second, third], &fx.builder, &fx.constants);
-
-    assert_eq!(
-        summary,
-        BranchExitSummary::PRODUCES,
-        "statements after a producing path must not change the summary"
-    );
-}
-
-#[test]
-fn branch_exits_report_direct_termination() {
-    let mut fx = TestExpressions::new();
-    let first = expression_statement(&mut fx, 1);
-    let second = return_value(&mut fx, 2);
-    let third = then_value(&mut fx, 3);
-    let summary = analyze_branch_exits(&[first, second, third], &fx.builder, &fx.constants);
-
-    assert_eq!(summary, BranchExitSummary::TERMINATES);
-}
-
-#[test]
-fn branch_exits_report_true_fallthrough() {
-    let mut fx = TestExpressions::new();
-    let first = expression_statement(&mut fx, 1);
-    let second = expression_statement(&mut fx, 2);
-    let summary = analyze_branch_exits(&[first, second], &fx.builder, &fx.constants);
-
-    assert_eq!(summary, BranchExitSummary::FALLS_THROUGH);
-}
-
-#[test]
-fn branch_exits_union_mixed_produce_and_terminate_alternatives() {
-    let mut fx = TestExpressions::new();
-    let then_body = vec![then_value(&mut fx, 2)];
-    let else_body = vec![return_value(&mut fx, 3)];
-    let mixed_if = bool_if(&mut fx, then_body, Some(else_body), 1);
-
-    assert_eq!(
-        analyze_branch_exits(&[mixed_if], &fx.builder, &fx.constants),
-        BranchExitSummary {
-            can_fall_through: false,
-            produces_value: true,
-            terminates: true,
-        }
-    );
-}
-
-#[test]
-fn branch_exits_union_produce_and_fallthrough_alternatives() {
-    let mut fx = TestExpressions::new();
-    let then_body = vec![then_value(&mut fx, 2)];
-    let else_body = vec![expression_statement(&mut fx, 3)];
-    let mixed_if = bool_if(&mut fx, then_body, Some(else_body), 1);
-
-    assert_eq!(
-        analyze_branch_exits(&[mixed_if], &fx.builder, &fx.constants),
-        BranchExitSummary {
-            can_fall_through: true,
-            produces_value: true,
-            terminates: false,
-        }
-    );
-}
-
-#[test]
-fn branch_exits_union_terminate_and_fallthrough_alternatives() {
-    let mut fx = TestExpressions::new();
-    let then_body = vec![return_value(&mut fx, 2)];
-    let else_body = vec![expression_statement(&mut fx, 3)];
-    let mixed_if = bool_if(&mut fx, then_body, Some(else_body), 1);
-
-    assert_eq!(
-        analyze_branch_exits(&[mixed_if], &fx.builder, &fx.constants),
-        BranchExitSummary {
-            can_fall_through: true,
-            produces_value: false,
-            terminates: true,
-        }
-    );
-}
-
-#[test]
-fn branch_exits_compose_nested_if_and_match() {
-    let mut fx = TestExpressions::new();
-    let arm_body = vec![then_value(&mut fx, 3)];
-    let match_default = Some(vec![return_value(&mut fx, 4)]);
-    let inner_match = literal_match(&mut fx, arm_body, match_default, 2);
-    let outer_then = vec![inner_match];
-    let outer_else = Some(vec![then_value(&mut fx, 5)]);
-    let nested = bool_if(&mut fx, outer_then, outer_else, 1);
-
-    assert_eq!(
-        analyze_branch_exits(&[nested], &fx.builder, &fx.constants),
-        BranchExitSummary {
-            can_fall_through: false,
-            produces_value: true,
-            terminates: true,
-        }
-    );
-}
-
-#[test]
-fn branch_exits_sequence_statements_after_partial_fallthrough() {
-    let mut fx = TestExpressions::new();
-    let then_body = vec![then_value(&mut fx, 2)];
-    let partial_if = bool_if(&mut fx, then_body, None, 1);
-    let following = then_value(&mut fx, 3);
-    let summary = analyze_branch_exits(&[partial_if, following], &fx.builder, &fx.constants);
-
-    assert_eq!(
-        summary,
-        BranchExitSummary {
-            can_fall_through: false,
-            produces_value: true,
-            terminates: false,
-        }
-    );
-}
-
-#[test]
-fn branch_exits_ignore_statements_after_every_path_has_exited() {
-    let mut fx = TestExpressions::new();
-    let then_body = vec![then_value(&mut fx, 2)];
-    let else_body = vec![return_value(&mut fx, 3)];
-    let closed_if = bool_if(&mut fx, then_body, Some(else_body), 1);
-    let following = expression_statement(&mut fx, 4);
-    let summary = analyze_branch_exits(&[closed_if, following], &fx.builder, &fx.constants);
-
-    assert_eq!(
-        summary,
-        BranchExitSummary {
-            can_fall_through: false,
-            produces_value: true,
-            terminates: true,
-        }
-    );
-}
-
-#[test]
-fn branch_exits_recurse_into_lexical_scopes() {
-    let mut fx = TestExpressions::new();
-    let body = vec![then_value(&mut fx, 2)];
-    let scoped = node(NodeKind::LexicalScope { body }, None);
-
-    assert_eq!(
-        analyze_branch_exits(&[scoped], &fx.builder, &fx.constants),
-        BranchExitSummary::PRODUCES
-    );
-}
-
-#[test]
-fn branch_exits_require_both_if_paths_to_exit() {
-    let mut fx = TestExpressions::new();
-    let producing_then = vec![then_value(&mut fx, 2)];
-    let producing_else = vec![then_value(&mut fx, 3)];
-    let producing_if = bool_if(&mut fx, producing_then, Some(producing_else), 1);
-    let fallthrough_then = vec![then_value(&mut fx, 5)];
-    let fallthrough_else = vec![expression_statement(&mut fx, 6)];
-    let fallthrough_if = bool_if(&mut fx, fallthrough_then, Some(fallthrough_else), 4);
-
-    assert_eq!(
-        analyze_branch_exits(&[producing_if], &fx.builder, &fx.constants),
-        BranchExitSummary::PRODUCES
-    );
-    assert_eq!(
-        analyze_branch_exits(&[fallthrough_if], &fx.builder, &fx.constants),
-        BranchExitSummary {
-            can_fall_through: true,
-            produces_value: true,
-            terminates: false,
-        }
-    );
-}
-
-#[test]
-fn branch_exits_combine_match_arms_and_default() {
-    let mut fx = TestExpressions::new();
-    let producing_arm = vec![then_value(&mut fx, 3)];
-    let producing_default = Some(vec![then_value(&mut fx, 4)]);
-    let producing_match = literal_match(&mut fx, producing_arm, producing_default, 1);
-    let mixed_arm = vec![then_value(&mut fx, 7)];
-    let mixed_default = Some(vec![return_value(&mut fx, 8)]);
-    let mixed_match = literal_match(&mut fx, mixed_arm, mixed_default, 5);
-
-    assert_eq!(
-        analyze_branch_exits(&[producing_match], &fx.builder, &fx.constants),
-        BranchExitSummary::PRODUCES
-    );
-    assert_eq!(
-        analyze_branch_exits(&[mixed_match], &fx.builder, &fx.constants),
-        BranchExitSummary {
-            can_fall_through: false,
-            produces_value: true,
-            terminates: true,
-        },
-        "mixed produce/terminate paths are a complete all-path exit"
-    );
-}
-
-#[test]
-fn branch_exits_report_assert_false_as_terminal() {
-    let mut fx = TestExpressions::new();
-    let first = expression_statement(&mut fx, 1);
-    let assertion = assert_statement(&mut fx, false, 2);
-    let third = then_value(&mut fx, 3);
-    let summary = analyze_branch_exits(&[first, assertion, third], &fx.builder, &fx.constants);
-
-    assert_eq!(summary, BranchExitSummary::TERMINATES);
-}
-
-#[test]
-fn branch_exits_do_not_treat_passing_assert_as_terminal() {
-    let mut fx = TestExpressions::new();
-    let assertion = assert_statement(&mut fx, true, 1);
-    let summary = analyze_branch_exits(&[assertion], &fx.builder, &fx.constants);
-
-    assert_eq!(summary, BranchExitSummary::FALLS_THROUGH);
-}
-
-#[test]
-fn branch_exits_combine_assert_false_branches_as_terminal() {
-    let mut fx = TestExpressions::new();
-    let terminating_then = vec![assert_statement(&mut fx, false, 2)];
-    let terminating_else = Some(vec![assert_statement(&mut fx, false, 3)]);
-    let terminating_if = bool_if(&mut fx, terminating_then, terminating_else, 1);
-
-    let partial_then = vec![assert_statement(&mut fx, false, 5)];
-    let partial_if = bool_if(&mut fx, partial_then, None, 4);
-
-    assert_eq!(
-        analyze_branch_exits(&[terminating_if], &fx.builder, &fx.constants),
-        BranchExitSummary::TERMINATES
-    );
-    assert_eq!(
-        analyze_branch_exits(&[partial_if], &fx.builder, &fx.constants),
-        BranchExitSummary {
-            can_fall_through: true,
-            produces_value: false,
-            terminates: true,
-        },
-        "if with only one assert-false branch still has a fallthrough path"
-    );
+    MatchArm {
+        pattern,
+        guard: None,
+        body,
+    }
 }
 
 #[test]
@@ -487,7 +232,8 @@ fn single_prefixed_receiver_does_not_parse_rhs_comma_as_a_target() {
         "choose |ready Bool, target ~I32|:\n\
              ~target = if ready: then 1, 2\n\
              else then 3, 4\n\
-             ;\n;\n",
+             ;\n\
+         ;\n",
     );
     let diagnostic = assert_ast_diagnostic(
         &failure,
@@ -536,16 +282,187 @@ fn shared_validator_rejects_all_terminating_value_if() {
     let mut fx = TestExpressions::new();
     let first = return_value(&mut fx, 1);
     let second = return_value(&mut fx, 2);
-    let error = validate_closed_branch_pair(
-        analyze_branch_exits(&[first], &fx.builder, &fx.constants),
-        analyze_branch_exits(&[second], &fx.builder, &fx.constants),
+    let error =
+        validate_closed_branch_pair(branch_exits(&fx, &first), branch_exits(&fx, &second), None)
+            .expect_err("a value-if whose every path terminates has no value to provide");
+    let ExpressionParseError::Diagnostic(diagnostic) = error else {
+        panic!("expected user diagnostic, found infrastructure error: {error:?}")
+    };
+
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("the draft compacts to a diagnostic view");
+    let facts = diagnostic
+        .family_view::<InvalidControlFlowStatementView>()
+        .expect("the diagnostic is an invalid control-flow statement");
+    assert_eq!(
+        facts.reason,
+        InvalidControlFlowStatementReason::ValueIfNoProducingPath
+    );
+}
+
+#[test]
+fn shared_validator_accepts_mixed_produce_and_terminate_branches() {
+    let mut fx = TestExpressions::new();
+    let producing = then_value(&mut fx, 1);
+    let returning = return_value(&mut fx, 2);
+
+    validate_closed_branch_pair(
+        branch_exits(&fx, &producing),
+        branch_exits(&fx, &returning),
         None,
     )
-    .expect_err("a value-if whose every path terminates has no value to provide");
-    let crate::compiler_frontend::ast::expressions::error::ExpressionParseError::Diagnostic(
-        diagnostic,
-    ) = error
-    else {
+    .expect("a producing branch and a terminating branch complete the value site");
+}
+
+#[test]
+fn shared_validator_accepts_loop_exits_targeting_an_outside_loop() {
+    for loop_exit in [NodeKind::Break, NodeKind::Continue] {
+        let mut fx = TestExpressions::new();
+        let exit = node(loop_exit, None);
+        let producing = then_value(&mut fx, 1);
+
+        validate_closed_branch_pair(
+            branch_exits(&fx, &exit),
+            branch_exits(&fx, &producing),
+            None,
+        )
+        .expect("break and continue leave the value block for an enclosing loop");
+    }
+}
+
+#[test]
+fn shared_validator_rejects_a_nested_loop_consuming_its_own_break() {
+    let mut fx = TestExpressions::new();
+    let nested_break = true_loop(&mut fx, vec![node(NodeKind::Break, None)]);
+    let producing = then_value(&mut fx, 1);
+
+    let error = validate_closed_branch_pair(
+        branch_exits(&fx, &nested_break),
+        branch_exits(&fx, &producing),
+        None,
+    )
+    .expect_err("the nested loop consumes its break and then falls through the branch");
+    let ExpressionParseError::Diagnostic(diagnostic) = error else {
+        panic!("expected user diagnostic, found infrastructure error: {error:?}")
+    };
+
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("the draft compacts to a diagnostic view");
+    let facts = diagnostic
+        .family_view::<InvalidControlFlowStatementView>()
+        .expect("the diagnostic is an invalid control-flow statement");
+    assert_eq!(
+        facts.reason,
+        InvalidControlFlowStatementReason::ValueIfBranchFallsThrough
+    );
+}
+
+#[test]
+fn shared_validator_rejects_a_real_fallthrough_branch() {
+    let mut fx = TestExpressions::new();
+    let falling_through = node(NodeKind::ExpressionStatement(fx.int(1)), None);
+    let producing = then_value(&mut fx, 2);
+
+    let error = validate_closed_branch_pair(
+        branch_exits(&fx, &falling_through),
+        branch_exits(&fx, &producing),
+        None,
+    )
+    .expect_err("a branch that reaches its end still falls through");
+    let ExpressionParseError::Diagnostic(diagnostic) = error else {
+        panic!("expected user diagnostic, found infrastructure error: {error:?}")
+    };
+
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("the draft compacts to a diagnostic view");
+    let facts = diagnostic
+        .family_view::<InvalidControlFlowStatementView>()
+        .expect("the diagnostic is an invalid control-flow statement");
+    assert_eq!(
+        facts.reason,
+        InvalidControlFlowStatementReason::ValueIfBranchFallsThrough
+    );
+}
+
+#[test]
+fn value_match_arms_accept_loop_exits_targeting_an_outside_loop() {
+    for loop_exit in [NodeKind::Break, NodeKind::Continue] {
+        let mut fx = TestExpressions::new();
+        let exit = node(loop_exit, None);
+        let producing = then_value(&mut fx, 1);
+        let arms = vec![
+            literal_arm(&mut fx, vec![exit]),
+            literal_arm(&mut fx, vec![producing]),
+        ];
+
+        validate_value_match_completeness(&arms, None, None, &fx.builder, &fx.constants)
+            .expect("match arms may leave the value block for an enclosing loop");
+    }
+}
+
+#[test]
+fn value_match_rejects_an_arm_whose_nested_loop_consumes_its_break() {
+    let mut fx = TestExpressions::new();
+    let nested_break = true_loop(&mut fx, vec![node(NodeKind::Break, None)]);
+    let producing = then_value(&mut fx, 1);
+    let arms = vec![
+        literal_arm(&mut fx, vec![nested_break]),
+        literal_arm(&mut fx, vec![producing]),
+    ];
+
+    let error = validate_value_match_completeness(&arms, None, None, &fx.builder, &fx.constants)
+        .expect_err("the nested loop consumes its break and then falls through the arm");
+    let ExpressionParseError::Diagnostic(diagnostic) = error else {
+        panic!("expected user diagnostic, found infrastructure error: {error:?}")
+    };
+
+    let compact = compact_bag_for_test(DiagnosticBag::from(diagnostic), None);
+    let diagnostic = compact
+        .first()
+        .expect("the draft compacts to a diagnostic view");
+    let facts = diagnostic
+        .family_view::<InvalidControlFlowStatementView>()
+        .expect("the diagnostic is an invalid control-flow statement");
+    assert_eq!(
+        facts.reason,
+        InvalidControlFlowStatementReason::ValueIfBranchFallsThrough
+    );
+}
+
+#[test]
+fn never_call_branch_completes_a_value_producer_without_producing() {
+    let mut fx = TestExpressions::new();
+    let then_body = [then_value(&mut fx, 1)];
+    let never_body = [never_call_statement()];
+
+    let never_exits = branch_exits(&fx, &never_body[0]);
+    assert!(never_exits.diverges);
+    assert!(!never_exits.produces_value);
+    assert!(!never_exits.can_fall_through);
+
+    validate_closed_branch_pair(branch_exits(&fx, &then_body[0]), never_exits, None)
+        .expect("a Never branch diverges instead of falling through or producing a value");
+}
+
+#[test]
+fn shared_validator_still_requires_one_producing_path_when_others_diverge() {
+    let mut fx = TestExpressions::new();
+    let diversifying = true_loop(&mut fx, vec![node(NodeKind::Continue, None)]);
+    let returning = return_value(&mut fx, 2);
+
+    let error = validate_closed_branch_pair(
+        branch_exits(&fx, &diversifying),
+        branch_exits(&fx, &returning),
+        None,
+    )
+    .expect_err("a value-if needs at least one path that produces a value");
+    let ExpressionParseError::Diagnostic(diagnostic) = error else {
         panic!("expected user diagnostic, found infrastructure error: {error:?}")
     };
 

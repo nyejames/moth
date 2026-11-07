@@ -14,7 +14,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalAccessKind, ExternalFunctionLowerings, ExternalFunctionSpec,
     ExternalJsLowering, ExternalPackageId, ExternalParameter, ExternalReturnSlot,
-    ExternalSignatureType, ExternalTypeId, ExternalTypeSpec,
+    ExternalSignatureType, ExternalTypeId, ExternalTypeSpec, external_returns,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
@@ -259,8 +259,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
                 ExternalFunctionSpec {
                     name: function.name.to_owned(),
                     parameters,
-                    returns,
-                    error_return_type: function.error_return_type.cloned(),
+                    return_contract: external_returns(returns, function.error_return_type.cloned()),
                     const_eval: None,
                     lowerings: ExternalFunctionLowerings {
                         js: Some(js_lowering),

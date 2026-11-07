@@ -14,11 +14,43 @@
 - A function with no success slots may reach the end of its body.
 - `return` with no values can leave a no-success function early.
 - `Void` is not an explicit return-slot type.
+- Ordinary no-value completion is not Never. A function that omits `->` may
+  fall through. A function declared `-> !` cannot.
 
 Return slots are exact receivers for eligible numeric origins in the function
 body. They cannot retag an already concrete operation or infer named operands
 backwards. Completed function signatures and public interfaces contain no
 pending numeric identity.
+
+### Never versus ordinary returns
+
+Three contracts are distinct:
+
+- Omit `->` for ordinary no-success completion. The function may reach the end
+  of its body or use a bare `return`.
+- Write an ordinary return type, including a temporary placeholder such as
+  `-> String`, when callers should still see that type. The current body may
+  diverge without becoming Never to those callers.
+- Write `-> !` only when the callable never returns control normally.
+
+[codeblock, $code("moth"):
+    greet |name String|:
+        io.line([: Hello, [name]])
+    ;
+
+    load_name || -> String:
+        assert(false, "not implemented")
+    ;
+
+    fatal |message String| -> !:
+        assert(false, message)
+    ;
+]
+
+Only the explicit `-> !` contract propagates divergence across a call.
+Callers of `load_name` still see an ordinary `String` result. See
+@#function-declarations (Function declarations) for body validation and
+@#calls-and-access (Calls and access) for placement.
 
 ### Multiple success values
 
