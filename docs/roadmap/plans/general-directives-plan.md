@@ -2,18 +2,18 @@
 
 ## Status and scope
 
-- Status: Accepted design, queued after the project-structure and builder-slots work is integrated.
+- Status: Accepted design, queued after fixed-root-roles and builder-slots integration.
 - Roadmap file: `docs/roadmap/plans/general-directives-plan.md`.
-- Deliver: a constrained compiler-owned directive grammar, core ownership of existing template formatters, `$config` input contracts and `$entry` entry selection.
+- Deliver: a constrained two-context directive grammar, frontend ownership of existing template formatters and `$config` input contracts.
 - Preserve: optional `config.moth` and its existing named `project` and builder-settings records, including the selected builder's current schema, defaults and validation policy.
 
-The build command selects the builder and compilation boundary before configuration is evaluated. `config.moth` remains a self-contained compile-time bootstrap source, not an ordinary module. Do not move configuration into `@` or `+` roots. Builders provide schemas, packages, source capabilities and output policies, not directive names or parsing and semantic callbacks.
+The build command selects the builder and compilation boundary before configuration is evaluated. `config.moth` remains a self-contained compile-time bootstrap source, not an ordinary module. Do not move configuration into structural module roots. Builders provide schemas, packages, source capabilities and output policies, not directive names or parsing and semantic callbacks.
 
 ## 1. Directive contract
 
-A directive modifies an existing construct. Template-head directives modify their template, module-root directives modify their module and other source directives modify the following eligible construct.
+A directive modifies an existing construct. Template-head directives modify their template and source directives modify the following eligible construct.
 
-A directive may supply an additional compiler-owned constraint on its target, but it is not a new declaration, general attribute, user macro, function call or independent control-flow construct. Neither builders nor user code can define, import, alias or override directives. Directive names do not reserve the corresponding ordinary identifiers. **The directive's known kind determines its attachment context; its position never changes that kind.** A source modifier at the beginning of a module file still attaches to the following declaration or statement.
+A directive may supply an additional compiler-owned constraint on its target, but it is not a new declaration, general attribute, user macro, function call or independent control-flow construct. Neither builders nor user code can define, import, alias or override directives. Directive names do not reserve the corresponding ordinary identifiers. **The directive's known kind determines its eligible target.** A source modifier at the beginning of a file still attaches to the following declaration or statement. No directive attaches to a module root.
 
 ### Forms and operands
 
@@ -29,57 +29,18 @@ $name key = value
 - `key = value` is **one named operand**, not a parameter list. The key is a statically recognised name with no explicit type annotation. Some template directives use the key as a slot identifier and the value as its default. The directive determines whether a bare operand denotes a static label, a positional index or a compile-time value.
 - No directive operand may contain an authored type annotation, runtime value, side effect, escaping control flow or mutable/exclusive evaluation. The type of an operand is resolved from its ordinary expression and the directive's fixed contract. Type annotations on the **following declaration**, such as `api_url #String`, remain ordinary language syntax.
 - An operand begins on the directive's line; a balanced value may continue over subsequent lines. A bare directive ends at its line boundary. A source directive occupies its own line and attaches to the immediately following eligible construct on the next meaningful line, **without intervening blank physical lines**. Contiguous comment-only lines are permitted, but a blank line within the comment run breaks attachment. Leading indentation is not an empty line. Template heads use their existing `,`, `:` and `]` boundaries. CRLF and LF observe identical logical boundaries.
-- Adjacent call syntax such as `$code("rust")`, `$project(...)` and `$entry()` is invalid. A parenthesised **record value** is allowed only as a single whitespace-separated operand, when the directive's contract permits a record. Multiple positional or named operands and directive-owned argument lists are not supported. Ordinary function calls remain unchanged.
+- Adjacent call syntax such as `$code("rust")` or `$config()` is invalid. A parenthesised **record value** is allowed only as a single whitespace-separated operand, when the directive's contract permits a record. Multiple positional or named operands and directive-owned argument lists are not supported. Ordinary function calls remain unchanged.
 - Template heads already support static slot names and indices. Preserve `$slot title`, `$slot 1`, `$slot title = "Fallback"` and `$in title`. These are one-operand forms and their names are not runtime variable lookups. Preserve the template head's independent compatibility rules and its ability to contain more than one *distinct* compatible directive.
 
 The `builder-slots` prefix/suffix spelling is normalised to the single-value form in this work: `$before value` and `$after value`, rather than `$before = value` and `$after = value`. Preserve all wrapper, named-slot and runtime no-output semantics. The previous assignment spelling is removed without a compatibility mode.
 
-Recognise a directive's known name before checking context. Each static compiler definition specifies eligible targets, phase, operand kind and compatibility. Diagnose unknown names, known names in the wrong context, duplicate or incompatible modifiers, missing/extra/malformed operands, dangling source modifiers and non-constant values at their authored spans. Known future names retain deferred-feature diagnostics where already recognised; recognising a name does not implement its semantics. Avoid a runtime-extensible registry, a catch-all directive-effect engine and extra annotation states on unrelated AST/HIR nodes. **Do not diagnose a misplaced known directive as a generic invalid `# General directives and project configuration
+Recognise a directive's known name before checking context. Each static compiler definition specifies eligible targets, phase, operand kind and compatibility. Diagnose unknown names, wrong-context uses, duplicate or incompatible modifiers, malformed operands, dangling modifiers and non-constant values at authored spans. Known future names retain deferred-feature diagnostics where already recognised; recognition does not implement their semantics. A known misplaced directive must not collapse into a generic invalid-character or unknown-name diagnostic. Avoid a runtime-extensible registry, catch-all effect engine or annotation states on unrelated AST/HIR nodes.
+### Two attachment locations
 
-## Status and scope
+- **Template head:** template directives modify their containing template, using existing TIR composition and formatter contracts. Template-head syntax, head compatibility and body whitespace are validated by the existing template parser.
+- **Source construct:** source modifiers modify the immediately following eligible declaration or statement. A compound target includes its own header and body. The modifier occupies its own line; contiguous comment-only lines may intervene, but a blank physical line, unrelated item, intervening scope or file boundary breaks attachment. Compatible modifiers may stack. A modifier at the beginning of a file still targets the following construct.
 
-- Status: Accepted design, queued after the project-structure and builder-slots work is integrated.
-- Roadmap file: `docs/roadmap/plans/general-directives-plan.md`.
-- Deliver: a constrained compiler-owned directive grammar, core ownership of existing template formatters, `$config` input contracts and `$entry` entry selection.
-- Preserve: optional `config.moth` and its existing named `project` and builder-settings records, including the selected builder's current schema, defaults and validation policy.
-
-The build command selects the builder and compilation boundary before configuration is evaluated. `config.moth` remains a self-contained compile-time bootstrap source, not an ordinary module. Do not move configuration into `@` or `+` roots. Builders provide schemas, packages, source capabilities and output policies, not directive names or parsing and semantic callbacks.
-
-## 1. Directive contract
-
-A directive modifies an existing construct. Template-head directives modify their template, module-root directives modify their module and other source directives modify the following eligible construct.
-
-A directive may supply an additional compiler-owned constraint on its target, but it is not a new declaration, general attribute, user macro, function call or independent control-flow construct. Neither builders nor user code can define, import, alias or override directives. Directive names do not reserve the corresponding ordinary identifiers. **The directive's known kind determines its attachment context; its position never changes that kind.** A source modifier at the beginning of a module file still attaches to the following declaration or statement.
-
-### Forms and operands
-
-A directive has **at most one optional compile-time operand**:
-
-```text
-$name
-$name value
-$name key = value
-```
-
-- `value` uses the existing compile-time expression grammar accepted for a const-record field value. A directive may restrict the shape and semantic type of that value, or require it to be known at an earlier compiler phase. Do not add a second directive expression parser or evaluator.
-- `key = value` is **one named operand**, not a parameter list. The key is a statically recognised name with no explicit type annotation. Some template directives use the key as a slot identifier and the value as its default. The directive determines whether a bare operand denotes a static label, a positional index or a compile-time value.
-- No directive operand may contain an authored type annotation, runtime value, side effect, escaping control flow or mutable/exclusive evaluation. The type of an operand is resolved from its ordinary expression and the directive's fixed contract. Type annotations on the **following declaration**, such as `api_url #String`, remain ordinary language syntax.
-- An operand begins on the directive's line; a balanced value may continue over subsequent lines. A bare directive ends at its line boundary. A source directive occupies its own line and attaches to the immediately following eligible construct on the next meaningful line, **without intervening blank physical lines**. Contiguous comment-only lines are permitted, but a blank line within the comment run breaks attachment. Leading indentation is not an empty line. Template heads use their existing `,`, `:` and `]` boundaries. CRLF and LF observe identical logical boundaries.
-- Adjacent call syntax such as `$code("rust")`, `$project(...)` and `$entry()` is invalid. A parenthesised **record value** is allowed only as a single whitespace-separated operand, when the directive's contract permits a record. Multiple positional or named operands and directive-owned argument lists are not supported. Ordinary function calls remain unchanged.
-- Template heads already support static slot names and indices. Preserve `$slot title`, `$slot 1`, `$slot title = "Fallback"` and `$in title`. These are one-operand forms and their names are not runtime variable lookups. Preserve the template head's independent compatibility rules and its ability to contain more than one *distinct* compatible directive.
-
-The `builder-slots` prefix/suffix spelling is normalised to the single-value form in this work: `$before value` and `$after value`, rather than `$before = value` and `$after = value`. Preserve all wrapper, named-slot and runtime no-output semantics. The previous assignment spelling is removed without a compatibility mode.
-
- character or an unknown directive.**
-
-### Three attachment locations
-
-- **Template head:** template directives modify their containing template. Static keys and compile-time values belong to existing TIR composition/formatter contracts, not to a new declaration or scope. Template-head rules do not constrain blank lines in rendered body text.
-- **Module root:** designated root directives modify the implicit module root and must appear as the first meaningful item of the root file, on their own line. Leading comments and whitespace are permitted. `$entry` is the only such directive in this plan, has no operand and introduces no binding, scope or runtime activation. Blank lines after `$entry` are ordinary source whitespace because it does not target the next item.
-- **Source construct:** source modifiers modify one immediately following eligible declaration or statement. A compound target includes its header and body. The modifier must be contiguous with its target, permitting intervening comment-only lines but no empty physical line, unrelated item, intervening scope or new file. Multiple compatible modifiers may stack under the same rule. A prefix in file-initial position is still a construct modifier.
-
-A known name is classified before position or target validation. A misplaced known root directive must never silently attach to the next declaration, and a misplaced construct directive must never silently gain module scope. No general rule allows arbitrary root directives merely because they are first. An invalid modifier must not swallow the next valid item during diagnostic recovery.
-
+The compiler classifies each directive by its name and its permitted target context, not by whether it appears near the top of a file. No module-root directive category or root attachment mechanism exists. An invalid source modifier must not consume the next valid item during recovery.
 Existing proposal-only block spellings such as `$async:` and `$checked:` are **not** authorised by this grammar. Any future syntax introducing a new execution scope or control flow requires its own language-design decision.
 
 ## 2. Configuration and build-input contracts
@@ -141,29 +102,18 @@ Move `$html`, `$css`, `$escape_html` and `$code` from HTML-builder registration 
 - Retain formatter results, warnings, HTML escaping, indentation handling, supported code-language aliases and highlighted CSS classes. `$code` continues to suppress nested template interpretation; CSS retains its balanced-body handling. Preserve opaque TIR anchors and structural resource pieces.
 - The call-shaped code formatter operand becomes a single compile-time operand, for example `[$code "rust": ...]`. Its supported language values and early lexical requirements remain unchanged. Do not add arbitrary runtime language selection or a new formatter-expression engine.
 - CSS's eventual inline-only design is separate. If its mode split remains at activation, keep current modes and change `$css("inline")` to `[$css "inline": ...]` using the single-operand grammar. If the inline-only design has already landed, retain that grammar and do not restore the old mode or its operand. Do not move stylesheet assembly into the directive subsystem.
-- Retain the `builder-slots` forms `$slot`, `$in`, `$fresh`, `$before`, `$after`, `$note`, `$todo`, `$doc`, `$raw` and `$md`, including per-occurrence slot defaults, builder-root direct named inserts, formatter conflicts, wrapper opt-outs and `.mtf` default Markdown. Only the `$before`/`$after` operand separator is normalised here.
-- The HTML builder continues to receive `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and `head` through the delivered **direct top-level const `$in` slots**. Preserve slot-specific validation, resource-origin deduplication, rendered-head deduplication and JS/Wasm output parity. Do not revive reserved `page_*` metadata or the `$page` proposal.
+- Retain the `builder-slots` forms `$slot`, `$in`, `$fresh`, `$before`, `$after`, `$note`, `$todo`, `$doc`, `$raw` and `$md`, including per-occurrence slot defaults, direct entry-root named inserts, formatter conflicts, wrapper opt-outs and `.mtf` default Markdown. Only the `$before`/`$after` operand separator is normalised here.
+- The HTML builder continues to receive `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and `head` through the delivered **direct top-level const `$in` slots in `@entry.moth`**. Preserve slot-specific validation, resource-origin deduplication, rendered-head deduplication and JS/Wasm output parity. Do not revive reserved `page_*` metadata or the `$page` proposal.
 
 Delete the merged builder directive API, the HTML directive registration owner, last-registration-wins behaviour and unused formatter adapters. Keep builder-provided slot schemas, packages, config schemas and output capabilities: these are data contracts, not builder-defined directive syntax.
 
-## 4. `$entry` and entry selection
+## 4. Entry and module integration boundary
 
-```moth
--- @home.moth
-$entry
+The separate fixed-root-roles plan owns root filenames, visibility, dormant `start`, entry eligibility, source discovery, builder selection, package facades, command routing, migration and entry-specific tests. Its accepted roles are `@mod.moth` for the normal API facade, `@package.moth` for the scoped or external package facade and `@entry.moth` for executable entry work. One directory remains one structural module and its available roles share one atomic compilation outcome.
 
-#[$in title: Home]
-#[: <main>Welcome</main>]
-```
+This directive work neither registers nor implements a module-root directive. A source-level `$entry` or `$page` is not an entry-selection mechanism. The builder consumes the completed `@entry` presence fact from root-role implementation, not source annotations, authored activity or rendered contents. Direct root `$in` contributions retain their ordinary template-head parsing and reach builder-owned destinations only under the selected active entry. Config remains independent in `config.moth`.
 
-`$entry` is valid at most once, as the first meaningful item of a normal `@` root or explicitly selected synthetic single-file normal root. Reject operands, call shape, duplicate markers, placement after another source item, inline trailing source on the marker line and use in helpers, `+` roots, facades, test roots, `config.moth`, function/branch bodies, export blocks or template heads. A misplaced known `$entry` must produce a precise placement diagnostic.
-
-It marks only the containing normal root as **eligible** for builder entry selection. It does not activate its implicit `start`, create another function, add a scope, change import visibility or require authored runtime work. Every normal root retains its compiler-owned dormant `start` and receives ordinary type/borrow/lifetime validation whether marked or not. Unmarked roots may contain valid dormant top-level runtime work and direct templates without becoming application entries; imports never activate provider starts. Dependency-package markers do not automatically become consumer application entries.
-
-Publish one non-exported eligibility fact in existing completed root metadata. Stage 0 and the selected builder consume that fact without reparsing source or testing HIR activity, constant names or rendered output. An entry with only static content or named slots is valid. `check` permits zero entries; application `build` and `dev` require at least one suitable marked entry where their selected builder requires application entries. Preserve package-only outcomes, descendant selection, directory-derived HTML routes, no-homepage behaviour, static/runtime fragment ordering, start failure handling and JS/Wasm lifecycle.
-
-Switch HTML selection from activity-based page discovery to marked-root facts. Require `$entry` on actual first-party and scaffolded page roots. Keep the completed builder-slot metadata system; a named `$in` at the root contributes only to the selected active entry. Remove the previous unpurposed-root-work rejection, old activity-based page emission and any surviving reserved `page_*` extraction. Reject `$page` rather than treating it as an alias or no-op.
-
+The fixed-root-roles cutover must be complete before the directive implementation assumes these filename and root-role contracts. Do not migrate root filenames, alter interface publication, change source discovery or rebuild entry planning here.
 ## 5. Owners and implementation sequence
 
 Use current paths as locators and reconcile them against the integration tree. Preserve one semantic owner per fact:
@@ -171,57 +121,50 @@ Use current paths as locators and reconcile them against the integration tree. P
 - `src/compiler_frontend/style_directives/` and `ast/templates/` own registered compiler template names, template-head parsing, formatters and TIR composition.
 - Existing tokenization/header preparation and `declaration_syntax/` own source directive recognition and attachment; retain compact modifier facts with the declaration/statement shell. No source rescans or second header grammar.
 - `src/compiler_frontend/build_config/` and `single_source_compilation/config.rs` own exact input resolution and config-source folding. `src/build_system/project_config/` and `builder_surface/config_schema.rs` apply folded `project` and active-builder records unchanged.
-- `module_compilation/`, the completed root metadata lane, Stage 0 selection and `projects/html_project/` own entry eligibility, builder selection and final output. Builders consume completed facts, never AST/TIR authority.
+- The fixed-root-roles implementation owns `@entry` eligibility, `start`, Stage 0 selection and entry assembly. This plan consumes those facts where template builder-slot validation requires entry context; no source directive republishes entry facts.
 
 Retain authored source spans until their final diagnostics are emitted, then use the existing source-table freeze boundary. Hand off typed folded facts and stable names, not complete AST/TIR stores. Preserve existing config/input, project-field, entry, implementation, resource and physical-variant invalidation domains. Directive syntax should not add a second cache-key or runtime representation.
 
 ### Implementation phases
 
-1. **Integration baseline and canonical docs.** Confirm the merged project-structure and `builder-slots` contracts, current `AGENTS.md`, language/implementation style, testing guide and compiler/build design authorities. Run focused baseline tests for config/defaults, input contracts, formatter output, wrapper/slot behaviour, HTML entry routes and JS/Wasm builds. Align accepted-design documentation to the existing named `project`/builder records **before** documenting directive grammar; retain truthful current-support labels until implementation lands. Verify the selected builder's present section requirements from the live schema.
-2. **Directive grammar and template migration.** Extend the compiler's existing static template specifications with the smallest source modifier/entry recognition needed. Route directive kinds to three attachment contexts without introducing separate directive parsers or a general attachment object. Track whether the preceding source boundary contained an empty physical line or only contiguous comments. Enforce single operands, same-scope attachment, ownership, placement and invalid call shapes. Migrate `$code` and applicable `$css` operands and `$before`/`$after` values without changing template semantics. Move HTML formatter implementations into the frontend and delete builder registration paths.
+1. **Integration baseline and canonical docs.** Confirm the merged fixed-root-roles and `builder-slots` contracts, current `AGENTS.md`, language/implementation style, testing guide and compiler/build design authorities. Run focused baseline tests for config/defaults, input contracts, formatter output, wrapper/slot behaviour, HTML entry routes and JS/Wasm builds. Align accepted-design documentation to the existing named `project`/builder records **before** documenting directive grammar; retain truthful current-support labels until implementation lands. Verify the selected builder's present section requirements from the live schema.
+2. **Directive grammar and template migration.** Extend existing static template specifications with only the source modifier recognition needed. Route directive kinds to two attachment contexts without introducing separate parsers or a general attachment object. Track whether the preceding source boundary contained an empty physical line or only contiguous comments. Enforce single operands, same-scope attachment, ownership, placement and invalid call shapes. Migrate `$code` and applicable `$css` operands and `$before`/`$after` values without changing template semantics. Move HTML formatter implementations into the frontend and delete builder registration paths.
 3. **Typed input cutover.** Attach `$config` to ordinary typed declaration shells, reuse existing prepared contract facts and config resolver, migrate `#Config of T` authoring and remove obsolete qualifier parsing. Keep named configuration records and active builder schemas untouched.
-4. **Entry cutover.** Publish `$entry` root facts, select marked HTML entries, migrate first-party sites and `moth new html` templates and remove activity-based selection and old root-purpose diagnostics. Confirm direct named builder slots remain restricted to marked active entries.
-5. **Cleanup and validation.** Remove dead paths, stale tests and duplicated parsing or evaluation. Update permanent docs, source examples, cheatsheet, progress matrices and roadmap to match delivered behaviour. Reconcile the queued HTML page/runtime-title work to retain only independently required runtime-title work. Complete focused and full validation and a code-bloat audit.
+4. **Cleanup and validation.** Remove dead paths, stale tests and duplicated parsing or evaluation. Update permanent docs, source examples, cheatsheet, progress matrices and roadmap to match delivered behaviour. Reconcile the queued HTML page/runtime-title work to retain only independently required runtime-title work. Complete focused and full validation and a code-bloat audit.
 
-Documentation owners to reconcile: `docs/docs/directives/{directives,directives-basic}.mtf`, `docs/docs/project-structure/{project-config,project-config-basic,build-inputs,build-inputs-basic,entry-config,entry-config-basic}.mtf`, template directive/slot/wrapper references, `docs/compiler-design-overview.md`, `docs/build-system-design.md`, the cheatsheet, progress matrices, scaffold docs and `docs/roadmap/roadmap.md`. In particular, remove claims that `$project`, `$builder`, `$html_builder` or `$page` are accepted future directives, and replace architecture text requiring directive bootstrap arguments or metadata recovered from `page_*` names. The named-record project and active-builder schema contracts are the accepted configuration design. Update future constraint/test/layout/feature plans only where their assumed directive grammar or attachment boundaries conflict with the single-operand rule; do not implement those features here.
+Documentation owners to reconcile: `docs/docs/directives/{directives,directives-basic}.mtf`, `docs/docs/project-structure/{project-config,project-config-basic,build-inputs,build-inputs-basic}.mtf`, template directive/slot/wrapper references, `docs/compiler-design-overview.md`, `docs/build-system-design.md`, the cheatsheet, progress matrices and `docs/roadmap/roadmap.md`. Fixed roots, entry config, scaffolds and routing are owned by `docs/roadmap/plans/fixed-root-roles-and-entry-plan.md`. In particular, remove claims that `$project`, `$builder`, `$html_builder` or `$page` are accepted future directives, and replace architecture text requiring directive bootstrap arguments or metadata recovered from `page_*` names. The named-record project and active-builder schema contracts are the accepted configuration design. Update future constraint/test/layout/feature plans only where their assumed directive grammar or attachment boundaries conflict with the single-operand rule; do not implement those features here.
 
 ## 6. Acceptance tests and gates
 
-Use existing subsystem tests and project/CLI integration harnesses. Put tests under the repository's `tests/` policy. Reuse fixtures and test actual public outcomes rather than introducing an independent directive harness.
+Use existing lexer/header, template, config and project/CLI test owners. Preserve typed diagnostics with accurate authored spans, error recovery and LF/CRLF parity. Each case should exercise a distinct failure.
 
-- **Grammar and attachment:** bare, single-value and `key = value` operands; template named/positional slot forms; const-only resolution and operand type/phase errors; balanced multiline operands; no operand type annotations, directive calls or multi-argument lists; ordinary `f()` unchanged. Test all three distinct locations, first-file construct modifiers, following-item target restrictions, compatible stacked modifiers, misplaced root markers and comments/blank-line boundaries below. Reject general `$name:` blocks, stray directives and deferred names with context-specific diagnostics.
 ### Placement and diagnostic matrix
-
-Use focused lexer/header tests for boundary recognition and existing project-command tests for semantic attachment. Include both positive and negative cases for every supported directive context. Diagnostics must be deterministic, identify the **directive site**, include the target site when present and recommend the correct context or immediate action. A second location is mandatory for duplicate and conflicting modifiers, and where an unrelated intervening declaration blocks attachment. Use the existing typed diagnostic reason and source-span infrastructure rather than adding string-matching parser heuristics.
 
 | Situation | Required outcome |
 |---|---|
-| `$entry` first meaningful item of a normal `@` root, including a comment banner or leading whitespace | Valid; marks the implicit module root |
-| `$entry` after a declaration, runtime statement, template, export group or another directive | Error: root directive must be first; name the root and point to the authored `$entry` |
-| Second `$entry` or the same root marker on a helper, `+` facade, test root, `config.moth` or nested scope | Error: duplicate with original site or wrong root/context |
-| `$entry` with a value, call suffix, trailing source or on the same line as another item | Error: root directive occupies its own line and takes no operand |
-| `$config` at the beginning of an eligible source/config file followed by the correct declaration | Valid construct modifier, never root directive |
-| `$config` followed immediately by its declaration, or by one or more adjacent comment-only lines | Valid; comments do not consume the target |
-| `$config` followed by one or multiple empty lines, including whitespace-only lines or an empty line between comment lines | Error: modifier separated from target; no declaration is silently claimed |
-| `$config` at EOF, before a close-scope, before a function or another ineligible construct | Error: dangling or wrong-target directive, with expected declaration kind |
-| Compatible source modifiers adjacent to each other then a declaration | One attachment to the declaration; incompatible or repeated modifiers identify both sites |
-| `$md` as bare source, `$slot` inside a function, `$config` in a template head, `$entry` in a template head | Known directive in wrong context; no generic invalid-character error |
-| `$slot` and `$in` inside valid heads, invalid heads, or alongside an incompatible formatter | Existing template attachment, exclusivity and conflict diagnostics preserved |
-| Unknown spelling, deferred feature, malformed/extra operand or runtime-dependent operand | Distinct error reason and precise authored span; no successful no-op |
-| LF, CRLF, leading indentation, comments at EOF and balanced multiline operand values | Same semantics and primary diagnostic location across newline forms |
-| Malformed directive followed by an ordinary declaration or template | Recover without consuming the unrelated item or hiding its own diagnostics |
+| `$config` begins a selected source or config file and immediately precedes a typed compile-time binding | Valid next-construct modifier, no file-wide meaning |
+| `$config` followed by contiguous comment-only lines and then its declaration | Valid, comments do not consume the target |
+| One or more blank lines between `$config` and its target, including whitespace-only and comments separated by blank lines | Error at directive: attachment broken |
+| `$config` at EOF, before unrelated code, wrong declaration kind, close scope or nested/local scope | Specific dangling or wrong-target error, preserve the next item |
+| Compatible consecutive source modifiers | Attach to the same eligible construct; repeated or conflicting modifiers cite both sites |
+| Known template directive in ordinary source or `$config` inside template head | Known wrong-context diagnostic, not unknown name or generic invalid character |
+| Unknown directive, deferred feature, malformed/runtime operand, type annotation or extra operand | Distinct typed error with correct span |
+| `$slot`, `$in`, `$before`, `$after` and `$fresh` in compatible/incompatible template heads | Existing template composition and exclusivity diagnostics |
+| Bare, value and named-value operands plus balanced multiline values | Accept only each directive's supported compile-time form |
+| LF/CRLF, indentation, comments at EOF and malformed directives followed by valid source | Equivalent semantics, deterministic diagnostics and no swallowed source |
 
-For examples, `$config\nvalue #String` attaches, `$config\n-- explanation\nvalue #String` attaches and `$config\n\nvalue #String` is rejected. Here `\n` denotes one physical line break. A template directive's body may contain blank lines, and the text following an already valid `$entry` is not a next-construct attachment. Do not introduce a new directive family or enable deferred semantics solely to satisfy this matrix; implement the applicable cases alongside each directive's activation.
+No module-root directive is registered or accepted, even when written at the beginning of a file. The fixed-root-roles plan independently tests `@entry` selection and export isolation.
 
-- **Formatting:** equivalent `$code` language aliases, HTML/Markdown/CSS/escaping, highlighter classes, CSS warnings and optional inline mode where still supported; nested formatting, `.mtf` defaults, TIR opaque/resource anchors, compile-time/runtime wrappers, `$fresh`, named-slot defaults and contributions and output parity under a minimal non-HTML builder.
-- **Inputs/config:** optional/required/defaulted `$config`; source-literal versus bootstrap-helper fallback restrictions; rejected `#Config of T`; exact U64 and F16/F32 numeric cases, optional wrapping and unsupported input types; same-name conflicts, explicit precedence, unknown-input timing, fingerprint/provenance and independent package namespaces. Preserve current `project #= (...)`, active `html #= (...)`, project-field fixed-only rules, omitted-config defaults, active-section requirement and unknown ordinary helper behaviour. Confirm no directive config syntax is accepted.
-- **Entries:** placement-first `$entry` diagnostics, comments, duplicates and invalid contexts; marked static/metadata-only/runtime and descendant entries; unmarked but validated dormant work; `check` with zero entries; no-entry application errors; package-only/facade roots; synthetic single-file root; no-homepage routes; `start` error behaviour; JS and Wasm outputs; direct root `$in` eligibility and resource emission.
-- **Migration:** first-party docs site, scaffold, representative packages, paired `@`/`+` roots, independently selected nested build roots and both output profiles. Confirm no surviving builder directive registry, `#Config` qualifier parser, reserved `page_*` extraction or operational `$page`, `$project`, `$builder` and `$html_builder` paths.
+### Functional and migration coverage
 
-Run focused tests throughout, `just validate` at subsystem integration, `just validate-full` on the final tree and the prescribed docs release build. Record commands, results and any genuine blockers. Review all touched paths against `moth-code-review-guide.md`: remove duplicate evaluators, unnecessary clones, large temporary stores, redundant wrappers, stale comments, unused metadata, oversized fixtures and diagnostics losing source spans. No phase may leave two supported public syntaxes for one feature.
+- **Formatting:** preserve `$code` language aliases, HTML/Markdown/CSS/escaping, highlighted classes, warnings, nested formatting, `.mtf` defaults, TIR/resource anchors, runtime/const wrappers, `$fresh`, named slot defaults and contributions and output parity with a minimal non-HTML builder.
+- **Inputs/config:** test required/optional/defaulted `$config`, exact types and numeric materialisation, config helpers and source literals, duplicate contracts, resolution precedence, fingerprints, invalid contexts, unknown input timing and independent package namespaces. Reject old `#Config of T` syntax only when the syntax cutover lands. Preserve `project #= (...)` and active builder records and schema defaults.
+- **Entry integration smoke tests:** verify direct `@entry.moth` `$in` slot consumption for static/metadata-only entries. Root discovery, filenames, selection, exports, no-entry outcomes, starts and JS/Wasm lifecycle remain owned by the fixed-root-roles plan.
+- **Cleanup:** verify no surviving builder directive registry, legacy `#Config` qualifier path, call-shaped general directive parser, duplicated evaluator or operational `$project`, `$builder` and `$html_builder` path.
 
+Run focused tests during implementation, `just validate` after subsystem integration, `just validate-full` on the final tree and the prescribed docs build. Record commands/results and real blockers. Audit against `moth-code-review-guide.md` for duplicated evaluators, redundant wrappers, stale metadata, unnecessary allocations, lost source spans and compatibility shims.
 ## Exclusions and completion
 
 This work does not implement `$export`, `$test`, `$layout`, `$feature`, `$fast_math`, `$safe_math`, `$infallible`, `$async`, `$checked`, `$mon`, speculative constraints, slot `$required`/`$unique`, arbitrary const-function formatter evaluation, automatic stylesheet dependency propagation, a new config-file format or a Moth-native build script. The separate CSS inline-only redesign and runtime `io.set_title` remain independently scoped. No generic directive extension API, conditional config evaluation, custom metadata registry or general source macro facility is introduced.
 
-Complete when all implemented directives obey the constrained attachment and operand grammar (apart from root-only `$entry`), the frontend owns all existing template formatters, `$config` uses the existing exact build-input service, `config.moth` still uses named project/builder records and `$entry` alone determines HTML application entry eligibility, with canonical docs and tests matching the delivered surface.
+Complete when every implemented directive uses only template-head or next-construct attachment with one optional compile-time operand, the frontend owns all existing template formatters, `$config` uses the existing exact build-input service and `config.moth` retains named project/builder records. Entry eligibility is exclusively owned by fixed root roles; canonical docs and tests match the delivered surface.
