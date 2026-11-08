@@ -1,18 +1,17 @@
-**Current support and accepted design.** Template directives work today. General source and module-root directives are accepted design and will be introduced by the queued general-directives plan. See @../progress (Progress) for current support.
+**Current support and accepted design.** Template directives work today. General source modifiers are accepted design queued for the general-directives plan. Entry selection uses the planned `@entry.moth` file role, not a directive. See @../progress (Progress) for current support.
 
-A directive modifies an existing construct. Template-head directives modify their template, module-root directives modify their module and other source directives modify the following eligible construct.
+A directive modifies an existing construct. Template-head directives modify their template and source directives modify the following eligible construct.
 
-### The three locations
+### The two locations
 
 - In a template head, the directive applies to that template, for example `[$slot title]` or `[$md: Text]`.
-- At the beginning of a normal module root file, the designated module directive applies to that root. `$entry` must appear on its own line before any meaningful source item. Leading comments and whitespace are allowed.
 - Before other source syntax, a modifier applies to the next eligible declaration or statement. `$config` is such a modifier, even when it is the first item in a file.
 
-The compiler decides each directive's kind from its name, not its position. An ordinary modifier cannot turn into a root directive just because it appears first.
+The compiler decides a directive's eligible target from its name, not the item's position in a file. There are no module-root directives.
 
 ### Spacing and operands
 
-A source modifier uses its own line and must attach to the next meaningful line. Contiguous comment lines may intervene, but **an empty line between the modifier and its target is an error**. A root directive does not modify the following item, so blank lines after `$entry` are ordinary whitespace.
+A source modifier uses its own line and must attach to the next meaningful line. Contiguous comment lines may intervene, but **an empty line between the modifier and its target is an error**.
 
 Each directive can have at most one optional compile-time operand: `$name`, `$name value` or `$name key = value`. No authored type or function-call-style argument list is allowed.
 
@@ -22,6 +21,6 @@ Each directive can have at most one optional compile-time operand: `$name`, `$na
     api_url #String = "https://example.com"
 ]
 
-The current config source retains named `project` and selected-builder records, using `#Config of T` inputs until the `$config` migration. There are no `$project` or `$builder` directives. HTML metadata uses direct const `$in` slots; `$entry` does not replace them.
+The current config source retains named `project` and selected-builder records, using `#Config of T` inputs until the `$config` migration. There are no `$project` or `$builder` directives. HTML metadata uses direct const `$in` slots in the selected entry; the planned `@entry.moth` role makes entry eligibility explicit.
 
 See @../directives/#directives (Directives), @../project-structure/#project-config (Project config) and @../project-structure/#entry-config (Entry metadata and builder slots).
