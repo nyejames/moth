@@ -1,10 +1,10 @@
-**Current support and accepted design.** Template-head directives are implemented. General source and module-root directives are accepted design but are not yet available in the Alpha compiler. The queued general-directives plan introduces `$config` and `$entry`. `config.moth` retains its named `project` and builder-specific records. See @../progress (Progress) for current support.
+**Current support and accepted design.** Template-head directives are implemented. General source modifiers, including `$config`, remain accepted design queued for implementation. Entry selection instead uses the planned fixed root filename `@entry.moth`. `config.moth` retains its named `project` and builder-specific records. See @../progress (Progress) for current support.
 
-A directive modifies an existing construct. Template-head directives modify their template, module-root directives modify their module and other source directives modify the following eligible construct.
+A directive modifies an existing construct. Template-head directives modify their template and source directives modify the following eligible construct.
 
-### Three attachment locations
+### Two attachment locations
 
-The directive's compiler-defined contract determines its kind. **Position never changes a directive's kind.** In particular, a declaration modifier placed first in a root file still modifies the following declaration.
+The directive's compiler-defined contract determines its eligible target. Position cannot turn a source modifier into a template directive or a module-wide marker.
 
 [table:
     [th:
@@ -12,19 +12,11 @@ The directive's compiler-defined contract determines its kind. **Position never 
         [: Target]
         [: Example]
     ]
-
     [td:
         [: Inside a template head]
-        [: That template]
+        [: The containing template]
         [: `[$slot title]` or `[$md: text]`]
     ]
-
-    [td:
-        [: Beginning of a normal module root file]
-        [: The containing implicit module root, for a designated root directive only]
-        [: `$entry`]
-    ]
-
     [td:
         [: Before a source declaration or statement]
         [: Exactly the next eligible construct]
@@ -32,21 +24,15 @@ The directive's compiler-defined contract determines its kind. **Position never 
     ]
 ]
 
-A module-root directive must be the first meaningful item in its **root file**, on its own line. Leading whitespace and comments are permitted. It cannot appear in a helper, support facade, configuration file, function, export block or template. Only `$entry` has this role in the accepted design. It marks eligibility for builder entry selection, does not activate the implicit `start` and introduces no binding or scope.
-
-A source modifier attaches to one immediately following eligible construct in the same scope. Its own line is followed by the target's next line, or by contiguous comment-only lines and then the target. **Blank lines between a source modifier and its target are invalid.** Multiple blank lines are not a special case: even one empty line breaks attachment. Comments alone do not break attachment, but a blank line among them does. A modifier cannot cross another source item, an ending scope or a module boundary. Compatible consecutive modifiers may stack without blank lines. A dangling, duplicate or incompatible modifier is an error. The root and template rules do not impose this next-line spacing restriction on template body content or the text following `$entry`.
+A source modifier has its own line and must attach to the next eligible construct in the same scope. Contiguous comment-only lines may intervene, but **any blank physical line breaks attachment**, including whitespace-only lines and blank lines between comments. A source modifier cannot cross an unrelated item, ending scope or file boundary. Compatible modifiers may stack without blank lines; duplicates and incompatible combinations are errors. A modifier at the very beginning of a file still attaches to its following declaration.
 
 [codeblock, $code("moth"):
     -- Accepted source modifier syntax:
     $config
     api_url #String = "https://example.com"
-
-    -- Accepted module-root syntax (in a normal @ root):
-    $entry
 ]
 
-The examples above describe accepted syntax, not current Alpha compiler support.
-
+The source example describes accepted syntax, not current Alpha compiler support. No module-root directive category exists. The proposed fixed-root-roles module structure instead uses `@mod.moth` for the normal API facade, `@package.moth` for the scoped or external package facade and `@entry.moth` for executable entry work. `config.moth` remains separate. The compiler and builder select entries from the role facts, not from directives or authored runtime activity.
 ### Operands and ownership
 
 The compiler defines directive names, valid target kinds, phases and operand contracts. A directive has at most one optional compile-time operand:
@@ -66,7 +52,7 @@ Directives are compiler-owned modifiers, not attributes available to arbitrary s
 ### Examples and contexts
 
 - `$config` marks one explicitly typed top-level compile-time `#` constant as an input contract. Its type and fallback are written on the declaration itself. It is valid in selected bootstrap configuration and eligible selected source modules. `#Config of T` remains the operational spelling until this migration.
-- `$entry` is a bare, argument-free normal-module-root directive. There is no `$entry()` form and `$page` is not an alias.
+- There is no entry-purpose directive. `@entry.moth` identifies an eligible executable entry under the fixed-root-roles design. `$page` is not an alias.
 - `$test`, `$export`, `$layout` and computation constraints are separate planned designs. Their exact targets and semantics are not implemented by this reference.
 - `$async` and `$checked` remain undecided proposals. Their earlier block spellings do not establish a general-purpose directive block grammar.
 - Project and active-builder settings remain ordinary named compile-time records inside `config.moth`. There are no accepted `$project`, `$builder` or `$html_builder` directives.
@@ -84,18 +70,15 @@ See @../project-structure/#project-config (Project configuration), @../project-s
 
 ### Diagnostics and recovery
 
-The compiler recognises a known directive name **before** validating context, so a known directive outside its allowed location receives a placement diagnostic rather than an unknown-directive or generic invalid-character diagnostic. Distinguish unknown names, known but unavailable/deferred names, invalid target kinds, invalid operand shapes, incompatible combinations and root-only placement errors.
+The compiler recognises a known directive name **before** validating context, so a known directive outside its allowed location receives a placement diagnostic rather than an unknown-name or generic invalid-character diagnostic. Distinguish unknown names, known but unavailable/deferred names, invalid target kinds, invalid operand shapes and incompatible combinations.
 
-Diagnostics should identify the directive's authored span, the attachment it attempted and the nearest useful fix:
+Diagnostics identify the directive's authored span, the target when present and the nearest useful fix:
 
-- `$entry` after a declaration: move `$entry` to the beginning of the normal root file. A duplicated `$entry` identifies the original marker as well.
-- `$entry` in a helper, `+` facade, `config.moth` or nested scope: the directive belongs only at the start of an eligible normal root.
-- `$config` separated from its declaration by an empty line or a scope boundary: place the target directly after the modifier. A wrong target, such as a function or local value, identifies the allowed declaration kind.
-- `$md` in ordinary source or `$config` inside a template head: use the valid directive context. A `$slot` in a malformed head receives the existing template-head structural diagnostics.
-- An unknown directive receives a name diagnostic, while a recognised but not implemented directive receives the established deferred-feature diagnostic. Neither is a successful no-op.
+- `$config` separated from its declaration by an empty line, unrelated item or scope boundary: place the target directly after the modifier. A wrong target such as a function or local value identifies the allowed declaration kind.
+- `$md` in ordinary source or `$config` inside a template head: use the valid directive context. A `$slot` in a malformed head receives its existing structural diagnostics.
+- Unknown spellings and recognised but unimplemented directives have distinct diagnostics. Invalid directives never act as successful no-ops and recovery must not consume following unrelated source.
 
-Do not diagnose a valid first-file `$config` as root-scoped. Do not infer directive kind from capitalisation or add a second spelling for root directives. CRLF and LF line endings must give the same results. A malformed directive must not consume unrelated following source during recovery.
-
+A declaration modifier appearing first in a file is still a declaration modifier. Directive matching never depends on capitalisation. CRLF and LF line endings must have identical attachment semantics.
 ### Related references
 
 - @../templates/#template-directives (Template directives)
