@@ -1,17 +1,17 @@
 HTML pages currently become entries from root activity: a non-trivial top-level
 runtime body, a direct const fragment or a runtime fragment. Direct const root
-inserts supply builder metadata. A general `$entry` purpose and
-capability-checked `io.set_title` remain queued; the earlier `$page` proposal is
-superseded. See @../progress (Progress) and
+inserts supply builder metadata. The accepted fixed-root-roles design will use
+`@entry.moth` as the explicit executable entry file. No entry-purpose directive
+is part of the language. Capability-checked `io.set_title` remains queued; the
+earlier `$page` proposal is superseded. See @../progress (Progress) and
 @../progress/packages-and-builders (Packages and builders).
 
 This page describes entry metadata and its relationship to project configuration.
 
 ### The `@project` namespace
 
-`@project` is an explicitly bound immutable namespace. The accepted `$project`
-directive publishes its predefined fields only. Today's grouped record also
-publishes supported extra metadata until that configuration cutover.
+`@project` is an explicitly bound immutable namespace. The named `project` configuration record supplies its predefined fields. The
+existing grouped-record configuration remains the accepted model.
 
 [codeblock, $code("moth"):
     @project version
@@ -84,14 +84,16 @@ former `page_title`, `page_description`, `page_lang`, `page_favicon`,
 `page_body_style` and `page_head` names are ordinary constants with no implicit
 document effect.
 
-### Future entry purpose and runtime title
+### Fixed entry file and runtime title
 
-General `$entry` purpose validation and `io.set_title` remain queued. They do
-not replace builder slots. Until `$entry` lands, root activity selects entries;
-it will then make entry selection explicit, and a metadata-only root will need
-that purpose. The earlier `$page` proposal is superseded: `$page` is not a directive and accepts no
-metadata arguments. Runtime top-level templates do not gain named builder slots
-under the current contract.
+The fixed-root-roles design uses `@entry.moth` to identify the only authored
+executable entry root in a structural module. Entry eligibility follows file
+presence, including static-only, metadata-only and empty entries, rather than
+authored activity. `@mod.moth` and `@package.moth` are API-only facades. The
+separate root-role implementation owns directory discovery, migration and
+entry activation. The earlier `$page` proposal is superseded. Runtime top-level
+templates do not gain named builder slots. Capability-checked `io.set_title`
+remains independent queued work.
 
 ### Concepts related to entry metadata
 

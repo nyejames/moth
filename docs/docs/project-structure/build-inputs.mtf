@@ -57,9 +57,9 @@ The accepted input types are `String`, `Bool`, `Char`, all fixed-width integers 
 
 Only `$config` declarations create explicit-only input contracts.
 
-- `$project(version = "1.0")` is project metadata, not a `version` input provider.
+- `project #= (version = "1.0")` is project metadata, not a `version` input provider.
 - An ordinary `version #String = "1.0"` is a helper constant, not an input provider.
-- Passing `release_version` to `$project(version = release_version)` does not rename its input contract.
+- Using `version = release_version` inside `project #= (...)` does not rename the input contract.
 - `@project` publishes only predefined project fields.
 
 Matching declarations within one compilation boundary agree on name, primitive type, optionality, required or default state and normalised default value. Each project or package boundary owns its own namespace.

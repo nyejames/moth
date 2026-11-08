@@ -1,34 +1,26 @@
-**Accepted queued design.** `$` introduces a registered compiler or builder directive. Template directives such as `$md` and `$code` are implemented. General non-template directives are accepted design and are not yet available in the Alpha compiler. See @../progress (Progress) for current support.
+**Current support and accepted design.** Template directives work today. General source modifiers are accepted design queued for the general-directives plan. Entry selection uses the planned `@entry.moth` file role, not a directive. See @../progress (Progress) for current support.
 
-A `$` marker is not automatically harmless metadata. Compiler-owned directives may impose real contracts. Builder extensions cannot rewrite functions or weaken language safety.
+A directive modifies an existing construct. Template-head directives modify their template and source directives modify the following eligible construct.
 
-### Current versus accepted syntax
+### The two locations
 
-Today, `config.moth` uses declaration-owned `#Config of T` inputs with grouped
-parenthesised `project` and `html` records. Direct const root inserts supply
-HTML metadata through builder slots. The accepted configuration shape is:
+- In a template head, the directive applies to that template, for example `[$slot title]` or `[$md: Text]`.
+- Before other source syntax, a modifier applies to the next eligible declaration or statement. `$config` is such a modifier, even when it is the first item in a file.
+
+The compiler decides a directive's eligible target from its name, not the item's position in a file. There are no module-root directives.
+
+### Spacing and operands
+
+A source modifier uses its own line and must attach to the next meaningful line. Contiguous comment lines may intervene, but **an empty line between the modifier and its target is an error**.
+
+Each directive can have at most one optional compile-time operand: `$name`, `$name value` or `$name key = value`. No authored type or function-call-style argument list is allowed.
 
 [codeblock, $code("moth"):
-    $project(
-        name = "my_site",
-    )
-
-    $html_builder
+    -- Accepted general-directive syntax:
+    $config
+    api_url #String = "https://example.com"
 ]
 
-Version is optional, and there is no `entry_root`; the selected directory is the source root.
+The current config source retains named `project` and selected-builder records, using `#Config of T` inputs until the `$config` migration. There are no `$project` or `$builder` directives. HTML metadata uses direct const `$in` slots in the selected entry; the planned `@entry.moth` role makes entry eligibility explicit.
 
-General `$entry` root-purpose validation remains queued. It does not replace
-builder slots. The earlier `$page` proposal is superseded and is not current
-syntax. See @../project-structure/#entry-config (Entry metadata and builder slots).
-
-### Directive argument basics
-
-- Supply arguments with `$name(arguments)`.
-- Supply none with `$name`.
-- Authored empty `()` is invalid for directives.
-- Ordinary function calls still use `f()`.
-
-`$html_builder` may be written with no parentheses when every parameter has a default. `$html_builder()` is invalid. A future `$entry` purpose has no decided signature and must not be written today.
-
-Exact signatures live in @../project-structure/#project-config (Project config) and @../project-structure/#entry-config (Entry metadata and builder slots).
+See @../directives/#directives (Directives), @../project-structure/#project-config (Project config) and @../project-structure/#entry-config (Entry metadata and builder slots).
