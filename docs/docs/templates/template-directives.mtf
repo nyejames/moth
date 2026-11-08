@@ -3,13 +3,13 @@ semantics; general ownership, context, argument and diagnostic rules live in
 @../directives (Directives).
 
 The template directives documented here are current supported semantics. General
-non-template `$config` and module-root `$entry` remain accepted queued design.
+non-template `$config` remains accepted queued design.
 Named project and builder settings remain ordinary compile-time records in
 `config.moth`. The former `$page` metadata design is superseded by direct const builder slots.
 
 Template-head directives modify their containing template, regardless of whether
 the head also has ordinary expressions. Their syntax does not change the placement
-rules for source modifiers or module-root directives.
+rules for following-construct source modifiers.
 
 Directive availability comes from one merged registry:
 
