@@ -1,10 +1,10 @@
 # Fixed root roles, API facades and entry separation
 
-> Status: Accepted design for implementation planning, based on the project-lead decisions in the design discussion of 7 November 2026. This document specifies the target behaviour, migration and verification work. It does not claim that the changes are implemented.
+> Status: Accepted design, queued for implementation. This plan describes final behaviour and the one-way source migration, not current compiler support.
 >
-> Baseline: `nyejames/moth`, PR #30 `docs/directive-attachment-rules` at `3c0264bc0fd8b335b7dabfd90dc092f254a5d0b7`. Recheck the branch head and merged prerequisites before editing. Source locators below were checked against that branch, but Rust names and line positions may change.
+> Reviewed baseline: `main` at `12b936de9989f0fbc18c30079ac7f97307ef0286` (8 November 2026), including merged PR #30. Verify the implementation branch against this baseline. The current Rust compiler still recognises arbitrary `@*.moth` and `+*.moth` roots, treats normal roots as possible starts and selects HTML entries by root activity.
 >
-> Destination: `docs/roadmap/plans/fixed-root-roles-and-entry-plan.md`. Integrate this plan with `docs/roadmap/plans/general-directives-plan.md` before activating the queued general-directives work. PR #30 is documentation-only and has not implemented `$entry`.
+> Authority: this plan owns the fixed-root-role cutover. `docs/roadmap/plans/general-directives-plan.md` already delegates entry selection to it and has no `$entry` implementation phase. Keep the remaining directive work separately queued.
 
 ## 1. Purpose and design authority
 
@@ -33,7 +33,7 @@ Read the opening authority text and all applicable root/module, interface, entry
 - `docs/roadmap/plans/built-in-testing-and-test-modules-plan.md` for the future test-only visibility exception
 - `docs/developer-docs/style-guide/{style-guide,testing,validation}.mtf`, `moth-code-review-guide.md` and `index.md`
 
-The PR branch's `docs/docs/project-structure/project-layout.mtf` still contains stale `$project`/`$html_builder` examples even though the PR's accepted config contract uses named records. Reconcile this documented contradiction as part of the plan. Don't reinstate retired directive-config forms.
+Some permanent project-layout and architecture pages still describe retired `$project`, `$html_builder` and `$entry` proposals. Reconcile these against the already-updated general-directives plan and the existing named `project`/builder configuration records. Do not restore discarded configuration directives.
 
 ## 2. Normative source and ownership contract
 
@@ -76,9 +76,11 @@ Every root claim must resolve to a distinct physical file within its structural 
 - A support facade cannot consume its own facade, an impermissible normal sibling, its parent consumer or a same-scope support sibling. Strictly outer-scope support packages and permitted private descendants retain their existing rules.
 - A paired directory has both API surfaces with the same established consumer-specific selection. The import resolver selects the surface through the constructed namespace edge, never by a nearest-match or normal-then-support fallback.
 - The selected project root's `@package.moth` is the external project package surface. It remains invisible to internal project modules, cannot import `@project` and cannot export facts whose public or reachable implementation transitively depends on private project globals. A project can publish a package and an entry simultaneously. Without root `@package.moth`, it has no external Moth package surface, even if it has `@mod.moth`.
-- Dependencies compile in their own package boundaries. Consumer inputs do not enter dependency config, dependency entry roots are never activated by importing the package and a dependency needs the valid external facade its package contract requires.
+- Separately compiled source packages keep their registered public surface contract. A Core/Builder source package may publish a normal `@mod` surface (for example `packages/html/@mod.moth` and `packages/web/site/@mod.moth`), while an external **project package** is assembled only from its project-root `@package`. A support-only registered source package can expose its support surface. Never require `@package` for all source-backed packages. Consumer inputs do not enter dependency configuration, and importing a package never activates its `@entry`.
 
-Use the same source-defined public interface representation for normal and support facades. A root absent from the directory produces no fake/empty public interface. Preserve stable origins, public type/effect/lifetime summaries, provider edges and transactional publication.
+Use the same source-defined public interface representation for normal and support facades. A missing facade produces no fake/empty public interface. Preserve stable origins, type/effect/lifetime summaries, provider edges and transactional publication.
+
+**Support-owner and consumer-role rule:** for scoped support visibility, a structural module with `@mod` **or** `@entry` occupies a normal consumer/owner position. This does not manufacture a normal public interface for an entry-only module. The nearest normal-position ancestor of a support-only module may therefore be entry-only. A directory with both `@entry` and `@package` still has separate consumer roles: the entry uses normal-position rules, the support facade uses strict support-scope rules and shared helpers may import only providers legal to every root that can consume them. The support facade cannot gain entry privileges from its co-located entry. Preserve the exclusion of a support package's private descendants, its own facade and same-owner-scope support siblings. Apply the existing `SupportVisibilityTopology` / `support_is_visible_for_role` owner in `project_module_graph.rs` and the per-source guard `cross_module_support_import_is_visible` in `module_inventory.rs`. Do not add a second scope algorithm or one namespace map per root.
 
 ### 2.4 Entry-only surface
 
@@ -112,176 +114,135 @@ The general-directives plan should now have exactly two attachment families requ
 ## 3. Compilation and graph invariants
 
 - Stage 0 is the single source of root/file/ownership facts. It discovers three fixed root roles and records one `ModuleId` per rooted directory before compiling bodies. No parser stage re-scans filesystem names or guesses roles from canonical symlink targets.
-- Stage 0 publishes one prepared module input with optional source IDs for each of the three roles plus one role-neutral owned source set. Do not create three independent module jobs or duplicate worklists for a paired/triple-root directory.
-- Header preparation retains file roles per source ID, including source-file-vs-root privileges. The compiler builds role-aware local nameability/visibility facts and rejects root-to-root lookup before AST. Stage 3 orders shared and root-local declarations without adding false cross-root edges.
-- The canonical compiler service constructs a single complete module semantic result with optional normal interface, optional support interface and optional entry metadata/executable start. All three are published together or none are published. A failed entry invalidates the module's API facades and vice versa.
+- Stage 0 publishes one prepared module input containing a fixed, role-keyed set of up to three root source IDs and one role-neutral owned source set. Exactly one source ID is selected as the preparation anchor when any roots exist. The anchor is not the implicit `start` or the package public surface. Do not create extra jobs, duplicate worklists or alternate public roles to satisfy a mandatory active-root field.
+- Header preparation consumes Stage 0's `SourceId`-keyed root-role facts, including the visible symlink spelling. It must not guess a role from the canonical path or rely on an `entry_file_id` meaning both a preparation anchor and executable start. The compiler builds role-aware nameability facts and rejects cross-root reads before AST. Stage 3 orders shared and root-local declarations without false edges.
+- The canonical compiler service constructs a single result with optional normal/support interfaces and an optional entry start/metadata. All present surfaces succeed together or diagnose together. Validate the published set against the structural root inventory in `ModuleArtifactStore` and `CompiledGraphBoundary`. No primary facade is mandatory when a module is entry-only.
 - The module's validated executable and link facts can contain callable functions from both API facades, shared implementation files and the entry. A missing entry never invents `start`. An absent facade never fabricates an interface just to fit an existing non-optional field.
 - Preserve immutable published artefacts, generated sidecar ownership, borrow/lifetime summaries, fixed failure lanes, source and path identity lifetimes, deterministic diagnostics, budget/scheduling cutoff, per-function link facts, output resource policy and physical-variant identities.
-- Separate stable semantic identifiers for the shared directory, root surface, exposed declaration and entry assembly. Role and logical module path must distinguish authored root-local declarations. Cosmetic filename migration must not incidentally make shared helper declarations into duplicate or unstable origins.
+- Keep stable semantic identifiers separate for the shared directory, each API/root-local role and entry assembly. Re-exporting one helper through two facades keeps its shared defining origin and distinct export bindings. Renaming a root file must not change its logical module path or the origin of an ordinary helper. Distinguish an entry-local private executable from a similarly named facade function.
 - Keep existing cross-package isolation and no-backend-source-parsing rules. Entry selection and package assembly consume completed compiler facts only. No post-compilation AST/TIR reconstruction.
 
-## 4. Repository impact map
+## 4. Existing code to reuse and simplify
 
-This is a locator map, not authority to add new layers. Check the actual current code on the implementation branch before editing.
+This map identifies current owners on the reviewed baseline. Read the actual implementation before moving a type or adding a helper. Prefer modifying these owners over introducing another role registry or graph layer.
 
-**Stage 0 and root file classification**
+| Owner | Required change or reuse |
+|---|---|
+| `src/compiler_frontend/source_packages/root_file.rs` | One closed root filename classifier and one special-file path diagnostic policy. Retain `config.moth` and legacy `#` handling. Remove the broad `@*.moth` / `+*.moth` predicates after the cutover. |
+| `src/build_system/create_project_modules/source_tree_index.rs` | Extend `ClassifiedDirectoryRoots`, `DiscoveredModuleRecord`, root claims and `SourceRecord` role classification in the existing single traversal. Preserve canonical and visible paths, deterministic source IDs, symlink/hidden-output rules and owned-source indexing. Cover `bounded_module_roots_for_single_file` and `single_file_dependency_keys`. |
+| `src/build_system/create_project_modules/module_identity.rs` and `src/compiler_frontend/semantic_identity.rs` | Extend `ModuleIdentityRecord` and `ModuleRootRole` with an entry role. Keep `Shared` for ordinary helpers and `SyntheticProjectContext` for `@project`. Keep one `ModuleId` per directory. |
+| `src/build_system/create_project_modules/project_module_graph.rs` | Derive entry candidates from actual `@entry` presence. Adapt `SupportVisibilityTopology`, `nearest_normal_ancestor` and `support_is_visible_for_role` to normal-position `@entry` owners while retaining strict support-role checks. Reuse the same predicate for project and package indexes. |
+| `src/build_system/create_project_modules/module_namespace.rs` and `module_inventory.rs` | Keep one indexed namespace, select only present `@mod`/ `@package` provider surfaces and filter by the requesting source role. Extend `cross_module_support_import_is_visible`. An entry-only child remains a structural boundary but has no normal importable API. |
+| `src/build_system/create_project_modules/{module_inventory,module_preparation,source_preparation,source_package_discovery,prepared_module}.rs` | Carry the three root IDs through one seed, one preparation and one job. Preserve the check-only and separately compiled source-package paths. Do not copy the candidate-source vector for each root. |
+| `src/compiler_frontend/headers/{parse_file_headers,types}.rs`, `src/compiler_frontend/module_dependencies.rs` and nameability/AST owners | Replace ambiguous active/entry file naming with explicit preparation anchor, actual entry source and role facts. Reuse retained source IDs, declaration shells, visibility and ordering. Root-local declarations stay invisible to other roots and ordinary helpers. |
+| `src/compiler_frontend/module_compilation/{prepared,service,artefact,outcome,context}.rs` and `public_interface/` | Prepare all roles in one transaction. Build zero, one or two API projections only for present facades. Keep one shared HIR/borrow/lifetime/generated lane and optional entry-only start/fragment metadata. Reuse the existing public-interface draft and export-seed builders rather than duplicate them per role. |
+| `src/build_system/create_project_modules/{module_artifact_store,compiled_boundary}.rs` | Replace mandatory-primary-interface assumptions with exact optional-surface validation. Preserve atomic publication, stable origins, interface lookup, generated sidecars and diagnosed/blocked outcomes. |
+| `src/build_system/build.rs` and `src/projects/html_project/` | Remove only the activity-based **entry selection** predicate. Preserve `EntryAssembly`, entry reachability/resource unions, builder slots and executable `runtime_fragment_count` used by the JS and Wasm emitters. |
+| `crates/moth-cli/src/scaffold/{files,start_page_scaffolding}.rs`, `packages/`, `docs/`, `tests/cases/` | Migrate authored roots, generators, real examples and existing fixtures in the same public cutover. |
 
-- `src/compiler_frontend/source_packages/root_file.rs`: currently recognises arbitrary `@*.moth`, `+*.moth`, `config.moth` and legacy `#` names. It is the shared filename policy owner.
-- `src/build_system/create_project_modules/source_tree_index.rs`: the single traversal, `ClassifiedDirectoryRoots`, `DiscoveredModuleRecord`, root claims, canonical path checks, source inventory and `SourceTreeDiscoveryStats`.
-- `src/build_system/create_project_modules/module_identity.rs`: `ModuleId`, `ModuleIdentityRecord`, role classifier, stable root origins and currently pair-only root slots.
-- `src/build_system/create_project_modules/project_module_graph.rs`: `ProjectModuleGraphNode`, entry candidates, role surfaces, adjacency and deterministic compile waves.
-- `src/build_system/create_project_modules/module_namespace.rs`: direct-child normal imports, scoped support namespace insertion, consumer-position surface selection and special-file bypass diagnostics.
-- `src/build_system/create_project_modules/{module_inventory,module_preparation,prepared_module,source_discovery,source_package_discovery}.rs`: one module seed, prepared source IDs, optional support root, check-only paths and source-package boundary validation.
-- `src/build_system/create_project_modules/{source_tree_index,project_module_graph,module_namespace}.rs` may already carry stable coverage and invariants. Extend rather than replicate.
+### Deletion and consolidation targets
 
-**Compiler semantics and publication**
-
-- `src/compiler_frontend/semantic_identity.rs`: `ModuleRootRole` currently contains `Normal`, `Support`, `Shared` and `SyntheticProjectContext`. `Normal` currently implies `start`. Add a distinct entry classification and move `has_implicit_start` to it. Retain `Shared` for helper origin.
-- `src/compiler_frontend/source_module_origin.rs`: source ID to role-qualified stable origin map.
-- `src/compiler_frontend/headers/parse_file_headers.rs`: `HeaderParseOptions`, active root, paired support root and `FileRole` assignment. The old `entry_file_id` parameter means the selected compiler root file, not necessarily an authored executable entry. Avoid carrying this overloaded name into the new model.
-- `src/compiler_frontend/module_compilation/{prepared,service,artefact,outcome,context}.rs`: one canonical module service, prepared active/support roots, export seeds, optional support projection and currently mandatory primary `PublicSemanticInterface`.
-- `src/compiler_frontend/public_interface/`, `src/compiler_frontend/module_dependencies/` and header/nameability owners: re-export projection, root-scoped export policy, same-module visibility and cross-surface isolation.
-- `src/build_system/create_project_modules/module_artifact_store.rs`: expects mandatory primary interface and optional support. Adapt to optional API facades without fake empty public interfaces.
-- `src/compiler_frontend/ast/`, HIR root construction and function-origin callers: restrict root-runtime compilation and start synthesis to `@entry` while leaving API function bodies legal.
-
-**Linking, builders and tooling**
-
-- `src/build_system/build.rs`: `ProjectCompilation::from_successful_boundaries`, graph `entry_modules()` selection and its current `root_activity.has_html_artifact_activity()` filter, `EntryAssembly`, `ProjectPackageAssembly` and reachability/resource planning.
-- `src/projects/html_project/`: HTML shell, direct named slots, route derivation and mixed JS/Wasm. Keep builder metadata, document defaults, resource unions and runtime/error semantics.
-- `src/build_system/project_config.rs`, `src/compiler_frontend/single_source_compilation/config.rs`: preserve project bootstrap and named-record extraction.
-- `crates/moth-cli/src/scaffold/{files,start_page_scaffolding}.rs`: `moth new html` filenames and starter content.
-- `packages/` and `docs/`: first-party Moth source roots and support packages that need migration.
-- `tests/cases/`, `src/build_system/tests/`, `src/compiler_frontend/tests/`, `crates/moth-cli/src/scaffold/tests/`: existing integration and unit tests. Use actual nearby test owners rather than creating an overlapping harness.
+- **Delete** `ModuleRootActivity::has_html_artifact_activity` and its activity-selection tests once entry discovery uses `@entry`. Inspect remaining `ModuleRootActivity` fields before removing them: `runtime_fragment_count` is consumed by HTML JS/Wasm. Remove unused `has_non_trivial_root_body` and `const_fragment_count` storage only after checking all legitimate consumers, not by renaming the old predicate.
+- **Consolidate** `public_surface_role` selection in `module_identity.rs`, graph projection and `compiled_boundary.rs` around the existing identity table. A missing public surface must be a typed absence where legal, never a fallback to `@entry` or a synthetic empty interface. Keep the specialised registered-source-package selection that legitimately chooses normal or support.
+- **Remove** re-derivation of special-file roles from canonical filenames in `parse_file_headers.rs` once source IDs carry Stage 0's authoritative role, including for symlinks. Maintain a narrow standalone/synthetic file-role route instead of adding a second discovery mechanism.
+- **Reuse** one existing root-file/public-export seed and `PublicInterfaceDraftBuilder` path for each *present API surface*. A small bounded iteration over the two facade roles is justified, but an extensible role framework, abstract registry, per-root compiler instance or independent entry-interface type is not.
+- **Keep local** the project-root external package policy and the registered Core/Builder source-package policy. They have different legitimate consumers, and forcing them behind a misleading universal "must be `@package`" helper would break source packages.
 
 ## 5. Implementation phases
 
-Keep a single feature/worktree branch based on the latest integrated PR #30 and any prerequisite changes. Prefer small commits at the named phase gates, with a single deliberate **public-syntax cutover** rather than two simultaneously supported filesystem syntaxes. A compiler-internal temporary bridge is allowed only if explicitly named, private and deleted in the cutover phase. Do not add persistent compatibility shims.
+Work in this branch after reconciling upstream changes. Make focused commits at the gates below. The intermediate implementation may have internal incomplete plumbing, but the public naming cutover is one coherent checkpoint. Temporary internal adapters must be named, private and deleted at that checkpoint, never preserved as compatibility APIs.
 
-### Phase 0: Rebaseline and lock the plan
+### Phase 0: Rebaseline and inventory
 
-1. Inspect the current branch and reconcile the PR #30 changes against the latest `main`. Confirm that `$entry` has no source parser or builder implementation yet. If implementation has landed in the meantime, remove it during the cutover rather than preserving it.
-2. Read canonical compiler/build, root, config, export, package, entry, test and style authorities listed in section 1. Inspect `index.md` and the actual code owners above.
-3. Produce a reference inventory of current `@*.moth`, `+*.moth`, `config.moth`, proposed `$entry`, root activity and test fixture uses. Record the exact migration map by directory. Identify the source package entry roots and any tool-generated sources.
-4. Resolve only implementation-level ambiguities that cannot be derived from sections 2 and 3. Do not change the approved role, visibility or lifecycle contracts by choosing a convenient Rust representation.
-5. Save baseline targeted test and build results, including first-party docs site, scoped package behaviour and single-file compilation. No baseline claim without a command/result.
+1. Confirm current `main`, the merged PR #30 design and that `$entry` has no live parser/selection implementation. Reconcile only changed code locations, not the accepted contracts.
+2. Read the architecture/style/testing authorities in section 1. Inspect the owners in section 4 and the current integration harness rather than treating the map as exhaustive.
+3. Inventory `@*.moth`, `+*.moth`, `config.moth`, root activity and generated/scaffold source, including `packages/html/@mod.moth`, `packages/web/site/@mod.moth`, docs pages, test fixtures and source-package boundary roots. Decide per **directory** which of the three roles it needs. A previously activity-driven `@page` generally becomes `@entry`; a public API root becomes `@mod`; a `+` support root becomes `@package`. Split the old normal root when it both exports API and has root output, moving shared implementation into ordinary files.
+4. Run and record baseline targeted source-discovery, package-visibility, `moth check`, HTML JS and supported Wasm tests. Record unavailable gates rather than claiming they passed.
 
-**Gate:** a source-backed inventory and an agreed role map exist. No source syntax change yet.
+**Gate:** one verified migration inventory and targeted baseline. No authored syntax change yet.
 
-### Phase 1: Establish one internal root-role authority
+### Phase 1: Internal role model and structural graph
 
-1. Replace the pair-only structural root record internally with a compact three-role presence model. Use one clear role vocabulary and one classifier. Keep role-qualified origins and one role-neutral shared owner.
-2. Thread three optional root source IDs through the index, graph, module seed and prepared compilation input. Preserve the one-directory/one-job invariant, source candidate interning and deterministic IDs.
-3. Centralise public surface selection as an explicit option: normal and support interfaces may each be absent, and an entry is never an importable API. Never infer the provider role from whichever file happens to be first.
-4. Update symlink/root claim and collision representation without adding parallel directory indexes or filesystem passes. Retain the visible authored path and canonical physical path separately.
-5. Introduce internal role tests for all eight possible presence combinations, including the no-root case, without yet accepting the new filenames as an alternate public syntax.
+1. Keep the existing `ModuleId` and shared-helper identity. Add a distinct `Entry` role to `ModuleRootRole` only where semantic origin or root-specific permissions require it. Keep normal/support as the two public interface roles and `Shared` as helper origin. Use a compact role-keyed root inventory, not three independently compiled modules.
+2. Feed that inventory through `SourceTreeIndex`, `ModuleIdentityRecord`, `ProjectModuleGraphNode`, `ModuleEntrySeed`, `PreparedModuleInput` and the source-origin table. Preserve one canonical owned-source vector, one preparation worklist and one graph node per rooted directory.
+3. Separate the *preparation anchor* (one selected root source ID) from the *entry source* and each facade source. Rename existing ambiguous `entry_file_id`, `entry_path` and primary-root fields at their true owners; avoid unrelated API renames. The chosen anchor has no semantic authority beyond preparing the one structural module.
+4. Keep registered Core/Builder source-package public-root selection valid for either `@mod` or `@package`, with the root package facade still required for external project package assembly. Validate physical duplicate claims and the absence of an importable API for entry-only roots.
+5. Add narrow identity/role tests for three single roles, three pairs, triple roots and an unrooted directory. Confirm role-stable shared helper origins and deterministic ordering.
 
-**Gate:** role plumbing compiles under the existing source surface while preserving the previous observable results. Any temporary bridge is documented locally for mandatory deletion in Phase 4.
+**Gate:** graph, identity and preparation plumbing compiles without new source-level syntax, extra graph nodes, per-root source copies or fabricated API surfaces.
 
-### Phase 2: Enforce isolated root-local visibility and API publication
+### Phase 2: Root-local scope, imports and exported APIs
 
-1. Make header preparation issue root-specific declaration ownership and visibility. Ensure ordinary helper declarations remain shared, while direct declarations in one root cannot enter another root's lookup, ordering or public projection.
-2. Prevent ordinary helper files from resolving declarations defined directly inside any root. Keep legal helper-to-helper and root-to-helper nameability.
-3. Restrict export parsing and exposure to normal/support facades in the target role model. The interim authored `export:` block remains supported only in those two root files. Reject any export attempt from entry, helper and config sources.
-4. Preserve one normal and one support interface type, with optional presence in the publication carrier. Update public-interface seed generation, package-surface checks and `ModuleArtifactStore::interface_for_surface`. Remove assumptions that every module has a public interface.
-5. Preserve one semantic transaction, HIR and generated sidecar lane for the structural module. Verify a shared helper exported through two facades has one defining declaration origin and two correctly scoped export bindings.
-6. Add focused negative tests for direct cross-root reads, indirect helper reads, direct-root-path imports, cross-root re-exports, leaked type identities, same-spelling independent root-local declarations and support visibility collisions.
+1. Reuse prepared declaration shells and the existing nameability owner to enforce three isolated root-local scopes. Each root may see its own declarations and legally bound shared helpers. Other roots and all ordinary helpers cannot resolve a root-local declaration, including via imports, re-exports or alias lookups. Keep same-spelling declarations legal in disjoint root scopes.
+2. Restrict the currently implemented `export:` to `@mod` and `@package`. Keep its existing direct-selection re-exports, exported type/effect/lifetime validation and precise diagnostics. Reject exports in entry, ordinary helpers and config. Do not implement undecided `$export` grammar.
+3. Project a public interface only for each **present** API facade using the existing export seed and draft builder. Publish two optional surfaces and the shared executable in one artefact. Update `ModuleArtifactStore::interface_for_surface`, publication-shape checks and consumers without empty-placeholder interfaces or compatibility wrapper types.
+4. Keep one namespace per structural module, but authorise each cross-module support import by the **source's** root/shared role. An `@entry` source is a normal-position consumer, an `@package` source is a strict support consumer and shared helpers in a module with `@package` must obey the stricter intersection. Use the existing support topology and `cross_module_support_import_is_visible` guard. A `@mod` or `@entry` co-located with a support facade must not grant imports to that facade.
+5. Extend scope and provider tests for an entry-only support owner, a support-only intermediate directory, a paired entry/support module, a triple-root module, a shared helper's restricted dependency and same-name root-local declarations. Confirm that a requested missing normal surface does not fall back to `@package` or `@entry`.
 
-**Gate:** isolated public projections and helper ownership are covered by compiler tests. No accidental cross-root provider edge is produced. Avoid widening scope through a special same-directory fallback.
+**Gate:** no direct or indirect cross-root read, illegal support import or public-surface leak. Compiling a shared helper still produces one declaration and one semantic origin.
 
-### Phase 3: Make executable work entry-only
+### Phase 3: Entry-only compiler work
 
-1. Move implicit `start` synthesis to the entry root role. The active root chosen for internal compilation must no longer be conflated with the executable root or public facade. Name internal fields accordingly.
-2. Parse and validate the `@entry` root as the sole legal source of top-level runtime work and direct fragments/slots. API-only roots reject those constructs with a role-specific diagnostic while allowing normal runtime function bodies.
-3. Move finished entry metadata, root activity, static/runtime fragment positions and `start` outcome to the optional entry lane of the completed module artefact. An entryless module must not contain a hidden `start` or fragment activation plan.
-4. Retain `Error!` source propagation, runtime fragment staging, compile-time fragment storage, selected builder-slot contracts and HIR/borrow/lifetime/target validation of all authored code.
-5. Ensure entry failure invalidates the paired facade publication and vice versa, with no partial results. Preserve source spans and one diagnostic owner.
+1. Synthesize `start` only for a real `@entry` root or an explicitly selected synthetic entry, not for an API facade. API-only roots reject direct runtime statements, top-level const/runtime fragments and direct builder slots while still allowing function bodies and API constants. Entry roots reject `export:`.
+2. Keep the existing AST, HIR, numeric/borrow/lifetime and generated-function pipeline. Carry optional entry metadata and fragment insertion indexes in the existing module metadata lane. An entryless module has no dormant start or entry fragment schedule. Do not create a second executable lane or a separate entry module job.
+3. Keep `Error!` startup propagation, static/runtime fragment order, builder slot semantics and the failure-path fragment-publication rule. Failure of any present facade or entry invalidates the one module transaction and both potential interfaces.
+4. Test API-only, entry-only, entry/support, entry/mod and triple-root modules, including an empty entry and a metadata-only entry. Assert that all published HIR, generated requests and start identities remain consistent with the roles actually present.
 
-**Gate:** compiler-module service tests cover entry-only, facade-only, two-facade and triple-root modules. Start/fragment identities originate only from the entry. No duplicate HIR for shared helpers.
+**Gate:** only entry roots produce `start` or root output, and interface-only modules compile with no fake executable entry.
 
-### Phase 4: Atomic public-syntax and entry-selection cutover
+### Phase 4: Single public filename and selection cutover
 
-This phase is the first public change and must land as one coherent branch checkpoint. It may contain several implementation commits, but no intermediate commit is advertised as a supported filesystem language.
+1. Change the canonical filename recogniser to exactly `@mod.moth`, `@package.moth` and `@entry.moth`. Reject other special `.moth` filenames (`@page`, `@api`, `+package`, `@config` and legacy `#`) as authored source diagnostics, not ordinary helper files or invisible no-ops. Inspect non-`.moth` `@` resources separately and retain existing source-kind semantics unless there is a proven name collision. Preserve case-only, symlink, canonical path and non-regular-root validation.
+2. Reuse Stage 0's indexed identities for direct-child `@mod` imports, scoped `@package` provider selection and the absence of an entry API. Deny direct special-file imports, private traversal and namespace fallback. Confirm registered Core/Builder source packages continue to compile with their permitted API facades.
+3. Derive `ProjectModuleGraph::entry_modules()` only from project-local `@entry` presence, excluding separately compiled dependency entries. In `ProjectCompilation::from_successful_boundaries`, delete `root_activity.has_html_artifact_activity()` gating. Preserve `EntryAssembly`, reachability and resource assembly.
+4. Preserve `check` with zero entries, no-homepage descendant entries and command-specific no-entry outcomes. Make explicit synthetic single-file application selection work without `$entry` or an authored special filename. Keep any standalone `@entry` file subject to the command's selected-root policy, not automatic project discovery.
+5. Migrate `packages/`, `docs/`, real fixtures and CLI scaffolds in the same checkpoint. Update declarations and imports when splitting previously combined executable/export roots. Route derivation still uses directories, not the new root filename.
+6. Delete temporary root adapters and obsolete activity-selection tests. Retain the working fragment counters, reporting and ownership lanes still used by backend assembly.
 
-1. Activate exactly `@mod.moth`, `@package.moth` and `@entry.moth` in `root_file.rs` and Stage 0 discovery. Remove recognition of arbitrary `@*.moth` and `+*.moth` as canonical roots. Diagnose obsolete/unknown special names precisely.
-2. Update namespace discovery so only `@mod` supplies the normal surface, only `@package` supplies support and neither namespace resolves `@entry`. Reject an import of an entry-only module when a normal API is requested. Preserve nearest-child/sibling support visibility and no fallback.
-3. Make `ProjectModuleGraph::entry_modules()` mean exactly project-local modules containing `@entry.moth`. Never include API-only modules or dependency package entries.
-4. In `ProjectCompilation::from_successful_boundaries`, delete the `root_activity.has_html_artifact_activity()` entry gate. Select the compiled entry presence and builder capability. Preserve static-only and metadata-only output. Leave the existing `EntryAssembly` reachability and resource union implementation intact as far as possible.
-5. Preserve project package facade assembly, but select only `@package` at the selected project root. A root `@mod` or `@entry` never acts as the external package facade.
-6. Reconcile synthetic single-file compilation as an explicit selection path and update HTML no-entry/no-homepage command results. Preserve directory-derived routes and runtime error handling.
-7. Migrate real source files, test fixtures, compiled first-party packages, docs page roots and CLI scaffolds in the same cutover. An old root must neither silently compile as a helper nor be recognised in parallel. Update import diagnostics to describe the directory surface rather than an authored root filename.
-8. Delete the private migration bridge from Phase 1. Remove obsolete root filename classification, activity-selection and `$entry` references in production code.
+**Gate:** one public root vocabulary, real docs/site HTML JS build and supported Wasm build, package-only and mixed project examples, and no activity-based entry selection.
 
-**Gate:** a whole first-party HTML project builds in JS mode and in the repository-supported Wasm mode. Package-only and mixed application/package projects compile. The migration has one public naming contract, no compatibility fallback and no activity-based entry selection.
+### Phase 5: Boundary hardening and regression validation
 
-### Phase 5: Harden command, discovery, package and test boundaries
+1. Exercise canonical, check-only, explicitly selected single-file and separately compiled source-package paths. Confirm entry-only, support-only and triple-root ownership, orphan-file diagnostics and no skipped root diagnostics under scheduling budgets.
+2. Verify that only an external **project package** requires its project-root `@package`; registered source-backed Core/Builder packages can retain `@mod` where their public-root contract permits it. Validate source-package identity isolation, project globals restrictions and consumer input separation.
+3. Validate direct special-file path rejection, case-only and extensionless collisions, symlink aliases, hidden/output exclusions, resource references, source package links and deterministic error spans. Preserve expected operational failures versus source diagnostics.
+4. Reconcile the queued test-module plan from `+` test facades to test-only `@package.moth` without implementing `moth test`. Preserve reserved `tests/` ownership and production-to-test invisibility. A test support facade must never acquire normal production visibility.
+5. Verify entry changes do not change API fingerprints if public facts are identical, shared helper export changes invalidate affected consumers, and private entry changes only affect executable/root/link facts. Retain the existing five fingerprint domains rather than adding one per root.
+6. Extend the existing narrow subsystem and integration tests. Each new test must protect a distinct failure mechanism, not merely the spelling of a second root filename.
 
-1. Check entry-only descendants, support-only descendants, paired facade modules and triple-root modules in canonical, check-only and source-package compilation paths. Verify orphan `.moth` files remain diagnosed and never create independent entries.
-2. Validate source package boundary admission: a consumed external source package needs its prescribed public `@package` facade. Its internal `@entry` never activates in the consumer. Its independently selected project build may activate that entry.
-3. Verify no root-only file is imported as a direct physical Moth file value or as a path bypassing facade boundaries. Preserve extensionless collisions, case folding, symlink safety, hidden outputs and source-kind/provider behaviour.
-4. Update the future test-module plan: test support facades use `@package.moth` in their test-only scope, not `+*.moth`. Keep recognised `tests/` units distinct from production modules, including unrooted test-only units. Production cannot discover or bind test support. Do **not** implement the future `moth test` runner in this phase.
-5. Check incremental reuse and fingerprint invariants: touching entry-only work does not change API fingerprints, touching shared helper public facts invalidates affected facade consumers, config changes retain their current dependency behaviour and output changes do not mutate semantic identities.
-6. Run focused integration, filesystem identity, source-package, CLI scaffold and resource tests. Ensure diagnostics use typed reasons, authored source sites and the correct failure lane.
+**Gate:** boundary, registered-package, test-design, fingerprints and deterministic compilation checks pass without duplicated source preparation or extra root-specific caches.
 
-**Gate:** structural discovery, source-package selection, test isolation specification and reuse checks hold at the appropriate boundaries. No duplicated scans, shadow namespace or per-root module job exists.
+### Phase 6: Documentation, cleanup and completion
 
-### Phase 6: Canonical documentation and full migration audit
+1. Update permanent authorities `docs/build-system-design.md` and `docs/compiler-design-overview.md` for the three roles, role-local visibility, support owner/consumer semantics, optional interfaces, entry-only start, registration of source packages and entry assembly. Update relevant `docs/docs/project-structure/` and `docs/docs/packages/` references plus their Basic counterparts. Document the final surface, not the migration as the language contract.
+2. Audit `docs/roadmap/plans/general-directives-plan.md` and the canonical directive pages rather than rewriting already-correct sections: they now have **two** attachment contexts and no `$entry` implementation phase. Preserve `$config` typed input contracts and template formatter migration. Keep the future `$export` restriction to the two API facades, without introducing its grammar.
+3. Update `docs/roadmap/plans/built-in-testing-and-test-modules-plan.md`, roadmap and progress matrices, cheatsheet, `index.md`, first-party package docs and scaffold examples. Fix known stale `$project`/`$html_builder` examples in project-layout docs, using existing named config records. Update links after renaming docs roots.
+4. Remove obsolete classifier predicates, duplicate facade-selection logic, no-longer-used entry activity predicates, abandoned root-only visibility exceptions, stale comments and migration bridges. Do not retain previous public filename spellings in compatibility code. Leave legitimate fragment-count handling in place.
+5. Follow `docs/developer-docs/style-guide/{testing,validation}.mtf` and `moth-code-review-guide.md`: focused checks at slice boundaries, `just validate` at integration checkpoints, and `just validate-full`, docs release build, applicable feature/OS gates and code-bloat audit for merge readiness. Run `rg` over implementation, docs and fixtures for old `+` roots, arbitrary `@*.moth` roots, `$entry`, `has_implicit_start` on Normal and `has_html_artifact_activity`. Retain intentional migration-diagnostic examples only.
+6. Record exact commands, results and blockers. Update the roadmap/progress status only for delivered code. Report remaining separate work: `$export` syntax and `moth test`.
 
-This is part of implementation completion, not optional follow-up documentation.
+**Gate:** documentation and code describe one implemented contract, full applicable validation is recorded, and an independent review finds no parallel root representation or unsupported claims.
 
-1. Update `docs/build-system-design.md` architectural invariants, project topology, roots, support/project package visibility, source indexing, source sets, command policies, entry candidates/selection, synthetic single-file selection, and fingerprint/link planning descriptions.
-2. Update `docs/compiler-design-overview.md` invariants, module root semantic roles, source identities, compiler input/result, optional public interfaces, `start`, header roles, public projection and metadata/link lanes. Explicitly specify that only entry roots synthesize `start`.
-3. Update canonical `docs/docs/project-structure/` pages and Basic pages for module roots, layout, API, facade, runtime, routing, configuration, builder slots and scaffold examples. Correct old assertions that root suffixes are cosmetic or that normal roots have dormant runtime.
-4. Update `docs/docs/packages/` pages and Basic pages for local support packages, module visibility, dependency paths and public re-exports. Explain normal/support consumer-position resolution without fallback.
-5. Update `docs/docs/directives/` and companion overview/Basic docs to remove `$entry`, the three-attachment-context model and root-only placement matrix. Preserve the `$config` and template-head grammar, accurate support labels and the accepted future `$export` restriction.
-6. Rewrite the accepted `docs/roadmap/plans/general-directives-plan.md` so its scope is `$config`, existing template formatter migration and the remaining general-source directive machinery. Remove the entire `$entry` implementation phase, acceptance tests and final condition. Point to this plan for the finished root-role contract. Preserve named `project`/builder config records, not obsolete `$project` or `$html_builder` directives.
-7. Reconcile `docs/roadmap/plans/built-in-testing-and-test-modules-plan.md`, `docs/roadmap/roadmap.md`, the compiler progress matrix (`docs/docs/progress/@page.moth`), packages/builders matrix, cheatsheet, `index.md`, first-party package READMEs and `moth new` instructions. Keep status/progress in the matrices, not final contract prose.
-8. Search documentation, examples, Rust comments and fixtures for `+package`, `+shared`, `@page`, `@site`, `@anything`, arbitrary normal root suffix, `has_implicit_start` on `Normal`, `$entry`, `$page` and old activity-based entry selection. Keep intentional historical references only when explicitly labelled as obsolete and useful for migration diagnostics.
-9. Verify docs links and render/build the docs site with the new root filenames and package paths. Do not silently rewrite source-relative file values, resource paths or the final output routes during migration.
+## 6. Required focused regression coverage
 
-**Gate:** permanent architecture and public language references describe exactly one final surface. No conflicting accepted plan claims remain and the docs release build succeeds.
+Use existing primary owners: `src/build_system/tests/` for discovery, graph, namespace and artefact invariants, compiler-local tests for role/nameability and root HIR, `tests/cases/` for observable programs, and existing HTML/CLI tests for output/scaffolding. Follow the test guide's admission rule. Consolidate repetitions rather than building a new root-role test framework.
 
-### Phase 7: Final technical and code-size audit
+| Area | Required distinct regression |
+|---|---|
+| Discovery | All seven non-empty root-role combinations, missing-root directory, rejected unknown/legacy root, same-physical-file alias, case-only collision and deterministic ordering |
+| Scope | Same helper accessed from three roots, one shared declaration/HIR definition, root-to-root and helper-to-root rejection, same-spelling local declarations with no accidental collision |
+| Visibility | A parent's child `@mod`, eligible sibling `@package`, entry-only child with no normal API, support-only private subtree and no normal-to-support fallback |
+| Support owner | Support nested under entry-only normal-position owner, paired `@entry`/`@package` with strict support imports, shared-helper intersection and project/package topology parity |
+| Public API | A helper re-exported through both facades with shared declaration origin but two export bindings, private nominal protection, invalid `export:` in entry or helper, exact optional interface publication |
+| Registered package | Existing `packages/html/@mod.moth` and `packages/web/site/@mod.moth` remain registered and importable, while external project package assembly still requires root `@package` |
+| Entry | Empty, static-only, metadata-only and runtime `@entry`, no facade start, imported entry never activates, one start per selected entry |
+| Commands | Zero-entry check, descendant-only HTML build/dev, no manufactured homepage, single-file synthetic application, package-only outcome |
+| Runtime and resources | JS/Wasm parity, runtime fragment insertion count, failure staging, direct `$in`, resource union and output URL context |
+| Config and tests | Optional top-level `config.moth`, ignored nested config, unchanged `$config` semantics, test-only `@package` not exposed to production |
+| Caching and diagnostics | Stable shared and role-local identities, entry-only edits not changing API projection, typed errors at authored sites, unchanged error-budget and symlink safety |
 
-1. Follow `docs/developer-docs/style-guide/validation.mtf` for the final gate. Run focused tests, `just validate`, `just validate-full`, the docs release build and the required feature/platform lanes for changed behavior. Do not claim anything was executed unless logs confirm it.
-2. Audit every touched owner with `moth-code-review-guide.md`. Remove old classifier predicates, obsolete role fallback, abandoned root-activity heuristics, parallel per-root module storage, redundant adapters and stale comments.
-3. Inspect `source_tree_index`, `module_identity`, `module_namespace`, `module_inventory`, `module_compilation`, `module_artifact_store` and `build.rs` for repeated root classification or duplicated declaration trees. Collapse superficial wrappers and preserve one source of truth per fact.
-4. Check user-input-triggerable panics, deterministic ordering, exact spans, namespace collision diagnostics, symlink/physical path invariants, memory growth, dropped temporary preparation state and missing/error outcomes.
-5. Update the roadmap/progress status and report each validation command's outcome, any unsupported target, final changed-file inventory and remaining independently queued work (`$export` and `moth test`).
+## 7. Completion and exclusions
 
-**Gate:** all applicable gates pass or any exceptional blocker is documented precisely, with no claimed completed feature or passed check unsupported by evidence.
+Complete only when the three fixed `@` files are the sole authored root roles, every structural module compiles once, all present root-local scopes remain isolated, only `@mod` and `@package` expose APIs, only `@entry` owns root runtime and project entries are selected by its presence. Preserve explicit source-package registration policy, scoped support visibility, bootstrap config, synthetic single-file commands, immutable interface/HIR/link handoffs, test-only separation and JS/Wasm output. Remove legacy filenames, `$entry`, compatibility paths and activity-based selection together. The affected permanent documentation and focused/full validation must match delivered behaviour.
 
-## 6. Required regression matrix
-
-Prefer extending the existing primary test owner. The real project integration harness is `tests/cases/`; focused Rust tests belong beside Stage 0/compiler/build owners under their existing `tests/` modules. Match the repository testing guide: every new case should catch a distinct credible failure rather than merely vary filenames.
-
-| Contract | Positive cases | Negative / regression cases |
-|---|---|---|
-| Role presence | Each single role, each pair and triple, plus no-root directory | Duplicate/alias root claims and unknown `@`/legacy `+` names |
-| Module identity | One directory `ModuleId`, one shared helper origin, three role origins | Three jobs for one directory, duplicate helper declarations, unstable shared identity |
-| Local visibility | Root sees its own declarations and explicitly bound helpers | `@mod` reading `@entry`, `@package` reading `@mod`, shared helper reading any root-local declaration |
-| Export scope | Same helper re-exported through both facades with correct export-binding identity | `export:`/future `$export` in entry or helper, private nominal leakage, bypassing facade |
-| Parent/support visibility | Direct child normal API, visible sibling support API, project external package | Importing entry-only module, sibling binding normal facade illegally, same-scope support dependencies, implicit fallback |
-| Entry semantics | Runtime, static, empty and metadata-only `@entry`, dormant imported entry | API facade runtime fragments, unmarked activity selecting entry, imported entry execution |
-| Command routing | Zero-entry `check`, descendant-only HTML `build`, no-homepage dev fallback | No-entry HTML `build`/`dev`, manufactured homepage, route from root basename |
-| Builder and runtime | JS and HTML-Wasm variants, direct root `$in` slots, resource URL contexts, start error path | Publishing runtime fragments after failed start, missing CSS resource from metadata-only entry |
-| Bootstrap and single-file | Optional `config.moth`, named records, source `$config`, explicitly selected synthetic entry | Nested config creates module, invalid `@config`, single-file root requires authored `$entry` |
-| Test isolation | Test-only support root direction remains documented and separately selectable | Production importing `tests/@package`, test helper accidentally publishes production ABI |
-| Determinism and caching | Same source tree yields stable IDs, diagnostics, interfaces and outputs across repeat runs | Case/symlink collision nondeterminism, entry edit changes API fingerprint without exported change |
-| Migration and tooling | First-party packages, docs, CLI scaffold, check-only owners and `moth tests` harness | Old `@site` accepted silently, legacy `+` path treated as helper, synthetic package selected as entry |
-
-Use typed diagnostic reason/code assertions with appropriate primary and related sites. Include source-level, graph-level and observable builder/runtime checks where the failure path differs. Source tree performance must remain one traversal per boundary, with no new per-root candidate-copy or repeated tokenization of shared helpers. Retain documented compiler/resource work limits.
-
-## 7. Completion contract and exclusions
-
-This plan is complete when:
-
-- Every authored source directory recognises only the three fixed `@` roles and permits any unique combination.
-- `@mod` and `@package` are API-only, `@entry` is entry-only and root-local declarations are mutually invisible, including through ordinary shared helpers.
-- Ordinary module implementation files are owned and semantically prepared once, and the structural module publishes all present surfaces atomically.
-- Only `@mod` and `@package` can export. Current `export:` remains the temporary operational spelling only until the separate `$export` migration.
-- Only `@entry` has an implicit `start` and becomes a builder entry candidate. HTML entries are explicit and no longer inferred from activity.
-- `config.moth`, external package isolation, support-package consumer-position rules, tests isolation, synthetic single-file semantics, link validation and JS/Wasm output contracts remain intact.
-- The old `$entry`, obsolete root-name spellings, `+` support roots, stale documentation and compatibility code are removed in the same public cutover.
-- Focused tests and final repo validation demonstrate those contracts with specific recorded results.
-
-Out of scope: implementing `$export`'s undecided operand/block form, the `moth test` runner, per-module configuration, builder selection from source, arbitrary new root kinds, multiple entries per directory, multiple independently compiled modules for one directory, user-defined visibility rules, source targets selected by filenames and a new module graph/parser/framework. A future feature may add a reserved filename only through a separate accepted design and its own source ownership contract.
+Out of scope: implementing the future `$export` grammar or `moth test` runner, per-module config, new root roles, multiple entries per directory, per-root compilation graphs, user-defined visibility directives, target selection by filenames or a new language/parser framework.
