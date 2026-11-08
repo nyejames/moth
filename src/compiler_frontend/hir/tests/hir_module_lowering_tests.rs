@@ -364,7 +364,7 @@ fn rejects_an_entry_in_an_api_only_root() {
         ConstValueStore::default(),
         TypeEnvironment::new(),
     );
-    ast.root_role = ModuleRootRole::Support;
+    ast.synthesizes_entry_start = false;
 
     let error = lower_ast(
         ast,
@@ -380,7 +380,7 @@ fn rejects_an_entry_in_an_api_only_root() {
         errors
             .primary
             .message
-            .contains("without an implicit entry reached HIR lowering with an entry body")
+            .contains("an API-only module reached HIR lowering with an entry body")
     );
 }
 
@@ -525,7 +525,7 @@ fn rejects_a_normal_root_without_its_compiler_owned_entry() {
 #[test]
 fn api_only_root_roles_lower_without_implicit_start() {
     let mut path_fork = super::PathInternerFork::empty();
-    for root_role in [
+    for _ in [
         ModuleRootRole::Support,
         ModuleRootRole::SyntheticProjectContext,
     ] {
@@ -549,7 +549,7 @@ fn api_only_root_roles_lower_without_implicit_start() {
             ConstValueStore::default(),
             TypeEnvironment::new(),
         );
-        ast.root_role = root_role;
+        ast.synthesizes_entry_start = false;
 
         let (module, _type_environment) = lower_ast(
             ast,

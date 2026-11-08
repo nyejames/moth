@@ -92,12 +92,16 @@ fn multi_file_declarations_are_aggregated() {
         )
         .expect("source should tokenize");
         let owner = SourceTokenOwner::new(lexed.tokens);
+        let options = if source_id == entry_id {
+            crate::compiler_frontend::tests::parse_support::legacy_single_root_options(source_id)
+        } else {
+            HeaderParseOptions::default()
+        };
         prepare_file_from_tokens(
             owner,
             lexed.logical_path,
             lexed.path_syntax,
-            &entry_path,
-            &HeaderParseOptions::default(),
+            &options,
             &mut string_table,
             0,
             0,

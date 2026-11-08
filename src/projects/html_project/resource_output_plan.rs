@@ -700,6 +700,7 @@ fn module_root_role_tag(role: ModuleRootRole) -> &'static str {
     match role {
         ModuleRootRole::Normal => "normal",
         ModuleRootRole::Support => "support",
+        ModuleRootRole::Entry => "entry",
         ModuleRootRole::Shared => "shared",
         ModuleRootRole::SyntheticProjectContext => "synthetic_project_context",
     }

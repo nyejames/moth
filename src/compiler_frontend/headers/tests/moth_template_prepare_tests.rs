@@ -189,7 +189,6 @@ fn prepare_via_pipeline(source: &str) -> SourcePreparationDelta {
     let context = FrontendFilePrepareContext {
         source_files: &source_files,
         style_directives: &style_directives,
-        entry_file_path: entry_file_path.as_path(),
         options: &options,
     };
 
@@ -221,7 +220,6 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
         &source_file_kinds,
         ModuleRootTable::empty(),
     );
-    let entry_file_path = input_path.clone();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     // One-row inventory, same constructor as the standalone Moth template service: authored
@@ -242,15 +240,12 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
         .map(|identity| identity.id)
         .expect("standalone Moth template source identity was not registered");
     let options = HeaderParseOptions {
-        entry_file_id: Some(entry_file_id),
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
+        selected_file: Some((entry_file_id, FileRole::LegacyCombinedRoot)),
+        ..Default::default()
     };
     let context = FrontendFilePrepareContext {
         source_files: &source_files,
         style_directives: &style_directives,
-        entry_file_path: entry_file_path.as_path(),
         options: &options,
     };
     let input = FrontendFilePrepareInput {
@@ -321,7 +316,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
             source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
-            root_role: ModuleRootRole::Normal,
+            synthesizes_entry_start: true,
             external_package_registry: Arc::clone(&external_package_registry),
             style_directives: &style_directives,
             string_table: &mut string_table,
@@ -550,7 +545,7 @@ impl MothTemplateScopeFixture {
                 source_build_config_contract_names: Arc::new(Default::default()),
             },
             AstBuildContext {
-                root_role: ModuleRootRole::Normal,
+                synthesizes_entry_start: true,
                 external_package_registry: Arc::clone(&external_package_registry),
                 style_directives: &style_directives,
                 string_table: &mut string_table,
@@ -651,18 +646,6 @@ impl MothTemplateScopeFixture {
     > {
         let style_directives = StyleDirectiveRegistry::built_ins();
         let external_package_registry = Arc::new(ExternalPackageRegistry::new());
-        let options = HeaderParseOptions {
-            entry_file_id: None,
-            support_root_file_id: None,
-            entry_file_role: None,
-            active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
-        };
-        let context = FrontendFilePrepareContext {
-            source_files: &self.source_files,
-            style_directives: &style_directives,
-            entry_file_path: self.entry_file_path.as_path(),
-            options: &options,
-        };
         let mut string_table = self.base_string_table.clone();
         let mut prepared_files = Vec::new();
         let mut span_builders = Vec::new();
@@ -675,6 +658,21 @@ impl MothTemplateScopeFixture {
                 .get_by_canonical_path(&source_path)
                 .expect("fixture source should be registered")
                 .id;
+            // The fixture prepares several root-named files in one set; select each file's
+            // fixture role through the shared single-module mapping.
+            let options = crate::compiler_frontend::tests::parse_support::legacy_fixture_file_role(
+                &source_path,
+                &self.entry_file_path,
+            )
+            .map_or_else(HeaderParseOptions::default, |role| HeaderParseOptions {
+                selected_file: Some((source_id, role)),
+                ..Default::default()
+            });
+            let context = FrontendFilePrepareContext {
+                source_files: &self.source_files,
+                style_directives: &style_directives,
+                options: &options,
+            };
             let source_kind = source_path
                 .extension()
                 .and_then(|extension| extension.to_str())
@@ -936,12 +934,19 @@ fn prepare_moth_source(
     )
     .expect("Moth source should tokenize");
     let owner = SourceTokenOwner::new(lexed.tokens);
+    let options = crate::compiler_frontend::tests::parse_support::legacy_fixture_file_role(
+        file_path,
+        entry_file_path,
+    )
+    .map_or_else(HeaderParseOptions::default, |role| HeaderParseOptions {
+        selected_file: Some((SourceId::COMPILATION_ROOT, role)),
+        ..Default::default()
+    });
     let output = prepare_file_from_tokens(
         owner,
         source_path,
         lexed.path_syntax,
-        entry_file_path,
-        &HeaderParseOptions::default(),
+        &options,
         string_table,
         0,
         0,
@@ -1948,7 +1953,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
             source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
-            root_role: ModuleRootRole::Normal,
+            synthesizes_entry_start: true,
             external_package_registry,
             style_directives: &StyleDirectiveRegistry::built_ins(),
             string_table: &mut string_table,

@@ -344,6 +344,8 @@ fn compile_single_file_frontend_with_target(
         }
     };
 
+    // `@mod.moth`, `@package.moth` and `@entry.moth` all carry the `@` prefix, so this predicate
+    // already admits every fixed root spelling. Legacy `+*.moth` selections keep an empty table.
     let module_roots = if file_name_is_normal_module_root_file(entry_file_name) {
         SourceTreeIndex::bounded_module_roots_for_single_file(
             &entry_path,
@@ -356,6 +358,9 @@ fn compile_single_file_frontend_with_target(
     } else {
         ModuleRootTable::empty()
     };
+    // Preparation needs the same bounded root inventory to classify every module root this
+    // synthetic unit reaches. The resolver owns that table, so borrow it back instead of
+    // keeping a second snapshot.
     let project_path_resolver = ProjectPathResolver::new_with_module_roots(
         source_root.clone(),
         source_root.clone(),
@@ -580,7 +585,7 @@ fn compile_single_file_frontend_with_target(
             input_files,
             &mut source_spans,
             &entry_path,
-            None,
+            project_path_resolver.prepared_module_roots(),
             local_table,
             path_fork,
             source_byte_count,
@@ -592,7 +597,7 @@ fn compile_single_file_frontend_with_target(
             input_files,
             &mut source_spans,
             &entry_path,
-            None,
+            project_path_resolver.prepared_module_roots(),
             local_table,
             path_fork,
             source_byte_count,
@@ -668,7 +673,6 @@ fn compile_single_file_frontend_with_target(
             let compile_context = ModuleCompilationContext {
                 options: config.frontend_options(),
                 build_profile,
-                root_role_override: None,
                 project_path_resolver: Some(&project_path_resolver),
                 source_files,
                 style_directives,

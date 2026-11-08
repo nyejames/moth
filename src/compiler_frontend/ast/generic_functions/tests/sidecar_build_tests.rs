@@ -78,7 +78,7 @@ fn requester_template_contract_slots_use_nonidentity_generated_domain_remap() {
         string_table: &mut string_table,
         path_fork: &mut path_fork,
         entry_dir,
-        root_role: ModuleRootRole::Support,
+        synthesizes_entry_start: false,
         build_profile: requester.build_profile,
         file_value_resolution: None,
         config_resolution: None,

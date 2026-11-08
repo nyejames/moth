@@ -494,14 +494,14 @@ fn extra_string_ids_remap_to_destination_ids() {
     let mut remapped = invalid_trait_conformance(
         widget,
         Some(printable),
-        InvalidTraitConformanceReason::ImportedModuleRoot,
+        InvalidTraitConformanceReason::AliasTarget,
         Some(exact_span(7, 3)),
     );
     remapped.remap_string_ids(&domain.string_remap);
     let direct = invalid_trait_conformance(
         dest_widget,
         Some(dest_printable),
-        InvalidTraitConformanceReason::ImportedModuleRoot,
+        InvalidTraitConformanceReason::AliasTarget,
         Some(exact_span(7, 3)),
     );
     assert_renders_like_direct(remapped, direct, &type_environment, context);
@@ -920,7 +920,7 @@ fn prepared_rebase_updates_payloads_labels_and_tokens() {
     let conformance = generics_traits_api::invalid_trait_conformance(
         alias,
         None,
-        InvalidTraitConformanceReason::ImportedModuleRoot,
+        InvalidTraitConformanceReason::AliasTarget,
         Some(primary_span),
     )
     .with_label(
@@ -992,7 +992,7 @@ fn prepared_rebase_updates_payloads_labels_and_tokens() {
         .expect("trait-conformance family");
     assert!(matches!(
         conformance.shape,
-        InvalidTraitConformanceShape::ImportedModuleRoot
+        InvalidTraitConformanceShape::AliasTarget
     ));
     let target_name = conformance_view
         .string_ids()
@@ -1234,7 +1234,7 @@ fn prepared_rebase_preserves_source_spans_and_strings() {
     let draft = generics_traits_api::invalid_trait_conformance(
         name,
         None,
-        InvalidTraitConformanceReason::ImportedModuleRoot,
+        InvalidTraitConformanceReason::AliasTarget,
         Some(primary),
     )
     .with_label(Some(related), Some(LabelDraftMessage::TraitRequirementSite));
@@ -1251,7 +1251,7 @@ fn prepared_rebase_preserves_source_spans_and_strings() {
         .expect("trait-conformance facts");
     assert!(matches!(
         conformance.shape,
-        InvalidTraitConformanceShape::ImportedModuleRoot
+        InvalidTraitConformanceShape::AliasTarget
     ));
     let target_name = view.string_ids().first().expect("trait target name");
     assert_eq!(report.context().strings().resolve(*target_name), "Button");

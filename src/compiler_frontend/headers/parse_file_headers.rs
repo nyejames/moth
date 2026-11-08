@@ -49,11 +49,9 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::semantic_identity::{ModuleRootFiles, ModuleRootRole};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpan};
-use crate::compiler_frontend::source_packages::root_file::{
-    file_name_is_config_file, file_name_is_module_root_file,
-};
+use crate::compiler_frontend::source_packages::root_file::file_name_is_config_file;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -61,8 +59,49 @@ use crate::compiler_frontend::tokenizer::tokens::{
 };
 use rustc_hash::FxHashMap;
 use std::mem;
-use std::path::Path;
 use std::sync::Arc;
+
+/// Derive one source's file role from Stage 0's role-keyed root inventory.
+///
+/// WHY: membership in the inventory is the authoritative root-role fact for every prepared
+///      source, including symlinked roots whose visible name differs from their canonical target.
+fn root_inventory_file_role(
+    root_file_ids: &ModuleRootFiles<SourceId>,
+    file_id: SourceId,
+) -> Option<FileRole> {
+    if root_file_ids.entry == Some(file_id) {
+        return Some(FileRole::ActiveEntryRoot);
+    }
+    if root_file_ids.support == Some(file_id) {
+        return Some(FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Support));
+    }
+    if root_file_ids.normal == Some(file_id) {
+        // The legacy-combined decision is owned by `ModuleRootFiles` so prepared-module start
+        // synthesis and this header role cannot drift.
+        return Some(if root_file_ids.normal_root_is_legacy_combined() {
+            FileRole::LegacyCombinedRoot
+        } else {
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal)
+        });
+    }
+    None
+}
+
+/// Derive one reached foreign root's file role from Stage 0's bounded root inventory.
+///
+/// WHY: a flattened synthetic unit prepares the module roots its dependency clauses reach in one
+///      source set. Those roots keep their authored API-facade role but never become this
+///      compilation's active surface. Entry roots are executable-only and stay ordinary sources,
+///      because they publish no importable declarations.
+fn reached_root_file_role(
+    reached_root_roles: &[(SourceId, FileRole)],
+    file_id: SourceId,
+) -> Option<FileRole> {
+    reached_root_roles
+        .iter()
+        .find(|(reached_id, _)| *reached_id == file_id)
+        .map(|(_, role)| *role)
+}
 
 /// Parse one tokenized file using the supplied string table.
 ///
@@ -74,14 +113,13 @@ use std::sync::Arc;
 /// can retain their exact primary and related byte ranges before the result crosses a preparation boundary.
 #[allow(
     clippy::too_many_arguments,
-    reason = "header parsing keeps the canonical source owner, its semantic source path, preparing path table, entry path, options, mutable string/path/span state, and the two fragment offsets as separate inputs"
+    reason = "header parsing keeps the canonical source owner, its semantic source path, preparing path table, options, mutable string/path/span state, and the two fragment offsets as separate inputs"
 )]
 pub fn parse_file_headers_with_table(
     owner: SourceTokenOwner,
     source_file: crate::compiler_frontend::symbols::path_interner::PathId,
     path_syntax: Arc<PathSyntaxTable>,
-    entry_file_path: &Path,
-    options: &HeaderParseOptions,
+    options: &HeaderParseOptions<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     const_template_offset: usize,
@@ -94,51 +132,23 @@ pub fn parse_file_headers_with_table(
         owner.tokens_ref(),
         &path_syntax,
     );
-    let HeaderParseOptions {
-        entry_file_id,
-        support_root_file_id,
-        ..
-    } = options;
-
-    let is_entry_file = entry_file_id.map_or_else(
-        || {
-            let mut scratch = Vec::new();
-            path_fork.render_native(source_file, string_table, &mut scratch) == entry_file_path
-        },
-        |expected_id| expected_id == file_id,
-    );
 
     let mut scratch = Vec::new();
     let source_path = path_fork.render_native(source_file, string_table, &mut scratch);
-    // Stage 0's module-root inventory admits only canonical `@*.moth`/`+*.moth` root names.
-    // Keep the filename check here as the provider-independent role classifier; filesystem root
-    // identity remains owned by Stage 0 and is not reconstructed from a relative logical path.
-    let is_module_root_file_by_name = source_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(file_name_is_module_root_file);
+    // `config.moth` stays a fixed build-only source name. It is not a module root role, so it
+    // cannot come from the Stage 0 role inventory.
     let is_config_file = source_path
         .file_name()
         .and_then(|name| name.to_str())
         .is_some_and(file_name_is_config_file);
 
-    let is_support_root_file = support_root_file_id.is_some_and(|root| root == file_id);
-    let file_role = if is_entry_file {
-        options
-            .entry_file_role
-            .unwrap_or(match options.active_root_role {
-                ModuleRootRole::Normal => FileRole::ActiveModuleRoot,
-                ModuleRootRole::Support
-                | ModuleRootRole::Shared
-                | ModuleRootRole::SyntheticProjectContext => FileRole::ActiveApiOnlyModuleRoot,
-            })
-    } else if is_support_root_file {
-        FileRole::ActiveApiOnlyModuleRoot
-    } else if is_module_root_file_by_name {
-        FileRole::ImportedModuleRoot
-    } else {
-        FileRole::Normal
-    };
+    let file_role = options
+        .selected_file
+        .filter(|(selected_id, _)| *selected_id == file_id)
+        .map(|(_, role)| role)
+        .or_else(|| root_inventory_file_role(&options.root_file_ids, file_id))
+        .or_else(|| reached_root_file_role(options.reached_root_roles, file_id))
+        .unwrap_or(FileRole::Normal);
 
     let mut parse_context = HeaderParseContext {
         file_role,
@@ -231,14 +241,13 @@ fn capture_preparation_spans(
 ///      ranges, then retains that same builder for later retained-token span resolution.
 #[allow(
     clippy::too_many_arguments,
-    reason = "file preparation keeps the canonical owner, its semantic source path, preparing path table, entry path, options, mutable string/path/span state, and the two fragment offsets as separate inputs"
+    reason = "file preparation keeps the canonical owner, its semantic source path, preparing path table, options, mutable string/path/span state, and the two fragment offsets as separate inputs"
 )]
 pub(crate) fn prepare_file_from_tokens(
     owner: SourceTokenOwner,
     source_file: crate::compiler_frontend::symbols::path_interner::PathId,
     path_syntax: Arc<PathSyntaxTable>,
-    entry_file_path: &Path,
-    options: &HeaderParseOptions,
+    options: &HeaderParseOptions<'_>,
     string_table: &mut StringTable,
     const_template_offset: usize,
     runtime_fragment_offset: usize,
@@ -254,8 +263,7 @@ pub(crate) fn prepare_file_from_tokens(
             InfrastructureFailure::internal(
                 CompilerStage::HeaderParsing,
                 format!(
-                    "token stream for {entry_file_path:?} carries source path {src:?} that was not issued by the supplied path table",
-                    src = source_file,
+                    "token stream carries source path {source_file:?} that was not issued by the supplied path table"
                 ),
             ),
         ));
@@ -269,7 +277,6 @@ pub(crate) fn prepare_file_from_tokens(
         owner,
         source_file,
         path_syntax,
-        entry_file_path,
         options,
         &mut local_string_table,
         &mut local_path_fork,

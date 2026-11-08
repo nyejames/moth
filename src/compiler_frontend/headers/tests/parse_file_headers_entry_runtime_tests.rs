@@ -56,8 +56,8 @@ fn entry_runtime_fragment_count_ignores_assigned_templates() {
 
 #[test]
 fn entry_runtime_fragment_count_is_zero_when_parsed_as_non_entry_file() {
-    // An imported root with only declarations reports runtime fragment count 0.
-    // WHY: only the active module root contributes runtime fragments.
+    // An ordinary source file with only declarations reports runtime fragment count 0.
+    // WHY: only the start-bearing root contributes runtime fragments.
     let headers = expect_header_success(
         parse_single_file_headers_with_entry(
             "f || -> I32:\n    1\n;\n",

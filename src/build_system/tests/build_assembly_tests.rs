@@ -73,8 +73,8 @@ use crate::compiler_frontend::public_interface::{
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
-    ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId, OriginTypeCategory,
-    OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
+    ModuleRootFiles, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
+    OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -344,17 +344,17 @@ fn module_record(
     logical_module_path: &str,
     package: &StablePackageIdentity,
 ) -> ModuleIdentityRecord {
-    let (normal_root_file, support_root_file) = match role {
-        ModuleRootRole::Normal => (Some(PathBuf::from(root_file)), None),
+    let root_files = match role {
+        ModuleRootRole::Normal => ModuleRootFiles::new(Some(PathBuf::from(root_file)), None, None),
         ModuleRootRole::Support | ModuleRootRole::SyntheticProjectContext => {
-            (None, Some(PathBuf::from(root_file)))
+            ModuleRootFiles::new(None, Some(PathBuf::from(root_file)), None)
         }
-        ModuleRootRole::Shared => (None, None),
+        ModuleRootRole::Entry => ModuleRootFiles::new(None, None, Some(PathBuf::from(root_file))),
+        ModuleRootRole::Shared => ModuleRootFiles::new(None, None, None),
     };
     ModuleIdentityRecord::new(
         PathBuf::from(root_directory),
-        normal_root_file,
-        support_root_file,
+        root_files,
         PathBuf::from(logical_module_path),
         package,
     )

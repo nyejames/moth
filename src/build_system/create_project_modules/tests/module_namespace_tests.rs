@@ -2,7 +2,9 @@ use super::*;
 use crate::build_system::create_project_modules::module_identity::{
     ModuleIdentityRecord, ModuleIdentityTable,
 };
-use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StablePackageIdentity};
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootFiles, ModuleRootRole, StablePackageIdentity,
+};
 use std::path::PathBuf;
 
 fn record(
@@ -14,8 +16,11 @@ fn record(
 ) -> ModuleIdentityRecord {
     ModuleIdentityRecord::new(
         PathBuf::from(root),
-        normal.then(|| PathBuf::from(format!("{root}/@root.moth"))),
-        support.then(|| PathBuf::from(format!("{root}/+root.moth"))),
+        ModuleRootFiles::new(
+            normal.then(|| PathBuf::from(format!("{root}/@root.moth"))),
+            support.then(|| PathBuf::from(format!("{root}/+root.moth"))),
+            None,
+        ),
         PathBuf::from(logical),
         package,
     )

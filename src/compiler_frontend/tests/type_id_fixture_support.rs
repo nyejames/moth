@@ -428,7 +428,7 @@ pub(crate) fn build_ast_with_choices(
         .expect("completed fixture expression store");
 
     Ast {
-        root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
+        synthesizes_entry_start: true,
         nodes,
         const_values,
         expressions,

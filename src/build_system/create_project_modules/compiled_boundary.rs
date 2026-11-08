@@ -622,7 +622,15 @@ impl CompiledSourcePackage {
                 let interface = self
                     .boundary
                     .modules
-                    .interface_for_surface(self.root_module_id, public_surface_role)?
+                    .interface_for_surface(
+                        self.root_module_id,
+                        public_surface_role.ok_or_else(|| {
+                            crate::compiler_bug!(
+                                CompilerStage::ProjectBuildAssembly,
+                                "registered source package boundary has no public surface role"
+                            )
+                        })?,
+                    )?
                     .ok_or_else(|| {
                         InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
                             "Source package @{} root ModuleId {} holds a successful slot without a published interface",
@@ -630,7 +638,7 @@ impl CompiledSourcePackage {
                             root_index
                         ))
                     })?;
-                if &interface.module_origin != public_surface_origin {
+                if Some(&interface.module_origin) != public_surface_origin {
                     return Err(InfrastructureFailure::internal(
                         CompilerStage::ProjectBuildAssembly,
                         format!(
@@ -688,7 +696,15 @@ impl CompiledSourcePackage {
             })?;
         self.boundary
             .modules
-            .interface_for_surface(self.root_module_id, node.public_surface_role())?
+            .interface_for_surface(
+                self.root_module_id,
+                node.public_surface_role().ok_or_else(|| {
+                    crate::compiler_bug!(
+                        CompilerStage::ProjectBuildAssembly,
+                        "project package module has no public surface role"
+                    )
+                })?,
+            )?
             .ok_or_else(|| {
                 InfrastructureFailure::internal(
                     CompilerStage::ProjectBuildAssembly,

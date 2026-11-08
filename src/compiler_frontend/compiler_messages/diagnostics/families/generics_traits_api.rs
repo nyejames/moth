@@ -1053,7 +1053,7 @@ diagnostic_family! {
 
 unit_code! {
     pub(crate) enum InvalidTraitConformanceCode {
-        ImportedModuleRoot = 1,
+        // Wire value 1 is retired with the removed imported-root role.
         AliasTarget = 2,
         NonCanonicalTarget = 3,
         NonlocalSourceTarget = 4,
@@ -1080,7 +1080,6 @@ impl InvalidTraitConformanceCode {
     pub(crate) fn of(reason: &InvalidTraitConformanceReason) -> Self {
         use InvalidTraitConformanceReason as Reason;
         match reason {
-            Reason::ImportedModuleRoot => Self::ImportedModuleRoot,
             Reason::AliasTarget => Self::AliasTarget,
             Reason::NonCanonicalTarget => Self::NonCanonicalTarget,
             Reason::NonlocalSourceTarget => Self::NonlocalSourceTarget,
@@ -1108,7 +1107,6 @@ impl InvalidTraitConformanceCode {
 /// type and word 3 the found type.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum InvalidTraitConformanceShape<Type> {
-    ImportedModuleRoot,
     AliasTarget,
     NonCanonicalTarget,
     NonlocalSourceTarget,
@@ -1154,7 +1152,6 @@ impl<Type> InvalidTraitConformanceShape<Type> {
     pub(crate) fn code(&self) -> InvalidTraitConformanceCode {
         use InvalidTraitConformanceShape as Shape;
         match self {
-            Shape::ImportedModuleRoot => InvalidTraitConformanceCode::ImportedModuleRoot,
             Shape::AliasTarget => InvalidTraitConformanceCode::AliasTarget,
             Shape::NonCanonicalTarget => InvalidTraitConformanceCode::NonCanonicalTarget,
             Shape::NonlocalSourceTarget => InvalidTraitConformanceCode::NonlocalSourceTarget,
@@ -1257,7 +1254,6 @@ impl FactCodec for InvalidTraitConformanceFact {
         use InvalidTraitConformanceShape as Shape;
         let code = Code::from_code(*words.first()?)?;
         Some(match code {
-            Code::ImportedModuleRoot => Shape::ImportedModuleRoot,
             Code::AliasTarget => Shape::AliasTarget,
             Code::NonCanonicalTarget => Shape::NonCanonicalTarget,
             Code::NonlocalSourceTarget => Shape::NonlocalSourceTarget,
@@ -1365,7 +1361,6 @@ fn split_invalid_trait_conformance(
     use InvalidTraitConformanceShape as Shape;
     let mut reason_name = None;
     let shape = match reason {
-        Reason::ImportedModuleRoot => Shape::ImportedModuleRoot,
         Reason::AliasTarget => Shape::AliasTarget,
         Reason::NonCanonicalTarget => Shape::NonCanonicalTarget,
         Reason::NonlocalSourceTarget => Shape::NonlocalSourceTarget,

@@ -238,7 +238,6 @@ fn malformed_generic_bound_retains_exact_multibyte_extended_span() {
     let source_id = SourceId::from_index(12);
     let context = HeaderTestPrepareContext {
         source_id,
-        entry_file_path: file_path,
         options: &options,
         style_directives: &style_directives,
     };
@@ -334,7 +333,6 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
     let source = format!("value #Config of I32 = 1\n#[{long_fragment_name}]\n");
     let mut source_context = TestSourceContext::new("src/@page.moth");
     let mut path_fork = PathInternerFork::empty();
-    let file_path = source_context.path().to_path_buf();
     let source_id = source_context.source_id();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let file_tokens = source_context
@@ -350,12 +348,13 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
     let tokenizer_span_count = {
         let (string_table, span_builder) = source_context.preparation_parts();
         let count = span_builder.len();
+        let options =
+            crate::compiler_frontend::tests::parse_support::legacy_single_root_options(source_id);
         let output = prepare_file_from_tokens(
             owner,
             interned_path,
             path_syntax,
-            &file_path,
-            &HeaderParseOptions::default(),
+            &options,
             string_table,
             0,
             0,
@@ -474,7 +473,7 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
         dependency_selections: &[],
         string_table,
         path_fork: &mut path_fork,
-        file_role: FileRole::ActiveModuleRoot,
+        file_role: FileRole::LegacyCombinedRoot,
     };
     let failure =
         create_top_level_const_template(scope, opening, 0, &mut cursor, &mut context, span_builder)

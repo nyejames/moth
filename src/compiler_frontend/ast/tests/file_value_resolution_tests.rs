@@ -36,7 +36,8 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::moth_template_prepare::prepare_moth_template_file;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    HeaderParseOptions, bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
+    FileRole, HeaderParseOptions, bind_module_headers, prepare_file_from_tokens,
+    prepare_header_syntax,
 };
 use crate::compiler_frontend::headers::plain_markdown_prepare::{
     PlainMarkdownPrepareInput, prepare_plain_markdown_file,
@@ -384,10 +385,8 @@ fn compile_fixture(
 
     let style_directives = StyleDirectiveRegistry::built_ins();
     let options = HeaderParseOptions {
-        entry_file_id: Some(file_id_for("@page.moth")),
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role: ModuleRootRole::Normal,
+        selected_file: Some((file_id_for("@page.moth"), FileRole::LegacyCombinedRoot)),
+        ..Default::default()
     };
     let mut prepared_outputs =
         Vec::with_capacity(moth_files.len() + templates.len() + markdown_files.len());
@@ -415,7 +414,6 @@ fn compile_fixture(
             owner,
             interned_path,
             path_syntax,
-            &entry_path,
             &options,
             &mut string_table,
             0,
@@ -580,8 +578,8 @@ fn compile_fixture(
         .headers_to_ast(
             AstBuildRequest {
                 sorted,
-                entry_file_path: &entry_path,
-                root_role: ModuleRootRole::Normal,
+                module_anchor_path: &entry_path,
+                synthesizes_entry_start: true,
                 build_profile: FrontendBuildProfile::Dev,
                 capacity_estimate: Default::default(),
                 resolved_file_references: resolved_references,

@@ -35,7 +35,7 @@ use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, owned_folded_string_from_const_string,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput,
+    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole,
     HeaderParseOptions, HeaderPreparationFailure, SourcePreparationDelta, bind_module_headers,
     prepare_header_syntax,
 };
@@ -51,7 +51,7 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
-use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
 use crate::compiler_frontend::source::SourceDatabaseError;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceDatabaseBuilder, SourceId,
@@ -823,15 +823,15 @@ fn prepare_template_source(
     span_builder: ExtendedSpanBuilder,
 ) -> SourcePreparationDelta {
     let options = HeaderParseOptions {
-        entry_file_id: Some(entry_file_id),
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role: ModuleRootRole::Normal,
+        root_file_ids: Default::default(),
+        // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): a standalone Moth template
+        // is one synthetic normal root that owns today's combined export/start behaviour.
+        selected_file: Some((entry_file_id, FileRole::LegacyCombinedRoot)),
+        reached_root_roles: &[],
     };
     let context = FrontendFilePrepareContext {
         source_files,
         style_directives: request.style_directives,
-        entry_file_path: request.source_path,
         options: &options,
     };
     let input = FrontendFilePrepareInput {
@@ -864,7 +864,7 @@ fn fold_template_ast(
             source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
-            root_role: ModuleRootRole::Normal,
+            synthesizes_entry_start: true,
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
             style_directives: request.style_directives,
             string_table,

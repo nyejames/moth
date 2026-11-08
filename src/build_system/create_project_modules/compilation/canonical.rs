@@ -248,40 +248,33 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
 fn facade_project_globals_dependency(
     prepared: &PreparedModule,
 ) -> Result<Option<DiagnosticDraft>, InfrastructureFailure> {
-    let active_origin = prepared
+    // An entry-only module publishes no facade, so it has no project package surface to validate.
+    // Its absence is rejected once by the compiler service that still requires a primary surface.
+    let Some(primary_root_file_id) = prepared.semantic.primary_surface_root() else {
+        return Ok(None);
+    };
+    let primary_origin = prepared
         .semantic
         .source_module_origins
-        .origin_for(prepared.semantic.active_root_file_id)?
+        .origin_for(primary_root_file_id)?
         .ok_or_else(|| {
             InfrastructureFailure::internal(
                 CompilerStage::ProjectBuildAssembly,
-                "facade dependency validation found no owning origin for the active root",
+                "facade dependency validation found no owning origin for the primary root",
             )
         })?;
     let is_project_package_surface = matches!(
-        active_origin.role(),
+        primary_origin.role(),
         ModuleRootRole::SyntheticProjectContext | ModuleRootRole::Support
-    ) && active_origin.logical_module_path().is_empty();
-    let has_project_package_support_surface = match prepared.semantic.support_root_file_id {
-        Some(support_root_file_id) => {
-            let support_origin = prepared
-                .semantic
-                .source_module_origins
-                .origin_for(support_root_file_id)?
-                .ok_or_else(|| {
-                    InfrastructureFailure::internal(
-                        CompilerStage::ProjectBuildAssembly,
-                        format!(
-                            "facade dependency validation found no owning origin for paired support root source {}",
-                            support_root_file_id.index()
-                        ),
-                    )
-                })?;
-            support_origin.role() == ModuleRootRole::Support
-                && support_origin.logical_module_path().is_empty()
-        }
-        None => false,
-    };
+    ) && primary_origin.logical_module_path().is_empty();
+    let has_project_package_support_surface =
+        prepared
+            .semantic
+            .support_surface()?
+            .is_some_and(|(_, support_origin)| {
+                support_origin.role() == ModuleRootRole::Support
+                    && support_origin.logical_module_path().is_empty()
+            });
     if !is_project_package_surface && !has_project_package_support_surface {
         return Ok(None);
     }
@@ -674,7 +667,6 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 None,
                 None,
                 None,
-                None,
                 module_context,
             )
         }
@@ -688,7 +680,6 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 prepared,
                 preparation_warnings,
                 known_generated,
-                None,
                 None,
                 None,
                 None,
@@ -716,7 +707,6 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         check_only_source_package_dependencies: Option<
             &[module_inventory::CheckOnlySourcePackageDependency],
         >,
-        check_only_source_role: Option<ModuleRootRole>,
         external_packages: Option<Arc<ExternalPackageRegistry>>,
         external_dependency_resolution_table: Option<&ExternalImportResolutionTable>,
         module_error_allowance_override: Option<NonZeroU32>,
@@ -806,11 +796,6 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             options: frontend_options,
             build_profile: self.boundary.build_profile,
             source_files: &self.boundary.source_files,
-            root_role_override: check_only_source_role.or_else(|| {
-                (check_only_provider_bindings.is_some()
-                    || check_only_source_package_dependencies.is_some())
-                .then_some(ModuleRootRole::Support)
-            }),
             project_path_resolver: Some(self.boundary.project_path_resolver),
             style_directives: self.boundary.style_directives,
             external_packages: effective_external_packages,
@@ -877,7 +862,6 @@ fn compile_check_only_job(
 ) -> DirectoryModuleTaskResult {
     let module_inventory::CheckOnlyModuleCompilationJob {
         owner_module_id: module_id,
-        source_role,
         path_base_len,
         string_table_base_len: base_len,
         provider_bindings,
@@ -945,7 +929,6 @@ fn compile_check_only_job(
             Some(&check_only_build_config_values),
             Some(&provider_bindings),
             Some(&source_package_dependencies),
-            Some(source_role),
             Some(external_packages),
             Some(&external_dependency_resolution_table),
             module_error_allowance_override,
@@ -965,7 +948,6 @@ fn compile_check_only_job(
             Some(&check_only_build_config_values),
             Some(&provider_bindings),
             Some(&source_package_dependencies),
-            Some(source_role),
             Some(external_packages),
             Some(&external_dependency_resolution_table),
             module_error_allowance_override,

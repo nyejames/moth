@@ -21,7 +21,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment;
-use crate::compiler_frontend::headers::parse_file_headers::{FileRole, Header, HeaderKind};
+use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -86,16 +86,6 @@ pub(crate) fn validate_trait_evidence(
         let HeaderKind::TraitConformance { conformance } = &header.kind else {
             continue;
         };
-
-        if header.file_role == FileRole::ImportedModuleRoot {
-            return Err(invalid_conformance(
-                conformance.target.name,
-                conformance.traits.first().map(|trait_ref| trait_ref.name),
-                InvalidTraitConformanceReason::ImportedModuleRoot,
-                Some(conformance.target.span),
-                Vec::new(),
-            ));
-        }
 
         let conformance_source_file = *input
             .source_paths_by_source_id

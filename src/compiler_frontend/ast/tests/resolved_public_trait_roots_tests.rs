@@ -152,14 +152,14 @@ fn retains_directly_authored_active_root_public_source_traits_in_order() {
     let headers = vec![
         trait_header(
             "Alpha",
-            FileRole::ActiveModuleRoot,
+            FileRole::LegacyCombinedRoot,
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
         ),
         trait_header(
             "Beta",
-            FileRole::ActiveModuleRoot,
+            FileRole::LegacyCombinedRoot,
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -218,14 +218,14 @@ fn excludes_private_traits() {
     let headers = vec![
         trait_header(
             "Public",
-            FileRole::ActiveModuleRoot,
+            FileRole::LegacyCombinedRoot,
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
         ),
         trait_header(
             "Private",
-            FileRole::ActiveModuleRoot,
+            FileRole::LegacyCombinedRoot,
             HeaderExportMode::Private,
             &mut string_table,
             &mut path_fork,
@@ -276,14 +276,14 @@ fn excludes_imported_and_non_active_root_traits() {
     let headers = vec![
         trait_header(
             "Local",
-            FileRole::ActiveModuleRoot,
+            FileRole::LegacyCombinedRoot,
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
         ),
         trait_header(
             "Imported",
-            FileRole::ImportedModuleRoot,
+            FileRole::Normal,
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -323,7 +323,7 @@ fn rejects_source_trait_header_resolving_to_compiler_owned_core_trait() {
     // deliberately resolves to the registered core definition to exercise that invariant.
     let mut headers = vec![trait_header(
         "DISPLAYABLE",
-        FileRole::ActiveModuleRoot,
+        FileRole::LegacyCombinedRoot,
         HeaderExportMode::Public,
         &mut string_table,
         &mut path_fork,
@@ -368,14 +368,14 @@ fn excludes_non_trait_declarations() {
     let headers = vec![
         function_header(
             "render",
-            FileRole::ActiveModuleRoot,
+            FileRole::LegacyCombinedRoot,
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
         ),
         trait_header(
             "Shape",
-            FileRole::ActiveModuleRoot,
+            FileRole::LegacyCombinedRoot,
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -408,7 +408,7 @@ fn missing_trait_definition_is_infrastructure_failure() {
 
     let headers = vec![trait_header(
         "Orphan",
-        FileRole::ActiveModuleRoot,
+        FileRole::LegacyCombinedRoot,
         HeaderExportMode::Public,
         &mut string_table,
         &mut path_fork,
@@ -475,14 +475,14 @@ fn retains_public_incompatibilities_symmetrically_for_direct_public_traits() {
     let headers = vec![
         trait_header(
             "Alpha",
-            FileRole::ActiveModuleRoot,
+            FileRole::LegacyCombinedRoot,
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
         ),
         trait_header(
             "Beta",
-            FileRole::ActiveModuleRoot,
+            FileRole::LegacyCombinedRoot,
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -550,14 +550,14 @@ fn private_incompatibility_relation_is_absent_from_trait_roots() {
     let headers = vec![
         trait_header(
             "Alpha",
-            FileRole::ActiveModuleRoot,
+            FileRole::LegacyCombinedRoot,
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
         ),
         trait_header(
             "Beta",
-            FileRole::ActiveModuleRoot,
+            FileRole::LegacyCombinedRoot,
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,

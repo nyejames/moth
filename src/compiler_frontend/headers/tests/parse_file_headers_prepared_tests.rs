@@ -53,7 +53,9 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@page.moth");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let options = HeaderParseOptions::default();
+    let options = crate::compiler_frontend::tests::parse_support::legacy_single_root_options(
+        SourceId::COMPILATION_ROOT,
+    );
     let style_directives = StyleDirectiveRegistry::built_ins();
     let interned_path = path_fork
         .try_intern_filesystem_path(&file_path, &mut string_table)
@@ -74,7 +76,6 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
         owner,
         interned_path,
         path_syntax,
-        &file_path,
         &options,
         &mut string_table,
         0,
@@ -154,7 +155,6 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
         owner,
         interned_path,
         path_syntax,
-        &file_path,
         &HeaderParseOptions::default(),
         &mut string_table,
         0,
@@ -237,10 +237,8 @@ fn aggregation_diagnostics_keep_distinct_source_ids_in_authored_order() {
     let mut path_fork = PathInternerFork::empty();
     let options = HeaderParseOptions::default();
     let styles = StyleDirectiveRegistry::built_ins();
-    let entry = Path::new("src/@page.moth");
     let context = HeaderTestPrepareContext {
         source_id: SourceId::COMPILATION_ROOT,
-        entry_file_path: entry,
         options: &options,
         style_directives: &styles,
     };
@@ -305,7 +303,6 @@ fn preparation_related_labels_keep_the_continuation_comma_and_name() {
     let path = Path::new("src/@page.moth");
     let context = HeaderTestPrepareContext {
         source_id: SourceId::from_index(4),
-        entry_file_path: path,
         options: &options,
         style_directives: &styles,
     };
@@ -392,7 +389,6 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
         owner,
         interned_path,
         path_syntax,
-        &file_path,
         &HeaderParseOptions::default(),
         &mut string_table,
         &mut path_fork,
@@ -461,7 +457,6 @@ fn dependency_shell_with_compilation_root_identity_prepares() {
         owner,
         interned_path,
         path_syntax,
-        &file_path,
         &HeaderParseOptions::default(),
         &mut string_table,
         0,

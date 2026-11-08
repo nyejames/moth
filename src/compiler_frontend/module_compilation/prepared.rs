@@ -14,9 +14,10 @@
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract;
-use crate::compiler_frontend::headers::parse_file_headers::PreparedHeaderSyntax;
+use crate::compiler_frontend::headers::parse_file_headers::{FileRole, PreparedHeaderSyntax};
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
-use crate::compiler_frontend::source::SourceId;
+use crate::compiler_frontend::semantic_identity::{ModuleRootFiles, StableModuleOriginIdentity};
+use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -33,14 +34,16 @@ use std::sync::Arc;
 /// compilation boundary's immutable database; this payload retains only module-local `SourceId`
 /// candidates and a shared immutable source-origin-table handle.
 pub(crate) struct PreparedModuleInput {
-    /// The retained `SourceId` of the active module root, resolved once through `SourceDatabase`
-    /// during preparation and validated against the shared boundary source-origin table.
+    /// The structural module's fixed role-keyed root sources, resolved once through
+    /// `SourceDatabase` during preparation and validated against the shared boundary
+    /// source-origin table.
     ///
-    /// Semantic compilation resolves both the active module origin and the entry file path from
-    /// this identity, so neither travels as a loose argument.
-    pub(crate) active_root_file_id: SourceId,
-    /// The paired support root, when the active root is the normal surface of a two-root module.
-    pub(crate) support_root_file_id: Option<SourceId>,
+    /// Semantic compilation resolves every surface and the preparation anchor from this
+    /// inventory, so no root role travels as a loose argument.
+    pub(crate) root_file_ids: ModuleRootFiles<SourceId>,
+    /// The one source explicitly selected for a standalone/synthetic/check-only unit, with the
+    /// file role its preparation used. `None` for Stage 0 directory modules.
+    pub(crate) selected_file: Option<(SourceId, FileRole)>,
     /// The module's ordered candidate source IDs.
     ///
     /// Directory modules receive every owned compiler-semantic ID from Stage 0 ownership,
@@ -79,28 +82,127 @@ pub(crate) struct PreparedModuleInput {
 }
 
 impl PreparedModuleInput {
-    /// The canonical path of the active module root.
+    /// The source ID selected to anchor preparation: the normal, then support, then entry root,
+    /// or the standalone selection for transient units. It has no entry or surface authority.
+    pub(crate) fn preparation_anchor(&self) -> Result<SourceId, InfrastructureFailure> {
+        self.root_file_ids
+            .preparation_anchor()
+            .copied()
+            .or(self.selected_file.map(|(source_id, _)| source_id))
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    "prepared module: the payload has neither a root inventory nor a selected source",
+                )
+            })
+    }
+
+    /// Select the root whose declarations feed the primary interface projection, when one exists.
     ///
-    /// WHY: preparation already resolved the entry file identity through the boundary-owned
+    /// A normal facade is always primary. A support facade is primary when there is no normal
+    /// facade, whether or not an entry root is present. A standalone synthetic or check-only unit
+    /// uses its one explicit selection. Entry roots never seed an interface: an entry-only
+    /// directory module is a valid structural module with no importable API, so this returns
+    /// `None` rather than manufacturing an empty facade.
+    pub(crate) fn primary_surface_root(&self) -> Option<SourceId> {
+        if let Some(normal_root) = self.root_file_ids.normal {
+            return Some(normal_root);
+        }
+        if let Some(support_root) = self.root_file_ids.support {
+            return Some(support_root);
+        }
+        self.selected_file
+            .map(|(selected_source, _)| selected_source)
+    }
+
+    /// The support facade source for a module whose primary root is normal, together with its
+    /// origin.
+    pub(crate) fn support_surface(
+        &self,
+    ) -> Result<Option<(SourceId, StableModuleOriginIdentity)>, InfrastructureFailure> {
+        let Some(support_root) = self.root_file_ids.support else {
+            return Ok(None);
+        };
+        if self.root_file_ids.normal.is_none() {
+            return Ok(None);
+        }
+        let origin = self
+            .source_module_origins
+            .origin_for(support_root)?
+            .cloned()
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "module compilation: support root file id {} has no module origin",
+                        support_root.index()
+                    ),
+                )
+            })?;
+        Ok(Some((support_root, origin)))
+    }
+
+    /// The canonical path of the preparation anchor.
+    ///
+    /// WHY: preparation already resolved the anchor identity through the boundary-owned
     /// `SourceDatabase`, so the path is a retained identity fact rather than a second argument the
     /// caller must keep in sync.
-    pub(crate) fn entry_file_path<'a>(
+    pub(crate) fn preparation_anchor_path<'a>(
         &self,
-        source_files: &'a crate::compiler_frontend::source::SourceDatabase,
+        source_files: &'a SourceDatabase,
     ) -> Result<&'a Path, InfrastructureFailure> {
+        let anchor = self.preparation_anchor()?;
         source_files
-            .get(self.active_root_file_id)
+            .get(anchor)
             .and_then(|identity| identity.canonical_os_path.as_deref())
             .ok_or_else(|| {
                 InfrastructureFailure::internal(
                     CompilerStage::ProjectBuildAssembly,
                     format!(
-                        "prepared module: active root file id {} is not in the source file table",
-                        self.active_root_file_id.index()
+                        "prepared module: preparation anchor file id {} is not in the source file table",
+                        anchor.index()
                     ),
                 )
             })
     }
+
+    /// The canonical path of the executable entry root, falling back to the preparation anchor
+    /// for modules without an entry root.
+    pub(crate) fn entry_point_path<'a>(
+        &self,
+        source_files: &'a SourceDatabase,
+    ) -> Result<&'a Path, InfrastructureFailure> {
+        let entry_root = self.root_file_ids.entry;
+        let Some(entry_root) = entry_root else {
+            return self.preparation_anchor_path(source_files);
+        };
+        source_files
+            .get(entry_root)
+            .and_then(|identity| identity.canonical_os_path.as_deref())
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "prepared module: entry root file id {} is not in the source file table",
+                        entry_root.index()
+                    ),
+                )
+            })
+    }
+
+    /// Whether preparation synthesized a start-bearing root for this module.
+    ///
+    /// A directory module is start-bearing when it owns an entry root, or when a normal root
+    /// still acts as today's legacy combined root. A standalone selection declares the same fact
+    /// through its explicit file role.
+    pub(crate) fn synthesizes_entry_start(&self) -> bool {
+        self.root_file_ids.entry.is_some()
+            || self.root_file_ids.normal_root_is_legacy_combined()
+            || self
+                .selected_file
+                .is_some_and(|(_, role)| role.synthesizes_entry_start())
+    }
+
     /// Borrow normalized source `#Config` shells retained during header preparation.
     ///
     /// The accessor exposes retained source contracts to the project-wide build-config barrier
@@ -108,4 +210,18 @@ impl PreparedModuleInput {
     pub(crate) fn source_build_config_contracts(&self) -> &[SourceBuildConfigContract] {
         &self.prepared_header_syntax.source_build_config_contracts
     }
+}
+
+/// The interim failure for an entry-only module that reaches interface publication.
+///
+/// WHAT: an entry-only directory module is a valid structural module with no importable API.
+///       The Phase 1 service still requires exactly one primary interface projection, so the
+///       compiler cannot publish it yet.
+/// WHY: optional interfaces land at the Phase 2 cutover. One named failure keeps every caller
+///      from fabricating an empty interface or falling back to another root.
+pub(crate) fn entry_only_module_cannot_publish() -> InfrastructureFailure {
+    InfrastructureFailure::internal(
+        CompilerStage::ProjectBuildAssembly,
+        "module compilation: entry-only modules cannot publish an interface yet; optional interfaces land at the Phase 2 cutover",
+    )
 }

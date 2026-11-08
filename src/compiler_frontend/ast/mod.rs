@@ -191,7 +191,6 @@ use crate::compiler_frontend::headers::parse_file_headers::{
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -235,11 +234,11 @@ pub struct Ast {
     pub(crate) expressions: ExpressionStore,
     pub doc_fragments: Vec<AstDocFragment>,
 
-    /// Structural role of the active module root.
+    /// Whether preparation synthesized the compiler-owned entry `start` body.
     ///
-    /// HIR uses this to require `start` only for normal modules. API-only support and facade
-    /// modules carry executable function bodies but no implicit entry function.
-    pub root_role: ModuleRootRole,
+    /// HIR uses this to require exactly one entry only when the module owns a start-bearing root.
+    /// API-only modules carry executable function bodies but no implicit entry function.
+    pub synthesizes_entry_start: bool,
 
     /// Const top-level fragments with their runtime insertion indices.
     /// Builders merge these with the runtime fragment list returned by entry `start()`.

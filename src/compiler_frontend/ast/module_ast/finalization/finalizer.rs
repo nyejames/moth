@@ -483,7 +483,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             expression_builder,
             const_values,
             file_value_resolution,
-            root_role,
+            synthesizes_entry_start,
             ..
         } = self.context;
         let template_ir_store = Rc::try_unwrap(template_ir_store).map_err(|shared| {
@@ -534,7 +534,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 expressions,
                 const_values,
                 doc_fragments,
-                root_role,
+                synthesizes_entry_start,
                 const_top_level_fragments,
                 warnings: emitted.warnings,
                 choice_definitions,

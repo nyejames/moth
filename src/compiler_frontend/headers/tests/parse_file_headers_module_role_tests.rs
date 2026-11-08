@@ -2,18 +2,37 @@ use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     InvalidTemplateStructureCode, InvalidTemplateStructureView,
 };
+use crate::compiler_frontend::semantic_identity::ModuleRootFiles;
 
 #[test]
-fn imported_module_root_discards_root_body_but_keeps_exportable_headers() {
-    let headers = expect_header_success(
+fn api_only_normal_root_keeps_exportable_headers_and_rejects_runtime_body() {
+    let errors = expect_header_error(
         parse_single_file_headers_with_entry(
             "export:\n    Button = | label String |\n;\n[ Button(\"ignored\") ]\n",
             "src/@components.moth",
             "src/@page.moth",
         ),
-        "imported module roots should parse their declaration surface",
+        "an API-only normal root must reject its top-level runtime body",
+    );
+    assert_eq!(errors.diagnostics.len(), 1);
+    assert_eq!(
+        errors
+            .diagnostics
+            .first()
+            .expect("expected one diagnostic")
+            .descriptor()
+            .code,
+        "MOTH-RULE-0023"
     );
 
+    let headers = expect_header_success(
+        parse_single_file_headers_with_entry(
+            "export:\n    Button = | label String |\n;\n",
+            "src/@components.moth",
+            "src/@page.moth",
+        ),
+        "API-only normal roots should parse their declaration surface",
+    );
     assert_eq!(
         headers
             .headers
@@ -21,7 +40,7 @@ fn imported_module_root_discards_root_body_but_keeps_exportable_headers() {
             .filter(|header| matches!(header.kind, HeaderKind::StartFunction))
             .count(),
         0,
-        "imported roots must not produce an entry header"
+        "API-only roots must not produce an entry header"
     );
     assert_eq!(headers.entry_runtime_fragment_count, 0);
     assert!(!headers.has_non_trivial_root_body);
@@ -30,8 +49,8 @@ fn imported_module_root_discards_root_body_but_keeps_exportable_headers() {
             && header.export_mode == HeaderExportMode::Public
     }));
 
-    // Imported roots have no start-body AST consumer, so preparation must diagnose an
-    // unclosed runtime template before discarding it, including inside a collection.
+    // API-only roots have no start-body AST consumer, so preparation must diagnose an
+    // unclosed runtime template while rejecting the body, including inside a collection.
     for file_path in ["src/@components.moth", "src/@page.moth"] {
         for source in ["[: broken", "values = {\n[: broken"] {
             let errors = expect_header_error(
@@ -76,23 +95,161 @@ fn imported_module_root_discards_root_body_but_keeps_exportable_headers() {
 }
 
 #[test]
-fn imported_module_root_discards_const_root_fragments() {
-    let headers = expect_header_success(
+fn api_only_normal_root_rejects_const_root_fragments() {
+    let errors = expect_header_error(
         parse_single_file_headers_with_entry(
             "#[html.head: [\"ignored\"]]\n",
             "src/@components.moth",
             "src/@page.moth",
         ),
-        "imported roots should skip const root fragments",
+        "API-only roots must reject top-level const fragments",
     );
 
-    assert!(headers.top_level_const_fragments.is_empty());
+    assert_eq!(errors.diagnostics.len(), 1);
+    assert_eq!(
+        errors
+            .diagnostics
+            .first()
+            .expect("expected one diagnostic")
+            .descriptor()
+            .code,
+        "MOTH-RULE-0023"
+    );
+}
+
+#[test]
+fn reached_root_discards_body_and_fragments_but_keeps_export_surface() {
+    let headers = expect_header_success(
+        parse_single_file_headers_with_reached_role(
+            "export:\n    Button = | label String |\n;\n[ Button(\"discarded\") ]\n#[html.head: [\"discarded\"]]\n",
+            "src/widgets/@mod.moth",
+            FileRole::ReachedApiFacadeRoot(ModuleRootRole::Normal),
+        ),
+        "a reached facade should keep its export surface and discard its root body",
+    );
+
+    assert_eq!(
+        headers
+            .headers
+            .iter()
+            .filter(|header| matches!(header.kind, HeaderKind::StartFunction))
+            .count(),
+        0,
+        "a reached facade must not produce an entry header"
+    );
+    assert_eq!(headers.entry_runtime_fragment_count, 0);
+    assert!(!headers.has_non_trivial_root_body);
+    assert!(
+        headers.top_level_const_fragments.is_empty(),
+        "a reached facade discards its top-level const fragments"
+    );
     assert!(
         headers
             .headers
             .iter()
-            .all(|header| !matches!(header.kind, HeaderKind::ConstTemplate { .. }))
+            .all(|header| !matches!(header.kind, HeaderKind::ConstTemplate { .. })),
+        "a reached facade discards its const-template headers"
     );
+    assert!(
+        headers.headers.iter().any(|header| {
+            matches!(header.kind, HeaderKind::Struct { .. })
+                && header.export_mode == HeaderExportMode::Public
+        }),
+        "a reached facade still parses its export surface"
+    );
+}
+
+#[test]
+fn entry_root_synthesizes_start_without_export_surface() {
+    let headers = expect_header_success(
+        parse_single_file_headers_with_options(
+            "greeting #= \"hello\"\n[greeting]\n",
+            Path::new("src/@entry.moth"),
+            entry_root_options(),
+        ),
+        "an entry root should synthesize its start body",
+    );
+
+    assert_eq!(
+        headers
+            .headers
+            .iter()
+            .filter(|header| matches!(header.kind, HeaderKind::StartFunction))
+            .count(),
+        1,
+        "an entry root owns exactly one start function"
+    );
+    assert_eq!(headers.entry_runtime_fragment_count, 1);
+    assert!(headers.has_non_trivial_root_body);
+    assert!(
+        headers.headers.iter().all(|header| {
+            !matches!(header.kind, HeaderKind::StartFunction)
+                || header.export_mode == HeaderExportMode::Private
+        }),
+        "the synthesized start is never a public surface declaration"
+    );
+}
+
+#[test]
+fn entry_root_rejects_export_block() {
+    let errors = expect_header_error(
+        parse_single_file_headers_with_options(
+            "export:\n    theme #= \"dark\"\n;\n",
+            Path::new("src/@entry.moth"),
+            entry_root_options(),
+        ),
+        "entry roots must reject export surfaces",
+    );
+
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic_has_family::<generics_traits_api::ExportOutsideModuleRootView>(&diagnostic)
+    }));
+}
+
+#[test]
+fn normal_root_colocated_with_entry_root_is_api_only() {
+    let errors = expect_header_error(
+        parse_single_file_headers_with_options(
+            "[greeting]\n",
+            Path::new("src/@mod.moth"),
+            normal_root_colocated_with_entry_options(),
+        ),
+        "a normal root co-located with an entry root must reject top-level runtime",
+    );
+
+    assert_eq!(errors.diagnostics.len(), 1);
+    assert_eq!(
+        errors
+            .diagnostics
+            .first()
+            .expect("expected one diagnostic")
+            .descriptor()
+            .code,
+        "MOTH-RULE-0023"
+    );
+}
+
+fn entry_root_options() -> HeaderParseOptions<'static> {
+    HeaderParseOptions {
+        root_file_ids: ModuleRootFiles {
+            entry: Some(SourceId::COMPILATION_ROOT),
+            ..Default::default()
+        },
+        selected_file: None,
+        reached_root_roles: &[],
+    }
+}
+
+fn normal_root_colocated_with_entry_options() -> HeaderParseOptions<'static> {
+    HeaderParseOptions {
+        root_file_ids: ModuleRootFiles {
+            normal: Some(SourceId::COMPILATION_ROOT),
+            entry: Some(SourceId::from_index(1)),
+            ..Default::default()
+        },
+        selected_file: None,
+        reached_root_roles: &[],
+    }
 }
 
 #[test]
@@ -131,9 +288,9 @@ fn struct_fields_retain_local_ordering_hints_for_named_field_types() {
     let file_path = PathBuf::from("src/@page.moth");
     // WHY: `parse_single_file_headers_with_table` discards the `PathInternerFork` that owns the
     // retained `PathId`s, so this fixture prepares through the fork-owning helper instead. The
-    // `@page.moth` name classifies the file as an imported module root, whose headers keep the
-    // root `PathId`, so struct identity must be resolved structurally rather than by comparing
-    // against `PathId::ROOT`.
+    // fixture selects the file as its own legacy combined root, whose headers keep the root
+    // `PathId`, so struct identity must be resolved structurally rather than by comparing against
+    // `PathId::ROOT`.
     let (output, _span_builder) = prepare_single_file_with_fork(
         "Point = |x I32, y I32|\nSpan = |start Point, end Point|\n",
         &file_path,

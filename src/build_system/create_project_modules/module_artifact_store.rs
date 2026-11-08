@@ -321,7 +321,9 @@ impl ModuleArtifactStore {
                 )
                 .then_some(&artifact.interface)
             })),
-            ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => Ok(None),
+            ModuleRootRole::Entry
+            | ModuleRootRole::Shared
+            | ModuleRootRole::SyntheticProjectContext => Ok(None),
         }
     }
     /// Install one boundary-owned path table into every successful base artefact.

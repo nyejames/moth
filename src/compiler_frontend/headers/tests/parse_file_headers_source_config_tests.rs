@@ -243,14 +243,14 @@ fn active_root_config_marker_after_declaration_gap_hides_file_value_reference() 
 }
 
 #[test]
-fn imported_root_discarded_body_config_marker_is_rejected() {
+fn reached_root_discarded_body_config_marker_is_rejected() {
     let errors = expect_header_error(
-        parse_single_file_headers_with_entry(
+        parse_single_file_headers_with_reached_role(
             "value = @assets/missing.mtf #Config of String\n",
-            "src/@page.moth",
-            "src/@root.moth",
+            "src/widgets/@mod.moth",
+            FileRole::ReachedApiFacadeRoot(ModuleRootRole::Normal),
         ),
-        "discarded imported-root body config markers must be rejected during preparation",
+        "discarded reached-root body config markers must be rejected during preparation",
     );
 
     assert!(errors.diagnostics.views().any(|diagnostic| {

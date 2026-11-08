@@ -556,10 +556,6 @@ fn invalid_trait_conformance_message(
     };
 
     match shape {
-        Shape::ImportedModuleRoot => {
-            "Trait conformance declarations are not allowed in imported module root files."
-                .to_owned()
-        }
         Shape::AliasTarget => {
             format!(
                 "Type alias '{target}' cannot declare trait conformance. Use the underlying nominal type."

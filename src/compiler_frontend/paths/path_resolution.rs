@@ -168,10 +168,21 @@ impl ProjectPathResolver {
         self.source_package_roots.root_files().iter()
     }
 
-    pub(crate) fn module_root_file_for_directory(&self, directory: &Path) -> Option<PathBuf> {
+    pub(crate) fn module_api_facade_root_file_for_directory(
+        &self,
+        directory: &Path,
+    ) -> Option<PathBuf> {
         self.module_roots
-            .root_file_for_directory(directory)
+            .api_facade_root_file_for_directory(directory)
             .map(|path| path.to_path_buf())
+    }
+
+    /// Borrow the prepared role-keyed module-root table for one boundary.
+    ///
+    /// Preparation consumes the same inventory the resolver owns, so it borrows instead of
+    /// cloning the table before resolver construction.
+    pub(crate) fn prepared_module_roots(&self) -> &ModuleRootTable {
+        &self.module_roots
     }
 
     pub(crate) fn module_root_file_for_directory_surface(
@@ -198,6 +209,14 @@ impl ProjectPathResolver {
     /// WHY: nearest-ancestor lookup determines which module a file belongs to.
     pub(crate) fn module_root_for_file(&self, file: &Path) -> Option<PathBuf> {
         self.module_roots.module_root_for_file(file)
+    }
+
+    /// The authored root role of one canonical root file in the prepared module inventory.
+    ///
+    /// Synthetic single-file discovery classifies each reached root from Stage 0's bounded
+    /// inventory before the final module preparation pass exists.
+    pub(crate) fn module_root_role_for_file(&self, file: &Path) -> Option<ModuleRootRole> {
+        self.module_roots.root_role_for_file(file)
     }
 
     /// WHAT: derive the logical source path for a provider-owned physical file.

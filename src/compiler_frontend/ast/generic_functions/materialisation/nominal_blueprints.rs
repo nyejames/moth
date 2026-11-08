@@ -1156,6 +1156,7 @@ fn append_materialisation_module_origin(
     let root_role = match origin.role() {
         ModuleRootRole::Normal => "normal",
         ModuleRootRole::Support => "support",
+        ModuleRootRole::Entry => "entry",
         ModuleRootRole::Shared => "shared",
         ModuleRootRole::SyntheticProjectContext => "synthetic_project_context",
     };

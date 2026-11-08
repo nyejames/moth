@@ -37,13 +37,16 @@ fn legacy_inline_export_declaration_is_rejected() {
 fn export_dependency_path_parsed_as_public_surface_dependency() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (output, _span_builder) = prepare_single_file_with_fork(
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let output = prepare_active_root_with_role(
         "export:\n    @button Button\n;\n",
         &PathBuf::from("src/@mod.moth"),
-        &PathBuf::from("src/@page.moth"),
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("an API-only normal root should accept its export block");
 
     assert_eq!(output.file_dependency_clauses.len(), 1);
     assert_eq!(
@@ -256,13 +259,16 @@ fn export_before_runtime_template_is_rejected() {
 fn public_dependency_and_private_dependency_keep_distinct_retained_shells() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (output, _span_builder) = prepare_single_file_with_fork(
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let output = prepare_active_root_with_role(
         "@button Button\nexport:\n    @button Button\n;\n",
         &PathBuf::from("src/@mod.moth"),
-        &PathBuf::from("src/@page.moth"),
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("an API-only normal root should accept its export block");
 
     assert_eq!(
         output.file_dependency_clauses.len(),

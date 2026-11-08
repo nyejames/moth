@@ -660,7 +660,6 @@ define_stable_reason_keys! {
     },
 
     InvalidTraitConformanceCode => {
-        &InvalidTraitConformanceCode::ImportedModuleRoot => "invalid_trait_conformance.imported_module_root",
         &InvalidTraitConformanceCode::AliasTarget => "invalid_trait_conformance.alias_target",
         &InvalidTraitConformanceCode::NonCanonicalTarget => "invalid_trait_conformance.non_canonical_target",
         &InvalidTraitConformanceCode::NonlocalSourceTarget => "invalid_trait_conformance.nonlocal_source_target",

@@ -16,7 +16,6 @@ use crate::compiler_frontend::module_compilation::generated::ProviderMaterialisa
 use crate::compiler_frontend::module_compilation::options::FrontendOptions;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathTable;
@@ -28,9 +27,6 @@ pub(crate) struct ModuleCompilationContext<'a> {
     /// Compiler-owned settings, already projected from whatever configuration the caller uses.
     pub(crate) options: FrontendOptions,
     pub(crate) build_profile: FrontendBuildProfile,
-    /// Transient check-only units have no entry root; canonical modules derive this from
-    /// their graph-owned stable origin.
-    pub(crate) root_role_override: Option<ModuleRootRole>,
     /// The canonical boundary owns the resolver; module compilation only borrows it.
     pub(crate) project_path_resolver: Option<&'a ProjectPathResolver>,
     /// Immutable source identities registered once by the enclosing compilation boundary.

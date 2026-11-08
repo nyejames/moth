@@ -38,7 +38,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{CompilerStage, DiagnosticBag, PreparedFailure};
 use crate::compiler_frontend::semantic_identity::{
-    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+    ModuleRootFiles, ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -87,10 +87,8 @@ trait SupportVisibilityTopology {
 pub(crate) struct ProjectModuleGraphNode {
     module_id: ModuleId,
     shared_origin: StableModuleOriginIdentity,
-    normal_origin: Option<StableModuleOriginIdentity>,
-    support_origin: Option<StableModuleOriginIdentity>,
-    normal_root_file: Option<PathBuf>,
-    support_root_file: Option<PathBuf>,
+    surface_origins: ModuleRootFiles<StableModuleOriginIdentity>,
+    root_files: ModuleRootFiles<PathBuf>,
     nearest_parent: Option<ModuleId>,
 }
 
@@ -112,11 +110,7 @@ impl ProjectModuleGraphNode {
         &self,
         role: ModuleRootRole,
     ) -> Option<&StableModuleOriginIdentity> {
-        match role {
-            ModuleRootRole::Normal => self.normal_origin.as_ref(),
-            ModuleRootRole::Support => self.support_origin.as_ref(),
-            ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => None,
-        }
+        self.surface_origins.get(role)
     }
 
     /// Whether this structural module owns any root with the given surface role.
@@ -127,30 +121,31 @@ impl ProjectModuleGraphNode {
     /// Whether a source origin belongs to this structural module.
     pub(crate) fn owns_origin(&self, origin: &StableModuleOriginIdentity) -> bool {
         &self.shared_origin == origin
-            || self.normal_origin.as_ref() == Some(origin)
-            || self.support_origin.as_ref() == Some(origin)
+            || self
+                .surface_origins
+                .present()
+                .any(|(_, surface_origin)| surface_origin == origin)
     }
 
-    /// The role of the package-facing public surface.
-    pub(crate) fn public_surface_role(&self) -> ModuleRootRole {
+    /// The role of the package-facing public surface, absent for an entry-only module.
+    pub(crate) fn public_surface_role(&self) -> Option<ModuleRootRole> {
         public_surface_role(
-            self.normal_root_file.is_some(),
-            self.support_root_file.is_some(),
+            self.root_files.normal.is_some(),
+            self.root_files.support.is_some(),
         )
     }
 
     /// The stable origin of the package-facing public surface.
-    pub(crate) fn public_surface_origin(&self) -> &StableModuleOriginIdentity {
-        self.surface_origin(self.public_surface_role())
-            .expect("the selected public surface must own an origin")
+    pub(crate) fn public_surface_origin(&self) -> Option<&StableModuleOriginIdentity> {
+        self.public_surface_role()
+            .and_then(|role| self.surface_origin(role))
     }
 
-    /// The primary cross-build origin for consumers that need one representative surface.
+    /// The cross-build origin of the preparation-anchor root.
     pub(crate) fn stable_origin(&self) -> &StableModuleOriginIdentity {
-        self.normal_origin
-            .as_ref()
-            .or(self.support_origin.as_ref())
-            .unwrap_or(&self.shared_origin)
+        self.surface_origins
+            .preparation_anchor()
+            .expect("a structural graph node has at least one root origin")
     }
 
     /// The exact primary and optional secondary origins one successful artefact must publish.
@@ -165,38 +160,45 @@ impl ProjectModuleGraphNode {
         Option<&StableModuleOriginIdentity>,
     ) {
         let support = self
-            .normal_origin
+            .surface_origins
+            .normal
             .as_ref()
-            .and(self.support_origin.as_ref());
+            .and(self.surface_origins.support.as_ref());
         (self.stable_origin(), support)
     }
 
-    /// The primary structural surface role for consumers that need one representative surface.
+    /// The structural role of the preparation-anchor root.
     pub(crate) fn role(&self) -> ModuleRootRole {
-        if self.normal_origin.is_some() {
+        if self.root_files.normal.is_some() {
             ModuleRootRole::Normal
-        } else if self.support_origin.is_some() {
+        } else if self.root_files.support.is_some() {
             ModuleRootRole::Support
         } else {
-            ModuleRootRole::Shared
+            ModuleRootRole::Entry
         }
+    }
+
+    /// The module's fixed role-keyed root files.
+    pub(crate) fn root_files(&self) -> &ModuleRootFiles<PathBuf> {
+        &self.root_files
     }
 
     /// The canonical normal root file, when this module has one.
     pub(crate) fn normal_root_file(&self) -> Option<&Path> {
-        self.normal_root_file.as_deref()
+        self.root_files.normal.as_deref()
     }
 
     /// The canonical support root file, when this module has one.
     pub(crate) fn support_root_file(&self) -> Option<&Path> {
-        self.support_root_file.as_deref()
+        self.root_files.support.as_deref()
     }
 
-    /// The canonical primary root file for consumers that need one representative surface.
+    /// The canonical preparation-anchor root file for focused graph tests.
+    #[cfg(test)]
     pub(crate) fn root_file(&self) -> &Path {
-        self.normal_root_file
-            .as_deref()
-            .or(self.support_root_file.as_deref())
+        self.root_files
+            .preparation_anchor()
+            .map(PathBuf::as_path)
             .expect("a structural graph node has at least one root file")
     }
 }
@@ -253,10 +255,8 @@ impl ProjectModuleGraph {
                 |(index, (stable_origin, root_file))| ProjectModuleGraphNode {
                     module_id: ModuleId::from_index(index),
                     shared_origin: stable_origin.clone(),
-                    normal_origin: Some(stable_origin),
-                    support_origin: None,
-                    normal_root_file: Some(root_file),
-                    support_root_file: None,
+                    surface_origins: ModuleRootFiles::new(Some(stable_origin), None, None),
+                    root_files: ModuleRootFiles::new(Some(root_file), None, None),
                     nearest_parent: None,
                 },
             )
@@ -295,14 +295,19 @@ impl ProjectModuleGraph {
             nodes.push(ProjectModuleGraphNode {
                 module_id: *module_id,
                 shared_origin: record.shared_origin().clone(),
-                normal_origin: record.surface_origin(ModuleRootRole::Normal).cloned(),
-                support_origin: record.surface_origin(ModuleRootRole::Support).cloned(),
-                normal_root_file: record.normal_root_file().map(Path::to_path_buf),
-                support_root_file: record.support_root_file().map(Path::to_path_buf),
+                surface_origins: ModuleRootFiles::new(
+                    record.surface_origin(ModuleRootRole::Normal).cloned(),
+                    record.surface_origin(ModuleRootRole::Support).cloned(),
+                    record.surface_origin(ModuleRootRole::Entry).cloned(),
+                ),
+                root_files: record.root_files().clone(),
                 nearest_parent,
             });
 
-            if record.normal_root_file().is_some() {
+            // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): an ordinary normal root
+            // is still a legacy combined root (`Normal` surface plus start) and therefore an
+            // entry candidate until fixtures migrate to `@entry.moth`.
+            if record.has_entry_root() || record.has_normal_root() {
                 entry_modules.push(*module_id);
             }
         }
@@ -343,14 +348,18 @@ impl ProjectModuleGraph {
             nodes.push(ProjectModuleGraphNode {
                 module_id: *module_id,
                 shared_origin: record.shared_origin().clone(),
-                normal_origin: record.surface_origin(ModuleRootRole::Normal).cloned(),
-                support_origin: record.surface_origin(ModuleRootRole::Support).cloned(),
-                normal_root_file: record.normal_root_file().map(Path::to_path_buf),
-                support_root_file: record.support_root_file().map(Path::to_path_buf),
+                surface_origins: ModuleRootFiles::new(
+                    record.surface_origin(ModuleRootRole::Normal).cloned(),
+                    record.surface_origin(ModuleRootRole::Support).cloned(),
+                    record.surface_origin(ModuleRootRole::Entry).cloned(),
+                ),
+                root_files: record.root_files().clone(),
                 nearest_parent: None,
             });
 
-            if record.normal_root_file().is_some() {
+            // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): see
+            // `from_source_tree_index`.
+            if record.has_entry_root() || record.has_normal_root() {
                 entry_modules.push(*module_id);
             }
         }
@@ -437,10 +446,13 @@ impl ProjectModuleGraph {
             .iter()
             .find(|node| {
                 node.nearest_parent.is_none()
-                    && node.support_origin.is_some()
+                    && node.support_root_file().is_some()
                     && node.stable_origin().logical_module_path().is_empty()
             })
-            .map(|node| (node.module_id, node.public_surface_role()))
+            .and_then(|node| {
+                node.public_surface_role()
+                    .map(|role| (node.module_id, role))
+            })
     }
 
     /// Strict scoped-support visibility query.
@@ -517,7 +529,8 @@ impl ProjectModuleGraph {
                             node.shared_origin(),
                             [
                                 node.surface_origin(ModuleRootRole::Normal),
-                                node.surface_origin(ModuleRootRole::Support)
+                                node.surface_origin(ModuleRootRole::Support),
+                                node.surface_origin(ModuleRootRole::Entry)
                             ],
                         ),
                     ));
@@ -844,11 +857,11 @@ impl SupportVisibilityTopology for ProjectModuleGraph {
     }
 
     fn has_normal_surface(&self, module_id: ModuleId) -> bool {
-        self.nodes[module_id.index()].normal_origin.is_some()
+        self.nodes[module_id.index()].normal_root_file().is_some()
     }
 
     fn has_support_surface(&self, module_id: ModuleId) -> bool {
-        self.nodes[module_id.index()].support_origin.is_some()
+        self.nodes[module_id.index()].support_root_file().is_some()
     }
 }
 
@@ -928,7 +941,11 @@ fn support_is_visible_for_role(
                 && !is_ancestor_of(topology, support_id, consumer_id)
         }
 
-        ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => false,
+        // Entry roots are normal-position consumers only once Phase 2 assigns their scoped
+        // imports. Until then an entry root can never act as a support consumer.
+        ModuleRootRole::Entry
+        | ModuleRootRole::Shared
+        | ModuleRootRole::SyntheticProjectContext => false,
     }
 }
 

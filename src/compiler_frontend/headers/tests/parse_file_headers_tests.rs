@@ -42,7 +42,7 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::semantic_identity::{ModuleRootFiles, ModuleRootRole};
 use crate::compiler_frontend::source::test_support::TestSourceContext;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
@@ -169,8 +169,7 @@ fn find_diagnostic_family<View: FamilyView>(
 
 struct HeaderTestPrepareContext<'a> {
     source_id: SourceId,
-    entry_file_path: &'a Path,
-    options: &'a HeaderParseOptions,
+    options: &'a HeaderParseOptions<'a>,
     style_directives: &'a StyleDirectiveRegistry,
 }
 
@@ -218,7 +217,14 @@ pub(crate) fn prepare_single_file_with_fork(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> (FileFrontendPrepareOutput, ExtendedSpanBuilder) {
-    let options = HeaderParseOptions::default();
+    let options = if entry_file_path == file_path {
+        HeaderParseOptions {
+            selected_file: Some((SourceId::COMPILATION_ROOT, FileRole::LegacyCombinedRoot)),
+            ..Default::default()
+        }
+    } else {
+        HeaderParseOptions::default()
+    };
     let style_directives = StyleDirectiveRegistry::built_ins();
     let interned_path = path_fork
         .try_intern_filesystem_path(file_path, string_table)
@@ -241,7 +247,6 @@ pub(crate) fn prepare_single_file_with_fork(
         owner,
         interned_path,
         path_syntax,
-        entry_file_path,
         &options,
         string_table,
         0,
@@ -287,7 +292,6 @@ fn prepare_test_source_file(
         owner,
         interned_path,
         path_syntax,
-        context.entry_file_path,
         context.options,
         string_table,
         const_template_offset,
@@ -320,12 +324,19 @@ fn prepare_tampered_path_clause(source: &str, file_path: &str) -> FileFrontendPr
     let (owner, _path_syntax) = owner_from_lexed_source(file_tokens);
     let invalid_path_syntax = Arc::new(PathSyntaxTable::new());
 
+    let options = crate::compiler_frontend::tests::parse_support::legacy_fixture_file_role(
+        &file_path,
+        Path::new("src/@page.moth"),
+    )
+    .map_or_else(HeaderParseOptions::default, |role| HeaderParseOptions {
+        selected_file: Some((SourceId::COMPILATION_ROOT, role)),
+        ..Default::default()
+    });
     match prepare_file_from_tokens(
         owner,
         interned_path,
         invalid_path_syntax,
-        &file_path,
-        &HeaderParseOptions::default(),
+        &options,
         &mut string_table,
         0,
         0,
@@ -413,7 +424,6 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
             owner,
             interned_path,
             other_path_syntax,
-            &file_path,
             &HeaderParseOptions::default(),
             &mut string_table,
             0,
@@ -428,7 +438,7 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
     );
 }
 
-fn prepare_active_root_with_role(
+pub(crate) fn prepare_active_root_with_role(
     source: &str,
     file_path: &Path,
     active_root_role: ModuleRootRole,
@@ -437,15 +447,15 @@ fn prepare_active_root_with_role(
     path_fork: &mut PathInternerFork,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let options = HeaderParseOptions {
-        entry_file_id: None,
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role,
+        selected_file: Some((
+            SourceId::COMPILATION_ROOT,
+            FileRole::ActiveApiOnlyModuleRoot(active_root_role),
+        )),
+        ..Default::default()
     };
     let style_directives = StyleDirectiveRegistry::built_ins();
     let context = HeaderTestPrepareContext {
         source_id: SourceId::COMPILATION_ROOT,
-        entry_file_path: file_path,
         options: &options,
         style_directives: &style_directives,
     };
@@ -591,15 +601,45 @@ fn parse_single_file_headers_with_entry(
     file_path: &str,
     entry_file_path: &str,
 ) -> HeaderTestOutcome {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from(file_path);
     let entry_file_path = PathBuf::from(entry_file_path);
+    let options = crate::compiler_frontend::tests::parse_support::legacy_fixture_file_role(
+        &file_path,
+        &entry_file_path,
+    )
+    .map_or_else(HeaderParseOptions::default, |role| HeaderParseOptions {
+        selected_file: Some((SourceId::COMPILATION_ROOT, role)),
+        ..Default::default()
+    });
+    parse_single_file_headers_with_options(source, &file_path, options)
+}
+
+/// Prepare one file as a foreign module root reached by a flattened synthetic unit.
+fn parse_single_file_headers_with_reached_role(
+    source: &str,
+    file_path: &str,
+    reached_role: FileRole,
+) -> HeaderTestOutcome {
+    let file_path = PathBuf::from(file_path);
+    let options = HeaderParseOptions {
+        root_file_ids: ModuleRootFiles::default(),
+        selected_file: None,
+        reached_root_roles: &[(SourceId::COMPILATION_ROOT, reached_role)],
+    };
+    parse_single_file_headers_with_options(source, &file_path, options)
+}
+
+fn parse_single_file_headers_with_options(
+    source: &str,
+    file_path: &Path,
+    options: HeaderParseOptions<'_>,
+) -> HeaderTestOutcome {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let external_package_registry = ExternalPackageRegistry::new();
-    let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let interned_path = path_fork
-        .try_intern_filesystem_path(&file_path, &mut string_table)
+        .try_intern_filesystem_path(file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
@@ -619,7 +659,6 @@ fn parse_single_file_headers_with_entry(
         owner,
         interned_path,
         path_syntax,
-        &entry_file_path,
         &options,
         &mut string_table,
         0,
@@ -911,7 +950,6 @@ pub(crate) fn parse_multi_file_headers(
     let style_directives = StyleDirectiveRegistry::built_ins();
     let prepare_context = HeaderTestPrepareContext {
         source_id: SourceId::COMPILATION_ROOT,
-        entry_file_path: &entry_file_path,
         options: &options,
         style_directives: &style_directives,
     };
@@ -923,12 +961,22 @@ pub(crate) fn parse_multi_file_headers(
 
     for (source, path_str) in sources {
         let file_path = PathBuf::from(path_str);
+        let source_id = SourceId::from_index(span_builders.len());
+        let options = crate::compiler_frontend::tests::parse_support::legacy_fixture_file_role(
+            &file_path,
+            &entry_file_path,
+        )
+        .map_or_else(HeaderParseOptions::default, |role| HeaderParseOptions {
+            selected_file: Some((source_id, role)),
+            ..Default::default()
+        });
         let mut span_builder = ExtendedSpanBuilder::new();
         let output = prepare_test_source_file(
             source,
             &file_path,
             &HeaderTestPrepareContext {
-                source_id: SourceId::from_index(span_builders.len()),
+                source_id,
+                options: &options,
                 ..prepare_context
             },
             &mut string_table,
@@ -989,7 +1037,6 @@ fn parse_multi_file_headers_with_path(
     let style_directives = StyleDirectiveRegistry::built_ins();
     let prepare_context = HeaderTestPrepareContext {
         source_id: SourceId::COMPILATION_ROOT,
-        entry_file_path: &entry_file_path,
         options: &options,
         style_directives: &style_directives,
     };
@@ -1003,12 +1050,22 @@ fn parse_multi_file_headers_with_path(
 
     for (source, path_str) in sources {
         let file_path = PathBuf::from(path_str);
+        let source_id = SourceId::from_index(span_builders.len());
+        let options = crate::compiler_frontend::tests::parse_support::legacy_fixture_file_role(
+            &file_path,
+            &entry_file_path,
+        )
+        .map_or_else(HeaderParseOptions::default, |role| HeaderParseOptions {
+            selected_file: Some((source_id, role)),
+            ..Default::default()
+        });
         let mut span_builder = ExtendedSpanBuilder::new();
         match prepare_test_source_file(
             source,
             &file_path,
             &HeaderTestPrepareContext {
-                source_id: SourceId::from_index(span_builders.len()),
+                source_id,
+                options: &options,
                 ..prepare_context
             },
             &mut string_table,
@@ -1136,7 +1193,6 @@ fn assert_generic_dependency_name_collision(source: &str) {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let context = HeaderTestPrepareContext {
         source_id: SourceId::COMPILATION_ROOT,
-        entry_file_path: &file_path,
         options: &options,
         style_directives: &style_directives,
     };

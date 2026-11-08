@@ -154,7 +154,8 @@ fn parse_headers_in_file_inner(
         let current_tag = current.tag();
         if !runtime_nesting.is_top_level() && current_tag != TokenTag::EOF {
             if current_tag == TokenTag::TEMPLATE_HEAD {
-                // Imported roots discard runtime bodies, so validate nested template balance here.
+                // A discarded foreign-root body has no AST consumer, so validate nested template
+                // balance here.
                 cursor.advance();
                 let range = capture_runtime_template_range_from_cursor(
                     current,
@@ -1108,7 +1109,7 @@ fn handle_runtime_template_item(
     state
         .record_start_body_source_range_from_source_tokens(range, canonical)
         .map_err(HeaderParseFailure::Infrastructure)?;
-    if context.file_role == FileRole::ActiveModuleRoot {
+    if context.file_role.synthesizes_entry_start() {
         state.runtime_fragment_count =
             state.runtime_fragment_count.checked_add(1).ok_or_else(|| {
                 HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
@@ -1120,6 +1121,13 @@ fn handle_runtime_template_item(
 
     Ok(())
 }
+
+/// Scan the captured start-body ranges of a discarded foreign root for a misplaced `#Config`
+/// marker.
+///
+/// A reached foreign facade keeps its declaration surface but discards its top-level body, so
+/// no later AST stage can report a config marker authored there. Preparation rejects it here,
+/// mirroring the retained-body validation.
 fn find_config_marker_in_start_ranges(
     state: &HeaderFileParseState,
     canonical: &SourceTokens,
@@ -1164,7 +1172,7 @@ pub(super) fn finish_file_output(
     state: HeaderFileParseState,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let canonical = owner.tokens_ref();
-    if context.file_role == FileRole::ImportedModuleRoot
+    if matches!(context.file_role, FileRole::ReachedApiFacadeRoot(_))
         && let Some((marker_span, adjacent)) = find_config_marker_in_start_ranges(
             &state,
             canonical,
@@ -1205,7 +1213,7 @@ pub(super) fn finish_file_output(
 
     if matches!(
         context.file_role,
-        FileRole::Normal | FileRole::ActiveApiOnlyModuleRoot
+        FileRole::Normal | FileRole::ActiveApiOnlyModuleRoot(_)
     ) && state.has_non_trivial_start_body()
     {
         let span = state
@@ -1216,7 +1224,7 @@ pub(super) fn finish_file_output(
         )));
     }
 
-    let mut output = if context.file_role == FileRole::ActiveModuleRoot {
+    let mut output = if context.file_role.synthesizes_entry_start() {
         state
             .into_entry_output(
                 owner,
@@ -1445,8 +1453,8 @@ fn attach_structural_file_facts(
 
 /// Scan one retained source-owned range for a `#Config` marker without materializing it.
 ///
-/// The structural fact pass only needs marker presence; placement/adjacency diagnostics remain
-/// on the span-aware `find_config_qualifier_marker_in_cursor` path used by start-body validation.
+/// The structural fact pass only needs marker presence; placement and adjacency diagnostics
+/// remain on the span-aware `find_config_qualifier_marker_in_cursor` header paths.
 fn source_cursor_contains_config_marker(
     mut cursor: TokenCursor<'_>,
     string_table: &StringTable,

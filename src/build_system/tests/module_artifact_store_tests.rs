@@ -28,7 +28,7 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
-    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
+    ModuleRootFiles, ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use std::path::PathBuf;
@@ -64,8 +64,7 @@ fn test_graph(
     let support_root_file = paired.then(|| PathBuf::from("+package.moth"));
     let record = ModuleIdentityRecord::new(
         PathBuf::from(format!("/{logical_module_path}")),
-        Some(PathBuf::from("@page.moth")),
-        support_root_file,
+        ModuleRootFiles::new(Some(PathBuf::from("@page.moth")), support_root_file, None),
         PathBuf::from(logical_module_path),
         package,
     )

@@ -186,8 +186,8 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
         "a nested config.moth is reserved and must not enter source inventory"
     );
 
-    let root_directories = index
-        .module_roots()
+    let module_roots = index.module_roots();
+    let root_directories = module_roots
         .root_directories()
         .map(|path| root_directory_name(path.as_path()))
         .collect::<Vec<_>>();
@@ -434,6 +434,64 @@ fn bounded_module_roots_for_single_file_indexes_nested_roots_with_ignored_direct
     assert_eq!(root_directories.len(), 2);
     assert!(root_directories.contains(&"module"));
     assert!(root_directories.contains(&"nested"));
+}
+
+#[test]
+fn bounded_module_roots_for_single_file_accepts_every_authored_root_spelling() {
+    use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+
+    for (root_file_name, expected_role) in [
+        ("@mod.moth", ModuleRootRole::Normal),
+        ("@package.moth", ModuleRootRole::Support),
+        ("@entry.moth", ModuleRootRole::Entry),
+        // LEGACY ROOT MIGRATION BRIDGE names remain selectable until the Phase 4 cutover.
+        ("@page.moth", ModuleRootRole::Normal),
+    ] {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let module_dir = root.join("module");
+        fs::create_dir_all(&module_dir).expect("should create module directory");
+        fs::write(module_dir.join(root_file_name), "").expect("should write selected root");
+        fs::write(module_dir.join("helper.moth"), "").expect("should write ordinary source");
+
+        let config = Config::new(root.clone());
+        let canonical_module_dir =
+            fs::canonicalize(&module_dir).expect("module directory should canonicalize");
+        let entry_file = canonical_module_dir.join(root_file_name);
+        let mut string_table = StringTable::new();
+
+        let module_roots =
+            super::source_tree_index::SourceTreeIndex::bounded_module_roots_for_single_file(
+                &entry_file,
+                &config,
+                &crate::builder_surface::SourcePackageRegistry::default(),
+                &crate::builder_surface::SourceFileKindRegistry::default(),
+                &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
+                &mut string_table,
+            )
+            .unwrap_or_else(|failure| {
+                panic!("{root_file_name} selection should index its bounded tree: {failure:?}")
+            });
+
+        let expected_root = canonical_module_dir.join(root_file_name);
+        let roles = module_roots.root_file_roles().collect::<Vec<_>>();
+        assert_eq!(
+            roles,
+            vec![(expected_role, expected_root.as_path())],
+            "{root_file_name} selection should keep its authored root role"
+        );
+
+        // The synthetic namespace owner reads local keys for every prepared root directory, so
+        // the same selection must not disappear from that inventory.
+        let local_keys = super::source_tree_index::SourceTreeIndex::single_file_dependency_keys(
+            &canonical_module_dir,
+        )
+        .expect("synthetic dependency keys should index the selected root directory");
+        assert!(
+            local_keys.contains("helper"),
+            "{root_file_name}: {local_keys:?}"
+        );
+    }
 }
 
 #[test]

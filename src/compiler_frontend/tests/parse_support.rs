@@ -27,8 +27,8 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    HeaderParseOptions, HeaderPreparationFailure, bind_module_headers, prepare_file_from_tokens,
-    prepare_header_syntax,
+    FileRole, HeaderParseOptions, HeaderPreparationFailure, bind_module_headers,
+    prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::module_compilation::{
     AstRecoveryPolicy, DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
@@ -50,13 +50,17 @@ use crate::compiler_frontend::source::test_support::TestSourceContext;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceId, SourceSpan,
 };
-use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
+use crate::compiler_frontend::source_packages::root_file::{
+    PreparedSourcePackageRoots, file_name_is_normal_module_root_file,
+    file_name_is_support_root_file,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::TokenizeFailure;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use std::cell::RefCell;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -70,6 +74,52 @@ pub(crate) fn test_project_path_resolver() -> ProjectPathResolver {
         &crate::builder_surface::SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
     )
+}
+
+/// Header options for one single-file fixture that models today's legacy normal root.
+///
+/// LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): the fixture file both publishes a
+/// normal surface and owns the top-level runtime body. Phase 4 fixtures split that role into
+/// `@mod.moth` and `@entry.moth`.
+pub(crate) fn legacy_single_root_options(file_id: SourceId) -> HeaderParseOptions<'static> {
+    HeaderParseOptions {
+        root_file_ids: Default::default(),
+        selected_file: Some((file_id, FileRole::LegacyCombinedRoot)),
+        reached_root_roles: &[],
+    }
+}
+
+/// Header role for one file in a legacy single-module header fixture.
+///
+/// WHAT: maps the fixture's authored entry path to the legacy combined root, the canonical
+///       `@entry.moth`/`@package.moth` spellings to their Stage 0 roles and every other root-named
+///       file to its API-only facade role. Returns `None` for ordinary sources so the caller
+///       keeps [`HeaderParseOptions::default`].
+/// WHY: legacy fixtures prepare several root-named files in one set and identify the executable
+///       root by path. Production derives roles from Stage 0's root inventory instead; this
+///       helper keeps the pre-cutover fixture shape in the one test-only owner.
+pub(crate) fn legacy_fixture_file_role(
+    file_path: &Path,
+    entry_file_path: &Path,
+) -> Option<FileRole> {
+    let file_name = file_path.file_name()?.to_str()?;
+    // The canonical role spellings classify exactly as Stage 0 does under the migration bridge.
+    // `@package.moth` is the support facade and `@entry.moth` is the start-bearing entry root,
+    // regardless of which path the legacy fixture names as its executable root.
+    if file_name == "@entry.moth" {
+        return Some(FileRole::ActiveEntryRoot);
+    }
+    if file_name == "@package.moth" {
+        return Some(FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Support));
+    }
+    if entry_file_path == file_path {
+        return Some(FileRole::LegacyCombinedRoot);
+    }
+    if file_name_is_support_root_file(file_name) {
+        return Some(FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Support));
+    }
+    file_name_is_normal_module_root_file(file_name)
+        .then_some(FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal))
 }
 
 /// Build deterministic Stage 0 facts for parser tests without reading the filesystem.
@@ -190,15 +240,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_recovery_policy(
     let mut path_fork = PathInternerFork::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let external_package_registry = Arc::new(registry);
-    let file_path = source_context.path().to_path_buf();
     let project_path_resolver = test_project_path_resolver();
-
-    let options = HeaderParseOptions {
-        entry_file_id: None,
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
-    };
 
     let lexed = match source_context.tokenize(
         source,
@@ -219,15 +261,19 @@ pub(crate) fn parse_single_file_ast_build_result_with_recovery_policy(
             panic!("parse fixture tokenization encountered infrastructure failure: {error:?}")
         }
     };
+    let file_id = lexed.file_id;
     let owner = SourceTokenOwner::new(lexed.tokens);
     let path_syntax = lexed.path_syntax;
     let (string_table, span_builder) = source_context.preparation_parts();
+
+    // The single-file fixture models today's legacy normal root: one file publishes the normal
+    // surface and owns the top-level runtime body.
+    let options = legacy_single_root_options(file_id);
 
     let output = match prepare_file_from_tokens(
         owner,
         lexed.logical_path,
         path_syntax,
-        &file_path,
         &options,
         string_table,
         0,
@@ -322,7 +368,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_recovery_policy(
             source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
-            root_role: ModuleRootRole::Normal,
+            synthesizes_entry_start: true,
             external_package_registry,
             style_directives: &style_directives,
             path_fork: &mut path_fork,

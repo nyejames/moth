@@ -25,8 +25,9 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareOutput, Header, HeaderKind, HeaderParseOptions, PreparedHeaderSyntax,
-    SourcePreparationDelta, parse_file_headers_with_table, prepare_header_syntax,
+    FileFrontendPrepareOutput, FileRole, Header, HeaderKind, HeaderParseOptions,
+    PreparedHeaderSyntax, SourcePreparationDelta, parse_file_headers_with_table,
+    prepare_header_syntax,
 };
 use crate::compiler_frontend::module_compilation::{
     ModuleCompilationContext, ModuleCompilationOutcome, ProviderMaterialisationRegistry,
@@ -369,13 +370,12 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     );
 
     let options = HeaderParseOptions {
-        entry_file_id: frontend
+        root_file_ids: Default::default(),
+        selected_file: frontend
             .source_files
             .get_by_canonical_path(&canonical_a)
-            .map(|i| i.id),
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role: ModuleRootRole::Normal,
+            .map(|i| (i.id, FileRole::LegacyCombinedRoot)),
+        reached_root_roles: &[],
     };
 
     // Helper to prepare one file using the local-table variant and merge its delta back
@@ -417,7 +417,6 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
             let prepare_context = FrontendFilePrepareContext {
                 source_files: frontend.source_files,
                 style_directives: frontend.style_directives,
-                entry_file_path: &canonical_a,
                 options: &options,
             };
             let input = FrontendFilePrepareInput {
@@ -688,7 +687,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         input_files,
         &mut span_owners,
         &canonical_entry,
-        None,
+        &ModuleRootTable::empty(),
         local_table,
         source_files_view.fork_path_interner(),
         source_byte_count,
@@ -700,7 +699,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         input_files,
         &mut span_owners,
         &canonical_entry,
-        None,
+        &ModuleRootTable::empty(),
         local_table,
         source_files_view.fork_path_interner(),
         source_byte_count,
@@ -724,7 +723,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     assert_eq!(
         prepared
             .semantic
-            .entry_file_path(source_files_view)
+            .preparation_anchor_path(source_files_view)
             .expect("preparation retains the active root identity"),
         canonical_entry.as_path(),
         "the entry file is resolved through the shared source database"
@@ -737,7 +736,6 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         source_files: source_files_view,
         options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         build_profile: FrontendBuildProfile::Dev,
-        root_role_override: None,
         project_path_resolver: Some(&project_path_resolver),
         style_directives: &style_directives,
         global_string_table: None,
@@ -918,7 +916,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         input_files,
         &mut span_owners,
         &canonical_entry,
-        None,
+        &ModuleRootTable::empty(),
         local_table,
         source_files_view.fork_path_interner(),
         source_byte_count,
@@ -930,7 +928,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         input_files,
         &mut span_owners,
         &canonical_entry,
-        None,
+        &ModuleRootTable::empty(),
         local_table,
         source_files_view.fork_path_interner(),
         source_byte_count,
@@ -946,7 +944,6 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         source_files: source_files_view,
         options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         build_profile: FrontendBuildProfile::Dev,
-        root_role_override: None,
         project_path_resolver: Some(&project_path_resolver),
         global_string_table: None,
         global_path_table: None,
@@ -1109,7 +1106,7 @@ third || -> I32:
         input_files,
         &mut span_owners,
         &canonical_entry,
-        None,
+        &ModuleRootTable::empty(),
         local_table,
         source_files_view.fork_path_interner(),
         source_byte_count,
@@ -1121,7 +1118,7 @@ third || -> I32:
         input_files,
         &mut span_owners,
         &canonical_entry,
-        None,
+        &ModuleRootTable::empty(),
         local_table,
         source_files_view.fork_path_interner(),
         source_byte_count,
@@ -1139,7 +1136,6 @@ third || -> I32:
         source_files: source_files_view,
         options: config.frontend_options(),
         build_profile: FrontendBuildProfile::Dev,
-        root_role_override: None,
         project_path_resolver: Some(&project_path_resolver),
         global_string_table: None,
         global_path_table: None,
@@ -1442,9 +1438,9 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
             &mut preparation_path_fork,
             input_files,
             &mut span_owners.split().1,
-            &canonical_a,
-            None,
-            ModuleRootRole::Normal,
+            &Default::default(),
+            Some((canonical_a.as_path(), FileRole::LegacyCombinedRoot)),
+            &[],
             source_byte_count,
         )
         .expect("serial preparation should succeed");
@@ -1680,9 +1676,9 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
             &mut preparation_path_fork,
             input_files,
             &mut span_owners.split().1,
-            &entry_file_path,
-            None,
-            ModuleRootRole::Normal,
+            &Default::default(),
+            Some((entry_file_path.as_path(), FileRole::LegacyCombinedRoot)),
+            &[],
             source_byte_count,
         )
         .expect("parallel preparation should succeed");
@@ -1725,14 +1721,13 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
     let mut fixture = frontend_preparation_fixture(&file_source_refs);
 
     let options = HeaderParseOptions {
-        entry_file_id: fixture
+        root_file_ids: Default::default(),
+        selected_file: fixture
             .frontend
             .source_files
             .get_by_canonical_path(&fixture.entry_file_path)
-            .map(|identity| identity.id),
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role: ModuleRootRole::Normal,
+            .map(|identity| (identity.id, FileRole::LegacyCombinedRoot)),
+        reached_root_roles: &[],
     };
     let fork_source = fixture.frontend.string_table.fork_source();
     let base_len = fork_source.base_len();
@@ -1743,7 +1738,6 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
         let prepare_context = FrontendFilePrepareContext {
             source_files: source_files_view,
             style_directives: &fixture.frontend.style_directives,
-            entry_file_path: &fixture.entry_file_path,
             options: &options,
         };
 
@@ -1873,14 +1867,13 @@ fn prepared_file_error_allowance(
     let file_source_refs = fixture_source_refs(file_sources);
     let mut fixture = frontend_preparation_fixture(&file_source_refs);
     let options = HeaderParseOptions {
-        entry_file_id: fixture
+        root_file_ids: Default::default(),
+        selected_file: fixture
             .frontend
             .source_files
             .get_by_canonical_path(&fixture.entry_file_path)
-            .map(|identity| identity.id),
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role: ModuleRootRole::Normal,
+            .map(|identity| (identity.id, FileRole::LegacyCombinedRoot)),
+        reached_root_roles: &[],
     };
     let fork_source = fixture.frontend.string_table.fork_source();
     let base_len = fork_source.base_len();
@@ -1896,7 +1889,6 @@ fn prepared_file_error_allowance(
         let prepare_context = FrontendFilePrepareContext {
             source_files: source_files_view,
             style_directives: &fixture.frontend.style_directives,
-            entry_file_path: &fixture.entry_file_path,
             options: &options,
         };
         super::ModulePreparationContext::prepare_module_file_chunks(
@@ -2162,9 +2154,12 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
             &mut preparation_path_fork,
             input_files,
             &mut fixture.span_builders.split().1,
-            &fixture.entry_file_path,
-            None,
-            ModuleRootRole::Normal,
+            &Default::default(),
+            Some((
+                fixture.entry_file_path.as_path(),
+                FileRole::LegacyCombinedRoot,
+            )),
+            &[],
             source_byte_count,
         )
         .expect("chunked preparation should succeed");
@@ -2236,14 +2231,13 @@ fn every_preparation_strategy_stamps_the_registered_source_identity() {
         );
 
         let options = HeaderParseOptions {
-            entry_file_id: fixture
+            root_file_ids: Default::default(),
+            selected_file: fixture
                 .frontend
                 .source_files
                 .get_by_canonical_path(&fixture.entry_file_path)
-                .map(|record| record.id),
-            support_root_file_id: None,
-            entry_file_role: None,
-            active_root_role: ModuleRootRole::Normal,
+                .map(|record| (record.id, FileRole::LegacyCombinedRoot)),
+            reached_root_roles: &[],
         };
         let fork_source = fixture.frontend.string_table.fork_source();
 
@@ -2252,7 +2246,6 @@ fn every_preparation_strategy_stamps_the_registered_source_identity() {
             let prepare_context = FrontendFilePrepareContext {
                 source_files: source_files_view,
                 style_directives: &fixture.frontend.style_directives,
-                entry_file_path: &fixture.entry_file_path,
                 options: &options,
             };
 
@@ -2333,9 +2326,11 @@ fn indexed_file_preparation_returns_warnings_for_publication() {
                 candidate_source_ids: vec![source_id],
                 source_module_origins,
             },
-            &fixture.entry_file_path,
-            None,
-            None,
+            Default::default(),
+            Some((
+                fixture.entry_file_path.clone(),
+                FileRole::LegacyCombinedRoot,
+            )),
             std::mem::take(&mut fixture.frontend.string_table),
             std::mem::replace(&mut fixture.frontend.path_fork, PathInternerFork::empty()),
             &mut selected_source_texts,
@@ -2396,9 +2391,12 @@ fn chunked_file_preparation_preserves_warning_source_order() {
             &mut fixture.frontend.source_files.fork_path_interner(),
             input_files,
             &mut fixture.span_builders.split().1,
-            &fixture.entry_file_path,
-            None,
-            ModuleRootRole::Normal,
+            &Default::default(),
+            Some((
+                fixture.entry_file_path.as_path(),
+                FileRole::LegacyCombinedRoot,
+            )),
+            &[],
             source_byte_count,
         )
         .expect("chunked preparation should succeed with warnings");
@@ -2452,12 +2450,13 @@ fn parsed_prepared_output(
     let owner = SourceTokenOwner::new(lexed.tokens);
     let path_syntax = lexed.path_syntax;
 
+    let options =
+        crate::compiler_frontend::tests::parse_support::legacy_single_root_options(source_id);
     parse_file_headers_with_table(
         owner,
         source_identity,
         path_syntax,
-        Path::new(source_name),
-        &HeaderParseOptions::default(),
+        &options,
         string_table,
         path_fork,
         0,
@@ -2589,14 +2588,13 @@ fn merge_rejects_chunk_forked_from_a_foreign_path_base() {
     let mut fixture = frontend_preparation_fixture(&[("a.moth", "alpha #= 1\n")]);
     let input_file_count = fixture.input_files.len();
     let options = HeaderParseOptions {
-        entry_file_id: fixture
+        root_file_ids: Default::default(),
+        selected_file: fixture
             .frontend
             .source_files
             .get_by_canonical_path(&fixture.entry_file_path)
-            .map(|identity| identity.id),
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role: ModuleRootRole::Normal,
+            .map(|identity| (identity.id, FileRole::LegacyCombinedRoot)),
+        reached_root_roles: &[],
     };
     let fork_source = fixture.frontend.string_table.fork_source();
     let chunks = {
@@ -2604,7 +2602,6 @@ fn merge_rejects_chunk_forked_from_a_foreign_path_base() {
         let prepare_context = FrontendFilePrepareContext {
             source_files: source_files_view,
             style_directives: &fixture.frontend.style_directives,
-            entry_file_path: &fixture.entry_file_path,
             options: &options,
         };
         super::ModulePreparationContext::prepare_module_file_chunks(
@@ -2826,7 +2823,7 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
 }
 
 #[test]
-fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
+fn resolve_and_validate_preparation_anchor_rejects_mismatched_expected_origin() {
     // The active root maps to stable origin A in the source-origin table, but the expected
     // active origin passed by the caller is distinct origin B. Preparation must reject this
     // mismatch rather than trusting the loose expected-origin argument.
@@ -2862,7 +2859,7 @@ fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
     let source_module_origins =
         SourceModuleOriginTable::from_graph_ownership(&source_files, &lookup);
 
-    let result = super::ModulePreparationContext::resolve_and_validate_active_root(
+    let result = super::ModulePreparationContext::resolve_and_validate_preparation_anchor(
         &source_files,
         &source_module_origins,
         &expected_origin,
@@ -2876,7 +2873,7 @@ fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
     assert!(
         error
             .message
-            .contains("does not match the expected active origin"),
+            .contains("does not match the expected module origin"),
         "error message `{}` should state the origin mismatch",
         error.message,
     );
@@ -2917,9 +2914,12 @@ fn serial_chunk_local_preparation_counts_each_selected_source_once() {
             &mut fixture.frontend.source_files.fork_path_interner(),
             input_files,
             &mut fixture.span_builders.split().1,
-            &fixture.entry_file_path,
-            None,
-            ModuleRootRole::Normal,
+            &Default::default(),
+            Some((
+                fixture.entry_file_path.as_path(),
+                FileRole::LegacyCombinedRoot,
+            )),
+            &[],
             source_byte_count,
         )
         .expect("serial preparation should succeed");
@@ -2970,9 +2970,12 @@ fn chunked_file_preparation_skips_identity_payload_remap() {
             &mut fixture.frontend.source_files.fork_path_interner(),
             input_files,
             &mut fixture.span_builders.split().1,
-            &fixture.entry_file_path,
-            None,
-            ModuleRootRole::Normal,
+            &Default::default(),
+            Some((
+                fixture.entry_file_path.as_path(),
+                FileRole::LegacyCombinedRoot,
+            )),
+            &[],
             source_byte_count,
         )
         .expect("chunked preparation should succeed");

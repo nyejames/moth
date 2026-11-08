@@ -42,7 +42,6 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
         owner,
         scope,
         path_syntax,
-        &canonical,
         &options,
         &mut strings,
         &mut path_fork,
@@ -199,12 +198,13 @@ fn declaration_initializer_reference_member_return_and_variant_spans_retain_orig
     )
     .expect("source should tokenize");
     let (owner, path_syntax) = super::canonical_handoff(tokens);
+    let options =
+        crate::compiler_frontend::tests::parse_support::legacy_single_root_options(source_id);
     let mut prepared = parse_file_headers_with_table(
         owner,
         scope,
         path_syntax,
-        &canonical,
-        &HeaderParseOptions::default(),
+        &options,
         &mut strings,
         &mut path_fork,
         0,
@@ -457,12 +457,13 @@ fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
     )
     .expect("source should tokenize");
     let (owner, path_syntax) = super::canonical_handoff(tokens);
+    let options =
+        crate::compiler_frontend::tests::parse_support::legacy_single_root_options(source_id);
     let mut prepared = parse_file_headers_with_table(
         owner,
         scope,
         path_syntax,
-        &canonical,
-        &HeaderParseOptions::default(),
+        &options,
         &mut strings,
         &mut path_fork,
         0,
@@ -681,7 +682,6 @@ Generic of A must {trait_name}\n"
         owner,
         scope,
         path_syntax,
-        &canonical,
         &HeaderParseOptions::default(),
         &mut strings,
         &mut path_fork,

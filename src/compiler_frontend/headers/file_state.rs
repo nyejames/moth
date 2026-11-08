@@ -216,8 +216,8 @@ impl HeaderFileParseState {
         file_role: FileRole,
     ) -> FileFrontendPrepareOutput {
         let file_id = owner.source_id();
-        let has_non_trivial_root_body =
-            file_role == FileRole::ActiveModuleRoot && self.has_non_trivial_start_body();
+        // This path only receives API-only or ordinary files; neither owns a start body.
+        let has_non_trivial_root_body = false;
         let token_stats = owner.token_stats();
         let source_token_stream = owner.into_tokens();
         FileFrontendPrepareOutput {
@@ -253,8 +253,9 @@ impl HeaderFileParseState {
         let has_non_trivial_root_body = self.has_non_trivial_start_body();
         use crate::compiler_frontend::headers::types::HeaderExportMode;
 
-        // Active module root: publish the source-owned start sequence for later AST body parsing.
-        // `start` is never a dependency-graph participant, so this header keeps no graph edges.
+        // The start-bearing root publishes its source-owned start sequence for later AST body
+        // parsing. `start` is never a dependency-graph participant, so this header keeps no
+        // graph edges.
         let token_sequence = owner.register_token_sequence(&self.start_body_ranges)?;
         let start_range = TokenRange::new(file_id, end_index, end_index)
             .expect("equal token indexes always form a valid empty range");

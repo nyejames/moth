@@ -590,20 +590,22 @@ impl<'a> HirBuilder<'a> {
         Ok(function_id)
     }
 
-    /// Reject a missing or misplaced entry body for this module role.
+    /// Reject a missing or misplaced entry body for this module.
     ///
-    /// WHAT: normal roots require exactly one entry; support roots and the package facade allow none.
-    /// WHY: the entry body is module-owned structure, so a mismatch is a compiler invariant failure
-    ///      rather than a user error.
+    /// WHAT: a module whose preparation synthesized a start-bearing root requires exactly one
+    ///       entry; an API-only module allows none.
+    /// WHY: the entry body is module-owned structure, so a mismatch is a compiler invariant
+    ///      failure rather than a user error. The expectation is one retained fact from
+    ///      preparation, not a re-derived role predicate.
     fn validate_entry_presence(&mut self, ast: &Ast) -> Result<(), HirConstructionFailure> {
-        match (ast.root_role.has_implicit_start(), self.module.start_function) {
+        match (ast.synthesizes_entry_start, self.module.start_function) {
             (true, Some(_)) | (false, None) => Ok(()),
             (true, None) => Err(InfrastructureFailure::hir_transformation(
-                "HIR invariant: a normal module root reached HIR lowering without its implicit entry body",
+                "HIR invariant: a start-bearing module reached HIR lowering without its implicit entry body",
             )
             .into()),
             (false, Some(_)) => Err(InfrastructureFailure::hir_transformation(
-                "HIR invariant: a module without an implicit entry reached HIR lowering with an entry body",
+                "HIR invariant: an API-only module reached HIR lowering with an entry body",
             )
             .into()),
         }

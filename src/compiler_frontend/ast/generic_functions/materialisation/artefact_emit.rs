@@ -62,8 +62,7 @@ use crate::compiler_frontend::public_interface::{
 #[cfg(test)]
 use crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity;
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModuleRootRole,
-    StableModuleOriginIdentity,
+    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::{
@@ -367,7 +366,7 @@ impl GenericTemplateArtefact {
             string_table,
             path_fork,
             entry_dir,
-            root_role: ModuleRootRole::Support,
+            synthesizes_entry_start: false,
             build_profile,
             file_value_resolution: Some(file_value_resolution),
             config_resolution: None,

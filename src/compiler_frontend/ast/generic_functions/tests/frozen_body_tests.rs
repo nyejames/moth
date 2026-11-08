@@ -52,7 +52,8 @@ use crate::compiler_frontend::folded_value::{
 };
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    HeaderParseOptions, bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
+    FileRole, HeaderParseOptions, bind_module_headers, prepare_file_from_tokens,
+    prepare_header_syntax,
 };
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
@@ -4010,10 +4011,10 @@ fn parse_closure_files(files: &[(&str, &str)]) -> (AstBuildResult, PathInternerF
         &sources,
     );
     let options = HeaderParseOptions {
-        entry_file_id: sources.get_by_canonical_path(entry).map(|source| source.id),
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role: ModuleRootRole::Normal,
+        selected_file: sources
+            .get_by_canonical_path(entry)
+            .map(|source| (source.id, FileRole::LegacyCombinedRoot)),
+        ..Default::default()
     };
     let mut outputs = Vec::new();
     let mut const_offset = 0;
@@ -4036,7 +4037,6 @@ fn parse_closure_files(files: &[(&str, &str)]) -> (AstBuildResult, PathInternerF
             owner,
             logical_path,
             syntax,
-            path,
             &options,
             &mut frontend.string_table,
             const_offset,
@@ -4078,8 +4078,8 @@ fn parse_closure_files(files: &[(&str, &str)]) -> (AstBuildResult, PathInternerF
         .headers_to_ast(
             AstBuildRequest {
                 sorted,
-                entry_file_path: entry,
-                root_role: ModuleRootRole::Normal,
+                module_anchor_path: entry,
+                synthesizes_entry_start: true,
                 build_profile: FrontendBuildProfile::Dev,
                 capacity_estimate: Default::default(),
                 resolved_file_references: ResolvedFileReferenceTable::default(),

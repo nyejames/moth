@@ -21,9 +21,7 @@ use crate::compiler_frontend::headers::module_symbols::{
     GenericDeclarationKind, ModuleSymbols, register_declared_symbol,
 };
 use crate::compiler_frontend::headers::parse_file_headers::HeaderPreparationFailure;
-use crate::compiler_frontend::headers::types::{
-    FileFrontendPrepareOutput, FileRole, Header, HeaderExportMode, HeaderKind,
-};
+use crate::compiler_frontend::headers::types::{FileFrontendPrepareOutput, Header, HeaderKind};
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -223,12 +221,6 @@ fn is_dependency_bindable_for_symbol_collection(header: &Header) -> bool {
             if declaration.config_qualifier.is_some()
     ) {
         return false;
-    }
-
-    if header.file_role == FileRole::ImportedModuleRoot {
-        // Imported roots are compiled only as public module surfaces; private declarations stay
-        // available for resolving the root's own exported signatures, not for consumer lookup.
-        return header.export_mode == HeaderExportMode::Public;
     }
 
     // Active roots and ordinary source files expose authored declarations within the module.

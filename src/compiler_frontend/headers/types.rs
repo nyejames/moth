@@ -27,7 +27,7 @@ use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceTable;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::semantic_identity::{ModuleRootFiles, ModuleRootRole};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
@@ -246,41 +246,27 @@ pub struct TopLevelConstFragment {
 
 /// Optional settings that affect module header parsing.
 ///
-/// WHAT: bundles optional entry identity and the semantic role of the active module root.
-/// WHY: role selection is a caller-owned decision; filesystem and provider resolution stay in the
-///      later header-binding stage.
-#[derive(Clone, Copy)]
-pub struct HeaderParseOptions {
-    pub entry_file_id: Option<SourceId>,
-    /// The paired support root for a structural module whose normal root is the active entry.
+/// WHAT: carries Stage 0's role-keyed root source inventory, the one explicit standalone
+///       selection used by synthetic, check-only and template preparation, and the roles of
+///       module roots reached by a flattened synthetic unit.
+/// WHY: a file's role is decided by membership in a Stage 0 root inventory, never by re-deriving a
+///      special-file name or by comparing canonical paths. Standalone callers have no structural
+///      module inventory, so they name their selected source and, when their call follows module
+///      dependencies into other directories, the reached roots Stage 0 already classified.
+#[derive(Clone, Copy, Default)]
+pub struct HeaderParseOptions<'reached> {
+    /// The structural module's present root sources, keyed by their authored root role.
+    pub root_file_ids: ModuleRootFiles<SourceId>,
+    /// The single source selected for a standalone/synthetic/check-only unit, with its role.
     ///
-    /// A paired module prepares both roots in one source set. The normal root uses
-    /// `active_root_role`; this identity marks the support root as its own API-only surface rather
-    /// than an imported module root.
-    pub support_root_file_id: Option<SourceId>,
-    /// An explicit role for the active entry file, when the caller is compiling a transient
-    /// selection rather than a graph-owned module root.
+    /// `None` for Stage 0 directory modules, whose roots are already in `root_file_ids`.
+    pub selected_file: Option<(SourceId, FileRole)>,
+    /// Module roots reached in a flattened synthetic source set, with the header role each one
+    /// takes except the explicit standalone selection.
     ///
-    /// WHY: check-only source selections retain their real source semantics and must not acquire
-    ///      active-root privileges merely because their selected file is the entry path.
-    pub entry_file_role: Option<FileRole>,
-    /// The graph-owned semantic role of the root currently being compiled.
-    ///
-    /// WHY: entry-path equality identifies which file is active but cannot decide whether that
-    ///      root owns dormant runtime work. Support and project-facade roots are API-only even
-    ///      while they are the active compilation root.
-    pub active_root_role: ModuleRootRole,
-}
-
-impl Default for HeaderParseOptions {
-    fn default() -> Self {
-        Self {
-            entry_file_id: None,
-            support_root_file_id: None,
-            entry_file_role: None,
-            active_root_role: ModuleRootRole::Normal,
-        }
-    }
+    /// Empty for Stage 0 directory modules, which never flatten another module's roots into their
+    /// own source set.
+    pub reached_root_roles: &'reached [(SourceId, FileRole)],
 }
 
 #[allow(
@@ -316,8 +302,8 @@ pub enum HeaderKind {
     ///
     /// WHAT: captures top-level executable statements that are not declarations.
     /// WHY: only the active module root produces a start function. Ordinary source files with
-    /// non-trivial top-level executable code are rejected as a rule error; imported roots discard
-    /// their root body before this output is assembled.
+    /// non-trivial top-level executable code are rejected as a rule error; an API-only or reached
+    /// foreign root discards its root body before this output is assembled.
     /// Start functions are build-system-only; they are not dependency-bindable or callable from modules.
     StartFunction,
 
@@ -586,7 +572,7 @@ pub struct Header {
     pub kind: HeaderKind,
     /// The role of the source file that produced this header.
     ///
-    /// WHAT: distinguishes active roots, imported roots, and normal source files.
+    /// WHAT: distinguishes active roots, reached foreign roots and ordinary source files.
     /// WHY: visibility and export decisions depend on file role and declaration kind,
     /// not file role alone.
     pub file_role: FileRole,
@@ -1452,45 +1438,128 @@ impl RetainedDependencyClause {
 
 /// Classification of a source file's role within the current module compilation.
 ///
-/// WHAT: distinguishes the active module root, an imported module root used as an export surface,
-///       and ordinary source.
-/// WHY: root identity and compilation context are independent: a root can expose declarations
-///       when imported without contributing its own top-level runtime body.
+/// WHAT: distinguishes the start-bearing root, the API-only facade roots and ordinary source.
+/// WHY: root identity and compilation context are independent. The entry root owns start and
+///       runtime, the API-only roots own export surfaces, and an ordinary helper owns neither.
+///       The role is derived from Stage 0's root inventory, never from the file name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileRole {
-    /// A normal root file for the module currently being compiled.
-    ActiveModuleRoot,
-    /// A support or project-facade root currently being compiled as an API-only module.
-    ActiveApiOnlyModuleRoot,
-    /// A foreign root file compiled only to validate its public declaration surface.
-    ImportedModuleRoot,
+    /// A normal root in a module without an entry root. This is the legacy combined root: it
+    /// publishes the normal surface and still owns today's implicit start and root runtime.
+    ///
+    /// LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): once every executable fixture
+    /// authors `@entry.moth`, a normal root no longer contributes start or root runtime.
+    LegacyCombinedRoot,
+    /// The entry root. It owns the implicit start, root runtime and direct output, and it never
+    /// publishes an export surface.
+    ActiveEntryRoot,
+    /// An API-only facade root in the module currently being compiled. The carried role is any
+    /// non-entry module root role.
+    ///
+    /// Only `Normal` and `Support` project an active public surface; a standalone
+    /// `SyntheticProjectContext` unit carries its role for provenance and projects none.
+    ActiveApiOnlyModuleRoot(ModuleRootRole),
+    /// A facade root of another structural module reached inside a flattened synthetic unit.
+    ///
+    /// The synthetic single-file path prepares every module root its dependency clauses reach in
+    /// one flat source set. Such a root keeps its export surface so its declarations parse like the
+    /// facade they are, but it is not the compiled module's own surface: it publishes no
+    /// interface and owns no start or root runtime. The carried role is `Normal` or `Support` and
+    /// comes from Stage 0's bounded root inventory, never from the filename.
+    ReachedApiFacadeRoot(ModuleRootRole),
+    /// The self-contained `config.moth` bootstrap unit.
+    ///
+    /// It is deliberately not a module root: the fixed build-only file creates no structural
+    /// module, publishes no export surface and never enters the module graph. Its top-level
+    /// statements are captured as one start-shaped body only so the config dialect validator can
+    /// classify each authored statement with its own `MOTH-CONFIG` diagnostics.
+    ConfigBootstrap,
     /// An ordinary source file.
     Normal,
 }
 
 impl FileRole {
+    /// Whether this file is a structural module root, including a foreign root reached by a
+    /// flattened synthetic unit.
     pub(crate) fn is_module_root(self) -> bool {
-        matches!(
-            self,
-            Self::ActiveModuleRoot | Self::ActiveApiOnlyModuleRoot | Self::ImportedModuleRoot
-        )
+        self.is_active_module_root() || matches!(self, Self::ReachedApiFacadeRoot(_))
     }
 
     /// Whether this root belongs to the module currently being compiled.
     pub(crate) fn is_active_module_root(self) -> bool {
-        matches!(self, Self::ActiveModuleRoot | Self::ActiveApiOnlyModuleRoot)
+        matches!(
+            self,
+            Self::LegacyCombinedRoot | Self::ActiveEntryRoot | Self::ActiveApiOnlyModuleRoot(_)
+        )
     }
 
+    /// Whether this root may author an export surface.
     pub(crate) fn is_export_capable(self) -> bool {
-        self.is_module_root()
+        matches!(
+            self,
+            Self::LegacyCombinedRoot
+                | Self::ActiveApiOnlyModuleRoot(_)
+                | Self::ReachedApiFacadeRoot(_)
+        )
     }
 
-    /// The active public surface this file role declares, when it is an active root.
+    /// Whether this file synthesizes the compiler-owned entry start.
+    ///
+    /// `ConfigBootstrap` is included because the config service captures the authored top-level
+    /// statements through the same start-shaped body lane before applying its own dialect
+    /// validator. It publishes no executable entry.
+    pub(crate) fn synthesizes_entry_start(self) -> bool {
+        matches!(
+            self,
+            Self::LegacyCombinedRoot | Self::ActiveEntryRoot | Self::ConfigBootstrap
+        )
+    }
+
+    /// The active public surface this file role declares, when it declares one.
     pub(crate) fn active_surface(self) -> Option<ModuleRootRole> {
         match self {
-            Self::ActiveModuleRoot => Some(ModuleRootRole::Normal),
-            Self::ActiveApiOnlyModuleRoot => Some(ModuleRootRole::Support),
-            Self::ImportedModuleRoot | Self::Normal => None,
+            Self::LegacyCombinedRoot => Some(ModuleRootRole::Normal),
+            Self::ActiveApiOnlyModuleRoot(role) => match role {
+                ModuleRootRole::Normal | ModuleRootRole::Support => Some(role),
+                ModuleRootRole::Entry
+                | ModuleRootRole::Shared
+                | ModuleRootRole::SyntheticProjectContext => None,
+            },
+            // A reached foreign facade belongs to another structural module, so this compilation
+            // never projects it as its own public surface.
+            Self::ReachedApiFacadeRoot(_)
+            | Self::ActiveEntryRoot
+            | Self::ConfigBootstrap
+            | Self::Normal => None,
+        }
+    }
+
+    /// The header role for one foreign root reached by a flattened synthetic unit.
+    ///
+    /// Normal and support roots keep their API-facade role so their export surfaces parse. An
+    /// entry root publishes no importable surface and stays an ordinary source.
+    pub(crate) fn reached_api_facade(role: ModuleRootRole) -> Option<Self> {
+        match role {
+            ModuleRootRole::Normal | ModuleRootRole::Support => {
+                Some(Self::ReachedApiFacadeRoot(role))
+            }
+            ModuleRootRole::Entry
+            | ModuleRootRole::Shared
+            | ModuleRootRole::SyntheticProjectContext => None,
+        }
+    }
+
+    /// The role used for a standalone source compiled as its own synthetic module root.
+    pub(crate) fn for_standalone_root(role: ModuleRootRole) -> Option<Self> {
+        match role {
+            // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): a standalone normal
+            // root keeps today's combined export/start behaviour.
+            ModuleRootRole::Normal => Some(Self::LegacyCombinedRoot),
+            ModuleRootRole::Entry => Some(Self::ActiveEntryRoot),
+            ModuleRootRole::Support | ModuleRootRole::SyntheticProjectContext => {
+                Some(Self::ActiveApiOnlyModuleRoot(role))
+            }
+            ModuleRootRole::Shared => None,
         }
     }
 }
@@ -1525,7 +1594,7 @@ pub struct FileFrontendPrepareOutput {
     pub token_stats: TokenStats,
     /// The role of this source file within the module.
     ///
-    /// WHAT: distinguishes active roots, imported roots and normal source files.
+    /// WHAT: distinguishes active roots, reached foreign roots and ordinary source files.
     /// WHY: module-wide symbol collection needs file roles for every prepared file,
     /// including dependency-only files that may produce no headers.
     pub file_role: FileRole,

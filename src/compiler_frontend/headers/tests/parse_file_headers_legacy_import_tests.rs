@@ -230,7 +230,6 @@ fn legacy_joined_clause_span_keeps_full_multibyte_extended_range() {
     let path = Path::new("src/@page.moth");
     let context = HeaderTestPrepareContext {
         source_id: SourceId::COMPILATION_ROOT,
-        entry_file_path: path,
         options: &options,
         style_directives: &styles,
     };

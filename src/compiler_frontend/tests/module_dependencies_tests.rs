@@ -65,7 +65,6 @@ fn parse_module_headers(
 ) -> (BoundModuleHeaders, StringTable, PathInternerFork) {
     let mut string_table = StringTable::new();
     let external_package_registry = ExternalPackageRegistry::new();
-    let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let entry_path_buf = PathBuf::from(entry_path);
     let all_paths = files
@@ -107,12 +106,19 @@ fn parse_module_headers(
         .expect("tokenization should succeed");
         let owner = SourceTokenOwner::new(lexed.tokens);
         let path_syntax = lexed.path_syntax;
+        let options = crate::compiler_frontend::tests::parse_support::legacy_fixture_file_role(
+            &path_buf,
+            &entry_path_buf,
+        )
+        .map_or_else(HeaderParseOptions::default, |role| HeaderParseOptions {
+            selected_file: Some((file_id_for(path), role)),
+            ..Default::default()
+        });
 
         let output = prepare_file_from_tokens(
             owner,
             interned_path,
             path_syntax,
-            &entry_path_buf,
             &options,
             &mut string_table,
             const_template_offset,
@@ -519,7 +525,6 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         owner,
         interned_path,
         path_syntax,
-        &entry_path,
         &options,
         &mut string_table,
         0,
@@ -1164,7 +1169,6 @@ fn parse_module_headers_with_content_sources(
 ) {
     let mut string_table = StringTable::new();
     let external_package_registry = ExternalPackageRegistry::new();
-    let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let entry_path_buf = PathBuf::from(entry_path);
 
@@ -1209,11 +1213,18 @@ fn parse_module_headers_with_content_sources(
         .expect("tokenization should succeed");
         let owner = SourceTokenOwner::new(lexed.tokens);
         let path_syntax = lexed.path_syntax;
+        let options = crate::compiler_frontend::tests::parse_support::legacy_fixture_file_role(
+            &path_buf,
+            &entry_path_buf,
+        )
+        .map_or_else(HeaderParseOptions::default, |role| HeaderParseOptions {
+            selected_file: Some((file_id_for(path), role)),
+            ..Default::default()
+        });
         let output = prepare_file_from_tokens(
             owner,
             interned_path,
             path_syntax,
-            &entry_path_buf,
             &options,
             &mut string_table,
             0,
@@ -1569,7 +1580,6 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         .logical_path_in_fork(icon_file_id, &mut path_fork)
         .expect("icon logical path should belong to fixture fork");
 
-    let entry_path_buf = root_file.clone();
     let mut prepared_outputs = Vec::new();
     let mut retained_span_builders = Vec::new();
 
@@ -1591,7 +1601,6 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         root_owner,
         root_logical,
         root_path_syntax,
-        &entry_path_buf,
         &options,
         &mut string_table,
         0,

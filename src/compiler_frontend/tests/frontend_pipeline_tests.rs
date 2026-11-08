@@ -63,8 +63,8 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    BoundModuleHeaders, HeaderParseOptions, bind_module_headers, prepare_file_from_tokens,
-    prepare_header_syntax,
+    BoundModuleHeaders, FileRole, HeaderParseOptions, bind_module_headers,
+    prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
@@ -84,7 +84,6 @@ use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan,
 };
@@ -458,10 +457,8 @@ impl FrontendProject {
             .map(|identity| identity.id);
 
         let options = HeaderParseOptions {
-            entry_file_id,
-            support_root_file_id: None,
-            entry_file_role: None,
-            active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
+            selected_file: entry_file_id.map(|id| (id, FileRole::LegacyCombinedRoot)),
+            ..Default::default()
         };
 
         let mut prepared_outputs = Vec::with_capacity(tokenized_files.len());
@@ -472,7 +469,6 @@ impl FrontendProject {
                 owner,
                 source_file,
                 path_syntax,
-                &self.entry_file,
                 &options,
                 &mut self.frontend.string_table,
                 const_template_offset,
@@ -525,8 +521,8 @@ impl FrontendProject {
             compiler.headers_to_ast(
                 AstBuildRequest {
                     sorted,
-                    entry_file_path: &self.entry_file,
-                    root_role: ModuleRootRole::Normal,
+                    module_anchor_path: &self.entry_file,
+                    synthesizes_entry_start: true,
                     build_profile: FrontendBuildProfile::Dev,
                     capacity_estimate: Default::default(),
                     resolved_file_references: ResolvedFileReferenceTable::default(),

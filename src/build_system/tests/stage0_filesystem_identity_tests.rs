@@ -602,8 +602,11 @@ mod source_package_boundary_indexes_tests {
             .module_id_for_directory(index.entry_root())
             .expect("the package root directory should have a structural module");
         let record = index.module_identities().record(module_id);
-        assert_eq!(record.public_surface_role(), ModuleRootRole::Support);
-        assert_eq!(record.public_root_file(), canonical_root_file);
+        assert_eq!(record.public_surface_role(), Some(ModuleRootRole::Support));
+        assert_eq!(
+            record.public_root_file(),
+            Some(canonical_root_file.as_path())
+        );
         assert!(
             record.surface_origin(ModuleRootRole::Support).is_some(),
             "the selected public surface must retain its stable support origin"
@@ -646,6 +649,69 @@ mod source_package_boundary_indexes_tests {
         let failure = build_indexes(&source_packages, &mut string_table)
             .expect_err("package root without a normal module root should fail boundary indexing");
         assert_invalid_config_reason(failure, InvalidConfigCode::SourcePackageMissingRoot);
+    }
+
+    #[test]
+    fn entry_only_package_root_is_rejected_as_missing_root() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let package_root = root.join("pkg");
+        fs::create_dir_all(&package_root).expect("should create package root");
+        fs::write(package_root.join("@entry.moth"), "").expect("should write entry root");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        register_pkg(&mut source_packages, &package_root);
+
+        let mut string_table = StringTable::new();
+        let failure = build_indexes(&source_packages, &mut string_table)
+            .expect_err("an entry-only package root publishes no importable facade");
+        assert_invalid_config_reason(failure, InvalidConfigCode::SourcePackageMissingRoot);
+    }
+
+    #[test]
+    fn package_facade_only_package_root_is_accepted_as_external_surface() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let package_root = root.join("pkg");
+        fs::create_dir_all(&package_root).expect("should create package root");
+        fs::write(package_root.join("@package.moth"), "")
+            .expect("should write package facade root");
+
+        let mut source_packages = SourcePackageRegistry::new();
+        register_pkg(&mut source_packages, &package_root);
+
+        let mut string_table = StringTable::new();
+        let indexes = build_indexes(&source_packages, &mut string_table)
+            .expect("a package-facade-only package should build a boundary index");
+        let (_, index) = indexes.iter().next().expect("package index should exist");
+        let canonical_root_file = fs::canonicalize(package_root.join("@package.moth"))
+            .expect("package facade root should canonicalize");
+        assert_eq!(
+            index.root_file_for_entry_root(),
+            Some(canonical_root_file.as_path()),
+            "a package facade is the package's external public surface"
+        );
+
+        let module_id = index
+            .module_identities()
+            .module_id_for_directory(
+                &fs::canonicalize(&package_root).expect("package root should canonicalize"),
+            )
+            .expect("the package facade should define one structural module");
+        let record = index.module_identities().record(module_id);
+        assert_eq!(record.normal_root_file(), None);
+        assert_eq!(record.public_surface_role(), Some(ModuleRootRole::Support));
+        assert_eq!(
+            record.public_root_file(),
+            Some(canonical_root_file.as_path())
+        );
+
+        let prepared = indexes.prepared_source_package_roots();
+        assert_eq!(
+            prepared.root_files().get("pkg"),
+            Some(&canonical_root_file),
+            "a package facade is the external package surface"
+        );
     }
 
     #[test]
@@ -1290,7 +1356,7 @@ mod module_identity_tests {
             record.support_root_file(),
             Some(fs::canonicalize(&support_root).unwrap().as_path())
         );
-        assert_eq!(record.public_surface_role(), ModuleRootRole::Support);
+        assert_eq!(record.public_surface_role(), Some(ModuleRootRole::Support));
 
         let normal_source = index
             .source_index_for_canonical_path(&fs::canonicalize(&normal_target).unwrap())
@@ -1337,7 +1403,7 @@ mod module_identity_tests {
             .module_id_for_directory(&entry_root)
             .expect("the entry root should own a structural module");
         let record = index.module_identities().record(module_id);
-        assert_eq!(record.public_surface_role(), ModuleRootRole::Normal);
+        assert_eq!(record.public_surface_role(), Some(ModuleRootRole::Normal));
 
         let source = index
             .source_index_for_canonical_path(&fs::canonicalize(&target).unwrap())
@@ -1351,6 +1417,293 @@ mod module_identity_tests {
             origin.role(),
             ModuleRootRole::Normal,
             "root role must follow the visible root entry, not the canonical target filename"
+        );
+    }
+
+    #[test]
+    fn fixed_root_role_combinations_form_one_module_with_role_origins() {
+        struct Case {
+            roots: &'static [&'static str],
+            has_normal: bool,
+            has_support: bool,
+            has_entry: bool,
+            public_surface: Option<ModuleRootRole>,
+            is_entry_module: bool,
+        }
+
+        let cases = [
+            Case {
+                roots: &["@mod.moth"],
+                has_normal: true,
+                has_support: false,
+                has_entry: false,
+                public_surface: Some(ModuleRootRole::Normal),
+                // LEGACY ROOT MIGRATION BRIDGE: a normal root without an entry root still acts
+                // as today's combined executable root until the Phase 4 cutover.
+                is_entry_module: true,
+            },
+            Case {
+                roots: &["@package.moth"],
+                has_normal: false,
+                has_support: true,
+                has_entry: false,
+                public_surface: Some(ModuleRootRole::Support),
+                is_entry_module: false,
+            },
+            Case {
+                roots: &["@entry.moth"],
+                has_normal: false,
+                has_support: false,
+                has_entry: true,
+                public_surface: None,
+                is_entry_module: true,
+            },
+            Case {
+                roots: &["@mod.moth", "@package.moth"],
+                has_normal: true,
+                has_support: true,
+                has_entry: false,
+                public_surface: Some(ModuleRootRole::Support),
+                // LEGACY ROOT MIGRATION BRIDGE: the normal root is still the combined root.
+                is_entry_module: true,
+            },
+            Case {
+                roots: &["@mod.moth", "@entry.moth"],
+                has_normal: true,
+                has_support: false,
+                has_entry: true,
+                public_surface: Some(ModuleRootRole::Normal),
+                is_entry_module: true,
+            },
+            Case {
+                roots: &["@package.moth", "@entry.moth"],
+                has_normal: false,
+                has_support: true,
+                has_entry: true,
+                public_surface: Some(ModuleRootRole::Support),
+                is_entry_module: true,
+            },
+            Case {
+                roots: &["@mod.moth", "@package.moth", "@entry.moth"],
+                has_normal: true,
+                has_support: true,
+                has_entry: true,
+                public_surface: Some(ModuleRootRole::Support),
+                is_entry_module: true,
+            },
+        ];
+
+        for case in cases {
+            let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+            let root = _tmp_root.path().to_path_buf();
+            let src = root.join("src");
+            fs::create_dir_all(&src).expect("should create entry root");
+            for root_name in case.roots {
+                fs::write(src.join(root_name), "").expect("should write authored root");
+            }
+            fs::write(src.join("helper.moth"), "").expect("should write shared helper");
+
+            let (index, _project_root, entry_root) = discover_index(&root, "src");
+            assert_eq!(
+                index.module_identities().module_ids().count(),
+                1,
+                "one directory with any root-role combination is exactly one structural module"
+            );
+            let module_id = index
+                .module_identities()
+                .module_id_for_directory(&entry_root)
+                .expect("the rooted directory should own the structural module");
+            let record = index.module_identities().record(module_id);
+            assert_eq!(
+                record.has_normal_root(),
+                case.has_normal,
+                "{:?}",
+                case.roots
+            );
+            assert_eq!(
+                record.has_support_root(),
+                case.has_support,
+                "{:?}",
+                case.roots
+            );
+            assert_eq!(record.has_entry_root(), case.has_entry, "{:?}", case.roots);
+            assert_eq!(
+                record.public_surface_role(),
+                case.public_surface,
+                "{:?}",
+                case.roots
+            );
+
+            let shared_origin = record.shared_origin().clone();
+            let mut present_origins = Vec::new();
+            for (role, present) in [
+                (ModuleRootRole::Normal, case.has_normal),
+                (ModuleRootRole::Support, case.has_support),
+                (ModuleRootRole::Entry, case.has_entry),
+            ] {
+                let origin = record.surface_origin(role);
+                if !present {
+                    assert!(origin.is_none(), "{role:?} must have no surface origin");
+                    continue;
+                }
+                let origin = origin
+                    .expect("a present root role should own a surface origin")
+                    .clone();
+                assert_eq!(origin.role(), role);
+                assert_ne!(
+                    origin, shared_origin,
+                    "a role-qualified surface origin must stay distinct from the shared helper origin"
+                );
+                assert!(
+                    !present_origins.contains(&origin),
+                    "each present root role owns its own surface origin"
+                );
+                present_origins.push(origin);
+            }
+
+            let graph = ProjectModuleGraph::from_source_tree_index(&index);
+            assert_eq!(
+                graph.entry_modules().contains(&module_id),
+                case.is_entry_module,
+                "entry-module membership follows an entry root or the legacy combined normal root: {:?}",
+                case.roots
+            );
+        }
+    }
+
+    #[test]
+    fn config_only_directory_is_not_rooted() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(&src).expect("should create entry root");
+        fs::write(src.join("config.moth"), "project #= (name = \"t\")\n")
+            .expect("should write build-only config");
+
+        let (index, _project_root, entry_root) = discover_index(&root, "src");
+        assert_eq!(index.module_identities().module_ids().count(), 0);
+        assert!(
+            index
+                .module_identities()
+                .module_id_for_directory(&entry_root)
+                .is_none(),
+            "config.moth never creates a structural module"
+        );
+    }
+
+    #[test]
+    fn duplicate_support_role_roots_are_rejected() {
+        use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+            InvalidConfigCode, InvalidConfigView,
+        };
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(&src).expect("should create entry root");
+        fs::write(src.join("@package.moth"), "").expect("should write canonical support root");
+        fs::write(src.join("+package.moth"), "").expect("should write legacy support root");
+
+        let failure = discover_result(&root, "src")
+            .expect_err("one directory cannot claim the support role twice");
+        let reports = prepared_failure_reports(failure);
+        let (_, diagnostic) = reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .next()
+            .expect("duplicate root roles should diagnose");
+        let facts = diagnostic
+            .family_view::<InvalidConfigView>()
+            .expect("duplicate root roles keep typed structure facts");
+        assert_eq!(facts.reason, InvalidConfigCode::MultipleModuleRootFiles);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_alias_between_normal_and_entry_roots_is_rejected() {
+        use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
+            InvalidConfigCode, InvalidConfigView,
+        };
+        use std::os::unix::fs::symlink;
+
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(&src).expect("should create entry root");
+        let target = src.join("actual.moth");
+        fs::write(&target, "").expect("should write shared physical source");
+        symlink(&target, src.join("@mod.moth")).expect("should create normal root symlink");
+        symlink(&target, src.join("@entry.moth")).expect("should create entry root symlink");
+
+        let failure = discover_result(&root, "src")
+            .expect_err("one physical file cannot claim two root roles");
+        let reports = prepared_failure_reports(failure);
+        let (_, diagnostic) = reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .next()
+            .expect("aliased root roles should diagnose");
+        let facts = diagnostic
+            .family_view::<InvalidConfigView>()
+            .expect("aliased root roles keep typed structure facts");
+        assert_eq!(facts.reason, InvalidConfigCode::MultipleModuleRootFiles);
+    }
+
+    #[test]
+    fn shared_helper_origin_is_stable_across_root_role_changes() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(&src).expect("should create entry root");
+        fs::write(src.join("helper.moth"), "").expect("should write shared helper");
+
+        fs::write(src.join("@mod.moth"), "").expect("should write normal root");
+        let (normal_index, _project_root, entry_root) = discover_index(&root, "src");
+        let normal_module = normal_index
+            .module_identities()
+            .module_id_for_directory(&entry_root)
+            .expect("normal root should own the module");
+        let helper_source = normal_index
+            .source_index_for_canonical_path(&fs::canonicalize(src.join("helper.moth")).unwrap())
+            .expect("shared helper should be indexed");
+        let helper_origin = normal_index
+            .source(helper_source)
+            .logical_identity()
+            .module_origin()
+            .expect("shared helper should own an origin")
+            .clone();
+        assert_eq!(helper_origin.role(), ModuleRootRole::Shared);
+        assert_eq!(
+            normal_index
+                .module_identities()
+                .record(normal_module)
+                .shared_origin(),
+            &helper_origin
+        );
+        fs::remove_file(src.join("@mod.moth")).expect("should remove normal root");
+
+        fs::write(src.join("@entry.moth"), "").expect("should write entry root");
+        let (entry_index, _project_root, entry_root) = discover_index(&root, "src");
+        let entry_module = entry_index
+            .module_identities()
+            .module_id_for_directory(&entry_root)
+            .expect("entry root should own the same structural module");
+        let helper_source = entry_index
+            .source_index_for_canonical_path(&fs::canonicalize(src.join("helper.moth")).unwrap())
+            .expect("shared helper should remain indexed");
+        let changed_origin = entry_index
+            .source(helper_source)
+            .logical_identity()
+            .module_origin()
+            .expect("shared helper should still own an origin");
+        assert_eq!(
+            changed_origin, &helper_origin,
+            "renaming the authored root must not change the shared helper origin"
+        );
+        assert_eq!(
+            entry_index
+                .module_identities()
+                .record(entry_module)
+                .shared_origin(),
+            &helper_origin
         );
     }
 
@@ -3018,7 +3371,7 @@ mod owned_source_inventory_tests {
         let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
 
         assert_eq!(
-            compilation_roots.root_file_for_directory(&canonical_root),
+            compilation_roots.api_facade_root_file_for_directory(&canonical_root),
             Some(canonical_root.join("@page.moth").as_path()),
             "the normal module remains the primary compilation root for the shared directory"
         );

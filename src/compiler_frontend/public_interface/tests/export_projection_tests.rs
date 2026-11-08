@@ -24,7 +24,9 @@ use crate::compiler_frontend::external_packages::{
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleSymbols, PublicExportEntry, PublicExportTarget,
 };
-use crate::compiler_frontend::headers::parse_file_headers::parse_file_headers_tests::prepare_single_file_with_fork;
+use crate::compiler_frontend::headers::parse_file_headers::parse_file_headers_tests::{
+    prepare_active_root_with_role, prepare_single_file_with_fork,
+};
 use crate::compiler_frontend::headers::parse_file_headers::{
     BoundModuleHeaders, FileRole, Header, HeaderKind, bind_module_headers, prepare_header_syntax,
 };
@@ -38,7 +40,7 @@ use crate::compiler_frontend::semantic_identity::{
     OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
     StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSpan};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::symbols::identity::{DependencySelectionId, DependencyShellId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -1063,16 +1065,22 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
         &mut string_table,
         &mut path_fork,
     );
-    let (imported_output, _span_builder) = prepare_single_file_with_fork(
+    let mut imported_span_builder = ExtendedSpanBuilder::new();
+    let imported_output = prepare_active_root_with_role(
         "export:\n    Imported = | value I32 |\n;\n",
         &imported_path,
-        &active_path,
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut imported_span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("a normal facade fixture should accept its export block");
 
-    assert_eq!(active_output.file_role, FileRole::ActiveModuleRoot);
-    assert_eq!(imported_output.file_role, FileRole::ImportedModuleRoot);
+    assert_eq!(active_output.file_role, FileRole::LegacyCombinedRoot);
+    assert_eq!(
+        imported_output.file_role,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal)
+    );
 
     let source_files = SourceDatabase::build(
         [active_path.clone(), imported_path.clone()],
@@ -1176,13 +1184,16 @@ fn public_source_nominal_origin_index_rejects_compilation_root_file_id() {
         &mut string_table,
         &mut path_fork,
     );
-    let (imported_output, _span_builder) = prepare_single_file_with_fork(
+    let mut imported_span_builder = ExtendedSpanBuilder::new();
+    let imported_output = prepare_active_root_with_role(
         "export:\n    Imported = | value I32 |\n;\n",
         &imported_path,
-        &active_path,
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut imported_span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("a normal facade fixture should accept its export block");
 
     let source_files = SourceDatabase::build(
         [active_path.clone(), imported_path.clone()],
@@ -1263,13 +1274,16 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
     );
     // A source-package module root not owned by the project graph: deliberately absent from the
     // origin map, so its table entry is None.
-    let (package_output, _span_builder) = prepare_single_file_with_fork(
+    let mut package_span_builder = ExtendedSpanBuilder::new();
+    let package_output = prepare_active_root_with_role(
         "export:\n    Pkg = | value I32 |\n;\n",
         &package_path,
-        &active_path,
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut package_span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("a facade fixture should accept its export block");
 
     let source_files = SourceDatabase::build(
         [active_path.clone(), package_path.clone()],
@@ -1374,7 +1388,7 @@ fn public_source_nominal_origin_index_includes_alias_targeted_normal_file_nomina
         &mut string_table,
         &mut path_fork,
     );
-    assert_eq!(active_output.file_role, FileRole::ActiveModuleRoot);
+    assert_eq!(active_output.file_role, FileRole::LegacyCombinedRoot);
     assert_eq!(impl_output.file_role, FileRole::Normal);
 
     let source_files = SourceDatabase::build(
@@ -1615,13 +1629,16 @@ fn public_source_trait_origin_index_includes_imported_provider_trait() {
         &mut string_table,
         &mut path_fork,
     );
-    let (imported_output, _span_builder) = prepare_single_file_with_fork(
+    let mut imported_span_builder = ExtendedSpanBuilder::new();
+    let imported_output = prepare_active_root_with_role(
         "export:\n    IMPORTED_TRAIT must:\n        show |This| -> String\n    ;\n;\n",
         &imported_path,
-        &active_path,
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut imported_span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("a normal facade fixture should accept its export block");
 
     let source_files = SourceDatabase::build(
         [active_path.clone(), imported_path.clone()],
@@ -1723,7 +1740,7 @@ fn public_source_trait_origin_index_includes_alias_targeted_normal_file_trait() 
         &mut string_table,
         &mut path_fork,
     );
-    assert_eq!(active_output.file_role, FileRole::ActiveModuleRoot);
+    assert_eq!(active_output.file_role, FileRole::LegacyCombinedRoot);
     assert_eq!(impl_output.file_role, FileRole::Normal);
 
     let source_files = SourceDatabase::build(

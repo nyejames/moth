@@ -719,7 +719,6 @@ fn trait_this_substitution_preserves_authored_signature_spans() {
         owner,
         scope,
         lexed.path_syntax,
-        &path,
         &HeaderParseOptions::default(),
         &mut strings,
         &mut path_fork,

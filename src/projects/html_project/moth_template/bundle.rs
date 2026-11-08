@@ -31,7 +31,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, DiagnosticDraft, PreparedFailure,
 };
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput,
+    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole,
     HeaderParseOptions, SourcePreparationDelta,
 };
 use crate::compiler_frontend::paths::file_references::{
@@ -184,10 +184,11 @@ pub(super) fn prepare_file_value_bundle(
             SourceDatabaseError::Infrastructure(error) => PreparedFailure::from(error),
         })?;
     let discovery_options = HeaderParseOptions {
-        entry_file_id: Some(entry_file_id),
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role: ModuleRootRole::Normal,
+        root_file_ids: Default::default(),
+        // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): the standalone HTML
+        // template entry is one synthetic normal root with today's combined behaviour.
+        selected_file: Some((entry_file_id, FileRole::LegacyCombinedRoot)),
+        reached_root_roles: &[],
     };
 
     let mut sources = DiscoveredTemplateSources::default();
@@ -307,7 +308,6 @@ pub(super) fn prepare_file_value_bundle(
             &FrontendFilePrepareContext {
                 source_files: &discovery_files,
                 style_directives,
-                entry_file_path: &path,
                 options: &discovery_options,
             },
             source_id,

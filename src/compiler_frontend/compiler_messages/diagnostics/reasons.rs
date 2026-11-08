@@ -1248,7 +1248,6 @@ pub enum InvalidTraitIncompatibilityReason {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidTraitConformanceReason {
-    ImportedModuleRoot,
     AliasTarget,
     NonCanonicalTarget,
     NonlocalSourceTarget,

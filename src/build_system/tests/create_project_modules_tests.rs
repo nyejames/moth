@@ -443,7 +443,7 @@ fn prepared_entry_file_path(
         .find_map(|(source_file, role)| {
             if matches!(
                 *role,
-                FileRole::ActiveModuleRoot | FileRole::ActiveApiOnlyModuleRoot
+                FileRole::LegacyCombinedRoot | FileRole::ActiveApiOnlyModuleRoot(_)
             ) {
                 Some(prepared.path_fork.render_native(
                     *source_file,
@@ -461,7 +461,7 @@ fn prepared_entry_canonical_file_path(
     source_files: &SourceDatabase,
 ) -> Option<PathBuf> {
     prepared
-        .entry_file_path(source_files)
+        .preparation_anchor_path(source_files)
         .ok()
         .map(Path::to_path_buf)
 }
@@ -1218,7 +1218,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
             input_files,
             &mut span_view,
             &entry_file_path,
-            None,
+            &ModuleRootTable::empty(),
             local_string_table,
             source_files.fork_path_interner(),
             source_byte_count,
@@ -1232,7 +1232,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
             input_files,
             &mut span_view,
             &entry_file_path,
-            None,
+            &ModuleRootTable::empty(),
             local_string_table,
             source_files.fork_path_interner(),
             source_byte_count,

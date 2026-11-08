@@ -29,8 +29,11 @@ use crate::compiler_frontend::module_compilation::PreparedModuleInput;
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReference, ResolvedFileReferenceTable,
 };
+use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootFiles, ModuleRootRole, StableModuleOriginIdentity,
+};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, SourceDatabase, SourceId, SourceKind, SourceSpanBuilders,
 };
@@ -224,6 +227,72 @@ fn source_id_for_canonical_path(
         .map(|record| record.id)
 }
 
+/// Resolve Stage 0's role-keyed root paths to the boundary's compiler source identities.
+///
+/// A present root path must already be registered: Stage 0 owns the source inventory, so a
+/// missing identity is a cross-stage invariant failure rather than a recoverable absence.
+fn resolve_root_file_ids(
+    source_files: &SourceDatabase,
+    root_file_paths: &ModuleRootFiles<PathBuf>,
+) -> Result<ModuleRootFiles<SourceId>, InfrastructureFailure> {
+    let resolve = |role: ModuleRootRole, path: Option<&PathBuf>| {
+        path.map(|path| {
+            source_id_for_canonical_path(source_files, path).ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "module preparation: the {role:?} root path {path:?} is not in the source file table"
+                    ),
+                )
+            })
+        })
+        .transpose()
+    };
+    Ok(ModuleRootFiles::new(
+        resolve(ModuleRootRole::Normal, root_file_paths.normal.as_ref())?,
+        resolve(ModuleRootRole::Support, root_file_paths.support.as_ref())?,
+        resolve(ModuleRootRole::Entry, root_file_paths.entry.as_ref())?,
+    ))
+}
+
+/// Resolve Stage 0's bounded root inventory into reached-root roles for a flattened synthetic unit.
+///
+/// WHAT: every normal or support root present in the unit, other than the standalone selection,
+///       becomes an export-capable but non-active `FileRole::ReachedApiFacadeRoot`. An entry root
+///       publishes no importable surface, so it stays an ordinary source. Roots absent from the
+///       source database were never reached and contribute no header role.
+/// WHY: synthetic single-file compilation follows dependency clauses into other directories and
+///      prepares their roots in one flat source set. Those roles must come from Stage 0's bounded
+///      root inventory rather than a second filename scan, which would ignore symlinked visible
+///      names and duplicate-root validation.
+fn resolve_reached_root_roles(
+    source_files: &SourceDatabase,
+    module_roots: &ModuleRootTable,
+    selected_file_path: &Path,
+) -> Vec<(SourceId, FileRole)> {
+    let mut roles = Vec::new();
+
+    for (role, root_path) in module_roots.root_file_roles() {
+        // The standalone selection owns its explicit role, which takes precedence over inventory
+        // membership during header parsing.
+        if root_path == selected_file_path {
+            continue;
+        }
+
+        // Entry roots own executable output and never publish an importable surface. Shared and
+        // synthetic roles never occupy a module-root slot.
+        let Some(file_role) = FileRole::reached_api_facade(role) else {
+            continue;
+        };
+
+        if let Some(source_id) = source_id_for_canonical_path(source_files, root_path) {
+            roles.push((source_id, file_role));
+        }
+    }
+
+    roles
+}
+
 /// Borrow the retained text of a source the boundary database already holds, or surface the load
 /// failure it recorded.
 ///
@@ -313,13 +382,12 @@ pub(super) struct ModuleSyntaxDiscovery<'a, 'texts> {
     context: &'a ModulePreparationContext<'a>,
     /// Source text selected during this walk but not retained in the boundary database yet.
     selected_source_texts: &'texts mut SelectedSourceTextMap,
-    entry_file_path: PathBuf,
-    /// The paired support root prepared into the same source set, when present.
-    support_root_file_path: Option<PathBuf>,
-    /// Explicit file role for transient entry selections; canonical module roots derive this from
-    /// `active_root_role`.
-    entry_file_role: Option<FileRole>,
-    active_root_role: ModuleRootRole,
+    /// Stage 0's role-keyed root paths for this structural module.
+    root_file_paths: ModuleRootFiles<PathBuf>,
+    /// The one explicitly selected source for a standalone/check-only unit.
+    selected_file: Option<(PathBuf, FileRole)>,
+    /// The single root source that anchors preparation. It has no entry or surface authority.
+    preparation_anchor_path: PathBuf,
     expected_active_origin: StableModuleOriginIdentity,
     /// Ordered owned-source candidates used by the module's source identity table.
     /// Unselected candidates remain here because provider resolution considers this complete
@@ -363,15 +431,14 @@ impl ModulePreparationContext<'_> {
     /// the single vessel conversion.
     #[allow(
         clippy::too_many_arguments,
-        reason = "syntax discovery keeps stable origin, registered sources, entry path and role, owned string/path tables, mutable selected source texts and the timers-only context separate"
+        reason = "syntax discovery keeps stable origin, registered sources, root inventory, standalone selection, owned string/path tables, mutable selected source texts and the timers-only context separate"
     )]
     pub(super) fn begin_syntax_discovery<'a, 'texts>(
         &'a self,
         stable_origin: StableModuleOriginIdentity,
         registered_sources: RegisteredModuleSources,
-        entry_file_path: &Path,
-        support_root_file_path: Option<&Path>,
-        entry_file_role: Option<FileRole>,
+        root_file_paths: ModuleRootFiles<PathBuf>,
+        selected_file: Option<(PathBuf, FileRole)>,
         string_table: StringTable,
         path_fork: PathInternerFork,
         selected_source_texts: &'texts mut SelectedSourceTextMap,
@@ -379,16 +446,26 @@ impl ModulePreparationContext<'_> {
     ) -> Result<ModuleSyntaxDiscovery<'a, 'texts>, PreparedFailure> {
         Self::validate_path_fork_base(&path_fork, self.source_files)?;
 
+        let preparation_anchor_path = root_file_paths
+            .preparation_anchor()
+            .or(selected_file.as_ref().map(|(path, _)| path))
+            .cloned()
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                    "module syntax discovery: a module or standalone selection must provide a preparation anchor",
+                )
+            })?;
+
         let candidate_source_ids = registered_sources.candidate_source_ids;
         let prepared_outputs = PreparedSourceSlots::new(candidate_source_ids.len());
 
         Ok(ModuleSyntaxDiscovery {
             context: self,
             selected_source_texts,
-            entry_file_path: entry_file_path.to_path_buf(),
-            support_root_file_path: support_root_file_path.map(Path::to_path_buf),
-            entry_file_role,
-            active_root_role: stable_origin.role(),
+            root_file_paths,
+            selected_file,
+            preparation_anchor_path,
             expected_active_origin: stable_origin,
             candidate_source_ids,
             source_module_origins: registered_sources.source_module_origins,
@@ -431,7 +508,9 @@ impl ModulePreparationContext<'_> {
         module: Vec<PreparedSourceInput>,
         source_spans: &mut SourceSpanBuilders<'_>,
         entry_file_path: &Path,
-        support_root_file_path: Option<&Path>,
+        // Stage 0's bounded root inventory for a flattened synthetic unit. Empty when the
+        // selection has no special root filename and discovery never indexed a bounded tree.
+        module_roots: &ModuleRootTable,
         mut string_table: StringTable,
         mut path_fork: PathInternerFork,
         source_byte_count: usize,
@@ -455,9 +534,22 @@ impl ModulePreparationContext<'_> {
         let contains_moth_template = module
             .iter()
             .any(|source| source_is_moth_template(self.source_files, source.source_id()));
-        // Entry identity and root semantics are separate. The stable module origin owns whether
-        // the active file is a normal runtime-capable root or an API-only support/facade root.
-        let active_root_role = stable_origin.role();
+        // A standalone synthetic module selects exactly one source. Its role comes from the
+        // synthetic module origin so the header stage can classify start/export capability
+        // without inventing a filesystem root inventory.
+        let selected_role =
+            FileRole::for_standalone_root(stable_origin.role()).ok_or_else(|| {
+                InfrastructureFailure::internal(
+                crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                "module preparation: a synthetic module origin cannot be a shared helper origin",
+            )
+            })?;
+        let selected_file = Some((entry_file_path.to_path_buf(), selected_role));
+        // A flattened synthetic unit also prepares the module roots its dependency clauses
+        // reached. Stage 0's bounded inventory classifies each one; the selected source keeps its
+        // explicit role above.
+        let reached_root_roles =
+            resolve_reached_root_roles(self.source_files, module_roots, entry_file_path);
 
         // 1. Prepare all selected files against one local string-table fork per worker chunk.
         //    Directory Moth inputs parse from their canonical owner through a bounded source
@@ -474,9 +566,11 @@ impl ModulePreparationContext<'_> {
                     &mut path_fork,
                     module,
                     source_spans,
-                    entry_file_path,
-                    support_root_file_path,
-                    active_root_role,
+                    &ModuleRootFiles::default(),
+                    selected_file
+                        .as_ref()
+                        .map(|(path, role)| (path.as_path(), *role)),
+                    &reached_root_roles,
                     source_byte_count,
                 )
             }
@@ -491,36 +585,22 @@ impl ModulePreparationContext<'_> {
             &stable_origin,
         ));
 
-        // 3. Resolve the entry file's `SourceId` through the boundary source database once and
-        //    validate that the synthetic origin table maps it to the expected active origin. The
-        //    active root must have an owning origin, and that origin must match the origin declared
-        //    by the single-file path.
-        let active_root_file_id = Self::resolve_and_validate_active_root(
+        // Resolve the selected source's `SourceId` through the boundary source database once and
+        // validate that the synthetic origin table maps it to the expected origin.
+        let selected_source_id = Self::resolve_and_validate_preparation_anchor(
             self.source_files,
             source_module_origins.as_ref(),
             &stable_origin,
             entry_file_path,
         )?;
-        let support_root_file_id = support_root_file_path
-            .map(|path| {
-                source_id_for_canonical_path(self.source_files, path).ok_or_else(|| {
-                    InfrastructureFailure::internal(
-                        crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
-                        format!(
-                            "module preparation: the paired support root path {path:?} is not in the source file table"
-                        ),
-                    )
-                })
-            })
-            .transpose()?;
 
         // Retain the deterministic preparation context so semantic compilation can continue
         // against the same string table, path fork and boundary source identities.
         Ok((
             PreparedModule {
                 semantic: PreparedModuleInput {
-                    active_root_file_id,
-                    support_root_file_id,
+                    root_file_ids: ModuleRootFiles::default(),
+                    selected_file: Some((selected_source_id, selected_role)),
                     candidate_source_ids,
                     source_module_origins,
                     prepared_header_syntax,
@@ -572,40 +652,40 @@ impl ModulePreparationContext<'_> {
     ///      loose origin, then retains only the `SourceId` and shared origin-table handle so
     ///      semantic projection resolves the active origin from the identity domain rather than
     ///      trusting a loose argument.
-    fn resolve_and_validate_active_root(
+    fn resolve_and_validate_preparation_anchor(
         source_files: &SourceDatabase,
         source_module_origins: &SourceModuleOriginTable,
-        expected_active_origin: &StableModuleOriginIdentity,
-        entry_file_path: &Path,
+        expected_origin: &StableModuleOriginIdentity,
+        anchor_path: &Path,
     ) -> Result<SourceId, InfrastructureFailure> {
-        let active_root_file_id = source_id_for_canonical_path(source_files, entry_file_path)
+        let anchor_file_id = source_id_for_canonical_path(source_files, anchor_path)
             .ok_or_else(|| {
                 InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
-                    "module preparation: the entry file path {:?} is not in the source file table",
-                    entry_file_path
+                    "module preparation: the preparation anchor path {:?} is not in the source file table",
+                    anchor_path
                 ))
             })?;
 
         let table_origin = source_module_origins
-            .origin_for(active_root_file_id)?
+            .origin_for(anchor_file_id)?
             .ok_or_else(|| {
                 InfrastructureFailure::internal(crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly, format!(
-                    "module preparation: the active root (file id {}) has no owning module origin in the source module origin table",
-                    active_root_file_id.index()
+                    "module preparation: the preparation anchor (file id {}) has no owning module origin in the source module origin table",
+                    anchor_file_id.index()
                 ))
             })?;
 
-        if table_origin != expected_active_origin {
+        if table_origin != expected_origin {
             return Err(InfrastructureFailure::internal(
                 crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
                 format!(
-                    "module preparation: the active root's table-resolved origin ({:?}) does not match the expected active origin ({:?})",
-                    table_origin, expected_active_origin
+                    "module preparation: the preparation anchor's table-resolved origin ({:?}) does not match the expected module origin ({:?})",
+                    table_origin, expected_origin
                 ),
             ));
         }
 
-        Ok(active_root_file_id)
+        Ok(anchor_file_id)
     }
 
     /// Prepare all source files in the module against local string-table forks, then merge and
@@ -621,7 +701,7 @@ impl ModulePreparationContext<'_> {
     /// cannot cancel or withhold a chunk; it bounds only what the merged batch retains.
     #[allow(
         clippy::too_many_arguments,
-        reason = "module preparation keeps shared context, mutable string/path forks, prepared inputs, span builders, entry path, root role and size threshold as separate inputs"
+        reason = "module preparation keeps shared context, mutable string/path forks, prepared inputs, span builders, root inventory, standalone selection, reached-root roles and size threshold as separate inputs"
     )]
     fn prepare_module_files(
         &self,
@@ -629,23 +709,33 @@ impl ModulePreparationContext<'_> {
         path_fork: &mut PathInternerFork,
         module: Vec<PreparedSourceInput>,
         source_spans: &mut SourceSpanBuilders<'_>,
-        entry_file_path: &Path,
-        support_root_file_path: Option<&Path>,
-        active_root_role: ModuleRootRole,
+        root_file_paths: &ModuleRootFiles<PathBuf>,
+        selected_file: Option<(&Path, FileRole)>,
+        reached_root_roles: &[(SourceId, FileRole)],
         source_byte_count: usize,
     ) -> Result<(PreparedHeaderSyntax, Vec<DiagnosticDraft>), PreparedFailure> {
         // Retained direct-preparation inputs use the source database's path domain. The mutable
         // module fork must carry that authoritative prefix before worker snapshots are created.
         Self::validate_path_fork_base(path_fork, self.source_files)?;
-        let entry_file_id = source_id_for_canonical_path(self.source_files, entry_file_path);
-
-        let support_root_file_id = support_root_file_path
-            .and_then(|path| source_id_for_canonical_path(self.source_files, path));
+        let root_file_ids = resolve_root_file_ids(self.source_files, root_file_paths)?;
+        let selected_file = selected_file
+            .map(|(path, role)| {
+                source_id_for_canonical_path(self.source_files, path)
+                    .map(|source_id| (source_id, role))
+                    .ok_or_else(|| {
+                        InfrastructureFailure::internal(
+                            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                            format!(
+                                "module preparation: the selected source path {path:?} is not in the source file table"
+                            ),
+                        )
+                    })
+            })
+            .transpose()?;
         let options = HeaderParseOptions {
-            entry_file_id,
-            support_root_file_id,
-            entry_file_role: None,
-            active_root_role,
+            root_file_ids,
+            selected_file,
+            reached_root_roles,
         };
         // Create one shared fork source for all file-preparation workers. Each scheduled chunk
         // gets a local table forked from this immutable base, so preparation never needs mutable
@@ -656,17 +746,15 @@ impl ModulePreparationContext<'_> {
         // module prefix and merge back in canonical chunk order after the string delta.
         let path_fork_source = path_fork.fork_source();
 
-        // Offsets are only relevant for the active module root files, and a structural module
-        // has at most one normal and one support root. Imported and ordinary files produce zero
-        // const templates and runtime fragments, so every file can safely start from offset zero
-        // without name collisions.
+        // Offsets are only relevant for the start-bearing root file. A reached foreign facade
+        // discards its fragments, and ordinary files produce zero const templates and runtime
+        // fragments, so every file can safely start from offset zero without name collisions.
         let const_template_offset = 0usize;
         let runtime_fragment_offset = 0usize;
 
         let prepare_context = FrontendFilePrepareContext {
             source_files: self.source_files,
             style_directives: self.style_directives,
-            entry_file_path,
             options: &options,
         };
 
@@ -1191,22 +1279,34 @@ impl ModuleSyntaxDiscovery<'_, '_> {
         })?;
         self.contains_moth_template |=
             source_is_moth_template(self.context.source_files, source_id);
-        let entry_file_id =
-            source_id_for_canonical_path(self.context.source_files, &self.entry_file_path);
-        let support_root_file_id = self
-            .support_root_file_path
-            .as_deref()
-            .and_then(|path| source_id_for_canonical_path(self.context.source_files, path));
+        let root_file_ids =
+            resolve_root_file_ids(self.context.source_files, &self.root_file_paths)?;
+        let selected_file = self
+            .selected_file
+            .as_ref()
+            .map(|(path, role)| {
+                source_id_for_canonical_path(self.context.source_files, path)
+                    .map(|selected_id| (selected_id, *role))
+                    .ok_or_else(|| {
+                        InfrastructureFailure::internal(
+                            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                            format!(
+                                "module syntax discovery: the selected source path {path:?} is not in the source file table"
+                            ),
+                        )
+                    })
+            })
+            .transpose()?;
         let options = HeaderParseOptions {
-            entry_file_id,
-            support_root_file_id,
-            entry_file_role: self.entry_file_role,
-            active_root_role: self.active_root_role,
+            root_file_ids,
+            selected_file,
+            // Directory modules prepare only their own root inventory; reached foreign roots
+            // arrive through a flattened synthetic selection instead.
+            reached_root_roles: &[],
         };
         let prepare_context = FrontendFilePrepareContext {
             source_files: self.context.source_files,
             style_directives: self.context.style_directives,
-            entry_file_path: &self.entry_file_path,
             options: &options,
         };
         let frontend_source = frontend_source(
@@ -1348,23 +1448,48 @@ impl ModuleSyntaxDiscovery<'_, '_> {
                 });
             }
         };
-        let active_root_file_id = ModulePreparationContext::resolve_and_validate_active_root(
-            self.context.source_files,
-            &self.source_module_origins,
-            &self.expected_active_origin,
-            &self.entry_file_path,
-        )?;
-        let support_root_file_id = self
-            .support_root_file_path
-            .as_deref()
-            .and_then(|path| source_id_for_canonical_path(self.context.source_files, path));
+        let preparation_anchor_id =
+            ModulePreparationContext::resolve_and_validate_preparation_anchor(
+                self.context.source_files,
+                &self.source_module_origins,
+                &self.expected_active_origin,
+                &self.preparation_anchor_path,
+            )?;
+        let root_file_ids =
+            resolve_root_file_ids(self.context.source_files, &self.root_file_paths)?;
+        let selected_file = self
+            .selected_file
+            .as_ref()
+            .map(|(path, role)| {
+                source_id_for_canonical_path(self.context.source_files, path)
+                    .map(|selected_id| (selected_id, *role))
+                    .ok_or_else(|| {
+                        InfrastructureFailure::internal(
+                            crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
+                            format!(
+                                "module syntax discovery: the selected source path {path:?} is not in the source file table"
+                            ),
+                        )
+                    })
+            })
+            .transpose()?;
+        // The anchor is always one of the roots or the standalone selection; retain it only
+        // through those facts so semantic compilation cannot treat it as a separate authority.
+        debug_assert_eq!(
+            root_file_ids
+                .preparation_anchor()
+                .copied()
+                .or(selected_file.map(|(source_id, _)| source_id)),
+            Some(preparation_anchor_id),
+            "the resolved preparation anchor must be the root or selected-source anchor"
+        );
 
         let warnings = self.warnings;
         Ok((
             PreparedModule {
                 semantic: PreparedModuleInput {
-                    active_root_file_id,
-                    support_root_file_id,
+                    root_file_ids,
+                    selected_file,
                     candidate_source_ids: self.candidate_source_ids,
                     source_module_origins: self.source_module_origins,
                     prepared_header_syntax,

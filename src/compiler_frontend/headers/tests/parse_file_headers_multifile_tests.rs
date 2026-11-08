@@ -237,7 +237,6 @@ fn dependency_only_file_contributes_file_dependency_clauses_and_module_file_path
     let styles = StyleDirectiveRegistry::built_ins();
     let context = HeaderTestPrepareContext {
         source_id: SourceId::from_index(1),
-        entry_file_path: &entry_file_path,
         options: &options,
         style_directives: &styles,
     };
@@ -369,15 +368,12 @@ fn dependency_clause_is_rejected_in_config_source() {
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("config.moth");
     let options = HeaderParseOptions {
-        entry_file_id: None,
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role: ModuleRootRole::Normal,
+        selected_file: None,
+        ..Default::default()
     };
     let style_directives = StyleDirectiveRegistry::built_ins();
     let context = HeaderTestPrepareContext {
         source_id: SourceId::COMPILATION_ROOT,
-        entry_file_path: &file_path,
         options: &options,
         style_directives: &style_directives,
     };
@@ -503,7 +499,7 @@ fn direct_selection_and_namespace_clauses_keep_provider_root_and_selection_shape
 }
 
 #[test]
-fn imported_module_root_prepare_output_has_imported_root_role() {
+fn non_selected_module_root_prepare_output_has_normal_role() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@mod.moth");
@@ -516,12 +512,12 @@ fn imported_module_root_prepare_output_has_imported_root_role() {
         &mut path_fork,
     );
 
-    assert_eq!(output.file_role, FileRole::ImportedModuleRoot);
+    assert_eq!(output.file_role, FileRole::Normal);
     assert!(output.file_dependency_clauses.is_empty());
 }
 
 #[test]
-fn entry_normal_module_root_file_is_assigned_active_module_root_role() {
+fn entry_normal_module_root_file_is_assigned_legacy_combined_role() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@page.moth");
@@ -534,7 +530,7 @@ fn entry_normal_module_root_file_is_assigned_active_module_root_role() {
         &mut path_fork,
     );
 
-    assert_eq!(output.file_role, FileRole::ActiveModuleRoot);
+    assert_eq!(output.file_role, FileRole::LegacyCombinedRoot);
 }
 
 #[test]
@@ -557,7 +553,10 @@ fn api_only_active_roots_export_declarations_without_synthesizing_start() {
         )
         .expect("API-only roots should accept public declarations");
 
-        assert_eq!(output.file_role, FileRole::ActiveApiOnlyModuleRoot);
+        assert_eq!(
+            output.file_role,
+            FileRole::ActiveApiOnlyModuleRoot(root_role)
+        );
         assert!(output.headers.iter().any(|header| {
             matches!(header.kind, HeaderKind::Constant { .. })
                 && header.export_mode == HeaderExportMode::Public
@@ -618,7 +617,7 @@ fn api_only_active_roots_reject_every_root_activity_form() {
 }
 
 #[test]
-fn support_package_root_file_is_assigned_imported_module_root_role() {
+fn support_package_root_file_outside_the_selection_has_normal_role() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/styles/+package.moth");
@@ -631,7 +630,7 @@ fn support_package_root_file_is_assigned_imported_module_root_role() {
         &mut path_fork,
     );
 
-    assert_eq!(output.file_role, FileRole::ImportedModuleRoot);
+    assert_eq!(output.file_role, FileRole::Normal);
 }
 
 #[test]

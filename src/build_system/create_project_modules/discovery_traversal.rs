@@ -22,6 +22,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
 use crate::compiler_frontend::paths::path_normalization::{
     is_relative_dependency_path, join_and_normalize_path,
 };
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternerFork,
@@ -657,11 +658,13 @@ fn resolve_and_queue_via_filesystem(
 
 /// Resolve a bare dependency from the retained module-root topology before entry-root lookup.
 ///
-/// WHAT: maps a module path to its prepared root facade, or resolves a bare dependency from the
-///      declaring file's owning module root.
+/// WHAT: maps a module path to its prepared normal public surface, or resolves a bare dependency
+///      from the declaring file's owning module root.
 /// WHY: synthetic discovery has no indexed namespace, but it must still implement the same
 ///      module-root-relative source contract as directory discovery without allowing an entry-root
-///      namesake to shadow the declaring module's source.
+///      namesake to shadow the declaring module's source. A dependency target is importable only
+///      through the normal facade: an entry-only child publishes no surface, and the preparation
+///      anchor (normal, then support, then entry) carries no import authority.
 fn resolve_module_root_bare_dependency(
     provider: PathId,
     path_fork: &mut PathInternerFork,
@@ -683,7 +686,9 @@ fn resolve_module_root_bare_dependency(
     };
 
     let root_candidate = join_and_normalize_path(&module_root, provider, &*path_fork, string_table);
-    if let Some(root_file) = project_path_resolver.module_root_file_for_directory(&root_candidate) {
+    if let Some(root_file) = project_path_resolver
+        .module_root_file_for_directory_surface(&root_candidate, ModuleRootRole::Normal)
+    {
         return Ok(Some(ResolvedDependencyFile {
             path: root_file,
             kind: SourceFileKind::Moth,
@@ -930,7 +935,9 @@ fn queue_same_directory_root_for_moth_template(
         return;
     };
 
-    let Some(root_path) = project_path_resolver.module_root_file_for_directory(directory) else {
+    let Some(root_path) =
+        project_path_resolver.module_api_facade_root_file_for_directory(directory)
+    else {
         return;
     };
 

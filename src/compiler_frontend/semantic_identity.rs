@@ -212,22 +212,101 @@ impl StablePackageIdentity {
 
 /// The structural role of one canonical module origin.
 ///
-/// `Normal` roots (`@*.moth`) are entry candidates. `Support` roots (`+*.moth`) are scoped package
-/// roots that are never entry candidates. `Shared` is the role-neutral defining origin for helper
-/// files that are owned once by a structural directory module and may be reached by both root
-/// surfaces. `SyntheticProjectContext` is retained only for the synthetic `@project` context; it has
-/// no filesystem or graph meaning.
+/// `Normal` (`@mod.moth`) is the API-only normal facade. `Support` (`@package.moth`) is the
+/// scoped support or external package facade. Both are the only public interface roles. `Entry`
+/// (`@entry.moth`) is the executable entry root: it owns the implicit `start`, root runtime and
+/// direct output, and it never publishes a public interface. `Shared` is the role-neutral
+/// defining origin for helper files that are owned once by a structural directory module and may
+/// be reached by every root. `SyntheticProjectContext` is retained only for the synthetic
+/// `@project` context; it has no filesystem or graph meaning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ModuleRootRole {
     Normal,
     Support,
+    Entry,
     Shared,
     SyntheticProjectContext,
 }
 
-impl ModuleRootRole {
-    pub(crate) fn has_implicit_start(self) -> bool {
-        matches!(self, Self::Normal)
+/// One structural module's fixed role-keyed root inventory.
+///
+/// WHAT: stores at most one root value per authored special role. Stage 0 uses it with canonical
+///       `PathBuf` roots, while the prepared inputs and header options use the same type with
+///       `SourceId` identities so file roles come from membership rather than filename spelling.
+/// WHY: a rooted directory is one structural module with up to three separate root scopes. One
+///      small fixed inventory keeps the roles visible, gives the preparation anchor one
+///      deterministic owner, and prevents parallel normal/support/entry fields from drifting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ModuleRootFiles<T> {
+    pub(crate) normal: Option<T>,
+    pub(crate) support: Option<T>,
+    pub(crate) entry: Option<T>,
+}
+
+impl<T> Default for ModuleRootFiles<T> {
+    fn default() -> Self {
+        Self {
+            normal: None,
+            support: None,
+            entry: None,
+        }
+    }
+}
+
+impl<T> ModuleRootFiles<T> {
+    pub(crate) fn new(normal: Option<T>, support: Option<T>, entry: Option<T>) -> Self {
+        Self {
+            normal,
+            support,
+            entry,
+        }
+    }
+
+    pub(crate) fn get(&self, role: ModuleRootRole) -> Option<&T> {
+        match role {
+            ModuleRootRole::Normal => self.normal.as_ref(),
+            ModuleRootRole::Support => self.support.as_ref(),
+            ModuleRootRole::Entry => self.entry.as_ref(),
+            ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => None,
+        }
+    }
+
+    /// The one deterministic root selected to anchor preparation: normal, then support, then
+    /// entry. The anchor carries no semantic authority beyond preparing the structural module.
+    pub(crate) fn preparation_anchor(&self) -> Option<&T> {
+        self.normal
+            .as_ref()
+            .or(self.support.as_ref())
+            .or(self.entry.as_ref())
+    }
+
+    /// Whether a normal root still acts as today's legacy combined root.
+    ///
+    /// LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): a normal root in a module
+    /// without an entry root keeps today's implicit start and root runtime. Header-role
+    /// classification and prepared-module start synthesis both read this one decision, so the
+    /// Phase 4 cutover deletes it in one place.
+    pub(crate) fn normal_root_is_legacy_combined(&self) -> bool {
+        self.normal.is_some() && self.entry.is_none()
+    }
+
+    /// Present roots in the fixed normal, support, entry order.
+    pub(crate) fn present(&self) -> impl Iterator<Item = (ModuleRootRole, &T)> {
+        [
+            (ModuleRootRole::Normal, self.normal.as_ref()),
+            (ModuleRootRole::Support, self.support.as_ref()),
+            (ModuleRootRole::Entry, self.entry.as_ref()),
+        ]
+        .into_iter()
+        .filter_map(|(role, root)| root.map(|root| (role, root)))
+    }
+
+    pub(crate) fn into_parts(self) -> (Option<T>, Option<T>, Option<T>) {
+        (self.normal, self.support, self.entry)
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.normal.is_none() && self.support.is_none() && self.entry.is_none()
     }
 }
 

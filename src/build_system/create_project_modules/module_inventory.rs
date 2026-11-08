@@ -25,7 +25,9 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDepende
 use crate::compiler_frontend::headers::parse_file_headers::FileRole;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::semantic_identity::{ModuleRootRole, StableModuleOriginIdentity};
+use crate::compiler_frontend::semantic_identity::{
+    ModuleRootFiles, ModuleRootRole, StableModuleOriginIdentity,
+};
 use crate::compiler_frontend::source::{
     SourceDatabase, SourceId as CompilerSourceId, SourceSpanBuilders,
 };
@@ -62,19 +64,18 @@ use super::source_tree_index::{
     SourceClassification, SourceOwnership, SourceRecordIndex, SourceTreeIndex,
 };
 
-/// One normal entry module seed carrying its graph-assigned `ModuleId` and canonical root file.
+/// One structural module seed carrying its graph-assigned `ModuleId` and root inventory.
 ///
-/// WHAT: discovery seeds entry modules in deterministic `ModuleId` order. The `ModuleId` travels
+/// WHAT: discovery seeds modules in deterministic `ModuleId` order. The `ModuleId` travels
 ///       through serial discovery so the deterministic compile-wave reorder can match by identity
 ///       rather than re-deriving identity from a root path, and so the graph-owned
 ///       `StableModuleOriginIdentity` is preserved for each discovered module.
-/// WHY: the graph owns the canonical origin identity; discovery must not reconstruct it. Carrying
-///      the dense `ModuleId` keeps the graph as the single identity owner through reorder.
+/// WHY: the graph owns the canonical root inventory and origin identity; discovery must not
+///      reconstruct either. Carrying the dense `ModuleId` keeps the graph as the single identity
+///      owner through reorder.
 struct ModuleEntrySeed {
     module_id: ModuleId,
-    entry_path: PathBuf,
-    /// The paired support root when the entry path is the normal root of a two-root module.
-    support_root_path: Option<PathBuf>,
+    root_files: ModuleRootFiles<PathBuf>,
 }
 
 /// Discovery-internal inventory carrying the graph-assigned `ModuleId` through serial discovery so
@@ -122,7 +123,6 @@ struct CheckOnlyModuleSpec {
     source_index: SourceRecordIndex,
     candidate_source_indices: Vec<SourceRecordIndex>,
     stable_origin: StableModuleOriginIdentity,
-    source_role: ModuleRootRole,
 }
 
 /// One transient semantic unit for one owned, unselected `.moth` source.
@@ -135,8 +135,6 @@ struct CheckOnlyModuleSpec {
 pub(crate) struct CheckOnlyModuleCompilationJob {
     /// Canonical module that owns this transient source.
     pub(crate) owner_module_id: ModuleId,
-    /// Authored surface role of the transient source being checked.
-    pub(crate) source_role: ModuleRootRole,
     /// Prefix length used when merging this job's local string table.
     pub(crate) string_table_base_len: usize,
     /// Prefix length used when merging this job's local path fork.
@@ -325,12 +323,10 @@ impl ModuleCompilationSchedule {
                 source_index,
                 candidate_source_indices,
                 stable_origin,
-                source_role,
             } = spec;
             let job = prepare_check_only_module(
                 owner_module_id,
                 source_index,
-                source_role,
                 &candidate_source_indices,
                 source_tree_index,
                 style_directives,
@@ -595,10 +591,7 @@ fn module_seeds_in_module_id_order(
         .iter()
         .map(|node| ModuleEntrySeed {
             module_id: node.module_id(),
-            entry_path: node.root_file().to_path_buf(),
-            support_root_path: node
-                .normal_root_file()
-                .and_then(|_| node.support_root_file().map(Path::to_path_buf)),
+            root_files: node.root_files().clone(),
         })
         .collect()
 }
@@ -726,7 +719,6 @@ fn finalize_owned_module_source_spans(
 fn prepare_check_only_module(
     owner_module_id: ModuleId,
     source_index: SourceRecordIndex,
-    source_role: ModuleRootRole,
     candidate_source_indices: &[SourceRecordIndex],
     source_tree_index: &super::source_tree_index::SourceTreeIndex,
     style_directives: &StyleDirectiveRegistry,
@@ -797,9 +789,8 @@ fn prepare_check_only_module(
             candidate_source_ids,
             source_module_origins,
         },
-        &entry_file_path,
-        None,
-        Some(FileRole::Normal),
+        ModuleRootFiles::default(),
+        Some((entry_file_path, FileRole::Normal)),
         local_string_table,
         path_fork,
         selected_source_texts,
@@ -1101,7 +1092,6 @@ fn prepare_check_only_module(
     let (prepared, preparation_warnings) = syntax.finish()?;
     Ok(CheckOnlyModuleCompilationJob {
         owner_module_id,
-        source_role,
         string_table_base_len,
         path_base_len,
         provider_bindings,
@@ -1171,6 +1161,7 @@ fn cross_module_support_import_is_visible(
     let needs_support_scope_check = match consumer_role {
         ModuleRootRole::Support => true,
         ModuleRootRole::Shared => graph.node(module_id).has_surface(ModuleRootRole::Support),
+        ModuleRootRole::Entry => false,
         ModuleRootRole::Normal | ModuleRootRole::SyntheticProjectContext => false,
     };
     !needs_support_scope_check
@@ -1354,15 +1345,6 @@ fn discover_modules_serial_provider_capable(
             .enumerate()
             .map(|(order, source_index)| (*source_index, order))
             .collect::<FxHashMap<_, _>>();
-        let entry_source_index = source_tree_index
-            .source_index_for_canonical_path(&seed.entry_path)
-            .ok_or_else(|| {
-                graph_inventory_mismatch_error(format!(
-                    "ModuleId {} root is absent from the source index",
-                    seed.module_id.index()
-                ))
-            })?;
-
         let stable_origin = project_module_graph
             .node(seed.module_id)
             .stable_origin()
@@ -1387,8 +1369,7 @@ fn discover_modules_serial_provider_capable(
                 candidate_source_ids: candidate_source_ids.clone(),
                 source_module_origins: Arc::clone(&source_module_origins),
             },
-            &seed.entry_path,
-            seed.support_root_path.as_deref(),
+            seed.root_files.clone(),
             None,
             local_string_table,
             path_fork,
@@ -1397,26 +1378,22 @@ fn discover_modules_serial_provider_capable(
             timing_context,
         )?;
 
-        let support_entry_source_index = seed
-            .support_root_path
-            .as_deref()
-            .map(|path| {
-                source_tree_index
-                    .source_index_for_canonical_path(path)
-                    .ok_or_else(|| {
-                        graph_inventory_mismatch_error(format!(
-                            "ModuleId {} paired support root is absent from the source index",
-                            seed.module_id.index()
-                        ))
-                    })
-            })
-            .transpose()?;
+        // Every present root participates in the same preparation set, in the fixed
+        // normal/support/entry order that also selects the preparation anchor.
         let mut queued = BTreeSet::new();
-        let mut queue = VecDeque::from([entry_source_index]);
-        queued.insert(entry_source_index);
-        if let Some(support_source_index) = support_entry_source_index {
-            queue.push_back(support_source_index);
-            queued.insert(support_source_index);
+        let mut queue = VecDeque::new();
+        for (role, root_path) in seed.root_files.present() {
+            let root_source_index = source_tree_index
+                .source_index_for_canonical_path(root_path)
+                .ok_or_else(|| {
+                    graph_inventory_mismatch_error(format!(
+                        "ModuleId {} {role:?} root is absent from the source index",
+                        seed.module_id.index()
+                    ))
+                })?;
+            if queued.insert(root_source_index) {
+                queue.push_back(root_source_index);
+            }
         }
         let mut file_reference_resolver =
             FileReferenceResolver::new(source_tree_index, resource_inputs);
@@ -1654,7 +1631,6 @@ fn discover_modules_serial_provider_capable(
                 owner_module_id: seed.module_id,
                 source_index: check_only_source_index,
                 candidate_source_indices: candidate_source_indices.clone(),
-                source_role: check_only_origin.role(),
                 stable_origin: check_only_origin,
             });
         }
