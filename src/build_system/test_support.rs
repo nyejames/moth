@@ -55,7 +55,7 @@ pub(crate) fn project_compilation_from_test_modules_with_resources(
             module_id,
             CompiledModuleArtifact {
                 module,
-                interface: test_public_interface(index),
+                normal_interface: Some(test_public_interface(index)),
                 support_interface: None,
             },
         )?;

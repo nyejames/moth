@@ -248,34 +248,34 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
 fn facade_project_globals_dependency(
     prepared: &PreparedModule,
 ) -> Result<Option<DiagnosticDraft>, InfrastructureFailure> {
-    // An entry-only module publishes no facade, so it has no project package surface to validate.
-    // Its absence is rejected once by the compiler service that still requires a primary surface.
-    let Some(primary_root_file_id) = prepared.semantic.primary_surface_root() else {
-        return Ok(None);
-    };
-    let primary_origin = prepared
+    // Only the selected project root's support facade is the external project package surface.
+    // An entry-only or normal-only module has no project package surface to validate.
+    let mut is_project_package_surface = false;
+    for (surface_root_file_id, surface_role) in prepared
         .semantic
-        .source_module_origins
-        .origin_for(primary_root_file_id)?
-        .ok_or_else(|| {
-            InfrastructureFailure::internal(
-                CompilerStage::ProjectBuildAssembly,
-                "facade dependency validation found no owning origin for the primary root",
-            )
-        })?;
-    let is_project_package_surface = matches!(
-        primary_origin.role(),
-        ModuleRootRole::SyntheticProjectContext | ModuleRootRole::Support
-    ) && primary_origin.logical_module_path().is_empty();
-    let has_project_package_support_surface =
-        prepared
+        .facade_surface_roots()
+        .into_iter()
+        .flatten()
+    {
+        if surface_role != ModuleRootRole::Support {
+            continue;
+        }
+        let surface_origin = prepared
             .semantic
-            .support_surface()?
-            .is_some_and(|(_, support_origin)| {
-                support_origin.role() == ModuleRootRole::Support
-                    && support_origin.logical_module_path().is_empty()
-            });
-    if !is_project_package_surface && !has_project_package_support_surface {
+            .source_module_origins
+            .origin_for(surface_root_file_id)?
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    "facade dependency validation found no owning origin for a support facade root",
+                )
+            })?;
+        if surface_origin.logical_module_path().is_empty() {
+            is_project_package_surface = true;
+            break;
+        }
+    }
+    if !is_project_package_surface {
         return Ok(None);
     }
 
@@ -433,7 +433,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                             .interface_for_surface(provider_module_id, provider_surface)?
                             .ok_or_else(|| {
                                 InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
-                                    "Check-only ModuleId {} started semantic binding before provider ModuleId {} published a complete interface",
+                                    "Check-only ModuleId {} started semantic binding before provider ModuleId {} published its {provider_surface:?} interface",
                                     consumer_module_id.index(),
                                     provider_module_id.index()
                                 ))
@@ -485,9 +485,10 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                         )?
                         .ok_or_else(|| {
                             InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
-                                "ModuleId {} started semantic binding before provider ModuleId {} published a complete interface",
+                                "ModuleId {} started semantic binding before provider ModuleId {} published its {:?} interface",
                                 consumer_module_id.index(),
-                                binding.provider_module_id.index()
+                                binding.provider_module_id.index(),
+                                binding.provider_surface
                             ))
                         })?;
 
@@ -1365,7 +1366,7 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                 match outcome.outcome {
                     DirectoryModuleTaskOutcome::Success(compiled, warnings, sidecar_warnings) => {
                         let node = graph.node(outcome.module_id);
-                        let (expected_origin, expected_support_origin) =
+                        let (expected_normal_origin, expected_support_origin) =
                             node.publication_surfaces();
                         publish_compiled_module(
                             &mut provider_store,
@@ -1373,7 +1374,7 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                             &mut provider_materialisations,
                             resource_inputs,
                             outcome.module_id,
-                            expected_origin,
+                            expected_normal_origin,
                             expected_support_origin,
                             *compiled,
                             warnings,

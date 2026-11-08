@@ -5,10 +5,15 @@
 //! easy to update wording or metadata across all dependency-related failures.
 //! MUST NOT: contain business logic for resolution or registration.
 
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType;
+use crate::compiler_frontend::compiler_messages::RootLocalDeclarationRole;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
+use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
+use crate::compiler_frontend::headers::parse_file_headers::FileRole;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -79,6 +84,67 @@ pub(super) fn direct_special_file_dependency(
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
     imports::direct_special_file_import(*path, span)
+}
+
+/// Map an active root file role to the authored root role a diagnostic names.
+fn root_local_declaration_role(role: FileRole) -> RootLocalDeclarationRole {
+    match role {
+        // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): until every executable
+        // fixture authors `@entry.moth`, a lone normal root keeps the combined export/start role.
+        FileRole::LegacyCombinedRoot => RootLocalDeclarationRole::LegacyCombinedRoot,
+        FileRole::ActiveEntryRoot => RootLocalDeclarationRole::EntryRoot,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal) => {
+            RootLocalDeclarationRole::NormalFacade
+        }
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Support) => {
+            RootLocalDeclarationRole::SupportFacade
+        }
+        // Every remaining shape is unreachable: `active_root_file_role` admits only active
+        // module roots, and Stage 0 prepares `ActiveApiOnlyModuleRoot` with a normal or support
+        // role. A reachable file here would silently misname the root in a user diagnostic.
+        FileRole::ActiveApiOnlyModuleRoot(
+            ModuleRootRole::Entry
+            | ModuleRootRole::Shared
+            | ModuleRootRole::SyntheticProjectContext,
+        )
+        | FileRole::ReachedApiFacadeRoot(_)
+        | FileRole::ConfigBootstrap
+        | FileRole::Normal => crate::compiler_bug!(
+            CompilerStage::HeaderParsing,
+            "root-local declaration diagnostic reached a file role that is not an active module root"
+        ),
+    }
+}
+
+/// Diagnostic when a file resolves a declaration authored in another active root file.
+///
+/// WHAT: returns `None` when the declaration is visible from the consumer, including every
+///       ordinary helper declaration and the authoring root file itself.
+/// WHY: direct selections, namespaces and re-exports must share one root-local isolation answer
+///      instead of rebuilding the policy in each resolution lane.
+pub(crate) fn cross_file_root_local_declaration(
+    module_symbols: &ModuleSymbols,
+    consumer_file: &PathId,
+    target_file: &PathId,
+    symbol_path: &PathId,
+    span: Option<SourceSpan>,
+) -> Option<DiagnosticDraft> {
+    if module_symbols.authored_declarations_visible_from(consumer_file, target_file) {
+        return None;
+    }
+
+    let role = module_symbols.active_root_file_role(target_file)?;
+    let declaration_span = module_symbols
+        .declaration_spans_by_symbol_path
+        .get(symbol_path)
+        .copied();
+    Some(imports::root_local_declaration_not_visible(
+        *symbol_path,
+        root_local_declaration_role(role),
+        *target_file,
+        span,
+        declaration_span,
+    ))
 }
 
 /// Diagnostic when a dependency path matches a source file but not a symbol.

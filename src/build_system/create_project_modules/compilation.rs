@@ -89,7 +89,7 @@ pub(super) struct ModuleBoundaryPublication<'a> {
     pub materialisations: &'a mut ProviderMaterialisationRegistry,
     pub resource_inputs: &'a mut ResourceInputRegistry,
     pub module_id: ModuleId,
-    pub expected_origin: &'a StableModuleOriginIdentity,
+    pub expected_normal_origin: Option<&'a StableModuleOriginIdentity>,
     pub expected_support_origin: Option<&'a StableModuleOriginIdentity>,
     pub artifact: CompiledModuleArtifact,
     pub generated_delta: GeneratedFunctionDelta,
@@ -112,7 +112,7 @@ pub(super) fn publish_module_and_generated(
         materialisations,
         resource_inputs,
         module_id,
-        expected_origin,
+        expected_normal_origin,
         expected_support_origin,
         artifact,
         generated_delta,
@@ -124,7 +124,7 @@ pub(super) fn publish_module_and_generated(
     let module_publication = modules.preflight_success(
         module_id,
         &artifact,
-        expected_origin,
+        expected_normal_origin,
         expected_support_origin,
     )?;
     let generated_publication = generated.preflight(&generated_delta)?;
@@ -157,7 +157,7 @@ pub(super) fn publish_compiled_module(
     materialisations: &mut ProviderMaterialisationRegistry,
     resource_inputs: &mut ResourceInputRegistry,
     module_id: ModuleId,
-    expected_origin: &StableModuleOriginIdentity,
+    expected_normal_origin: Option<&StableModuleOriginIdentity>,
     expected_support_origin: Option<&StableModuleOriginIdentity>,
     compiled: ModuleSemanticResult,
     mut warnings: DiagnosticBag,
@@ -212,8 +212,8 @@ pub(super) fn publish_compiled_module(
         resource_source_associations,
         string_table: _,
         path_fork: _,
-        public_interface,
-        support_public_interface,
+        normal_interface,
+        support_interface,
     } = compiled;
     if !path_remap.is_identity() {
         module.remap_path_ids(&path_remap);
@@ -276,12 +276,12 @@ pub(super) fn publish_compiled_module(
         materialisations,
         resource_inputs,
         module_id,
-        expected_origin,
+        expected_normal_origin,
         expected_support_origin,
         artifact: CompiledModuleArtifact {
             module,
-            interface: public_interface,
-            support_interface: support_public_interface,
+            normal_interface,
+            support_interface,
         },
         generated_delta,
         resource_source_associations,

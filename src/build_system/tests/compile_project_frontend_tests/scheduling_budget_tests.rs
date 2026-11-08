@@ -359,7 +359,7 @@ fn diagnostic_recovery_project_soft_cutoff() {
         frontend
             .project
             .modules
-            .interface(second_module)
+            .normal_interface(second_module)
             .expect("slot lookup should resolve")
             .is_none(),
         "an unvisited slot can never satisfy a provider"
@@ -545,7 +545,7 @@ fn diagnostic_recovery_project_soft_cutoff_counts_shared_provider_once() {
         frontend
             .project
             .modules
-            .interface(dependant_module)
+            .normal_interface(dependant_module)
             .expect("slot lookup should resolve")
             .is_none(),
         "a blocked dependant never publishes an interface"
@@ -880,7 +880,7 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
         frontend
             .project
             .modules
-            .interface(broken_module)
+            .normal_interface(broken_module)
             .expect("slot lookup should resolve")
             .is_none(),
         "a diagnosed module never publishes an interface"
@@ -889,10 +889,13 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
         frontend
             .project
             .successful_artefacts_in_module_id_order()
-            .all(
-                |artifact| artifact.interface.module_origin.logical_module_path()
-                    != Path::new("broken")
-            ),
+            .all(|artifact| artifact
+                .normal_interface
+                .as_ref()
+                .expect("the successful artefact carries its normal facade")
+                .module_origin
+                .logical_module_path()
+                != Path::new("broken")),
         "a diagnosed module never publishes an artefact"
     );
     assert_slot_is_successful(&frontend, "ok");
@@ -934,7 +937,15 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
     let ok_artefact = frontend
         .project
         .successful_artefacts_in_module_id_order()
-        .find(|artifact| artifact.interface.module_origin.logical_module_path() == Path::new("ok"))
+        .find(|artifact| {
+            artifact
+                .normal_interface
+                .as_ref()
+                .expect("the successful artefact carries its normal facade")
+                .module_origin
+                .logical_module_path()
+                == Path::new("ok")
+        })
         .expect("the clean module should publish an artefact");
     let ok_origins = ok_artefact.module.executable.resource_table.origins();
     assert_eq!(
@@ -1131,7 +1142,7 @@ fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
         package
             .boundary
             .modules
-            .interface(package.root_module_id)
+            .normal_interface(package.root_module_id)
             .expect("package slot lookup should resolve")
             .is_none(),
         "an unvisited package root publishes no facade interface"
@@ -1146,7 +1157,7 @@ fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
         frontend
             .project
             .modules
-            .interface(page_module)
+            .normal_interface(page_module)
             .expect("project slot lookup should resolve")
             .is_none()
     );
@@ -1226,7 +1237,7 @@ fn diagnostic_recovery_package_cutoff_can_diagnose_its_own_root() {
         package
             .boundary
             .modules
-            .interface(package.root_module_id)
+            .normal_interface(package.root_module_id)
             .expect("package slot lookup should resolve")
             .is_none()
     );
@@ -1243,7 +1254,7 @@ fn diagnostic_recovery_package_cutoff_can_diagnose_its_own_root() {
         package
             .boundary
             .modules
-            .interface(later_module)
+            .normal_interface(later_module)
             .expect("package slot lookup should resolve")
             .is_none()
     );

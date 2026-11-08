@@ -69,9 +69,14 @@ trait SupportVisibilityTopology {
 
     fn nearest_parent(&self, module_id: ModuleId) -> Option<ModuleId>;
 
-    fn has_normal_surface(&self, module_id: ModuleId) -> bool {
-        self.role(module_id) == ModuleRootRole::Normal
-    }
+    /// Whether this module occupies the normal consumer/owner position.
+    ///
+    /// WHAT: true when the module owns a normal or entry root, regardless of whether it also
+    ///       owns a support root.
+    /// WHY: an entry-only module has no normal public surface, but `@entry` still occupies the
+    ///      normal owner/consumer position for scoped support visibility. It must never be
+    ///      mistaken for a support-scoped consumer, and no normal interface is manufactured.
+    fn occupies_normal_position(&self, module_id: ModuleId) -> bool;
 
     fn has_support_surface(&self, module_id: ModuleId) -> bool {
         self.role(module_id) == ModuleRootRole::Support
@@ -148,23 +153,21 @@ impl ProjectModuleGraphNode {
             .expect("a structural graph node has at least one root origin")
     }
 
-    /// The exact primary and optional secondary origins one successful artefact must publish.
+    /// The exact optional normal and support origins one successful artefact must publish.
     ///
-    /// A normal root is always the primary interface. A secondary support interface exists only
-    /// when the same structural module owns both a normal and a support root. A support-only
-    /// module publishes its support origin as the primary interface and has no secondary one.
+    /// Each entry mirrors the role-keyed root inventory, so a published surface must exist
+    /// exactly when the node owns that facade root. An entry-only module returns two absences and
+    /// publishes no interface.
     pub(crate) fn publication_surfaces(
         &self,
     ) -> (
-        &StableModuleOriginIdentity,
+        Option<&StableModuleOriginIdentity>,
         Option<&StableModuleOriginIdentity>,
     ) {
-        let support = self
-            .surface_origins
-            .normal
-            .as_ref()
-            .and(self.surface_origins.support.as_ref());
-        (self.stable_origin(), support)
+        (
+            self.surface_origin(ModuleRootRole::Normal),
+            self.surface_origin(ModuleRootRole::Support),
+        )
     }
 
     /// The structural role of the preparation-anchor root.
@@ -455,13 +458,14 @@ impl ProjectModuleGraph {
             })
     }
 
-    /// Strict scoped-support visibility query.
+    /// Scoped-support visibility query for one whole structural module.
     ///
-    /// For a support package `S` whose nearest normal ancestor is `P`, `S` is visible to `P`, to
-    /// normal descendants of `P` outside `S`'s private subtree, and to support facades in a
-    /// strictly nested normal scope. It is not visible above `P`, outside `P`'s subtree, to `S`
-    /// itself, to `S`'s private descendants, or to another support module owned by `P`. Returns
-    /// `false` when `support_id` is not a support module.
+    /// For a support package `S` whose nearest normal-position ancestor is `P`, `S` is visible
+    /// to `P`, to normal-position descendants of `P` outside `S`'s private subtree, and to
+    /// support facades in a strictly nested normal scope. A normal or entry root occupies the
+    /// normal position, so an entry-only owner is a valid `P`. `S` is not visible above `P`,
+    /// outside `P`'s subtree, to `S` itself, to `S`'s private descendants, or to another support
+    /// module owned by `P`. Returns `false` when `support_id` is not a support module.
     pub(crate) fn is_support_visible_to_consumer(
         &self,
         support_id: ModuleId,
@@ -470,11 +474,12 @@ impl ProjectModuleGraph {
         support_is_visible(self, support_id, consumer_id)
     }
 
-    /// Strict support visibility for one authored consumer surface.
+    /// Scoped support visibility for one authored consumer surface.
     ///
     /// A paired structural module has both a normal and a support surface but one graph node.
     /// The node's primary role cannot distinguish an import authored in the support root, so
-    /// callers pass the declaring source's role explicitly.
+    /// callers pass the declaring source's role explicitly. An entry root is a normal-position
+    /// consumer; a support root keeps the strict support-scope rule.
     pub(crate) fn is_support_visible_to_consumer_role(
         &self,
         support_id: ModuleId,
@@ -856,8 +861,9 @@ impl SupportVisibilityTopology for ProjectModuleGraph {
         self.nodes[module_id.index()].nearest_parent
     }
 
-    fn has_normal_surface(&self, module_id: ModuleId) -> bool {
-        self.nodes[module_id.index()].normal_root_file().is_some()
+    fn occupies_normal_position(&self, module_id: ModuleId) -> bool {
+        let node = &self.nodes[module_id.index()];
+        node.normal_root_file().is_some() || node.has_surface(ModuleRootRole::Entry)
     }
 
     fn has_support_surface(&self, module_id: ModuleId) -> bool {
@@ -874,8 +880,9 @@ impl SupportVisibilityTopology for ModuleIdentityTable {
         self.nearest_ancestor_module(module_id)
     }
 
-    fn has_normal_surface(&self, module_id: ModuleId) -> bool {
-        self.record(module_id).normal_root_file().is_some()
+    fn occupies_normal_position(&self, module_id: ModuleId) -> bool {
+        let record = self.record(module_id);
+        record.has_normal_root() || record.has_entry_root()
     }
 
     fn has_support_surface(&self, module_id: ModuleId) -> bool {
@@ -904,8 +911,27 @@ fn support_is_visible(
         topology,
         support_id,
         consumer_id,
-        topology.role(consumer_id),
+        module_consumer_role(topology, consumer_id),
     )
+}
+
+/// The consumer role a whole structural module's namespace is built for.
+///
+/// WHAT: a module with a normal or entry root is built as a normal-position consumer; a
+///       support-only module is built as a strict support consumer.
+/// WHY: the namespace is module-wide, but a paired module holds sources with different authored
+///      roles. Building it for the normal position exposes every provider a normal or entry
+///      source may reach, and the module-inventory import guard then rechecks each authored
+///      source's role so a co-located support facade gains nothing.
+fn module_consumer_role(
+    topology: &impl SupportVisibilityTopology,
+    module_id: ModuleId,
+) -> ModuleRootRole {
+    if topology.occupies_normal_position(module_id) {
+        ModuleRootRole::Normal
+    } else {
+        topology.role(module_id)
+    }
 }
 
 fn support_is_visible_for_role(
@@ -923,7 +949,9 @@ fn support_is_visible_for_role(
     };
 
     match consumer_role {
-        ModuleRootRole::Normal => {
+        // An entry root publishes no normal surface but is a normal-position consumer: it sees
+        // the support packages its normal position can reach.
+        ModuleRootRole::Normal | ModuleRootRole::Entry => {
             consumer_id != support_id
                 && (consumer_id == owner
                     || (is_ancestor_of(topology, owner, consumer_id)
@@ -941,11 +969,7 @@ fn support_is_visible_for_role(
                 && !is_ancestor_of(topology, support_id, consumer_id)
         }
 
-        // Entry roots are normal-position consumers only once Phase 2 assigns their scoped
-        // imports. Until then an entry root can never act as a support consumer.
-        ModuleRootRole::Entry
-        | ModuleRootRole::Shared
-        | ModuleRootRole::SyntheticProjectContext => false,
+        ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => false,
     }
 }
 
@@ -956,7 +980,7 @@ fn nearest_normal_ancestor(
     let mut current = topology.nearest_parent(module_id);
 
     while let Some(parent) = current {
-        if topology.has_normal_surface(parent) {
+        if topology.occupies_normal_position(parent) {
             return Some(parent);
         }
         current = topology.nearest_parent(parent);

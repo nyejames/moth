@@ -428,9 +428,9 @@ impl CompiledGraphBoundary {
                     }
                     *owner = Some(module_id);
                     let node = &self.structure.nodes()[index];
-                    let (expected_primary, expected_support) = node.publication_surfaces();
+                    let (expected_normal, expected_support) = node.publication_surfaces();
                     if let Some(mismatch) =
-                        publication_surface_mismatch(artifact, expected_primary, expected_support)
+                        publication_surface_mismatch(artifact, expected_normal, expected_support)
                     {
                         return Err(InfrastructureFailure::internal(
                             CompilerStage::ProjectBuildAssembly,
@@ -619,33 +619,34 @@ impl CompiledSourcePackage {
 
         match self.boundary.modules.slot(self.root_module_id)? {
             ProviderSlot::Successful(_) => {
+                // Discovery rejects a registered package root without an API facade, so the
+                // selected role is present for every boundary that can reach a successful slot.
+                let surface_role = public_surface_role.ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "Source package @{} root ModuleId {root_index} reached a successful slot without a public facade root",
+                            self.package_prefix()
+                        ),
+                    )
+                })?;
                 let interface = self
                     .boundary
                     .modules
-                    .interface_for_surface(
-                        self.root_module_id,
-                        public_surface_role.ok_or_else(|| {
-                            crate::compiler_bug!(
-                                CompilerStage::ProjectBuildAssembly,
-                                "registered source package boundary has no public surface role"
-                            )
-                        })?,
-                    )?
+                    .interface_for_surface(self.root_module_id, surface_role)?
                     .ok_or_else(|| {
                         InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
-                            "Source package @{} root ModuleId {} holds a successful slot without a published interface",
-                            self.package_prefix(),
-                            root_index
+                            "Source package @{} root ModuleId {root_index} published no {surface_role:?} interface for its selected public-surface root",
+                            self.package_prefix()
                         ))
                     })?;
                 if Some(&interface.module_origin) != public_surface_origin {
                     return Err(InfrastructureFailure::internal(
                         CompilerStage::ProjectBuildAssembly,
                         format!(
-                            "Source package @{} root interface origin {:?} disagrees with its selected {:?} public-surface origin {:?}",
+                            "Source package @{} root interface origin {:?} disagrees with its selected {surface_role:?} public-surface origin {:?}",
                             self.package_prefix(),
                             interface.module_origin,
-                            public_surface_role,
                             public_surface_origin
                         ),
                     ));
@@ -694,22 +695,24 @@ impl CompiledSourcePackage {
                     ),
                 )
             })?;
+        let surface_role = node.public_surface_role().ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "Source package @{} root ModuleId {} has no public facade root",
+                    self.package_prefix(),
+                    self.root_module_id.index()
+                ),
+            )
+        })?;
         self.boundary
             .modules
-            .interface_for_surface(
-                self.root_module_id,
-                node.public_surface_role().ok_or_else(|| {
-                    crate::compiler_bug!(
-                        CompilerStage::ProjectBuildAssembly,
-                        "project package module has no public surface role"
-                    )
-                })?,
-            )?
+            .interface_for_surface(self.root_module_id, surface_role)?
             .ok_or_else(|| {
                 InfrastructureFailure::internal(
                     CompilerStage::ProjectBuildAssembly,
                     format!(
-                        "Source package @{} completed without a successful facade interface",
+                        "Source package @{} completed without a published {surface_role:?} facade interface",
                         self.package_prefix()
                     ),
                 )

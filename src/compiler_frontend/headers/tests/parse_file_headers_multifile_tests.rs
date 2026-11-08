@@ -534,44 +534,68 @@ fn entry_normal_module_root_file_is_assigned_legacy_combined_role() {
 }
 
 #[test]
-fn api_only_active_roots_export_declarations_without_synthesizing_start() {
-    for root_role in [
-        ModuleRootRole::Support,
-        ModuleRootRole::SyntheticProjectContext,
-    ] {
-        let mut string_table = StringTable::new();
-        let mut path_fork = PathInternerFork::empty();
-        let file_path = PathBuf::from("src/styles/+package.moth");
-        let mut span_builder = ExtendedSpanBuilder::new();
-        let output = prepare_active_root_with_role(
-            "export:\n    theme #= \"dark\"\n;\n",
-            &file_path,
-            root_role,
-            &mut string_table,
-            &mut span_builder,
-            &mut path_fork,
-        )
-        .expect("API-only roots should accept public declarations");
+fn api_only_support_root_exports_declarations_without_synthesizing_start() {
+    let root_role = ModuleRootRole::Support;
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let file_path = PathBuf::from("src/styles/+package.moth");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let output = prepare_active_root_with_role(
+        "export:\n    theme #= \"dark\"\n;\n",
+        &file_path,
+        root_role,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    )
+    .expect("API-only roots should accept public declarations");
 
-        assert_eq!(
-            output.file_role,
-            FileRole::ActiveApiOnlyModuleRoot(root_role)
-        );
-        assert!(output.headers.iter().any(|header| {
-            matches!(header.kind, HeaderKind::Constant { .. })
-                && header.export_mode == HeaderExportMode::Public
-        }));
-        assert!(
-            output
-                .headers
-                .iter()
-                .all(|header| !matches!(header.kind, HeaderKind::StartFunction)),
-            "API-only roots must not synthesize start"
-        );
-        assert_eq!(output.runtime_fragment_count, 0);
-        assert_eq!(output.const_template_count, 0);
-        assert!(!output.has_non_trivial_root_body);
-    }
+    assert_eq!(
+        output.file_role,
+        FileRole::ActiveApiOnlyModuleRoot(root_role)
+    );
+    assert!(output.headers.iter().any(|header| {
+        matches!(header.kind, HeaderKind::Constant { .. })
+            && header.export_mode == HeaderExportMode::Public
+    }));
+    assert!(
+        output
+            .headers
+            .iter()
+            .all(|header| !matches!(header.kind, HeaderKind::StartFunction)),
+        "API-only roots must not synthesize start"
+    );
+    assert_eq!(output.runtime_fragment_count, 0);
+    assert_eq!(output.const_template_count, 0);
+    assert!(!output.has_non_trivial_root_body);
+}
+
+#[test]
+fn synthetic_project_context_root_rejects_export_surfaces() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let file_path = PathBuf::from("src/styles/+package.moth");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let diagnostic = match prepare_active_root_with_role(
+        "export:\n    theme #= \"dark\"\n;\n",
+        &file_path,
+        ModuleRootRole::SyntheticProjectContext,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    ) {
+        Ok(_) => panic!("a synthetic project-context root owns no export surface"),
+        Err(FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+            diagnostic, ..
+        })) => diagnostic,
+        Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
+            panic!("synthetic project-context export rejection became infrastructure: {error:?}")
+        }
+    };
+
+    let diagnostics = diagnostic_view_for_test(diagnostic);
+    let diagnostic = diagnostics.first().expect("the export rejection compacts");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0077");
 }
 
 #[test]

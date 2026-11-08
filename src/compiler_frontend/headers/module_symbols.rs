@@ -288,6 +288,33 @@ pub(crate) struct ModuleSymbols {
 }
 
 impl ModuleSymbols {
+    /// The active root role that owns `file`, when its authored declarations are root-local.
+    ///
+    /// WHAT: `Some(role)` only for a root file of the module currently being compiled.
+    /// WHY: declarations authored directly in `@mod.moth`, `@package.moth`, `@entry.moth` or a
+    ///      legacy combined root belong to that file alone; a reached foreign facade keeps the
+    ///      ordinary public-surface rules of its own module.
+    pub(crate) fn active_root_file_role(&self, file: &PathId) -> Option<FileRole> {
+        self.file_roles_by_source
+            .get(file)
+            .copied()
+            .filter(|role| role.is_active_module_root())
+    }
+
+    /// Whether a declaration authored in `target_file` may be resolved from `consumer_file`.
+    ///
+    /// WHAT: an active root file's authored declarations resolve only inside that same file.
+    ///       Ordinary helper declarations stay visible from every root and every other helper.
+    /// WHY: root-local isolation, not declaration flags, is the gate that keeps one root's
+    ///      private implementation out of sibling roots and the role-neutral helper environment.
+    pub(crate) fn authored_declarations_visible_from(
+        &self,
+        consumer_file: &PathId,
+        target_file: &PathId,
+    ) -> bool {
+        consumer_file == target_file || self.active_root_file_role(target_file).is_none()
+    }
+
     /// Resolve one clause range through the selection table owned by its source file.
     pub(crate) fn selections_for_clause<'a>(
         &'a self,

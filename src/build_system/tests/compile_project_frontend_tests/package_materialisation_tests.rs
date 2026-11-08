@@ -2384,24 +2384,37 @@ export:
         "both declaring module and later requester must compile without source diagnoses",
     );
 
-    let declaring_artefact = frontend
-        .project
-        .successful_artefacts_in_module_id_order()
-        .find(|artefact| {
-            artefact.interface.declarations.iter().any(|declaration| {
+    let declaring_artefact =
+        frontend
+            .project
+            .successful_artefacts_in_module_id_order()
+            .find(|artefact| {
+                artefact
+        .normal_interface
+        .as_ref()
+        .expect("the artefact publishes its normal facade").declarations.iter().any(|declaration| {
                 matches!(
                     &declaration.origin,
                     OriginDeclarationId::Function(origin) if origin.defining_name() == "product"
                 )
             })
-        })
-        .expect("declaring module should publish product");
+            })
+            .expect("declaring module should publish product");
     assert_eq!(
-        declaring_artefact.interface.declarations.len(),
+        declaring_artefact
+            .normal_interface
+            .as_ref()
+            .expect("the artefact publishes its normal facade")
+            .declarations
+            .len(),
         1,
         "multiply must remain private to the declaring module",
     );
-    let declaration = &declaring_artefact.interface.declarations[0];
+    let declaration = &declaring_artefact
+        .normal_interface
+        .as_ref()
+        .expect("the artefact publishes its normal facade")
+        .declarations[0];
     let PublicDeclarationSemantics::Function(product) = &declaration.semantics else {
         panic!("product must retain its public function contract");
     };
@@ -2676,18 +2689,22 @@ fn implicit_failure_private_helper_infallible_to_fallible_changes_exported_calle
         first.project.diagnosed.is_empty(),
         "the infallible helper version must publish without rejection"
     );
-    let declaring_artefact = first
-        .project
-        .successful_artefacts_in_module_id_order()
-        .find(|artefact| {
-            artefact.interface.declarations.iter().any(|declaration| {
+    let declaring_artefact =
+        first
+            .project
+            .successful_artefacts_in_module_id_order()
+            .find(|artefact| {
+                artefact
+        .normal_interface
+        .as_ref()
+        .expect("the artefact publishes its normal facade").declarations.iter().any(|declaration| {
                 matches!(
                     &declaration.origin,
                     OriginDeclarationId::Function(origin) if origin.defining_name() == "product"
                 )
             })
-        })
-        .expect("declaring module should publish product");
+            })
+            .expect("declaring module should publish product");
     let context = declaring_artefact
         .module
         .metadata
@@ -3166,15 +3183,27 @@ fn paired_root_publishes_one_artifact_one_helper_body_and_two_interfaces() {
         .as_ref()
         .expect("the paired module must publish its support interface");
     assert_eq!(
-        artifact.interface.module_origin.role(),
+        artifact
+            .normal_interface
+            .as_ref()
+            .expect("the artefact publishes its normal facade")
+            .module_origin
+            .role(),
         ModuleRootRole::Normal
     );
     assert_eq!(support.module_origin.role(), ModuleRootRole::Support);
-    assert!(
-        artifact
-            .interface
-            .module_origin
-            .is_same_structural_directory(&support.module_origin),
+    let normal = artifact
+        .normal_interface
+        .as_ref()
+        .expect("the paired module must publish its normal interface");
+    assert_eq!(
+        normal.module_origin.package(),
+        support.module_origin.package(),
+        "both interfaces must belong to the same package"
+    );
+    assert_eq!(
+        normal.module_origin.logical_module_path(),
+        support.module_origin.logical_module_path(),
         "both interfaces must belong to the same structural directory"
     );
 
@@ -3188,7 +3217,7 @@ fn paired_root_publishes_one_artifact_one_helper_body_and_two_interfaces() {
             .map(|declaration| declaration.origin.clone())
             .collect::<Vec<_>>()
     };
-    let normal_shared = shared_origins(&artifact.interface);
+    let normal_shared = shared_origins(normal);
     let support_shared = shared_origins(support);
     assert_eq!(
         normal_shared, support_shared,
@@ -3202,6 +3231,178 @@ fn paired_root_publishes_one_artifact_one_helper_body_and_two_interfaces() {
         ["Message", "value"],
         "the shared helper declarations must not be duplicated per surface"
     );
+
+    // An entry root co-located with a support facade must not add a surface or leak its
+    // same-named declaration into that facade.
+    assert_exact_facade_surfaces(
+        &compile_inline_root_fixture(&[
+            (
+                "@entry.moth",
+                "@shared label\n\nsupport_label #= \"entry-local\"\n\n[: [label()]]\n",
+            ),
+            (
+                "@package.moth",
+                "@shared label\n\nexport:\n    support_label || -> String:\n        return label()\n    ;\n;\n",
+            ),
+            (
+                "shared.moth",
+                "label || -> String:\n    return \"entry-support\"\n;\n",
+            ),
+        ]),
+        &[(ModuleRootRole::Support, &["support_label"])],
+    );
+
+    // A triple-root module publishes both facades without admitting either entry-local
+    // same-named declaration.
+    assert_exact_facade_surfaces(
+        &compile_inline_root_fixture(&[
+            (
+                "@entry.moth",
+                "@shared label\n\nnormal_label #= \"entry-normal\"\nsupport_label #= \"entry-support\"\n\n[: [label()]]\n",
+            ),
+            (
+                "@mod.moth",
+                "@shared label\n\nexport:\n    normal_label || -> String:\n        return label()\n    ;\n;\n",
+            ),
+            (
+                "@package.moth",
+                "@shared label\n\nexport:\n    support_label || -> String:\n        return label()\n    ;\n;\n",
+            ),
+            (
+                "shared.moth",
+                "label || -> String:\n    return \"triple\"\n;\n",
+            ),
+        ]),
+        &[
+            (ModuleRootRole::Normal, &["normal_label"]),
+            (ModuleRootRole::Support, &["support_label"]),
+        ],
+    );
+}
+
+/// Compile one in-memory directory module fixture through the real builder frontend.
+///
+/// Each entry pairs a `src`-relative path with its source text, so entry-plus-facade root
+/// combinations can be compiled without adding integration cases.
+fn compile_inline_root_fixture(files: &[(&str, &str)]) -> ProjectFrontendCompilation {
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = temp.path().to_path_buf();
+    fs::create_dir_all(dir.join("src")).expect("should create source root");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (name = \"docs\")\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    for (relative_path, source) in files {
+        let path = dir.join("src").join(relative_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("should create fixture source directory");
+        }
+        fs::write(path, source).expect("should write fixture source");
+    }
+
+    let mut config = Config::new(dir);
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    successful_compilation_value(compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut warning_owner,
+    ))
+}
+
+/// Assert the exact optional facade surfaces and their origins for one compiled directory module.
+///
+/// `expected` pairs each present surface role with the facade exports that surface must own.
+/// Entry-root declarations must never enter a public surface, even when their names match a
+/// facade export.
+fn assert_exact_facade_surfaces(
+    frontend: &ProjectFrontendCompilation,
+    expected: &[(ModuleRootRole, &[&str])],
+) {
+    let artifacts = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        artifacts.len(),
+        1,
+        "the directory must publish one structural module artifact"
+    );
+    let artifact = &artifacts[0];
+    for (interface, role) in [
+        (&artifact.normal_interface, ModuleRootRole::Normal),
+        (&artifact.support_interface, ModuleRootRole::Support),
+    ] {
+        let Some((_, facade_exports)) = expected
+            .iter()
+            .find(|(expected_role, _)| *expected_role == role)
+        else {
+            assert!(
+                interface.is_none(),
+                "the {role:?} role has no root, so it must have no surface"
+            );
+            continue;
+        };
+        let interface = interface
+            .as_ref()
+            .unwrap_or_else(|| panic!("the {role:?} facade root must publish a surface"));
+        assert_eq!(
+            interface.module_origin.role(),
+            role,
+            "the {role:?} surface must carry its own role origin"
+        );
+        for export in *facade_exports {
+            let declarations = interface
+                .declarations
+                .iter()
+                .filter(|declaration| declaration.origin.defining_name() == *export)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                declarations.len(),
+                1,
+                "the {role:?} surface must publish exactly one facade `{export}` declaration"
+            );
+            assert!(
+                matches!(
+                    &declarations[0].semantics,
+                    crate::compiler_frontend::public_interface::PublicDeclarationSemantics::Function(_)
+                ),
+                "the {role:?} surface must publish the facade function `{export}`, not an entry-local constant of the same name"
+            );
+            assert_eq!(
+                declarations[0].origin.module_origin().role(),
+                role,
+                "the `{export}` declaration must originate on its own facade root"
+            );
+        }
+        assert!(
+            interface.declarations.iter().all(|declaration| {
+                declaration.origin.module_origin().role() != ModuleRootRole::Entry
+            }),
+            "entry-root declarations must never enter the {role:?} public surface"
+        );
+    }
+    if let (Some(normal), Some(support)) = (&artifact.normal_interface, &artifact.support_interface)
+    {
+        assert_eq!(
+            normal.module_origin.package(),
+            support.module_origin.package(),
+            "both facade surfaces must belong to the same package"
+        );
+        assert_eq!(
+            normal.module_origin.logical_module_path(),
+            support.module_origin.logical_module_path(),
+            "both facade surfaces must belong to the same structural directory"
+        );
+        assert_ne!(
+            normal.module_origin, support.module_origin,
+            "each facade surface must carry its own role origin"
+        );
+    }
 }
 
 #[test]
@@ -3220,7 +3421,13 @@ fn paired_root_private_declarations_keep_their_surface_origins() {
         .expect("the paired module must publish its support interface");
 
     for (interface, role) in [
-        (&artifact.interface, ModuleRootRole::Normal),
+        (
+            artifact
+                .normal_interface
+                .as_ref()
+                .expect("the artefact publishes its normal facade"),
+            ModuleRootRole::Normal,
+        ),
         (support, ModuleRootRole::Support),
     ] {
         let declarations = interface

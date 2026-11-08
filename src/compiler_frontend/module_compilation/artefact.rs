@@ -71,14 +71,16 @@ impl Module {
 
 /// One successful canonical module artefact.
 ///
-/// WHAT: pairs the backend-neutral executable/link/metadata lanes with the immutable semantic
-///       interface published to later graph waves.
+/// WHAT: pairs the backend-neutral executable/link/metadata lanes with the immutable API surfaces
+///       the module's present facade roots published to later graph waves.
 /// WHY: provider publication must point at a complete success value without retaining diagnostics
-///      in a semantic artefact.
+///      in a semantic artefact. An entry-only module publishes neither surface, and each surface
+///      is present exactly when its facade root exists.
 pub(crate) struct CompiledModuleArtifact {
     pub(crate) module: Module,
-    pub(crate) interface: PublicSemanticInterface,
-    /// The paired support surface published by the same successful module transaction.
+    /// The normal `@mod` facade surface, present exactly when the module owns a normal root.
+    pub(crate) normal_interface: Option<PublicSemanticInterface>,
+    /// The support `@package` facade surface, present exactly when the module owns a support root.
     pub(crate) support_interface: Option<PublicSemanticInterface>,
 }
 

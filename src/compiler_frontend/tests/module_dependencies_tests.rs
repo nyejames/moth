@@ -238,12 +238,15 @@ fn dependency_sort_preserves_root_activity_metadata() {
 
 #[test]
 fn reports_circular_dependencies() {
+    // Root-local isolation: the cycle lives between two ordinary helper files. The entry root
+    // only reaches the module; it never participates in the helper-to-helper cycle.
     let (headers, mut string_table, mut path_fork) = parse_module_headers(
         &[
+            ("src/main.moth", "[: [\"cycle\"]]\n"),
             ("src/a.moth", "@b Middle\nTop #Middle = Middle\n"),
             ("src/b.moth", "@a Top\nMiddle #Top = Top\n"),
         ],
-        "src/a.moth",
+        "src/main.moth",
     );
     let cycle_header_name_span = headers
         .headers

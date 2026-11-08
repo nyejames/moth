@@ -1,6 +1,7 @@
 //! Tests for module-artifact retention and boundary bijection invariants.
 //!
-//! WHAT: verifies single-module preflight rejection and retained artefact-row consistency.
+//! WHAT: verifies the exact optional normal/support surface shape, single-module preflight
+//!       rejection and retained artefact-row consistency.
 //! WHY: these tests own the module store's local lanes; combined module/generated transactions
 //!       are covered by `compilation_tests` instead.
 
@@ -56,15 +57,21 @@ fn duplicate_materialisation_identity() -> GeneratedDeclarationIdentity {
     ))
 }
 
+/// Build one structural graph node with exactly the given facade and entry roots.
 fn test_graph(
     package: &StablePackageIdentity,
     logical_module_path: &str,
-    paired: bool,
+    normal_root: Option<&str>,
+    support_root: Option<&str>,
+    entry_root: Option<&str>,
 ) -> ProjectModuleGraph {
-    let support_root_file = paired.then(|| PathBuf::from("+package.moth"));
     let record = ModuleIdentityRecord::new(
         PathBuf::from(format!("/{logical_module_path}")),
-        ModuleRootFiles::new(Some(PathBuf::from("@page.moth")), support_root_file, None),
+        ModuleRootFiles::new(
+            normal_root.map(PathBuf::from),
+            support_root.map(PathBuf::from),
+            entry_root.map(PathBuf::from),
+        ),
         PathBuf::from(logical_module_path),
         package,
     )
@@ -72,19 +79,39 @@ fn test_graph(
     ProjectModuleGraph::from_test_records(vec![record])
 }
 
-fn artifact_with_origins(
-    primary: StableModuleOriginIdentity,
+fn interface_for(origin: StableModuleOriginIdentity) -> PublicSemanticInterface {
+    PublicSemanticInterface {
+        module_origin: origin,
+        export_bindings: Vec::new(),
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: Vec::new(),
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    }
+}
+
+fn origin(
+    package: &StablePackageIdentity,
+    logical_module_path: &str,
+    role: ModuleRootRole,
+) -> StableModuleOriginIdentity {
+    StableModuleOriginIdentity::from_portable_path(
+        package.clone(),
+        logical_module_path.to_owned(),
+        role,
+    )
+}
+
+fn artifact_with_interfaces(
+    normal: Option<StableModuleOriginIdentity>,
     support: Option<StableModuleOriginIdentity>,
 ) -> CompiledModuleArtifact {
     let mut artifact = artifact_with_context(
         ModuleMaterialisationContext::from_identities_for_test(Vec::new()),
     );
-    artifact.interface.module_origin = primary;
-    artifact.support_interface = support.map(|origin| {
-        let mut interface = artifact.interface.clone();
-        interface.module_origin = origin;
-        interface
-    });
+    artifact.normal_interface = normal.map(interface_for);
+    artifact.support_interface = support.map(interface_for);
     artifact
 }
 
@@ -109,11 +136,6 @@ fn boundary_with_success_artifact(
 }
 
 fn artifact_with_context(context: ModuleMaterialisationContext) -> CompiledModuleArtifact {
-    let origin = StableModuleOriginIdentity::from_portable_path(
-        StablePackageIdentity::project_local("module-artifact-tests"),
-        "main".to_owned(),
-        ModuleRootRole::Normal,
-    );
     CompiledModuleArtifact {
         module: Module {
             executable: ModuleExecutable {
@@ -137,29 +159,38 @@ fn artifact_with_context(context: ModuleMaterialisationContext) -> CompiledModul
                 materialisation_context: Some(Arc::new(context)),
             },
         },
-        interface: PublicSemanticInterface {
-            module_origin: origin,
-            export_bindings: Vec::new(),
-            export_diagnostic_provenance: Vec::new(),
-            binding_exports: Vec::new(),
-            declarations: Vec::new(),
-            reusable_evidence: Vec::new(),
-            concrete_call_summaries: Vec::new(),
-        },
+        normal_interface: None,
         support_interface: None,
     }
 }
 
+fn publish(
+    store: &mut ModuleArtifactStore,
+    artifact: CompiledModuleArtifact,
+    expected_normal: Option<&StableModuleOriginIdentity>,
+    expected_support: Option<&StableModuleOriginIdentity>,
+) {
+    let publication = store
+        .preflight_success(
+            ModuleId::from_index(0),
+            &artifact,
+            expected_normal,
+            expected_support,
+        )
+        .expect("the exact optional surface shape should publish");
+    store.reserve_success_commit(&publication);
+    store.commit_success(publication, artifact);
+}
+
 #[test]
 fn boundary_validation_rejects_missing_successful_artefact_row() {
-    let graph = ProjectModuleGraph::from_normal_roots(vec![(
-        StableModuleOriginIdentity::from_portable_path(
-            StablePackageIdentity::project_local("test"),
-            "missing".to_owned(),
-            ModuleRootRole::Normal,
-        ),
-        PathBuf::from("@missing.moth"),
-    )]);
+    let graph = test_graph(
+        &StablePackageIdentity::project_local("test"),
+        "missing",
+        Some("@mod.moth"),
+        None,
+        None,
+    );
     let store = ModuleArtifactStore {
         slots: vec![ProviderSlot::Successful(CompiledModuleArtifactId(0))],
         artifacts: Vec::new(),
@@ -195,12 +226,7 @@ fn module_success_preflight_rejects_duplicate_rows_without_mutation() {
     let store = ModuleArtifactStore::new(1);
 
     let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        store.preflight_success(
-            ModuleId::from_index(0),
-            &artifact,
-            &artifact.interface.module_origin,
-            None,
-        )
+        store.preflight_success(ModuleId::from_index(0), &artifact, None, None)
     }))
     .expect_err("duplicate materialisation rows must raise a compiler bug");
     assert_compiler_bug(payload, &expected_message);
@@ -216,15 +242,28 @@ fn module_success_preflight_rejects_duplicate_rows_without_mutation() {
 #[test]
 fn paired_publication_rejects_wrong_support_origin_without_mutation() {
     let package = StablePackageIdentity::project_local("module-artifact-tests");
-    let graph = test_graph(&package, "paired", true);
+    let graph = test_graph(
+        &package,
+        "paired",
+        Some("@mod.moth"),
+        Some("@package.moth"),
+        None,
+    );
     let node = graph.node(ModuleId::from_index(0));
-    let (primary, support) = node.publication_surfaces();
-    let support = support.expect("the test graph declares paired roots");
-    let artifact = artifact_with_origins(primary.clone(), Some(primary.clone()));
+    let (expected_normal, expected_support) = node.publication_surfaces();
+    let expected_normal = expected_normal.expect("the test graph declares a normal root");
+    let expected_support = expected_support.expect("the test graph declares a support root");
+    let artifact =
+        artifact_with_interfaces(Some(expected_normal.clone()), Some(expected_normal.clone()));
 
     let store = ModuleArtifactStore::new(1);
     let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        store.preflight_success(ModuleId::from_index(0), &artifact, primary, Some(support))
+        store.preflight_success(
+            ModuleId::from_index(0),
+            &artifact,
+            Some(expected_normal),
+            Some(expected_support),
+        )
     }))
     .expect_err("a wrong support origin must reject publication");
     let report = payload
@@ -241,129 +280,242 @@ fn paired_publication_rejects_wrong_support_origin_without_mutation() {
     );
 
     assert_eq!(store.artifact_count(), 0);
-    assert_eq!(
-        store.slot(ModuleId::from_index(0)).unwrap(),
-        ProviderSlot::Unavailable
-    );
     assert_eq!(store.materialisation_locations().count(), 0);
 }
 
 #[test]
 fn paired_publication_rejects_missing_support_interface_without_mutation() {
     let package = StablePackageIdentity::project_local("module-artifact-tests");
-    let graph = test_graph(&package, "paired", true);
+    let graph = test_graph(
+        &package,
+        "paired",
+        Some("@mod.moth"),
+        Some("@package.moth"),
+        None,
+    );
     let node = graph.node(ModuleId::from_index(0));
-    let (primary, support) = node.publication_surfaces();
-    let support = support.expect("the test graph declares paired roots");
-    let artifact = artifact_with_origins(primary.clone(), None);
+    let (expected_normal, expected_support) = node.publication_surfaces();
+    let expected_normal = expected_normal.expect("the test graph declares a normal root");
+    let expected_support = expected_support.expect("the test graph declares a support root");
+    let artifact = artifact_with_interfaces(Some(expected_normal.clone()), None);
 
     let store = ModuleArtifactStore::new(1);
     let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        store.preflight_success(ModuleId::from_index(0), &artifact, primary, Some(support))
+        store.preflight_success(
+            ModuleId::from_index(0),
+            &artifact,
+            Some(expected_normal),
+            Some(expected_support),
+        )
     }))
     .expect_err("a paired graph must reject a missing support interface");
     let report = payload
         .downcast::<CompilerBugReport>()
         .unwrap_or_else(|_| panic!("expected a CompilerBugReport payload"));
     assert!(
-        report
-            .message
-            .contains("missing the secondary support interface"),
+        report.message.contains("missing the support interface"),
         "unexpected paired publication failure: {}",
         report.message
     );
 
     assert_eq!(store.artifact_count(), 0);
-    assert_eq!(
-        store.slot(ModuleId::from_index(0)).unwrap(),
-        ProviderSlot::Unavailable
-    );
     assert_eq!(store.materialisation_locations().count(), 0);
 }
 
 #[test]
 fn normal_only_publication_rejects_unexpected_support_interface_without_mutation() {
     let package = StablePackageIdentity::project_local("module-artifact-tests");
-    let graph = test_graph(&package, "single", false);
+    let graph = test_graph(&package, "single", Some("@mod.moth"), None, None);
     let node = graph.node(ModuleId::from_index(0));
-    let (primary, support) = node.publication_surfaces();
-    assert!(support.is_none(), "the test graph must be normal-only");
-    let unexpected_support = StableModuleOriginIdentity::from_portable_path(
-        package.clone(),
-        "single".to_owned(),
-        ModuleRootRole::Support,
+    let (expected_normal, expected_support) = node.publication_surfaces();
+    let expected_normal = expected_normal.expect("the test graph declares a normal root");
+    assert!(
+        expected_support.is_none(),
+        "the test graph must be normal-only"
     );
-    let artifact = artifact_with_origins(primary.clone(), Some(unexpected_support));
+    let unexpected_support = origin(&package, "single", ModuleRootRole::Support);
+    let artifact =
+        artifact_with_interfaces(Some(expected_normal.clone()), Some(unexpected_support));
 
     let store = ModuleArtifactStore::new(1);
     let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        store.preflight_success(ModuleId::from_index(0), &artifact, primary, None)
+        store.preflight_success(
+            ModuleId::from_index(0),
+            &artifact,
+            Some(expected_normal),
+            None,
+        )
     }))
-    .expect_err("a single-root graph must reject an unexpected support interface");
+    .expect_err("a single-facade graph must reject an unexpected support interface");
     let report = payload
         .downcast::<CompilerBugReport>()
         .unwrap_or_else(|_| panic!("expected a CompilerBugReport payload"));
     assert!(
-        report
-            .message
-            .contains("unexpected secondary support interface"),
+        report.message.contains("unexpected support interface"),
         "unexpected single-root publication failure: {}",
         report.message
     );
 
     assert_eq!(store.artifact_count(), 0);
-    assert_eq!(
-        store.slot(ModuleId::from_index(0)).unwrap(),
-        ProviderSlot::Unavailable
-    );
     assert_eq!(store.materialisation_locations().count(), 0);
+}
+
+#[test]
+fn publication_rejects_a_missing_normal_surface() {
+    let package = StablePackageIdentity::project_local("module-artifact-tests");
+    let graph = test_graph(&package, "normal", Some("@mod.moth"), None, None);
+    let node = graph.node(ModuleId::from_index(0));
+    let (expected_normal, _) = node.publication_surfaces();
+    let expected_normal = expected_normal.expect("the test graph declares a normal root");
+    let artifact = artifact_with_interfaces(None, None);
+
+    let store = ModuleArtifactStore::new(1);
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        store.preflight_success(
+            ModuleId::from_index(0),
+            &artifact,
+            Some(expected_normal),
+            None,
+        )
+    }))
+    .expect_err("a normal facade root must reject a missing normal interface");
+    let report = payload
+        .downcast::<CompilerBugReport>()
+        .unwrap_or_else(|_| panic!("expected a CompilerBugReport payload"));
+    assert!(
+        report.message.contains("missing the normal interface"),
+        "unexpected missing-normal failure: {}",
+        report.message
+    );
+}
+
+#[test]
+fn entry_only_publication_publishes_no_interface() {
+    let package = StablePackageIdentity::project_local("module-artifact-tests");
+    let graph = test_graph(&package, "entry", None, None, Some("@entry.moth"));
+    let node = graph.node(ModuleId::from_index(0));
+    let (expected_normal, expected_support) = node.publication_surfaces();
+    assert!(expected_normal.is_none() && expected_support.is_none());
+    let artifact = artifact_with_interfaces(None, None);
+
+    let mut store = ModuleArtifactStore::new(1);
+    publish(&mut store, artifact, None, None);
+
+    assert!(
+        store
+            .interface_for_surface(ModuleId::from_index(0), ModuleRootRole::Normal)
+            .unwrap()
+            .is_none(),
+        "an entry-only module must not fabricate a normal interface"
+    );
+    assert!(
+        store
+            .interface_for_surface(ModuleId::from_index(0), ModuleRootRole::Support)
+            .unwrap()
+            .is_none(),
+        "an entry-only module must not fabricate a support interface"
+    );
+}
+
+#[test]
+fn support_only_publication_publishes_only_the_support_surface() {
+    let package = StablePackageIdentity::project_local("module-artifact-tests");
+    // A co-located entry root never adds a facade: publication surfaces are keyed only by the
+    // normal and support roles.
+    for entry_root in [None, Some("@entry.moth")] {
+        let graph = test_graph(&package, "support", None, Some("@package.moth"), entry_root);
+        let node = graph.node(ModuleId::from_index(0));
+        let (expected_normal, expected_support) = node.publication_surfaces();
+        assert!(
+            expected_normal.is_none(),
+            "a support-only module with entry root {entry_root:?} has no normal surface"
+        );
+        let expected_support = expected_support.expect("the test graph declares a support root");
+        let artifact = artifact_with_interfaces(None, Some(expected_support.clone()));
+
+        let mut store = ModuleArtifactStore::new(1);
+        publish(&mut store, artifact, None, Some(expected_support));
+
+        let support = store
+            .interface_for_surface(ModuleId::from_index(0), ModuleRootRole::Support)
+            .unwrap()
+            .expect("the support surface should resolve");
+        assert_eq!(support.module_origin.role(), ModuleRootRole::Support);
+        assert!(
+            store
+                .interface_for_surface(ModuleId::from_index(0), ModuleRootRole::Normal)
+                .unwrap()
+                .is_none(),
+            "a support-only module with entry root {entry_root:?} has no normal surface to fall back to"
+        );
+    }
 }
 
 #[test]
 fn paired_publication_with_exact_surface_origins_resolves_both_roles() {
     let package = StablePackageIdentity::project_local("module-artifact-tests");
-    let graph = test_graph(&package, "paired", true);
-    let node = graph.node(ModuleId::from_index(0));
-    let (primary, support) = node.publication_surfaces();
-    let support = support.expect("the test graph declares paired roots");
-    let artifact = artifact_with_origins(primary.clone(), Some(support.clone()));
+    // A co-located entry root never adds a facade: the same exact paired surface shape must hold
+    // for both the normal+support and triple-root inventories.
+    for entry_root in [None, Some("@entry.moth")] {
+        let graph = test_graph(
+            &package,
+            "paired",
+            Some("@mod.moth"),
+            Some("@package.moth"),
+            entry_root,
+        );
+        let node = graph.node(ModuleId::from_index(0));
+        let (expected_normal, expected_support) = node.publication_surfaces();
+        let expected_normal = expected_normal.expect("the test graph declares a normal root");
+        let expected_support = expected_support.expect("the test graph declares a support root");
+        let artifact = artifact_with_interfaces(
+            Some(expected_normal.clone()),
+            Some(expected_support.clone()),
+        );
 
-    let mut store = ModuleArtifactStore::new(1);
-    let publication = store
-        .preflight_success(ModuleId::from_index(0), &artifact, primary, Some(support))
-        .expect("the exact paired surface shape should publish");
-    store.reserve_success_commit(&publication);
-    store.commit_success(publication, artifact);
+        let mut store = ModuleArtifactStore::new(1);
+        publish(
+            &mut store,
+            artifact,
+            Some(expected_normal),
+            Some(expected_support),
+        );
 
-    let normal = store
-        .interface_for_surface(ModuleId::from_index(0), ModuleRootRole::Normal)
-        .unwrap()
-        .expect("the normal surface should resolve");
-    let support = store
-        .interface_for_surface(ModuleId::from_index(0), ModuleRootRole::Support)
-        .unwrap()
-        .expect("the support surface should resolve");
-    assert_eq!(normal.module_origin.role(), ModuleRootRole::Normal);
-    assert_eq!(support.module_origin.role(), ModuleRootRole::Support);
-    assert_ne!(normal.module_origin, support.module_origin);
+        let normal = store
+            .interface_for_surface(ModuleId::from_index(0), ModuleRootRole::Normal)
+            .unwrap()
+            .expect("the normal surface should resolve");
+        let support = store
+            .interface_for_surface(ModuleId::from_index(0), ModuleRootRole::Support)
+            .unwrap()
+            .expect("the support surface should resolve");
+        assert_eq!(normal.module_origin.role(), ModuleRootRole::Normal);
+        assert_eq!(support.module_origin.role(), ModuleRootRole::Support);
+        assert_ne!(normal.module_origin, support.module_origin);
+    }
 }
 
 #[test]
 fn boundary_validation_rejects_paired_artifact_without_support_interface() {
     let package = StablePackageIdentity::project_local("module-artifact-tests");
-    let graph = test_graph(&package, "paired", true);
+    let graph = test_graph(
+        &package,
+        "paired",
+        Some("@mod.moth"),
+        Some("@package.moth"),
+        None,
+    );
     let node = graph.node(ModuleId::from_index(0));
-    let (primary, _) = node.publication_surfaces();
-    let artifact = artifact_with_origins(primary.clone(), None);
+    let (expected_normal, _) = node.publication_surfaces();
+    let expected_normal = expected_normal.expect("the test graph declares a normal root");
+    let artifact = artifact_with_interfaces(Some(expected_normal.clone()), None);
     let boundary = boundary_with_success_artifact(graph, artifact);
 
     let error = boundary
         .validate_invariants()
         .expect_err("boundary validation must reject the malformed successful artifact");
     assert!(
-        error
-            .message
-            .contains("missing the secondary support interface"),
+        error.message.contains("missing the support interface"),
         "unexpected boundary failure: {}",
         error.message
     );
@@ -372,50 +524,68 @@ fn boundary_validation_rejects_paired_artifact_without_support_interface() {
 #[test]
 fn boundary_validation_rejects_paired_artifact_with_wrong_support_role() {
     let package = StablePackageIdentity::project_local("module-artifact-tests");
-    let graph = test_graph(&package, "paired", true);
-    let node = graph.node(ModuleId::from_index(0));
-    let (primary, _) = node.publication_surfaces();
-    let wrong_support = StableModuleOriginIdentity::from_portable_path(
-        package.clone(),
-        "paired".to_owned(),
-        ModuleRootRole::Normal,
+    let graph = test_graph(
+        &package,
+        "paired",
+        Some("@mod.moth"),
+        Some("@package.moth"),
+        None,
     );
-    let artifact = artifact_with_origins(primary.clone(), Some(wrong_support));
+    let node = graph.node(ModuleId::from_index(0));
+    let (expected_normal, _) = node.publication_surfaces();
+    let expected_normal = expected_normal.expect("the test graph declares a normal root");
+    let wrong_support = origin(&package, "paired", ModuleRootRole::Normal);
+    let artifact = artifact_with_interfaces(Some(expected_normal.clone()), Some(wrong_support));
     let boundary = boundary_with_success_artifact(graph, artifact);
 
     let error = boundary
         .validate_invariants()
         .expect_err("boundary validation must reject the malformed successful artifact");
     assert!(
-        error
-            .message
-            .contains("disagrees with graph node support origin"),
+        error.message.contains("support interface origin")
+            && error
+                .message
+                .contains("disagrees with graph node support origin"),
         "unexpected boundary failure: {}",
         error.message
     );
 }
 
 #[test]
-fn boundary_validation_rejects_unexpected_secondary_interface_on_single_root() {
+fn boundary_validation_rejects_unexpected_support_interface_on_single_facade() {
     let package = StablePackageIdentity::project_local("module-artifact-tests");
-    let graph = test_graph(&package, "single", false);
+    let graph = test_graph(&package, "single", Some("@mod.moth"), None, None);
     let node = graph.node(ModuleId::from_index(0));
-    let (primary, _) = node.publication_surfaces();
-    let unexpected_support = StableModuleOriginIdentity::from_portable_path(
-        package.clone(),
-        "single".to_owned(),
-        ModuleRootRole::Support,
-    );
-    let artifact = artifact_with_origins(primary.clone(), Some(unexpected_support));
+    let (expected_normal, _) = node.publication_surfaces();
+    let expected_normal = expected_normal.expect("the test graph declares a normal root");
+    let unexpected_support = origin(&package, "single", ModuleRootRole::Support);
+    let artifact =
+        artifact_with_interfaces(Some(expected_normal.clone()), Some(unexpected_support));
     let boundary = boundary_with_success_artifact(graph, artifact);
 
     let error = boundary
         .validate_invariants()
         .expect_err("boundary validation must reject the malformed successful artifact");
     assert!(
-        error
-            .message
-            .contains("unexpected secondary support interface"),
+        error.message.contains("unexpected support interface"),
+        "unexpected boundary failure: {}",
+        error.message
+    );
+}
+
+#[test]
+fn boundary_validation_rejects_support_surface_on_entry_only_module() {
+    let package = StablePackageIdentity::project_local("module-artifact-tests");
+    let graph = test_graph(&package, "entry", None, None, Some("@entry.moth"));
+    let unexpected_support = origin(&package, "entry", ModuleRootRole::Support);
+    let artifact = artifact_with_interfaces(None, Some(unexpected_support));
+    let boundary = boundary_with_success_artifact(graph, artifact);
+
+    let error = boundary
+        .validate_invariants()
+        .expect_err("entry-only publication must reject a fabricated support surface");
+    assert!(
+        error.message.contains("unexpected support interface"),
         "unexpected boundary failure: {}",
         error.message
     );

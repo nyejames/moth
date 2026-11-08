@@ -204,6 +204,356 @@ fn entry_root_rejects_export_block() {
     assert!(errors.diagnostics.views().any(|diagnostic| {
         diagnostic_has_family::<generics_traits_api::ExportOutsideModuleRootView>(&diagnostic)
     }));
+
+    let diagnostic = errors
+        .diagnostics
+        .first()
+        .expect("entry export rejection holds one diagnostic");
+    let view = diagnostic
+        .family_view::<generics_traits_api::ExportOutsideModuleRootView>()
+        .expect("entry export rejection keeps its typed reason");
+    assert_eq!(
+        view.reason,
+        crate::compiler_frontend::compiler_messages::ExportOutsideModuleRootReason::EntryRoot,
+        "an entry root names its own missing export surface"
+    );
+}
+
+#[test]
+fn entry_root_rejects_non_block_export() {
+    let errors = expect_header_error(
+        parse_single_file_headers_with_options(
+            "export\n",
+            Path::new("src/@entry.moth"),
+            entry_root_options(),
+        ),
+        "entry roots must reject a non-block export clause",
+    );
+
+    let diagnostic = errors
+        .diagnostics
+        .first()
+        .expect("entry export rejection holds one diagnostic");
+    let view = diagnostic
+        .family_view::<generics_traits_api::ExportOutsideModuleRootView>()
+        .expect("non-block entry export keeps its typed reason");
+    assert_eq!(
+        view.reason,
+        crate::compiler_frontend::compiler_messages::ExportOutsideModuleRootReason::EntryRoot
+    );
+}
+
+/// Parse and bind a multi-file fixture whose root-local read must be rejected.
+fn expect_single_root_local_diagnostic(
+    sources: &[(String, String)],
+) -> CompactDiagnosticBagForTest {
+    let (result, _warnings, _string_table) =
+        parse_multi_file_headers_with_result(sources, "src/@entry.moth");
+    let bag = match result {
+        Ok(_) => panic!("a cross-file root-local read must be rejected"),
+        Err(bag) => bag,
+    };
+    let diagnostics = compact_bag_for_test(bag, None);
+    assert_eq!(
+        diagnostics.len(),
+        1,
+        "root-local isolation reports exactly one diagnostic"
+    );
+    let diagnostic = diagnostics.first().expect("the bag holds its diagnostic");
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-IMPORT-0030",
+        "the failure keeps the dedicated root-local import code"
+    );
+    diagnostics
+}
+
+#[test]
+fn helper_file_cannot_resolve_a_normal_root_local_declaration() {
+    let sources = [
+        ("theme #= \"dark\"\n".to_owned(), "src/@mod.moth".to_owned()),
+        (
+            "@\"@mod\" theme\n\nuse_theme || -> String:\n    return theme\n;\n".to_owned(),
+            "src/helper.moth".to_owned(),
+        ),
+    ];
+
+    let diagnostics = expect_single_root_local_diagnostic(&sources);
+    let diagnostic = diagnostics.first().expect("the bag holds its diagnostic");
+    let view = diagnostic
+        .family_view::<imports::RootLocalDeclarationNotVisibleView>()
+        .expect("the helper read keeps the root-local family");
+    assert_eq!(
+        view.root_role,
+        crate::compiler_frontend::compiler_messages::RootLocalDeclarationRole::NormalFacade,
+        "the diagnostic names the normal facade that authored the declaration"
+    );
+    assert!(
+        diagnostic_label_span(diagnostic, 0).is_some(),
+        "the authored declaration span is the related root-local site"
+    );
+}
+
+#[test]
+fn normal_root_cannot_resolve_a_support_root_local_declaration() {
+    let sources = [
+        (
+            "@\"@package\" support_value\n\nnormal_value #= support_value\n".to_owned(),
+            "src/@mod.moth".to_owned(),
+        ),
+        (
+            "support_value #= \"support\"\n".to_owned(),
+            "src/@package.moth".to_owned(),
+        ),
+    ];
+
+    let diagnostics = expect_single_root_local_diagnostic(&sources);
+    let diagnostic = diagnostics.first().expect("the bag holds its diagnostic");
+    let view = diagnostic
+        .family_view::<imports::RootLocalDeclarationNotVisibleView>()
+        .expect("the sibling-root read keeps the root-local family");
+    assert_eq!(
+        view.root_role,
+        crate::compiler_frontend::compiler_messages::RootLocalDeclarationRole::SupportFacade,
+        "the diagnostic names the support facade that authored the declaration"
+    );
+}
+
+#[test]
+fn entry_root_cannot_resolve_a_normal_root_local_declaration() {
+    let sources = [
+        ("theme #= \"dark\"\n".to_owned(), "src/@mod.moth".to_owned()),
+        (
+            "@\"@mod\" theme\n\n[: [theme]]\n".to_owned(),
+            "src/@entry.moth".to_owned(),
+        ),
+    ];
+
+    let diagnostics = expect_single_root_local_diagnostic(&sources);
+    let diagnostic = diagnostics.first().expect("the bag holds its diagnostic");
+    let view = diagnostic
+        .family_view::<imports::RootLocalDeclarationNotVisibleView>()
+        .expect("the entry reads reject through the root-local family");
+    assert_eq!(
+        view.root_role,
+        crate::compiler_frontend::compiler_messages::RootLocalDeclarationRole::NormalFacade,
+        "the entry root names the normal facade it tried to read"
+    );
+}
+
+#[test]
+fn helper_file_cannot_resolve_an_entry_root_local_declaration() {
+    let sources = [
+        (
+            "greeting #= \"hello\"\n[greeting]\n".to_owned(),
+            "src/@entry.moth".to_owned(),
+        ),
+        (
+            "@\"@entry\" greeting\ngreeting_copy #= greeting\n".to_owned(),
+            "src/helper.moth".to_owned(),
+        ),
+    ];
+
+    let diagnostics = expect_single_root_local_diagnostic(&sources);
+    let diagnostic = diagnostics.first().expect("the bag holds its diagnostic");
+    let view = diagnostic
+        .family_view::<imports::RootLocalDeclarationNotVisibleView>()
+        .expect("the helper read keeps the root-local family");
+    assert_eq!(
+        view.root_role,
+        crate::compiler_frontend::compiler_messages::RootLocalDeclarationRole::EntryRoot,
+        "the diagnostic names the entry root that authored the declaration"
+    );
+    assert!(
+        diagnostic_label_span(diagnostic, 0).is_some(),
+        "the authored entry declaration span is the related root-local site"
+    );
+}
+
+#[test]
+fn helper_cannot_bind_an_entry_root_namespace() {
+    let sources = [
+        (
+            "greeting #= \"hello\"\n[greeting]\n".to_owned(),
+            "src/@entry.moth".to_owned(),
+        ),
+        (
+            "@\"@entry\" as entry_root\nhelpers_copy #= 1\n".to_owned(),
+            "src/helper.moth".to_owned(),
+        ),
+    ];
+
+    let diagnostics = expect_single_root_local_diagnostic(&sources);
+    let diagnostic = diagnostics.first().expect("the bag holds its diagnostic");
+    let view = diagnostic
+        .family_view::<imports::RootLocalDeclarationNotVisibleView>()
+        .expect("the namespace bind keeps the root-local family");
+    assert_eq!(
+        view.root_role,
+        crate::compiler_frontend::compiler_messages::RootLocalDeclarationRole::EntryRoot,
+        "the namespace gate names the entry root it tried to bind"
+    );
+}
+
+#[test]
+fn normal_root_export_cannot_reexport_an_entry_root_declaration() {
+    let sources = [
+        (
+            "greeting #= \"hello\"\n[greeting]\n".to_owned(),
+            "src/@entry.moth".to_owned(),
+        ),
+        (
+            "export:\n    @\"@entry\" greeting\n;\n".to_owned(),
+            "src/@mod.moth".to_owned(),
+        ),
+    ];
+
+    let diagnostics = expect_single_root_local_diagnostic(&sources);
+    let diagnostic = diagnostics.first().expect("the bag holds its diagnostic");
+    let view = diagnostic
+        .family_view::<imports::RootLocalDeclarationNotVisibleView>()
+        .expect("the re-export gate keeps the root-local family");
+    assert_eq!(
+        view.root_role,
+        crate::compiler_frontend::compiler_messages::RootLocalDeclarationRole::EntryRoot,
+        "the exporting normal root names the entry root it tried to re-export"
+    );
+}
+
+#[test]
+fn normal_root_export_cannot_reexport_a_support_facade_declaration() {
+    let sources = [
+        (
+            "support_value #= \"support\"\n".to_owned(),
+            "src/@package.moth".to_owned(),
+        ),
+        (
+            "export:\n    @\"@package\" support_value\n;\n".to_owned(),
+            "src/@mod.moth".to_owned(),
+        ),
+    ];
+
+    let diagnostics = expect_single_root_local_diagnostic(&sources);
+    let diagnostic = diagnostics.first().expect("the bag holds its diagnostic");
+    let view = diagnostic
+        .family_view::<imports::RootLocalDeclarationNotVisibleView>()
+        .expect("the re-export gate keeps the root-local family");
+    assert_eq!(
+        view.root_role,
+        crate::compiler_frontend::compiler_messages::RootLocalDeclarationRole::SupportFacade,
+        "the exporting normal root names the support facade it tried to re-export"
+    );
+}
+
+#[test]
+fn helper_file_cannot_resolve_a_legacy_combined_root_declaration() {
+    let sources = [
+        (
+            "theme #= \"dark\"\n".to_owned(),
+            "src/@page.moth".to_owned(),
+        ),
+        (
+            "@\"@page\" theme\nhelper_copy #= theme\n".to_owned(),
+            "src/helper.moth".to_owned(),
+        ),
+    ];
+
+    let (result, _warnings, _string_table, _path_fork) =
+        parse_multi_file_headers_with_path(&sources, "src/@page.moth");
+    let bag = match result {
+        Ok(_) => panic!("a helper read of a legacy combined root must be rejected"),
+        Err(bag) => bag,
+    };
+    let diagnostics = compact_bag_for_test(bag, None);
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = diagnostics.first().expect("the bag holds its diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0030");
+    let view = diagnostic
+        .family_view::<imports::RootLocalDeclarationNotVisibleView>()
+        .expect("the legacy-root read keeps the root-local family");
+    assert_eq!(
+        view.root_role,
+        crate::compiler_frontend::compiler_messages::RootLocalDeclarationRole::LegacyCombinedRoot,
+        "the diagnostic keeps the bridge role until Phase 4 migrates the root spelling"
+    );
+}
+
+#[test]
+fn one_helper_declaration_binds_from_all_three_root_roles() {
+    let sources = [
+        (
+            "shared #= \"s\"\n\nhelper || -> String:\n    return shared\n;\n".to_owned(),
+            "src/shared.moth".to_owned(),
+        ),
+        (
+            "@shared helper\n\nnormal_value #= 1\n".to_owned(),
+            "src/@mod.moth".to_owned(),
+        ),
+        (
+            "@shared helper\n\nsupport_value #= 2\n".to_owned(),
+            "src/@package.moth".to_owned(),
+        ),
+        (
+            "@shared helper\n\n[: [\"ok\"]]\n".to_owned(),
+            "src/@entry.moth".to_owned(),
+        ),
+    ];
+
+    let (result, _warnings, mut string_table, mut path_fork) =
+        parse_multi_file_headers_with_path(&sources, "src/@entry.moth");
+    let headers = result.expect("ordinary helper declarations stay bindable from every root role");
+    let helper_name = string_table.intern("helper");
+
+    for root_file in ["src/@mod.moth", "src/@package.moth", "src/@entry.moth"] {
+        let root_path = path_fork
+            .try_intern_filesystem_path(&PathBuf::from(root_file), &mut string_table)
+            .expect("fixture root path is UTF-8");
+        let visibility = headers
+            .binding_environment
+            .visibility_for(&root_path)
+            .expect("every root owns a visibility map");
+        assert!(
+            visibility.visible_source_names.contains_key(&helper_name),
+            "{root_file} must bind the shared helper declaration"
+        );
+    }
+}
+
+#[test]
+fn same_spelled_root_local_declarations_in_two_roots_stay_independent() {
+    let sources = [
+        ("theme #= \"dark\"\n".to_owned(), "src/@mod.moth".to_owned()),
+        (
+            "theme #= \"light\"\n".to_owned(),
+            "src/@package.moth".to_owned(),
+        ),
+    ];
+
+    let (result, _warnings, string_table, path_fork) =
+        parse_multi_file_headers_with_path(&sources, "src/@entry.moth");
+    let headers = result.expect("disjoint root-local scopes accept equal spellings");
+
+    let theme_paths: Vec<_> = headers
+        .headers
+        .iter()
+        .filter(|header| {
+            matches!(header.kind, HeaderKind::Constant { .. })
+                && path_fork
+                    .component(header.declaration_path)
+                    .is_some_and(|name| string_table.resolve(name) == "theme")
+        })
+        .map(|header| header.declaration_path)
+        .collect();
+
+    assert_eq!(
+        theme_paths.len(),
+        2,
+        "each root keeps its own same-spelled declaration"
+    );
+    assert_ne!(
+        theme_paths[0], theme_paths[1],
+        "root-local declarations keep distinct authored identities"
+    );
 }
 
 #[test]

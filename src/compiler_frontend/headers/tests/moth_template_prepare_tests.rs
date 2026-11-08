@@ -1382,7 +1382,36 @@ fn moth_template_header_visibility_contains_implicit_html_constants() {
 }
 
 #[test]
+fn moth_template_body_sees_root_reexported_helper_constants() {
+    let fixture = MothTemplateScopeFixture::new(&[
+        (
+            "src/docs/home_constants.moth",
+            "local_label #= \"from helper\"\n",
+        ),
+        (
+            "src/docs/@mod.moth",
+            "export:\n    @home_constants local_label\n;\n",
+        ),
+        ("src/docs/intro.mtf", "[local_label]"),
+    ]);
+    let (ast, string_table, path_fork) = fixture.compile_moth_template_ast_ok(
+        "src/docs/intro.mtf",
+        &[
+            "@html/@mod.moth",
+            "src/docs/@mod.moth",
+            "src/docs/home_constants.moth",
+            "src/docs/intro.mtf",
+        ],
+    );
+
+    folded_content_contains(&ast, &string_table, &path_fork, "from helper");
+}
+
+#[test]
 fn moth_template_body_sees_exported_same_directory_root_constants() {
+    // TEMPLATE SCOPE MIGRATION BRIDGE (removed by qualified-reference plan Phase 5): the
+    // implicit same-directory scope deliberately admits root-authored exported constants until
+    // QE Phase 5 replaces it with explicit `[@helper value]` references.
     let fixture = MothTemplateScopeFixture::new(&[
         (
             "src/docs/@mod.moth",
@@ -1413,6 +1442,9 @@ fn moth_template_without_same_directory_root_sees_only_html_constants() {
 }
 #[test]
 fn same_directory_root_constants_collide_with_html_constants() {
+    // TEMPLATE SCOPE MIGRATION BRIDGE (removed by qualified-reference plan Phase 5): the
+    // bridge's root-authored constant participates in the same collision check as the
+    // helper-reexported constants that survive the bridge.
     let fixture = MothTemplateScopeFixture::new(&[
         (
             "src/docs/@mod.moth",

@@ -264,6 +264,33 @@ pub enum ImportPublicSurfaceType {
     ModuleRoot,
 }
 
+/// Why a declaration authored in one root file cannot be resolved from another source file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RootLocalDeclarationRole {
+    /// The declaration is authored in `@mod.moth`, the normal API facade.
+    NormalFacade,
+    /// The declaration is authored in `@package.moth`, the support API facade.
+    SupportFacade,
+    /// The declaration is authored in `@entry.moth`, the start-bearing entry root.
+    EntryRoot,
+    /// The declaration is authored in a legacy combined normal root.
+    ///
+    /// LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): before the cutover a normal
+    /// root without a co-located `@entry.moth` still owns the combined export/start role. The
+    /// diagnostic names the actual root file as the normal root file; Phase 4 renames or splits
+    /// every legacy root into `@mod.moth` and `@entry.moth`.
+    LegacyCombinedRoot,
+}
+
+/// Why an authored `export:` clause is rejected for its file role.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ExportOutsideModuleRootReason {
+    /// The file is an ordinary helper, a config bootstrap, or a root that owns no export surface.
+    NoExportSurface,
+    /// `@entry.moth` owns start and runtime and has no export surface at all.
+    EntryRoot,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DiagnosticPlace {
     Local(StringId),

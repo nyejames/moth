@@ -2,9 +2,15 @@ use super::*;
 use crate::build_system::create_project_modules::module_identity::{
     ModuleIdentityRecord, ModuleIdentityTable,
 };
+use crate::build_system::create_project_modules::source_tree_index::SourceTreeProjectContext;
+use crate::builder_surface::SourceFileKindRegistry;
+use crate::builder_surface::SourcePackageRegistry;
+use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootFiles, ModuleRootRole, StablePackageIdentity,
 };
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::projects::settings::Config;
 use std::path::PathBuf;
 
 fn record(
@@ -103,5 +109,62 @@ fn paired_support_is_suppressed_for_parent_even_through_an_unrooted_directory() 
         cross_module_surface(&parent_namespace, "engine"),
         None,
         "the support surface must not be added under a basename for the parent"
+    );
+}
+
+#[test]
+fn entry_root_file_is_not_a_same_module_namespace_entry() {
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = std::fs::canonicalize(temp.path()).expect("project root should canonicalize");
+    for root_file in ["@entry.moth", "@mod.moth", "@package.moth", "shared.moth"] {
+        std::fs::write(root.join(root_file), "").expect("should write fixture source");
+    }
+
+    let config = Config::new(root.clone());
+    let mut string_table = StringTable::new();
+    let index = SourceTreeIndex::discover(
+        root.clone(),
+        SourceTreeProjectContext {
+            project_root: &root,
+            validated_output_settings: None,
+        },
+        &config,
+        &SourcePackageRegistry::default(),
+        &SourceFileKindRegistry::default(),
+        &ExternalImportProviderRegistry::default(),
+        &mut string_table,
+    )
+    .expect("source tree index should build");
+    let module_id = index
+        .module_identities()
+        .module_ids()
+        .next()
+        .expect("the root directory should be one structural module");
+    assert_eq!(
+        index.owned_source_indices(module_id).len(),
+        4,
+        "all three roots and the helper must be owned sources before namespace filtering"
+    );
+
+    let mut namespace = ModuleNamespace::new();
+    populate_same_module_entries(&mut namespace, &index, module_id);
+
+    for root_key in ["@entry", "@mod", "@package"] {
+        assert!(
+            !namespace.entries.contains_key(root_key),
+            "a special root file must not become a same-module namespace entry: {root_key}"
+        );
+    }
+    assert!(
+        matches!(
+            namespace.entries.get("shared"),
+            Some(NamespaceEntry::SameModuleSource { .. })
+        ),
+        "ordinary helper sources remain same-module namespace entries"
+    );
+    assert_eq!(
+        namespace.entries.len(),
+        1,
+        "only the helper source should enter the same-module namespace"
     );
 }

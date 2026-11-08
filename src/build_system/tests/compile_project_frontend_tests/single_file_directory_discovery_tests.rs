@@ -496,3 +496,60 @@ fn single_file_project_cutoff_after_package_work_refuses_module_admission() {
         "refusing the unvisited module is a recorded project cutoff"
     );
 }
+
+#[test]
+fn check_project_with_root_entry_only_publishes_no_interface() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(dir.join("@entry.moth"), "value ~= 1\n").expect("should write the entry root");
+
+    let mut config = Config::new(dir);
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let mut project_source_files = None;
+    let mut project_source_builder = Some(
+        crate::compiler_frontend::source::SourceDatabaseBuilder::new(
+            crate::compiler_frontend::source::SourceDatabase::empty(),
+        ),
+    );
+
+    let result = compile_project_frontend_with_inputs(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut warning_owner,
+        &mut project_source_files,
+        &mut project_source_builder,
+        &crate::compiler_frontend::build_config::BuildConfigInputSet::new(),
+        FrontendCompilationMode::Check,
+    );
+
+    let modules = successful_compilation_value(result);
+    let views = modules.successful_module_views().collect::<Vec<_>>();
+    assert_eq!(
+        views.len(),
+        1,
+        "an entry-only root directory is one structural module"
+    );
+    let artifacts = modules
+        .project
+        .successful_artefacts_in_module_id_order()
+        .collect::<Vec<_>>();
+    assert_eq!(artifacts.len(), 1);
+    assert!(
+        artifacts[0].normal_interface.is_none(),
+        "an entry-only module must not publish a normal interface"
+    );
+    assert!(
+        artifacts[0].support_interface.is_none(),
+        "an entry-only module must not publish a support interface"
+    );
+}

@@ -310,11 +310,21 @@ fn empty_interface(module_origin: StableModuleOriginIdentity) -> PublicSemanticI
 }
 
 fn artifact(module: Module, interface: PublicSemanticInterface) -> CompiledModuleArtifact {
-    CompiledModuleArtifact {
+    let mut artifact = CompiledModuleArtifact {
         module,
-        interface,
+        normal_interface: None,
         support_interface: None,
+    };
+    match interface.module_origin.role() {
+        ModuleRootRole::Normal => artifact.normal_interface = Some(interface),
+        ModuleRootRole::Support => artifact.support_interface = Some(interface),
+        ModuleRootRole::Entry
+        | ModuleRootRole::Shared
+        | ModuleRootRole::SyntheticProjectContext => {
+            panic!("a compiled module fixture must publish a normal or support facade interface")
+        }
     }
+    artifact
 }
 
 fn boundary(
@@ -346,11 +356,12 @@ fn module_record(
 ) -> ModuleIdentityRecord {
     let root_files = match role {
         ModuleRootRole::Normal => ModuleRootFiles::new(Some(PathBuf::from(root_file)), None, None),
-        ModuleRootRole::Support | ModuleRootRole::SyntheticProjectContext => {
-            ModuleRootFiles::new(None, Some(PathBuf::from(root_file)), None)
-        }
+        ModuleRootRole::Support => ModuleRootFiles::new(None, Some(PathBuf::from(root_file)), None),
         ModuleRootRole::Entry => ModuleRootFiles::new(None, None, Some(PathBuf::from(root_file))),
         ModuleRootRole::Shared => ModuleRootFiles::new(None, None, None),
+        ModuleRootRole::SyntheticProjectContext => {
+            panic!("a synthetic project context is not a filesystem module root")
+        }
     };
     ModuleIdentityRecord::new(
         PathBuf::from(root_directory),
@@ -830,7 +841,7 @@ fn package_facade_rejects_project_context_reachable_private_helper() {
     let facade_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
         "".to_owned(),
-        ModuleRootRole::SyntheticProjectContext,
+        ModuleRootRole::Support,
     );
     let child_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
@@ -898,7 +909,7 @@ fn package_facade_rejects_project_context_reachable_private_helper() {
         module_record(
             "/synthetic/provenance-helper",
             "/synthetic/provenance-helper/+package.moth",
-            ModuleRootRole::SyntheticProjectContext,
+            ModuleRootRole::Support,
             "",
             &package,
         ),
@@ -939,7 +950,7 @@ fn package_union_follows_facade_export_and_excludes_hidden_child_export() {
     let facade_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
         "".to_owned(),
-        ModuleRootRole::SyntheticProjectContext,
+        ModuleRootRole::Support,
     );
     let child_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
@@ -996,7 +1007,7 @@ fn package_union_follows_facade_export_and_excludes_hidden_child_export() {
         module_record(
             "/synthetic/project",
             "/synthetic/project/+package.moth",
-            ModuleRootRole::SyntheticProjectContext,
+            ModuleRootRole::Support,
             "",
             &package,
         ),
@@ -1068,7 +1079,7 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
     let facade_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
         "".to_owned(),
-        ModuleRootRole::SyntheticProjectContext,
+        ModuleRootRole::Support,
     );
     let child_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
@@ -1141,7 +1152,7 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
         module_record(
             "/synthetic/nominal",
             "/synthetic/nominal/+package.moth",
-            ModuleRootRole::SyntheticProjectContext,
+            ModuleRootRole::Support,
             "",
             &package,
         ),

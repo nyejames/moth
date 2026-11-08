@@ -138,7 +138,7 @@ fn publish_module_and_generated(
         materialisations,
         resource_inputs,
         module_id,
-        expected_origin,
+        expected_normal_origin: Some(expected_origin),
         expected_support_origin: expected_support_origin.as_ref(),
         artifact,
         generated_delta,
@@ -181,7 +181,7 @@ fn invalid_artifact() -> CompiledModuleArtifact {
                 )),
             },
         },
-        interface: PublicSemanticInterface {
+        normal_interface: Some(PublicSemanticInterface {
             module_origin: origin,
             export_bindings: Vec::new(),
             export_diagnostic_provenance: Vec::new(),
@@ -189,7 +189,7 @@ fn invalid_artifact() -> CompiledModuleArtifact {
             declarations: Vec::new(),
             reusable_evidence: Vec::new(),
             concrete_call_summaries: Vec::new(),
-        },
+        }),
         support_interface: None,
     }
 }
@@ -312,7 +312,12 @@ fn combined_publication_commits_compiler_resource_association_delta() {
     let mut materialisations = ProviderMaterialisationRegistry::default();
     let mut resource_inputs = ResourceInputRegistry::new();
     let artifact = artifact_without_context();
-    let expected_origin = artifact.interface.module_origin.clone();
+    let expected_origin = artifact
+        .normal_interface
+        .as_ref()
+        .expect("the fixture artefact carries a normal facade")
+        .module_origin
+        .clone();
     let source = resource_inputs.register_source(PathBuf::from("/project/assets/logo.svg"));
     let association = resource_association(&expected_origin, source);
     let resource_origin = association.origin.clone();
@@ -346,7 +351,12 @@ fn combined_publication_rejects_unknown_resource_source_without_mutation() {
     let mut materialisations = ProviderMaterialisationRegistry::default();
     let mut resource_inputs = ResourceInputRegistry::new();
     let artifact = artifact_without_context();
-    let expected_origin = artifact.interface.module_origin.clone();
+    let expected_origin = artifact
+        .normal_interface
+        .as_ref()
+        .expect("the fixture artefact carries a normal facade")
+        .module_origin
+        .clone();
     let association = resource_association(&expected_origin, ResourceSourceId::from_index(99));
     let resource_origin = association.origin.clone();
 
@@ -375,7 +385,12 @@ fn combined_publication_module_bug_raises_before_any_lane_mutation() {
     let mut generated = BoundaryGeneratedFunctionStore::default();
     let generated_delta = GeneratedFunctionDelta::from_records(Vec::new());
     let artifact = invalid_artifact();
-    let expected_origin = artifact.interface.module_origin.clone();
+    let expected_origin = artifact
+        .normal_interface
+        .as_ref()
+        .expect("the fixture artefact carries a normal facade")
+        .module_origin
+        .clone();
 
     let mut materialisations = ProviderMaterialisationRegistry::default();
     let mut resource_inputs = ResourceInputRegistry::new();
@@ -424,9 +439,14 @@ fn combined_publication_rejects_expected_origin_mismatch_without_mutation() {
         "other".to_owned(),
         ModuleRootRole::Normal,
     );
-    let actual_origin = artifact.interface.module_origin.clone();
+    let actual_origin = artifact
+        .normal_interface
+        .as_ref()
+        .expect("the fixture artefact carries a normal facade")
+        .module_origin
+        .clone();
     let expected_bug_message = format!(
-        "ModuleId 0 artefact primary interface origin {:?} disagrees with graph node origin {:?}",
+        "ModuleId 0 artefact normal interface origin {:?} disagrees with graph node normal origin {:?}",
         actual_origin, wrong_origin
     );
 
@@ -460,7 +480,12 @@ fn combined_publication_rejects_generated_delta_without_committing_valid_module(
     let mut modules = ModuleArtifactStore::new(1);
     let mut generated = BoundaryGeneratedFunctionStore::default();
     let artifact = artifact_without_context();
-    let expected_origin = artifact.interface.module_origin.clone();
+    let expected_origin = artifact
+        .normal_interface
+        .as_ref()
+        .expect("the fixture artefact carries a normal facade")
+        .module_origin
+        .clone();
 
     let mut materialisations = ProviderMaterialisationRegistry::default();
     let mut resource_inputs = ResourceInputRegistry::new();
@@ -499,7 +524,12 @@ fn combined_publication_rejects_module_after_valid_generated_preflight_without_m
     let mut modules = ModuleArtifactStore::new(1);
     let mut generated = BoundaryGeneratedFunctionStore::default();
     let artifact = invalid_artifact();
-    let expected_origin = artifact.interface.module_origin.clone();
+    let expected_origin = artifact
+        .normal_interface
+        .as_ref()
+        .expect("the fixture artefact carries a normal facade")
+        .module_origin
+        .clone();
 
     let mut materialisations = ProviderMaterialisationRegistry::default();
     let mut resource_inputs = ResourceInputRegistry::new();
@@ -757,7 +787,11 @@ fn semantic_result_with_local_path_in_domain(
 ) -> crate::compiler_frontend::module_compilation::ModuleSemanticResult {
     let mut artifact = invalid_artifact();
     artifact.module.metadata.materialisation_context = None;
-    artifact.interface.module_origin = origin.clone();
+    artifact
+        .normal_interface
+        .as_mut()
+        .expect("the fixture artefact carries a normal facade")
+        .module_origin = origin.clone();
     path_fork
         .try_intern_portable_path(&format!("{origin:?}/published-path"), &mut string_table)
         .expect("the module-local path should intern into the fork");
@@ -769,8 +803,8 @@ fn semantic_result_with_local_path_in_domain(
         resource_source_associations: Vec::new(),
         string_table,
         path_fork,
-        public_interface: artifact.interface,
-        support_public_interface: None,
+        normal_interface: artifact.normal_interface,
+        support_interface: None,
     }
 }
 
@@ -810,7 +844,7 @@ fn forced_path_exhaustion_during_module_publication_reports_capacity_diagnostic(
         &mut materialisations,
         &mut resource_inputs,
         ModuleId::from_index(0),
-        &origin,
+        Some(&origin),
         None,
         compiled,
         DiagnosticBag::new(),
@@ -944,7 +978,11 @@ fn check_only_success_result_with_warnings() -> (
         ModuleRootRole::Normal,
     );
     let mut artifact = artifact_without_context();
-    artifact.interface.module_origin = origin;
+    artifact
+        .normal_interface
+        .as_mut()
+        .expect("the fixture artefact carries a normal facade")
+        .module_origin = origin;
 
     // Production check-only sidecars compile inside the module's string/path domains, so
     // warnings from both owners share one domain. Pre-seeding the aggregate prefix first
@@ -1052,8 +1090,8 @@ fn check_only_success_result_with_warnings() -> (
             resource_source_associations: Vec::new(),
             string_table: module_string_table,
             path_fork: module_path_fork,
-            public_interface: artifact.interface,
-            support_public_interface: None,
+            normal_interface: artifact.normal_interface,
+            support_interface: None,
         },
         module_warnings,
         vec![sidecar_warnings],
@@ -1577,7 +1615,7 @@ fn published_warnings_capture_types_and_remap_paths_after_environment_drop() {
             &mut materialisations,
             &mut resource_inputs,
             ModuleId::from_index(0),
-            &origin,
+            Some(&origin),
             None,
             compiled,
             warnings,
@@ -1949,7 +1987,11 @@ fn publish_generated_sidecar_boundary(
             module_path_fork,
         );
         compiled.module.metadata.entry_point = PathBuf::from(module_path);
-        compiled.public_interface.module_origin = origin.clone();
+        compiled
+            .normal_interface
+            .as_mut()
+            .expect("the fixture result carries a normal facade")
+            .module_origin = origin.clone();
         let mut generated_records = Vec::new();
         let mut generated_warning_bags = Vec::new();
         let sidecar_name = format!("{warning_name}_sidecar");
@@ -1977,7 +2019,7 @@ fn publish_generated_sidecar_boundary(
             &mut materialisations,
             &mut resource_inputs,
             ModuleId::from_index(0),
-            &origin,
+            Some(&origin),
             None,
             compiled,
             DiagnosticBag::new(),

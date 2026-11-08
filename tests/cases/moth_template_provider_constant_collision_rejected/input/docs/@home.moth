@@ -1,5 +1,5 @@
 export:
-    @intro content as intro_content
+    @home_constants center
 
-    center #= "local center"
+    @intro content as intro_content
 ;

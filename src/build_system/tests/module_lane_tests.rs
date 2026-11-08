@@ -406,7 +406,12 @@ fn frontend_compilation_retains_project_artefact_interfaces() {
         "project artefact root activity is retained"
     );
     assert_eq!(
-        artifact.interface.module_origin.role(),
+        artifact
+            .normal_interface
+            .as_ref()
+            .expect("the published artefact carries its normal facade")
+            .module_origin
+            .role(),
         ModuleRootRole::Normal,
         "artefact interface survives the handoff"
     );
@@ -421,7 +426,12 @@ fn frontend_compilation_retains_project_artefact_interfaces() {
         .expect("valid module id")
         .expect("success-only compilation retains the artefact");
     assert_eq!(
-        retained.interface.module_origin.role(),
+        retained
+            .normal_interface
+            .as_ref()
+            .expect("the retained artefact carries its normal facade")
+            .module_origin
+            .role(),
         ModuleRootRole::Normal,
         "completed public interface remains accessible after success-only conversion"
     );
@@ -558,7 +568,7 @@ fn test_graph_boundary(
                 ModuleId::from_index(index),
                 CompiledModuleArtifact {
                     module,
-                    interface: empty_test_interface_for_origin(origins[index].clone()),
+                    normal_interface: Some(empty_test_interface_for_origin(origins[index].clone())),
                     support_interface: None,
                 },
             )
@@ -604,7 +614,7 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
             ModuleId::from_index(2),
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("high/@mod.moth"), true),
-                interface: empty_test_interface("high".to_owned()),
+                normal_interface: Some(empty_test_interface("high".to_owned())),
                 support_interface: None,
             },
         )
@@ -614,7 +624,7 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
             ModuleId::from_index(1),
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("low/@mod.moth"), true),
-                interface: empty_test_interface("low".to_owned()),
+                normal_interface: Some(empty_test_interface("low".to_owned())),
                 support_interface: None,
             },
         )
@@ -673,7 +683,7 @@ fn duplicate_declaration_inside_one_materialisation_context_raises_compiler_bug(
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module,
-                interface: empty_test_interface("dup".to_owned()),
+                normal_interface: Some(empty_test_interface("dup".to_owned())),
                 support_interface: None,
             },
         )
@@ -716,7 +726,7 @@ fn materialisation_lookup_resolves_the_exact_template_row() {
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module,
-                interface: empty_test_interface("rows".to_owned()),
+                normal_interface: Some(empty_test_interface("rows".to_owned())),
                 support_interface: None,
             },
         )
@@ -1597,7 +1607,7 @@ fn frontend_boundary_rejects_unfinished_module_slots() {
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@first.moth"), true),
-                interface: empty_test_interface("first".to_owned()),
+                normal_interface: Some(empty_test_interface("first".to_owned())),
                 support_interface: None,
             },
         )
@@ -1659,7 +1669,7 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@success.moth"), true),
-                interface: empty_test_interface("success".to_owned()),
+                normal_interface: Some(empty_test_interface("success".to_owned())),
                 support_interface: None,
             },
         )
@@ -1864,7 +1874,7 @@ fn boundary_validation_rejects_blocked_lane_mismatch_in_both_directions() {
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@single.moth"), false),
-                interface: empty_test_interface("single".to_owned()),
+                normal_interface: Some(empty_test_interface("single".to_owned())),
                 support_interface: None,
             },
         )
@@ -2096,7 +2106,7 @@ fn materialisation_rows_iterate_in_deterministic_publication_order() {
             ModuleId::from_index(1),
             CompiledModuleArtifact {
                 module: second_module,
-                interface: empty_test_interface("second".to_owned()),
+                normal_interface: Some(empty_test_interface("second".to_owned())),
                 support_interface: None,
             },
         )
@@ -2113,7 +2123,7 @@ fn materialisation_rows_iterate_in_deterministic_publication_order() {
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module: first_module,
-                interface: empty_test_interface("first".to_owned()),
+                normal_interface: Some(empty_test_interface("first".to_owned())),
                 support_interface: None,
             },
         )
@@ -2331,7 +2341,7 @@ fn boundary_with_unvisited_slot(
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("@success.moth"), true),
-                interface: empty_test_interface("success".to_owned()),
+                normal_interface: Some(empty_test_interface("success".to_owned())),
                 support_interface: None,
             },
         )
@@ -2375,7 +2385,7 @@ fn diagnostic_recovery_incomplete_graph_is_not_success() {
         frontend
             .project
             .modules
-            .interface(ModuleId::from_index(2))
+            .normal_interface(ModuleId::from_index(2))
             .expect("slot lookup should resolve")
             .is_none()
     );
@@ -2384,7 +2394,9 @@ fn diagnostic_recovery_incomplete_graph_is_not_success() {
         .successful_artefacts_in_module_id_order()
         .map(|artifact| {
             artifact
-                .interface
+                .normal_interface
+                .as_ref()
+                .expect("the successful artefact carries its normal facade")
                 .module_origin
                 .logical_module_path()
                 .to_owned()

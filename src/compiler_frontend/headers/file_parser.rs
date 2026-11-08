@@ -17,8 +17,8 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
 };
 use crate::compiler_frontend::compiler_messages::{CapacityResource, CompilerStage};
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, InvalidConfigReason, InvalidDeclarationReason,
-    InvalidReceiverDeclarationReason,
+    CommonSyntaxMistakeReason, ExportOutsideModuleRootReason, InvalidConfigReason,
+    InvalidDeclarationReason, InvalidReceiverDeclarationReason,
 };
 use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker_in_cursor;
 use crate::compiler_frontend::headers::file_dependency_clauses::{
@@ -271,17 +271,40 @@ fn parse_headers_in_file_inner(
     Ok(())
 }
 
+/// Reject an authored `export:` clause whose file role owns no export surface.
+///
+/// WHAT: entry roots receive a root-specific reason; helpers, config and non-facade roots keep
+///       the generic module-root rule.
+/// WHY: `@entry.moth` has no export surface, while ordinary helpers are not module roots at all.
+fn reject_export_outside_module_root(
+    context: &HeaderParseContext<'_>,
+    export_span: SourceSpan,
+) -> FileParserResult<()> {
+    let reason = if context.is_config_file {
+        Some(ExportOutsideModuleRootReason::NoExportSurface)
+    } else {
+        match context.file_role {
+            FileRole::ActiveEntryRoot => Some(ExportOutsideModuleRootReason::EntryRoot),
+            role if role.is_export_capable() => None,
+            _ => Some(ExportOutsideModuleRootReason::NoExportSurface),
+        }
+    };
+
+    match reason {
+        Some(reason) => Err(diagnostic_failure(
+            generics_traits_api::export_outside_module_root(reason, Some(export_span)),
+        )),
+        None => Ok(()),
+    }
+}
+
 fn reject_non_block_export(
     cursor: &TokenCursor<'_>,
     file_id: SourceId,
     context: &mut HeaderParseContext<'_>,
     export_span: SourceSpan,
 ) -> FileParserResult<()> {
-    if !context.file_role.is_export_capable() || context.is_config_file {
-        return Err(diagnostic_failure(
-            generics_traits_api::export_outside_module_root(Some(export_span)),
-        ));
-    }
+    reject_export_outside_module_root(context, export_span)?;
 
     // Without the block delimiter, the token is not an export target. Keep this diagnostic in
     // header parsing instead of interpreting the following tokens through another syntax path.
@@ -319,11 +342,7 @@ fn handle_export_block(
     context: &mut HeaderParseContext<'_>,
     export_span: SourceSpan,
 ) -> FileParserResult<()> {
-    if !context.file_role.is_export_capable() || context.is_config_file {
-        return Err(diagnostic_failure(
-            generics_traits_api::export_outside_module_root(Some(export_span)),
-        ));
-    }
+    reject_export_outside_module_root(context, export_span)?;
 
     if state.seen_export_block.is_some() {
         return Err(diagnostic_failure(

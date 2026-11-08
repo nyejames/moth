@@ -11873,6 +11873,55 @@ contract = "language.project_structure.shared_helper_support_visibility"
 role = "primary"
 
 [[case]]
+id = "entry_owner_support_visible_to_entry_and_siblings"
+path = "entry_owner_support_visible_to_entry_and_siblings"
+tags = ["integration", "modules", "visibility", "root-boundaries", "entry", "positive"]
+contract = "language.project_structure.entry_owner_support_visibility"
+role = "primary"
+
+[[case]]
+id = "support_only_intermediate_owner_success"
+path = "support_only_intermediate_owner_success"
+tags = ["integration", "modules", "visibility", "root-boundaries", "entry", "positive"]
+contract = "language.project_structure.support_only_intermediate_owner"
+role = "primary"
+
+[[case]]
+id = "entry_only_child_import_rejected"
+path = "entry_only_child_import_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "entry", "negative"]
+contract = "language.project_structure.entry_only_child_no_normal_api"
+role = "primary"
+
+[[case]]
+id = "paired_entry_support_facade_import_rejected"
+path = "paired_entry_support_facade_import_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "entry", "negative"]
+contract = "language.project_structure.paired_entry_support_facade_scope"
+role = "primary"
+
+[[case]]
+id = "paired_entry_support_entry_import_success"
+path = "paired_entry_support_entry_import_success"
+tags = ["integration", "modules", "visibility", "root-boundaries", "entry", "positive"]
+contract = "language.project_structure.paired_entry_support_entry_import"
+role = "primary"
+
+[[case]]
+id = "entry_support_shared_helper_import_rejected"
+path = "entry_support_shared_helper_import_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "entry", "negative"]
+contract = "language.project_structure.entry_support_shared_helper_scope"
+role = "primary"
+
+[[case]]
+id = "triple_root_module_success"
+path = "triple_root_module_success"
+tags = ["integration", "modules", "visibility", "root-boundaries", "entry", "publication", "positive"]
+contract = "language.project_structure.triple_root_module_publication"
+role = "primary"
+
+[[case]]
 id = "paired_support_helper_private_param_rejected"
 path = "paired_support_helper_private_param_rejected"
 tags = ["integration", "modules", "visibility", "root-boundaries", "public-api", "negative"]
@@ -11912,6 +11961,13 @@ id = "paired_shared_template_root_constant_rejected"
 path = "paired_shared_template_root_constant_rejected"
 tags = ["integration", "modules", "visibility", "root-boundaries", "templates", "negative"]
 contract = "language.project_structure.paired_shared_template_isolation"
+role = "primary"
+
+[[case]]
+id = "root_local_helper_read_of_facade_declaration_rejected"
+path = "root_local_helper_read_of_facade_declaration_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "diagnostics", "negative"]
+contract = "language.project_structure.helper_cannot_read_root_local_declaration"
 role = "primary"
 
 [[case]]
@@ -14223,6 +14279,13 @@ path = "export_block_outside_module_root_rejected"
 tags = ["integration", "diagnostics", "dependencies", "facades"]
 contract = "language.dependencies.export_outside_module_root_rejected"
 role = "boundary"
+
+[[case]]
+id = "entry_root_export_block_rejected"
+path = "entry_root_export_block_rejected"
+tags = ["integration", "modules", "root-boundaries", "entry", "diagnostics", "negative"]
+contract = "language.project_structure.entry_root_export_rejected"
+role = "primary"
 
 [[case]]
 id = "export_block_missing_colon_rejected"

@@ -810,7 +810,12 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     };
 
     assert_eq!(
-        draft.public_interface.module_origin, stable_origin,
+        draft
+            .normal_interface
+            .as_ref()
+            .expect("the compiled module publishes its normal facade")
+            .module_origin,
+        stable_origin,
         "the semantic draft should retain the module's stable origin"
     );
     assert_eq!(
@@ -834,16 +839,13 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
 }
 
 #[test]
-fn api_only_root_roles_compile_public_interfaces_without_hir_start() {
-    for root_role in [
-        ModuleRootRole::Support,
-        ModuleRootRole::SyntheticProjectContext,
-    ] {
-        compile_api_only_root_and_assert_boundary(root_role);
-    }
+fn support_api_only_root_compiles_public_interface_without_hir_start() {
+    // A synthetic project-context root owns no export surface under the fixed root roles, so
+    // only the support facade compiles a public interface through this path.
+    compile_api_only_root_and_assert_boundary();
 }
 
-fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
+fn compile_api_only_root_and_assert_boundary() {
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
     let entry_file = temp_dir.path().join("+package.moth");
     let source = "export:\n    answer #= 42\n;\n";
@@ -901,7 +903,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let stable_origin = StableModuleOriginIdentity::from_relative_logical_path(
         StablePackageIdentity::project_local("test-project"),
         std::path::Path::new("api"),
-        root_role,
+        ModuleRootRole::Support,
     )
     .expect("API-only stable origin should construct");
     let source_byte_count = source_byte_count(&input_files, source_files_view);
@@ -1000,8 +1002,12 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
         }
     };
 
-    assert_eq!(draft.public_interface.module_origin, stable_origin);
-    assert_eq!(draft.public_interface.export_bindings.len(), 1);
+    let published = draft
+        .support_interface
+        .as_ref()
+        .expect("the compiled module publishes its support facade");
+    assert_eq!(published.module_origin, stable_origin);
+    assert_eq!(published.export_bindings.len(), 1);
     assert_eq!(draft.module.executable.hir.start_function, None);
     assert!(draft.module.executable.hir.functions.is_empty());
     assert!(

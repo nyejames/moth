@@ -20,7 +20,9 @@ use crate::compiler_frontend::headers::module_symbols::{GenericDeclarationKind, 
 use crate::compiler_frontend::headers::parse_file_headers::{
     Header, HeaderKind, HeaderPreparationFailure,
 };
-use crate::compiler_frontend::headers::types::LocalDeclarationOrderingHint;
+use crate::compiler_frontend::headers::types::{
+    LocalDeclarationOrderingHint, SyntheticContentPayload,
+};
 use crate::compiler_frontend::public_interface::{
     PublicDeclarationRecord, PublicDeclarationSemantics,
 };
@@ -147,6 +149,9 @@ pub(crate) fn add_constant_initializer_dependencies(
             Ok(v) => v,
             Err(error) => return Err(HeaderPreparationFailure::Infrastructure(error.into())),
         };
+        let current_source_file = module_symbols
+            .source_path_for_header(header)
+            .expect("header body range has no prepared source-path identity");
 
         let current_path = header.declaration_path;
 
@@ -178,9 +183,6 @@ pub(crate) fn add_constant_initializer_dependencies(
                             missing_constant_position_error(&path, path_fork, string_table).into(),
                         ));
                     };
-                    let current_source_file = module_symbols
-                        .source_path_for_header(header)
-                        .expect("header body range has no prepared source-path identity");
                     if position.source_file == current_source_file {
                         if position.header_index > reference_header_index {
                             diagnostic_bag.push(same_file_forward_reference_error(
@@ -219,12 +221,52 @@ pub(crate) fn add_constant_initializer_dependencies(
                 ConstantReferenceResolution::ExternalNonConstant { .. } => {}
 
                 // A constant with this name exists in the module but is not visible to this file.
+                // When the invisible declaration is authored directly in an active root file,
+                // name the root-local isolation rule with both sites instead of the generic
+                // constant-visibility error.
                 ConstantReferenceResolution::NotVisible { name } => {
-                    if constants_by_name.contains_key(&name) {
-                        diagnostic_bag.push(not_visible_constant_error(reference));
+                    let Some(candidates) = constants_by_name.get(&name) else {
+                        // No constant with this name exists anywhere. AST produces a more precise
+                        // diagnostic during expression parsing.
+                        continue;
+                    };
+                    // A Moth template body keeps the existing constant-not-visible diagnostic.
+                    // Its same-directory implicit scope is a TEMPLATE SCOPE MIGRATION BRIDGE
+                    // (removed by qualified-reference plan Phase 5), so templates are not
+                    // ordinary readers of root-local declarations and must not report the
+                    // cross-root rule for a scope QE Phase 5 deletes.
+                    let is_moth_template_content = matches!(
+                        header.synthetic_content_payload,
+                        Some(SyntheticContentPayload::MothTemplate { .. })
+                    );
+                    let root_local = if is_moth_template_content {
+                        None
+                    } else {
+                        candidates.iter().copied().find_map(|path| {
+                            let position = constant_positions.get(&path)?;
+                            (!module_symbols.authored_declarations_visible_from(
+                                &current_source_file,
+                                &position.source_file,
+                            ))
+                            .then_some((path, position.source_file))
+                        })
+                    };
+                    match root_local {
+                        Some((path, target_source_file)) => {
+                            let diagnostic = crate::compiler_frontend::headers::binding_environment::cross_file_root_local_declaration(
+                                module_symbols,
+                                &current_source_file,
+                                &target_source_file,
+                                &path,
+                                reference.span,
+                            )
+                            .expect(
+                                "an invisible constant authored in an active root file is not visible from this consumer",
+                            );
+                            diagnostic_bag.push(diagnostic);
+                        }
+                        None => diagnostic_bag.push(not_visible_constant_error(reference)),
                     }
-                    // If no constant with this name exists anywhere, treat as Unknown so AST
-                    // can produce a more precise diagnostic during expression parsing.
                 }
             }
         }

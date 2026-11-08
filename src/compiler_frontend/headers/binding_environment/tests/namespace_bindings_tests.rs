@@ -44,6 +44,7 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::{
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleRootBoundary, ModuleSymbols, PublicExportEntry, PublicExportTarget,
 };
+use crate::compiler_frontend::headers::parse_file_headers::FileRole;
 use crate::compiler_frontend::headers::parse_file_headers::HeaderPreparationFailure;
 use crate::compiler_frontend::headers::types::{
     DependencyBindingSyntax, DependencySelection, DependencySelectionRange, HeaderExportMode,
@@ -1290,6 +1291,10 @@ fn module_root_namespace_uses_prepared_root_file_identity() {
     let mut module_symbols = ModuleSymbols::empty();
     module_symbols.module_file_paths.insert(source_file);
     module_symbols.module_file_paths.insert(root_file);
+    module_symbols.file_roles_by_source.insert(
+        source_file,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
+    );
     module_symbols.file_module_membership.insert(
         source_file,
         intern_path(&["entry-root"], &mut string_table, &mut path_fork),
@@ -1677,6 +1682,10 @@ fn nested_module_root_depends_on_child_facade_resolves_child_root() {
     let mut module_symbols = ModuleSymbols::empty();
     module_symbols.module_file_paths.insert(helper_mod_file);
     module_symbols.module_file_paths.insert(grandchild_mod_file);
+    module_symbols.file_roles_by_source.insert(
+        helper_mod_file,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
+    );
     module_symbols
         .file_module_membership
         .insert(helper_mod_file, helper_root);

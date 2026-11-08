@@ -1,0 +1,6 @@
+@lib value
+export:
+    sibling || -> String:
+        return value
+    ;
+;

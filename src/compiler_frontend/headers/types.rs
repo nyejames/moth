@@ -1494,12 +1494,17 @@ impl FileRole {
     }
 
     /// Whether this root may author an export surface.
+    ///
+    /// WHAT: only the normal (`@mod.moth`) and support (`@package.moth`) API facades own one,
+    ///       together with the legacy combined normal root and a reached foreign facade.
+    /// WHY: `@entry.moth` owns start/runtime and publishes no importable surface; a synthetic
+    ///      project-context root projects no surface at all.
     pub(crate) fn is_export_capable(self) -> bool {
         matches!(
             self,
             Self::LegacyCombinedRoot
-                | Self::ActiveApiOnlyModuleRoot(_)
-                | Self::ReachedApiFacadeRoot(_)
+                | Self::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal | ModuleRootRole::Support)
+                | Self::ReachedApiFacadeRoot(ModuleRootRole::Normal | ModuleRootRole::Support)
         )
     }
 
@@ -1531,6 +1536,29 @@ impl FileRole {
             | Self::ActiveEntryRoot
             | Self::ConfigBootstrap
             | Self::Normal => None,
+        }
+    }
+
+    /// The provider surface this file role consumes module-root namespaces as.
+    ///
+    /// WHAT: normal-position roles consume the normal surface; a support facade consumes the
+    ///       support surface.
+    /// WHY: an entry root publishes no surface of its own but is a normal-position consumer, so
+    ///      it must select the provider surfaces a normal root would. A role with no authored
+    ///      consumer position returns `None` rather than silently falling back to another
+    ///      surface.
+    pub(crate) fn consumer_surface(self) -> Option<ModuleRootRole> {
+        match self {
+            Self::LegacyCombinedRoot | Self::ActiveEntryRoot | Self::Normal => {
+                Some(ModuleRootRole::Normal)
+            }
+            Self::ActiveApiOnlyModuleRoot(role) | Self::ReachedApiFacadeRoot(role) => match role {
+                ModuleRootRole::Normal | ModuleRootRole::Support => Some(role),
+                ModuleRootRole::Entry
+                | ModuleRootRole::Shared
+                | ModuleRootRole::SyntheticProjectContext => None,
+            },
+            Self::ConfigBootstrap => None,
         }
     }
 

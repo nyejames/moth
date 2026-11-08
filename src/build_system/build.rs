@@ -879,7 +879,7 @@ fn boundary_interface_at<'a>(
                 InfrastructureFailure::internal(
                     CompilerStage::ProjectBuildAssembly,
                     format!(
-                        "Project module ref {} has no published interface",
+                        "Project module ref {} has no published {surface:?} interface",
                         module_id.index()
                     ),
                 )
@@ -896,7 +896,7 @@ fn boundary_interface_at<'a>(
                 InfrastructureFailure::internal(
                     CompilerStage::ProjectBuildAssembly,
                     format!(
-                        "Source-package module ref {} has no published interface",
+                        "Source-package module ref {} has no published {surface:?} interface",
                         module_id.index()
                     ),
                 )

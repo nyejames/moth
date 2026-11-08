@@ -9,8 +9,8 @@
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::semantic_identity::{
-    FunctionOriginKind, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
-    OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
+    ExportBinding, FunctionOriginKind, ModuleRootRole, OriginConstantId, OriginDeclarationId,
+    OriginFunctionId, OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
     StableOwnedSourceIdentity, StablePackageIdentity,
 };
 
@@ -373,6 +373,64 @@ fn owned_source_identity_rejects_absolute_relative_path() {
     assert!(
         matches!(result, Err(ref e) if e.kind == InfrastructureFailureKind::Internal && e.message.contains("invalid component")),
         "an absolute relative source path must be rejected through the compiler-error lane"
+    );
+}
+
+#[test]
+fn helper_reexported_through_both_facades_keeps_one_defining_origin_and_two_export_bindings() {
+    let shared = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("my-project"),
+        "ui/button".to_owned(),
+        ModuleRootRole::Shared,
+    );
+    let normal_facade = shared.with_role(ModuleRootRole::Normal);
+    let support_facade = shared.with_role(ModuleRootRole::Support);
+
+    let defining_origin = OriginDeclarationId::Function(OriginFunctionId::new_free(
+        shared.clone(),
+        "render".to_owned(),
+    ));
+    let normal_binding = ExportBinding::new(
+        normal_facade.clone(),
+        "render".to_owned(),
+        defining_origin.clone(),
+    );
+    let support_binding = ExportBinding::new(
+        support_facade.clone(),
+        "render".to_owned(),
+        defining_origin.clone(),
+    );
+
+    assert_eq!(
+        normal_binding.origin(),
+        support_binding.origin(),
+        "both facades must keep the one Shared defining origin"
+    );
+    assert_eq!(
+        normal_binding.origin().module_origin(),
+        &shared,
+        "the defining origin must stay Shared-rooted rather than becoming a facade origin"
+    );
+    assert_ne!(
+        normal_binding, support_binding,
+        "the two facade exports must remain distinct export bindings"
+    );
+    assert_ne!(
+        normal_binding.exporting_module(),
+        support_binding.exporting_module(),
+        "each export binding must carry its own facade origin"
+    );
+    assert!(
+        !normal_binding
+            .exporting_module()
+            .is_same_structural_module(support_binding.exporting_module()),
+        "the two root surfaces of one directory remain isolated scopes"
+    );
+    assert!(
+        normal_binding
+            .exporting_module()
+            .is_same_structural_module(&shared),
+        "a facade origin and the shared helper belong to one structural module"
     );
 }
 

@@ -189,6 +189,16 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         consumer_file: &PathId,
         target_file: &PathId,
     ) -> bool {
+        // A declaration authored directly in an active root file is internal only to that file.
+        // Neither a sibling root nor an ordinary helper shares its dependency boundary, so this
+        // answer gates direct selections, receiver-method travel and namespace records before AST.
+        if !self
+            .module_symbols
+            .authored_declarations_visible_from(consumer_file, target_file)
+        {
+            return false;
+        }
+
         let consumer_package = self
             .module_symbols
             .file_package_membership
@@ -1133,6 +1143,14 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         Ok(())
     }
 
+    /// Register the implicit constant scope available to one Moth template file.
+    ///
+    /// TEMPLATE SCOPE MIGRATION BRIDGE (removed by qualified-reference plan Phase 5): the
+    /// same-directory export-constant scope below deliberately admits declarations authored in
+    /// the root file itself. That is a temporary exception to root-local isolation, accepted only
+    /// because the qualified-reference plan replaces the whole implicit scope with explicit
+    /// `[@helper value]` references. Every other path keeps root-local isolation. Delete this
+    /// layer and migrate `.mtf` pages when QE Phase 5 lands.
     fn register_implicit_moth_template_constant_scope(
         &mut self,
         file_visibility: &mut FileVisibility,
@@ -1286,6 +1304,13 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         Ok(())
     }
 
+    /// Add the same-directory root's exported constants to one Moth template's implicit scope.
+    ///
+    /// TEMPLATE SCOPE MIGRATION BRIDGE (removed by qualified-reference plan Phase 5): exported
+    /// constants authored directly in the root are admitted here even though they are root-local
+    /// for every other consumer. This is the only deliberate exception to root-local isolation;
+    /// QE Phase 5 deletes the scope and migrates `.mtf` pages to explicit `[@helper value]`
+    /// references.
     fn collect_same_directory_public_export_constants(
         &mut self,
         source_file: &PathId,
@@ -1325,6 +1350,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 continue;
             }
 
+            // TEMPLATE SCOPE MIGRATION BRIDGE (removed by qualified-reference plan Phase 5):
+            // the excluded file is the template itself, so this only drops its own generated
+            // constants. Root-authored constants stay admitted by the bridge above.
             if excluded_source_file
                 .is_some_and(|source_file| self.symbol_origin_matches_source(path, source_file))
             {
@@ -1374,6 +1402,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             Some(SourceKind::Compiler(SourceFileKind::MothTemplate))
         )
     }
+    /// Select the single export-capable root beside a Moth template.
+    ///
+    /// TEMPLATE SCOPE MIGRATION BRIDGE (removed by qualified-reference plan Phase 5): this
+    /// lookup exists only for the implicit same-directory template scope. A paired directory
+    /// still returns `None`, so a shared source never inherits one arbitrary root's surface.
     fn same_directory_root_file(&self, source_file: &PathId) -> Option<PathId> {
         let moth_template_directory = self.source_directory(source_file)?;
         let mut roots = self.module_symbols.file_roles_by_source.iter().filter_map(
@@ -1617,6 +1650,16 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     .canonical_source_by_symbol_path
                     .get(&symbol_path)
                 {
+                    if let Some(diagnostic) = super::diagnostics::cross_file_root_local_declaration(
+                        self.module_symbols,
+                        source_file,
+                        target_file,
+                        &symbol_path,
+                        Some(selection.source_span),
+                    ) {
+                        return Err(diagnostic.into());
+                    }
+
                     check_source_package_boundary(SourcePackageBoundaryCheckInput {
                         consumer_file: source_file,
                         target_file,

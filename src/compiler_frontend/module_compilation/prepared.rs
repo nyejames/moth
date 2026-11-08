@@ -1,9 +1,9 @@
 //! Provider-independent prepared source for one module compilation.
 //!
-//! WHAT: the retained result of preparing one module's source files — the active root's `SourceId`,
-//!       ordered candidate source IDs, the shared boundary source-origin table, aggregated
-//!       `PreparedHeaderSyntax`, the module string table and the input-size facts arena capacity
-//!       estimation needs.
+//! WHAT: the retained result of preparing one module's source files — its role-keyed root
+//!       `SourceId`s, ordered candidate source IDs, the shared boundary source-origin table,
+//!       aggregated `PreparedHeaderSyntax`, the module string table and the input-size facts arena
+//!       capacity estimation needs.
 //! WHY:  the compiler design overview requires `PreparedHeaderSyntax` to exist before the provider
 //!       graph is compiled, and Stage 0 decides when to prepare each candidate. This value is the
 //!       compiler-owned payload that crosses back into semantic compilation, so the phase boundary
@@ -16,7 +16,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract;
 use crate::compiler_frontend::headers::parse_file_headers::{FileRole, PreparedHeaderSyntax};
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
-use crate::compiler_frontend::semantic_identity::{ModuleRootFiles, StableModuleOriginIdentity};
+use crate::compiler_frontend::semantic_identity::{ModuleRootFiles, ModuleRootRole};
 use crate::compiler_frontend::source::{SourceDatabase, SourceId};
 use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -97,49 +97,43 @@ impl PreparedModuleInput {
             })
     }
 
-    /// Select the root whose declarations feed the primary interface projection, when one exists.
+    /// The present API facade roots in the fixed normal, then support slots.
     ///
-    /// A normal facade is always primary. A support facade is primary when there is no normal
-    /// facade, whether or not an entry root is present. A standalone synthetic or check-only unit
-    /// uses its one explicit selection. Entry roots never seed an interface: an entry-only
-    /// directory module is a valid structural module with no importable API, so this returns
-    /// `None` rather than manufacturing an empty facade.
-    pub(crate) fn primary_surface_root(&self) -> Option<SourceId> {
-        if let Some(normal_root) = self.root_file_ids.normal {
-            return Some(normal_root);
+    /// A directory module reads its role-keyed root inventory. A standalone synthetic or
+    /// check-only unit reads the explicit surface its preparation selected. Entry roots,
+    /// ordinary helpers and a synthetic project context own no importable API surface, so their
+    /// slot stays empty. The caller publishes one interface per present slot and none when both
+    /// are empty, so an entry-only module compiles without manufacturing a facade.
+    pub(crate) fn facade_surface_roots(&self) -> [Option<(SourceId, ModuleRootRole)>; 2] {
+        if !self.root_file_ids.is_empty() {
+            return [
+                self.root_file_ids
+                    .normal
+                    .map(|source_id| (source_id, ModuleRootRole::Normal)),
+                self.root_file_ids
+                    .support
+                    .map(|source_id| (source_id, ModuleRootRole::Support)),
+            ];
         }
-        if let Some(support_root) = self.root_file_ids.support {
-            return Some(support_root);
-        }
-        self.selected_file
-            .map(|(selected_source, _)| selected_source)
-    }
 
-    /// The support facade source for a module whose primary root is normal, together with its
-    /// origin.
-    pub(crate) fn support_surface(
-        &self,
-    ) -> Result<Option<(SourceId, StableModuleOriginIdentity)>, InfrastructureFailure> {
-        let Some(support_root) = self.root_file_ids.support else {
-            return Ok(None);
-        };
-        if self.root_file_ids.normal.is_none() {
-            return Ok(None);
-        }
-        let origin = self
-            .source_module_origins
-            .origin_for(support_root)?
-            .cloned()
-            .ok_or_else(|| {
-                InfrastructureFailure::internal(
-                    CompilerStage::ProjectBuildAssembly,
-                    format!(
-                        "module compilation: support root file id {} has no module origin",
-                        support_root.index()
-                    ),
+        let mut roots = [None, None];
+        if let Some((source_id, file_role)) = self.selected_file {
+            match file_role.active_surface() {
+                Some(ModuleRootRole::Normal) => {
+                    roots[0] = Some((source_id, ModuleRootRole::Normal));
+                }
+                Some(ModuleRootRole::Support) => {
+                    roots[1] = Some((source_id, ModuleRootRole::Support));
+                }
+                Some(
+                    ModuleRootRole::Entry
+                    | ModuleRootRole::Shared
+                    | ModuleRootRole::SyntheticProjectContext,
                 )
-            })?;
-        Ok(Some((support_root, origin)))
+                | None => {}
+            }
+        }
+        roots
     }
 
     /// The canonical path of the preparation anchor.
@@ -210,18 +204,4 @@ impl PreparedModuleInput {
     pub(crate) fn source_build_config_contracts(&self) -> &[SourceBuildConfigContract] {
         &self.prepared_header_syntax.source_build_config_contracts
     }
-}
-
-/// The interim failure for an entry-only module that reaches interface publication.
-///
-/// WHAT: an entry-only directory module is a valid structural module with no importable API.
-///       The Phase 1 service still requires exactly one primary interface projection, so the
-///       compiler cannot publish it yet.
-/// WHY: optional interfaces land at the Phase 2 cutover. One named failure keeps every caller
-///      from fabricating an empty interface or falling back to another root.
-pub(crate) fn entry_only_module_cannot_publish() -> InfrastructureFailure {
-    InfrastructureFailure::internal(
-        CompilerStage::ProjectBuildAssembly,
-        "module compilation: entry-only modules cannot publish an interface yet; optional interfaces land at the Phase 2 cutover",
-    )
 }

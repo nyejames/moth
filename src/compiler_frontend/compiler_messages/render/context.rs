@@ -297,6 +297,7 @@ pub(crate) fn compact_label_message_text(
             "declaration has no `export` here".to_owned()
         }
         DurableLabelMessage::ExternalImportSite => "imported here".to_owned(),
+        DurableLabelMessage::RootLocalDeclarationSite => "root-local declaration here".to_owned(),
         DurableLabelMessage::GenericInstantiationBodySite => {
             "generic body operation failed here".to_owned()
         }

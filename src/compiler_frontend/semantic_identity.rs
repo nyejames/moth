@@ -428,11 +428,6 @@ impl StableModuleOriginIdentity {
         }
         self.role == ModuleRootRole::Shared || other.role == ModuleRootRole::Shared
     }
-
-    /// Whether two origins name the same rooted directory, regardless of root surface role.
-    pub(crate) fn is_same_structural_directory(&self, other: &Self) -> bool {
-        self.package == other.package && self.logical_module_path == other.logical_module_path
-    }
 }
 
 /// Convert a base-relative logical path into a portable forward-slash spelling.

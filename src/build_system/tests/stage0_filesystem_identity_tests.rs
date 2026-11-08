@@ -4182,6 +4182,296 @@ mod project_module_graph_tests {
     }
 
     #[test]
+    fn entry_owner_exposes_support_to_entry_and_normal_siblings() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(src.join("lib")).expect("should create lib");
+        fs::create_dir_all(src.join("pages")).expect("should create pages");
+
+        fs::write(src.join("@entry.moth"), "").expect("should write entry root");
+        fs::write(src.join("lib/@package.moth"), "").expect("should write support root");
+        fs::write(src.join("pages/@mod.moth"), "").expect("should write normal sibling root");
+
+        let (index, _project_root, _entry_root) = discover_index(&root, "src");
+        let graph = ProjectModuleGraph::from_source_tree_index(&index);
+        let identities = index.module_identities();
+
+        let owner_id = module_id_for(&index, ModuleRootRole::Entry, "");
+        let support_id = module_id_for(&index, ModuleRootRole::Support, "lib");
+        let sibling_id = module_id_for(&index, ModuleRootRole::Normal, "pages");
+
+        assert!(
+            identities.record(owner_id).normal_root_file().is_none()
+                && identities.record(owner_id).entry_root_file().is_some(),
+            "an entry-only owner must stay entry-only instead of acquiring a normal facade"
+        );
+        assert!(
+            graph.is_support_visible_to_consumer(support_id, owner_id),
+            "support nested under an entry-only owner is visible to that owner"
+        );
+        assert!(
+            graph.is_support_visible_to_consumer_role(support_id, owner_id, ModuleRootRole::Entry),
+            "an entry source is a normal-position consumer of support packages"
+        );
+        assert!(
+            graph.is_support_visible_to_consumer(support_id, sibling_id),
+            "support nested under an entry-only owner is visible to its normal siblings"
+        );
+        assert!(
+            super::project_module_graph::is_support_visible_in_identity_table(
+                identities, support_id, owner_id
+            ),
+            "project and package topology must agree for an entry-only owner"
+        );
+        assert!(
+            super::project_module_graph::is_support_visible_in_identity_table(
+                identities, support_id, sibling_id
+            ),
+            "project and package topology must agree for a normal sibling"
+        );
+    }
+
+    #[test]
+    fn support_only_intermediate_directory_is_not_a_normal_owner() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(src.join("theme/parts")).expect("should create nested support");
+        fs::create_dir_all(src.join("pages")).expect("should create pages");
+
+        fs::write(src.join("@entry.moth"), "").expect("should write entry root");
+        fs::write(src.join("theme/@package.moth"), "")
+            .expect("should write support-only intermediate root");
+        fs::write(src.join("theme/parts/@package.moth"), "")
+            .expect("should write nested support root");
+        fs::write(src.join("pages/@mod.moth"), "").expect("should write normal sibling root");
+
+        let (index, _project_root, _entry_root) = discover_index(&root, "src");
+        let graph = ProjectModuleGraph::from_source_tree_index(&index);
+        let identities = index.module_identities();
+
+        let owner_id = module_id_for(&index, ModuleRootRole::Entry, "");
+        let intermediate_id = module_id_for(&index, ModuleRootRole::Support, "theme");
+        let nested_id = module_id_for(&index, ModuleRootRole::Support, "theme/parts");
+        let pages_id = module_id_for(&index, ModuleRootRole::Normal, "pages");
+
+        assert!(
+            graph.is_support_visible_to_consumer(nested_id, owner_id),
+            "owner resolution must skip a support-only intermediate directory"
+        );
+        assert!(
+            graph.is_support_visible_to_consumer(nested_id, pages_id),
+            "a normal sibling must see the nested support package through the skipped owner"
+        );
+        assert!(
+            !graph.is_support_visible_to_consumer(nested_id, intermediate_id),
+            "a support-only intermediate directory must not become the nested package's owner"
+        );
+        assert!(
+            super::project_module_graph::is_support_visible_in_identity_table(
+                identities, nested_id, owner_id
+            ),
+            "the package identity table must skip the support-only intermediate directory too"
+        );
+        assert!(
+            !super::project_module_graph::is_support_visible_in_identity_table(
+                identities,
+                nested_id,
+                intermediate_id
+            ),
+            "the package identity table must not treat the support-only directory as an owner"
+        );
+    }
+
+    #[test]
+    fn paired_entry_support_module_uses_normal_position_for_entry_and_strict_support_for_facade() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(src.join("app")).expect("should create app");
+        fs::create_dir_all(src.join("lib")).expect("should create lib");
+
+        fs::write(src.join("@entry.moth"), "").expect("should write project entry root");
+        fs::write(src.join("app/@entry.moth"), "").expect("should write paired entry root");
+        fs::write(src.join("app/@package.moth"), "").expect("should write paired support root");
+        fs::write(src.join("lib/@package.moth"), "").expect("should write sibling support root");
+
+        let (index, _project_root, _entry_root) = discover_index(&root, "src");
+        let graph = ProjectModuleGraph::from_source_tree_index(&index);
+        let identities = index.module_identities();
+
+        let paired_id = module_id_for(&index, ModuleRootRole::Support, "app");
+        let support_id = module_id_for(&index, ModuleRootRole::Support, "lib");
+
+        assert!(
+            identities.record(paired_id).entry_root_file().is_some()
+                && identities.record(paired_id).support_root_file().is_some()
+                && identities.record(paired_id).normal_root_file().is_none(),
+            "the paired module must own an entry and a support root and no normal root"
+        );
+        assert!(
+            graph.is_support_visible_to_consumer(support_id, paired_id),
+            "the paired module namespace must expose the normal-position support targets for its entry"
+        );
+        assert!(
+            graph.is_support_visible_to_consumer_role(support_id, paired_id, ModuleRootRole::Entry),
+            "the paired entry is a normal-position consumer"
+        );
+        assert!(
+            !graph.is_support_visible_to_consumer_role(
+                support_id,
+                paired_id,
+                ModuleRootRole::Support
+            ),
+            "the co-located support facade must keep the strict support scope and gain nothing from the entry"
+        );
+        assert!(
+            super::project_module_graph::is_support_visible_in_identity_table(
+                identities, support_id, paired_id
+            ),
+            "the package identity table must build the same normal-position namespace"
+        );
+    }
+
+    #[test]
+    fn triple_root_module_occupies_normal_position_and_publishes_two_facades() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(src.join("lib")).expect("should create lib");
+
+        fs::write(src.join("@entry.moth"), "").expect("should write entry root");
+        fs::write(src.join("@mod.moth"), "").expect("should write normal facade root");
+        fs::write(src.join("@package.moth"), "").expect("should write support facade root");
+        fs::write(src.join("lib/@package.moth"), "").expect("should write support root");
+
+        let (index, _project_root, _entry_root) = discover_index(&root, "src");
+        let graph = ProjectModuleGraph::from_source_tree_index(&index);
+        let identities = index.module_identities();
+
+        let root_id = module_id_for(&index, ModuleRootRole::Normal, "");
+        let support_id = module_id_for(&index, ModuleRootRole::Support, "lib");
+        let node = graph.node(root_id);
+
+        assert!(
+            node.has_surface(ModuleRootRole::Normal)
+                && node.has_surface(ModuleRootRole::Support)
+                && node.has_surface(ModuleRootRole::Entry),
+            "a triple-root module must keep all three root surfaces"
+        );
+        let (normal_origin, support_origin) = node.publication_surfaces();
+        assert_eq!(
+            normal_origin.map(|origin| origin.role()),
+            Some(ModuleRootRole::Normal),
+            "the normal facade must publish the normal surface"
+        );
+        assert_eq!(
+            support_origin.map(|origin| origin.role()),
+            Some(ModuleRootRole::Support),
+            "the support facade must publish the support surface"
+        );
+        assert!(
+            graph.entry_modules().contains(&root_id),
+            "a triple-root module remains an entry candidate"
+        );
+        assert!(
+            graph.is_support_visible_to_consumer_role(support_id, root_id, ModuleRootRole::Entry),
+            "the triple-root entry is a normal-position consumer"
+        );
+        assert!(
+            super::project_module_graph::is_support_visible_in_identity_table(
+                identities, support_id, root_id
+            ),
+            "the package identity table must agree for a triple-root owner"
+        );
+    }
+
+    #[test]
+    fn entry_owner_permits_strictly_outer_support_scope_imports() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(src.join("lib")).expect("should create lib");
+        fs::create_dir_all(src.join("pages/tools")).expect("should create pages tools");
+
+        fs::write(src.join("@entry.moth"), "").expect("should write project entry root");
+        fs::write(src.join("lib/@package.moth"), "").expect("should write outer support root");
+        fs::write(src.join("pages/@entry.moth"), "").expect("should write pages entry root");
+        fs::write(src.join("pages/tools/@package.moth"), "")
+            .expect("should write nested support root");
+
+        let (index, _project_root, _entry_root) = discover_index(&root, "src");
+        let graph = ProjectModuleGraph::from_source_tree_index(&index);
+        let identities = index.module_identities();
+
+        let outer_id = module_id_for(&index, ModuleRootRole::Support, "lib");
+        let pages_id = module_id_for(&index, ModuleRootRole::Entry, "pages");
+        let nested_id = module_id_for(&index, ModuleRootRole::Support, "pages/tools");
+
+        assert!(
+            graph.is_support_visible_to_consumer_role(outer_id, nested_id, ModuleRootRole::Support),
+            "a support facade under an entry-only owner may import a strictly outer support package"
+        );
+        assert!(
+            graph.is_support_visible_to_consumer(outer_id, nested_id),
+            "the module-level namespace must expose the strictly outer support package"
+        );
+        assert!(
+            graph.is_support_visible_to_consumer_role(outer_id, pages_id, ModuleRootRole::Entry),
+            "the entry-only intermediate owner sees the outer support package"
+        );
+        assert!(
+            !graph.is_support_visible_to_consumer(nested_id, outer_id),
+            "an outer support package must not see a strictly nested support package"
+        );
+        assert!(
+            super::project_module_graph::is_support_visible_in_identity_table(
+                identities, outer_id, nested_id
+            ),
+            "the package identity table must apply the same strictly-outer rule"
+        );
+    }
+
+    #[test]
+    fn entry_owner_private_support_descendant_cannot_import_the_support_package() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(src.join("lib/inner")).expect("should create private descendant");
+
+        fs::write(src.join("@entry.moth"), "").expect("should write project entry root");
+        fs::write(src.join("lib/@package.moth"), "").expect("should write support root");
+        fs::write(src.join("lib/inner/@mod.moth"), "").expect("should write private descendant");
+
+        let (index, _project_root, _entry_root) = discover_index(&root, "src");
+        let graph = ProjectModuleGraph::from_source_tree_index(&index);
+        let identities = index.module_identities();
+
+        let support_id = module_id_for(&index, ModuleRootRole::Support, "lib");
+        let inner_id = module_id_for(&index, ModuleRootRole::Normal, "lib/inner");
+
+        assert!(
+            !graph.is_support_visible_to_consumer_role(
+                support_id,
+                inner_id,
+                ModuleRootRole::Normal
+            ),
+            "a support package's private descendant must not import that support package"
+        );
+        assert!(
+            !graph.is_support_visible_to_consumer(support_id, inner_id),
+            "the module-level namespace must keep the private descendant outside the package"
+        );
+        assert!(
+            !super::project_module_graph::is_support_visible_in_identity_table(
+                identities, support_id, inner_id
+            ),
+            "the package identity table must preserve the private-descendant exclusion"
+        );
+    }
+
+    #[test]
     fn independent_ready_modules_share_wave_zero_in_module_id_order() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();

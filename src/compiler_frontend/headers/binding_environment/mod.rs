@@ -18,7 +18,9 @@ mod source_dependencies;
 mod target_resolution;
 mod visible_names;
 
-pub(crate) use diagnostics::provider_public_surface_diagnostic;
+pub(crate) use diagnostics::{
+    cross_file_root_local_declaration, provider_public_surface_diagnostic,
+};
 
 pub(crate) use bindings::{
     FileVisibility, HeaderBindingEnvironment, ImportedFunctionContract, NamespaceMemberLookup,

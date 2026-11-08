@@ -1142,11 +1142,13 @@ fn insert_resolved_dependency_edges(
 
 /// Whether one resolved support-surface dependency is visible to a cross-module consumer.
 ///
-/// A normal consumer is not rechecked here: namespace construction already exposes only support
-/// surfaces legal for its normal position. Support roots always require the strict support-scope
-/// check, and a shared helper requires it whenever its owning module also has a support surface,
-/// because the helper is visible from both authored roots. Returns `true` when the provider is not
-/// a support surface or no check applies.
+/// Authorisation uses the importing source's authored role, never the module's primary role:
+/// an entry root is a normal-position consumer, a support facade keeps the strict support-scope
+/// check, and a shared helper in a module that also has a support surface must satisfy the
+/// stricter intersection because both authored roots can reach it. A normal root is not
+/// rechecked here: namespace construction already exposes only support surfaces legal for its
+/// normal position. Returns `true` when the provider is not a support surface or no check
+/// applies.
 fn cross_module_support_import_is_visible(
     graph: &ProjectModuleGraph,
     provider_module_id: ModuleId,
@@ -1158,18 +1160,19 @@ fn cross_module_support_import_is_visible(
         return true;
     }
 
-    let needs_support_scope_check = match consumer_role {
-        ModuleRootRole::Support => true,
-        ModuleRootRole::Shared => graph.node(module_id).has_surface(ModuleRootRole::Support),
-        ModuleRootRole::Entry => false,
-        ModuleRootRole::Normal | ModuleRootRole::SyntheticProjectContext => false,
+    let checked_role = match consumer_role {
+        ModuleRootRole::Entry => Some(ModuleRootRole::Normal),
+        ModuleRootRole::Support => Some(ModuleRootRole::Support),
+        ModuleRootRole::Shared => graph
+            .node(module_id)
+            .has_surface(ModuleRootRole::Support)
+            .then_some(ModuleRootRole::Support),
+        ModuleRootRole::Normal | ModuleRootRole::SyntheticProjectContext => None,
     };
-    !needs_support_scope_check
-        || graph.is_support_visible_to_consumer_role(
-            provider_module_id,
-            module_id,
-            ModuleRootRole::Support,
-        )
+
+    checked_role.is_none_or(|role| {
+        graph.is_support_visible_to_consumer_role(provider_module_id, module_id, role)
+    })
 }
 
 /// Raise a compiler-bug report when the project module graph and discovered inventories disagree.

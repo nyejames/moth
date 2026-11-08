@@ -953,17 +953,24 @@ fn with_namespace_resolution(
         source_package_boundary_indexes,
         &external_packages,
     );
-    let provider_paths = ["child", "helper", "project"]
-        .into_iter()
-        .map(|segment| {
-            (
-                segment.to_owned(),
-                path_fork
-                    .try_intern_child(PathId::ROOT, string_table.intern(segment))
-                    .expect("test path fits"),
-            )
-        })
-        .collect::<Vec<_>>();
+    let provider_paths = [
+        "child",
+        "helper",
+        "project",
+        "paired",
+        "entry_child",
+        "entry_support",
+    ]
+    .into_iter()
+    .map(|segment| {
+        (
+            segment.to_owned(),
+            path_fork
+                .try_intern_child(PathId::ROOT, string_table.intern(segment))
+                .expect("test path fits"),
+        )
+    })
+    .collect::<Vec<_>>();
     body(
         &module_namespace_set,
         &source_tree_index,
@@ -1697,7 +1704,7 @@ pub(super) fn compiled_package(prefix: &str) -> CompiledSourcePackage {
             root_module_id,
             CompiledModuleArtifact {
                 module: empty_module(),
-                interface: PublicSemanticInterface {
+                normal_interface: Some(PublicSemanticInterface {
                     module_origin: origin,
                     export_bindings: Vec::new(),
                     export_diagnostic_provenance: Vec::new(),
@@ -1705,7 +1712,7 @@ pub(super) fn compiled_package(prefix: &str) -> CompiledSourcePackage {
                     declarations: Vec::new(),
                     reusable_evidence: Vec::new(),
                     concrete_call_summaries: Vec::new(),
-                },
+                }),
                 support_interface: None,
             },
         )
@@ -1814,6 +1821,163 @@ fn direct_selection_resolves_cross_module_child_facade() {
                     );
                 }
                 other => panic!("expected CrossModule, got {:?}", other),
+            }
+        },
+    );
+}
+
+#[test]
+fn namespace_selects_present_child_surfaces_without_surface_fallback() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(src.join("child")).expect("should create support-only child");
+    fs::create_dir_all(src.join("paired")).expect("should create paired child");
+    fs::create_dir_all(src.join("entry_child")).expect("should create entry-only child");
+    fs::create_dir_all(src.join("entry_support"))
+        .expect("should create paired entry/support child");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@mod.moth"), "").expect("should write normal parent root");
+    fs::write(
+        src.join("child/@package.moth"),
+        "export:\n    value #= 1\n;\n",
+    )
+    .expect("should write support-only child root");
+    fs::write(src.join("paired/@mod.moth"), "export:\n    value #= 1\n;\n")
+        .expect("should write paired normal root");
+    fs::write(
+        src.join("paired/@package.moth"),
+        "export:\n    value #= 1\n;\n",
+    )
+    .expect("should write paired support root");
+    fs::write(src.join("entry_child/@entry.moth"), "").expect("should write entry-only child root");
+    fs::write(src.join("entry_support/@entry.moth"), "")
+        .expect("should write paired entry/support entry root");
+    fs::write(
+        src.join("entry_support/@package.moth"),
+        "export:\n    value #= 1\n;\n",
+    )
+    .expect("should write paired entry/support support root");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    let declaring_source =
+        fs::canonicalize(src.join("@mod.moth")).expect("declaring source should canonicalize");
+
+    with_namespace_resolution(
+        &config,
+        &resolver,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        None,
+        |namespace_set,
+         source_tree_index,
+         _package_prefix,
+         string_table,
+         provider_paths,
+         path_fork| {
+            let resolution =
+                DirectoryDependencyResolution::project(namespace_set, source_tree_index, path_fork);
+
+            let support_only = resolution
+                .resolve_dependency(
+                    &provider_root(&["child"], provider_paths),
+                    &declaring_source,
+                    string_table,
+                )
+                .expect("a support-only child must resolve through its support surface");
+            match support_only {
+                ResolvedDependency::CrossModule {
+                    provider_surface,
+                    root_file,
+                    ..
+                } => {
+                    assert_eq!(
+                        provider_surface,
+                        ModuleRootRole::Support,
+                        "a support-only child must never be selected as a normal child module"
+                    );
+                    assert!(
+                        root_file.ends_with("child/@package.moth"),
+                        "expected the support facade root file, got {root_file:?}"
+                    );
+                }
+                other => panic!("expected CrossModule, got {other:?}"),
+            }
+
+            let paired = resolution
+                .resolve_dependency(
+                    &provider_root(&["paired"], provider_paths),
+                    &declaring_source,
+                    string_table,
+                )
+                .expect("a paired child must resolve through its normal surface");
+            match paired {
+                ResolvedDependency::CrossModule {
+                    provider_surface,
+                    root_file,
+                    ..
+                } => {
+                    assert_eq!(
+                        provider_surface,
+                        ModuleRootRole::Normal,
+                        "a paired child must select its normal surface without a support fallback"
+                    );
+                    assert!(
+                        root_file.ends_with("paired/@mod.moth"),
+                        "expected the normal facade root file, got {root_file:?}"
+                    );
+                }
+                other => panic!("expected CrossModule, got {other:?}"),
+            }
+
+            let entry_only = resolution
+                .resolve_dependency(
+                    &provider_root(&["entry_child"], provider_paths),
+                    &declaring_source,
+                    string_table,
+                )
+                .expect_err("an entry-only child has no importable surface");
+            assert_eq!(
+                entry_only.code(),
+                "MOTH-IMPORT-0005",
+                "an entry-only child must report a missing dependency target"
+            );
+
+            let entry_support = resolution
+                .resolve_dependency(
+                    &provider_root(&["entry_support"], provider_paths),
+                    &declaring_source,
+                    string_table,
+                )
+                .expect("a paired entry/support child must resolve through its support surface");
+            match entry_support {
+                ResolvedDependency::CrossModule {
+                    provider_surface,
+                    root_file,
+                    ..
+                } => {
+                    assert_eq!(
+                        provider_surface,
+                        ModuleRootRole::Support,
+                        "a co-located entry must never be selected as the provider surface"
+                    );
+                    assert!(
+                        root_file.ends_with("entry_support/@package.moth"),
+                        "expected the support facade root file, got {root_file:?}"
+                    );
+                }
+                other => panic!("expected CrossModule, got {other:?}"),
             }
         },
     );

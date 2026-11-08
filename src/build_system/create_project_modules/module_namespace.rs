@@ -782,8 +782,9 @@ fn build_package_namespaces(
 /// Add same-module source entries for one module from its owned source rows.
 ///
 /// Each owned source's extensionless module-relative logical path becomes a namespace key.
-/// Root files (names starting with `@` or `+`) are excluded because direct root dependencies are
-/// rejected.
+/// Special root files are excluded because direct root dependencies are rejected: every root
+/// file's owning origin carries a Normal, Support, Entry or SyntheticProjectContext role (for
+/// example `@mod.moth`, `@package.moth` or `@entry.moth`).
 fn populate_same_module_entries(
     namespace: &mut ModuleNamespace,
     index: &SourceTreeIndex,
@@ -804,6 +805,7 @@ fn populate_same_module_entries(
                     origin.role(),
                     ModuleRootRole::Normal
                         | ModuleRootRole::Support
+                        | ModuleRootRole::Entry
                         | ModuleRootRole::SyntheticProjectContext
                 )
             });
