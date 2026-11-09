@@ -845,12 +845,12 @@ A `.mtf` source begins as an implicit compile-time `$md` body exported as `conte
 
 ### Directives and formatting
 
-Directives are compiler-defined operations written `$name`, `$name value` or `$name key = value`.
+Directives are compiler-defined operations written `$name`, `$name value` or one named `$name key = value` where the directive's contract allows it.
 Builders add no directives. The parenthesised call spelling `$name(...)` is rejected.
-Some format templates, while others configure projects or mark declarations (see @../directives (Directives)).
+Some format templates, while others mark declarations or declare build inputs (see @../directives (Directives)).
 
 `$md` formats Markdown. `$raw` preserves text and whitespace. `$note`/`$todo` discard content, while `$doc` marks documentation.
-The compiler supplies `$html`, `$css`, `$escape_html` and `$code "language"` to every builder. `$code` highlights literal code.
+The compiler provides `$html`, `$css`, `$escape_html` and `$code` (optionally `$code "language"`) under every builder. `$code` highlights literal code.
 Formatters apply to their own templates, and incompatible formatters can't share a head.
 
 ### Slots and wrappers
@@ -879,7 +879,7 @@ Formatters apply to their own templates, and incompatible formatters can't share
 `$slot`, `$slot name` and `$slot 1` declare default, named and positional slots. Each occurrence may carry a `= <compile-time String>` default. `$in name:` fills one named slot. Names and positions are bare tokens, so `$in` has no String-expression or positional form.
 A routed contribution, including an explicitly empty one, suppresses the occurrence default. Missing slots without a default render empty, repeated slots replay content, multiple named contributions concatenate and unassigned loose content is an error.
 An application with content closes its own unfilled defaults; a head-only reference stays open for later composition.
-`$before` and `$after` wrap direct children with a compile-time String or constant template. Their values may contain named slots only, and an explicit default or positional slot is rejected. Each directive may appear once per head. `$fresh` skips one parent wrapper. Structurally absent output produces no wrapper, while a selected empty String is wrapped.
+`$before` and `$after` take one bare operand and wrap direct children with a compile-time String or constant template. Their values may contain named slots only, an explicit default or positional slot is rejected, and the removed `$before = value` / `$after = value` spellings are not accepted. Each directive may appear once per head. `$fresh` skips one parent wrapper. Structurally absent output produces no wrapper, while a selected empty String is wrapped.
 Direct top-level const `$in` inserts on an active entry root are builder slots, not ordinary template slots. See Pages and top-level work.
 `$required` and `$unique` are deferred candidates, not implemented directives. Loop-level uniqueness is excluded; const function syntax is outside this work.
 
@@ -1122,8 +1122,9 @@ See @../project-structure (Project structure) and @../packages (Package visibili
 
 ## Directives and project configuration
 
-Template-head directives modify their template. A source directive such as `$config` starts its own line and attaches to the next declaration
-without a blank line between. Each directive takes at most one optional compile-time operand. Directives are provided by the compiler, not defined in source.
+Template-head directives modify their template. The source modifier `$config` starts its own line and attaches to the next eligible declaration;
+comment-only lines may intervene, but a blank physical line breaks attachment. Each directive takes at most one optional compile-time operand, which
+starts on the directive line and may continue while balanced. Directives are provided by the compiler, not defined in source.
 
 An authored project-root `config.moth` contains compile-time values and configuration. It uses ordinary named records for the project and the selected
 builder. Source imports, functions and runtime work belong in ordinary modules:
@@ -1142,9 +1143,10 @@ There are no `$project`, `$builder` or `$html_builder` directives.
 
 ### Build inputs
 
-`$config` marks the next **explicitly typed top-level constant** as a build input. The initializer supplies a fallback.
-Without one, an ordinary input is required while an optional input defaults to `none`. `$config` takes no operand and only a marked binding
-may omit its initializer.
+`$config` marks one **explicitly typed top-level compile-time `#` binding**, in `config.moth` or a selected source module, as a build input.
+The binding name is the input key, its declared type is the receiving contract and the initializer supplies the fallback. Without an initializer,
+an ordinary input is required while an optional input defaults to `none`. `$config` takes no operand and only a marked binding may omit its initializer.
+The retired `#Config of T` input qualifier does not parse; use `$config` with an ordinary `#T` annotation.
 
 [codeblock, $code "moth":
     $config

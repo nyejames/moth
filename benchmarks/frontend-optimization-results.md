@@ -3245,10 +3245,12 @@ is a `mode = "success"` fixture whose `unused.mtf` carries an unmatched `]` prec
 compiler must never import it. No source the compiler is expected to accept is missing from the
 census.
 
-The census tokenizes with the HTML project's style directives merged in, exactly as
-`moth_template::compile` does. An earlier run used built-ins alone and lost 276 documentation
-templates to `InvalidStyleDirective` - precisely the files that carry the longest spans. The
-selection below was not made on that run.
+That run tokenized with the HTML project's style directives merged in, which is what
+`moth_template::compile` did at the time. The merge no longer exists: the frontend's built-in
+registry now covers every formatter under every builder, and the census tokenizes with
+`StyleDirectiveRegistry::built_ins()`. An earlier run, using built-ins alone while that split
+still existed, lost 276 documentation templates to `InvalidStyleDirective` - precisely the files
+that carry the longest spans. The selection below was not made on that run.
 
 ### Span length distribution
 

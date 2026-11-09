@@ -7,7 +7,7 @@
 //! WHY:
 //! - The frontend owns every template formatter and makes them available under every builder.
 //!   Keeping the implementations here separates formatter logic from generic template parsing
-//!   while giving one owner for directive registration and execution.
+//!   while giving one owner for directive ownership and execution.
 
 // -------------------------
 //  Public Modules

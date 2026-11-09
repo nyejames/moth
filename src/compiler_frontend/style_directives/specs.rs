@@ -3,8 +3,7 @@
 //! These types describe directive syntax, parser effects, formatter factories, and core
 //! compiler-owned behavior. Frontend-owned directive values live in `builtins`.
 
-use crate::compiler_frontend::ast::templates::template::Template;
-use crate::compiler_frontend::ast::templates::template::{BodyWhitespacePolicy, Formatter};
+use crate::compiler_frontend::ast::templates::template::Formatter;
 use crate::compiler_frontend::style_directives::compatibility::TemplateHeadCompatibility;
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 
@@ -97,31 +96,15 @@ pub enum CoreStyleDirectiveKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StyleDirectiveArgumentType {
     String,
-    // Parser normalization still understands these operand kinds, but no frontend directive
-    // currently declares them.
-    #[allow(dead_code)]
-    Template,
-    #[allow(dead_code)]
-    Number,
-    #[allow(dead_code)]
-    Bool,
 }
 
 /// Parsed value for an optional handler-based style operand.
 #[derive(Clone, Debug)]
 pub enum StyleDirectiveArgumentValue {
     String(String),
-    // Produced by parser normalization for the dormant argument types above. Formatter
-    // factories only consume `String` today, so these payloads stay unread.
-    #[allow(dead_code)]
-    Template(Box<Template>),
-    #[allow(dead_code)]
-    Number(f64),
-    #[allow(dead_code)]
-    Bool(bool),
 }
 
-/// Template-style toggles that a handler-based directive can apply when used.
+/// Semantic template-style state a handler-based directive applies when used.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct StyleDirectiveEffects {
     /// Optional semantic style label applied to the effective `TemplateIr.style.id`.
@@ -130,12 +113,8 @@ pub struct StyleDirectiveEffects {
     /// - `style_id` tags parsed template semantics.
     /// - `Formatter.id` identifies the concrete formatter implementation.
     pub style_id: Option<&'static str>,
-    /// Optional body-whitespace policy override.
-    pub body_whitespace_policy: Option<BodyWhitespacePolicy>,
     /// Optional toggle for parsing `[...]` as literal body text.
     pub suppress_child_templates: Option<bool>,
-    /// Optional toggle that opts this template out of parent `$before`/`$after` wrappers.
-    pub skip_parent_child_wrappers: Option<bool>,
 }
 
 /// Formatter factory used by handler-based directives.
@@ -185,7 +164,7 @@ pub enum StyleDirectiveKind {
     SourceModifier(SourceModifierTarget),
 }
 
-/// Frontend registration contract for one style directive.
+/// Frontend-owned contract for one style directive.
 ///
 /// `body_mode` controls template-body tokenization after the directive appears in the template
 /// head. `head_compatibility` controls parse-time compatibility against other meaningful head
@@ -201,7 +180,7 @@ pub struct StyleDirectiveSpec {
 }
 
 impl StyleDirectiveSpec {
-    /// Register a handler-based template directive.
+    /// Declare a handler-based frontend directive.
     pub fn handler(
         name: impl Into<String>,
         body_mode: TemplateBodyMode,

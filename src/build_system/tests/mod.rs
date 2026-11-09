@@ -430,9 +430,9 @@ impl BackendBuilder for FailingValidationBuilder {
     }
 }
 
-struct NoDirectiveBuilder;
+struct MinimalBuilder;
 
-impl BackendBuilder for NoDirectiveBuilder {
+impl BackendBuilder for MinimalBuilder {
     type Error = std::convert::Infallible;
     fn build_backend(
         &self,

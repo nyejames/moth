@@ -19,30 +19,21 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{TokenRef, TokenTag};
 use moth_lexical::numeric::grammar::NumericLiteralSign;
 
 /// Contract syntax retained for one `$config`-marked compile-time binding.
 ///
-/// The binding's ordinary declaration owns its type annotation and initializer. This value only
-/// preserves the facts the input-contract stages need, including the authored `$config` span for
-/// diagnostics.
+/// The binding's ordinary declaration owns its type annotation and initializer, and absence is
+/// derived by the consuming contract stage: header normalization for selected sources, AST resolution for the config source. This value only preserves the authored
+/// `$config` span, so the declaration never carries a second copy of either fact.
 #[derive(Clone, Debug)]
 pub(crate) struct BuildConfigContractSyntax {
-    pub(crate) type_annotation: ParsedTypeRef,
     /// Authored span of the `$config` directive that marked this binding.
     pub(crate) marker_span: SourceSpan,
-    /// Whether an absent value means optional absence rather than a required input.
-    pub(crate) default_none: bool,
 }
 
-impl BuildConfigContractSyntax {
-    /// Remap all interned type names into the merged module string table.
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        self.type_annotation.remap_string_ids(remap);
-    }
-}
 /// One normalized source-owned `$config` declaration shell.
 ///
 /// The shell is collected while header syntax is prepared, before provider interfaces or AST
@@ -124,6 +115,7 @@ pub(crate) fn parsed_type_span(parsed: &ParsedTypeRef) -> Option<SourceSpan> {
 pub(crate) fn normalize_source_build_config_contract_from_token(
     name: StringId,
     name_span: SourceSpan,
+    type_annotation: &ParsedTypeRef,
     contract: &BuildConfigContractSyntax,
     token: Option<TokenRef<'_>>,
     string_table: &mut StringTable,
@@ -136,11 +128,11 @@ pub(crate) fn normalize_source_build_config_contract_from_token(
             Some(name_span),
         ))
     })?;
-    let value_type = build_input_type_from_parsed(&contract.type_annotation).ok_or_else(|| {
+    let value_type = build_input_type_from_parsed(type_annotation).ok_or_else(|| {
         HeaderParseFailure::Diagnostic(project_config::invalid_config_reason(
             Some(name),
             InvalidConfigReason::ConfigQualifierUnsupportedType,
-            parsed_type_span(&contract.type_annotation),
+            parsed_type_span(type_annotation),
         ))
     })?;
 
@@ -287,7 +279,7 @@ pub(crate) fn normalize_source_build_config_contract_from_token(
 pub(crate) fn normalize_source_build_config_contract_non_primitive(
     name: StringId,
     name_span: SourceSpan,
-    contract: &BuildConfigContractSyntax,
+    type_annotation: &ParsedTypeRef,
     span: SourceSpan,
     string_table: &mut StringTable,
 ) -> Result<SourceBuildConfigContract, HeaderParseFailure> {
@@ -299,11 +291,11 @@ pub(crate) fn normalize_source_build_config_contract_non_primitive(
             Some(name_span),
         ))
     })?;
-    let value_type = build_input_type_from_parsed(&contract.type_annotation).ok_or_else(|| {
+    let value_type = build_input_type_from_parsed(type_annotation).ok_or_else(|| {
         HeaderParseFailure::Diagnostic(project_config::invalid_config_reason(
             Some(name),
             InvalidConfigReason::ConfigQualifierUnsupportedType,
-            parsed_type_span(&contract.type_annotation),
+            parsed_type_span(type_annotation),
         ))
     })?;
     Err(HeaderParseFailure::Diagnostic(

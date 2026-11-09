@@ -222,7 +222,6 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
                 StyleDirectiveEffects {
                     style_id: Some("code"),
                     suppress_child_templates: Some(true),
-                    ..StyleDirectiveEffects::default()
                 },
                 Some(code_formatter_factory),
             ),

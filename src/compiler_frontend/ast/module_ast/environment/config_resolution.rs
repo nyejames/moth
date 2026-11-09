@@ -36,7 +36,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
-    build_input_type_from_parsed, parsed_type_span,
+    build_input_type_from_parsed, build_input_type_name, parsed_type_span,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -81,20 +81,27 @@ pub(super) fn resolve_config_declaration(
                 Some(contract_syntax.marker_span),
             )
         })?;
-        let Some(contract) = build_input_type_from_parsed(&contract_syntax.type_annotation) else {
+        let Some(type_annotation) = declaration.type_syntax.as_ref() else {
+            return Err(ExpressionParseError::from(InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "config contract declaration retained no type annotation",
+            )));
+        };
+        let Some(contract) = build_input_type_from_parsed(type_annotation) else {
             return Err(config_expression_error(
                 Some(declaration_name),
                 InvalidConfigReason::ConfigQualifierUnsupportedType,
-                parsed_type_span(&contract_syntax.type_annotation),
+                parsed_type_span(type_annotation),
             ));
         };
+        // The contract now owns the semantic type; the source annotation has no later reader.
+        declaration.type_syntax = None;
         // Pass the initializer as a bare `ExprId`: the view borrow must end before
         // `normalize_config_default` mutably borrows the owners for the template fold.
         let initializer = declaration.value.initializer();
         let authored_default = normalize_config_default(
             ConfigDefaultMetadata {
                 field_name: declaration_name,
-                default_none: contract_syntax.default_none,
                 default_span: Some(contract_syntax.marker_span),
                 contract,
             },
@@ -324,7 +331,6 @@ enum AuthoredConfigDefault {
 /// Declaration-owned identity and contract for validating an authored config default.
 struct ConfigDefaultMetadata {
     field_name: StringId,
-    default_none: bool,
     default_span: Option<SourceSpan>,
     contract: BuildInputType,
 }
@@ -342,26 +348,16 @@ fn normalize_config_default(
     // before `primitive_value_from_expression_id` mutably borrows the owners for the fold.
     let ConfigDefaultMetadata {
         field_name,
-        default_none,
         default_span,
         contract,
     } = metadata;
     let Some(expression_id) = expression else {
-        let span = default_span;
-        if !default_none {
+        // No initializer: an optional contract records absence, a required primitive contract
+        // leaves the input missing for the explicit-input/default check below.
+        if !contract.is_optional() {
             return Ok(AuthoredConfigDefault::Missing);
         }
-        if !contract.is_optional() {
-            return Err(config_input_type_mismatch(
-                Some(field_name),
-                "None",
-                contract,
-                span,
-                None,
-                string_table,
-            ));
-        }
-        return Ok(AuthoredConfigDefault::None { span });
+        return Ok(AuthoredConfigDefault::None { span: default_span });
     };
     let (span, value_type_id, snapshot_const) = {
         let snapshot = expression_builder.view(expression_id)?;
@@ -430,7 +426,7 @@ fn normalize_config_default(
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "resolution record keeps field identity and text, input name and contract, required/default/value state, origin, and qualifier/value spans as separate inputs"
+    reason = "resolution record keeps field identity and text, input name and contract, required/default/value state, origin, and marker/value spans as separate inputs"
 )]
 fn config_resolution_record(
     field_name: StringId,
@@ -441,7 +437,7 @@ fn config_resolution_record(
     default: Option<PrimitiveBuildValue>,
     value: Option<PrimitiveBuildValue>,
     origin: BuildConfigValueOrigin,
-    qualifier_span: Option<SourceSpan>,
+    marker_span: Option<SourceSpan>,
     value_location: Option<BuildConfigValueLocation>,
 ) -> ConfigResolutionRecord {
     let fingerprint = build_config_fingerprint(field_text, contract, value.as_ref());
@@ -454,7 +450,7 @@ fn config_resolution_record(
         value,
         origin,
         fingerprint,
-        qualifier_span,
+        marker_span,
         value_location,
     }
 }
@@ -479,7 +475,7 @@ fn config_input_type_mismatch(
         key,
         InvalidConfigReason::ConfigInputTypeMismatch {
             provided: string_table.intern(provided),
-            expected: string_table.intern(&config_type_name(contract)),
+            expected: string_table.intern(&build_input_type_name(contract)),
             provided_argument_index,
         },
         span,
@@ -532,15 +528,6 @@ fn build_config_input_argument_index(location: &BuildConfigValueLocation) -> Opt
     match location {
         BuildConfigValueLocation::Command(location) => Some(location.argument_index()),
         BuildConfigValueLocation::Source(_) => None,
-    }
-}
-
-fn config_type_name(contract: BuildInputType) -> String {
-    let primitive = contract.primitive().name();
-    if contract.is_optional() {
-        format!("{primitive}?")
-    } else {
-        primitive.to_owned()
     }
 }
 

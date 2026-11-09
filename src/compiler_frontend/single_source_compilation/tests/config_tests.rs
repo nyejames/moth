@@ -594,10 +594,10 @@ fn rejects_implicit_sibling_field_reference_inside_a_grouped_project_record() {
 }
 
 #[test]
-fn rejects_config_contract_on_builder_section_fields() {
+fn top_level_config_contract_can_be_referenced_from_a_builder_section_field() {
     // Builder and tooling section fields cannot declare `$config`; only top-level source
-    // compile-time declarations carry contracts. The service rejects this before any folded
-    // section value reaches build-side validation.
+    // compile-time declarations carry contracts. A section field may still reference one of
+    // those top-level contracts while it folds.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
@@ -622,9 +622,7 @@ fn rejects_config_contract_on_builder_section_fields() {
         &mut string_table,
     )
     .result
-    .expect(
-        "a top-level contract referenced by a builder section field folds without a qualifier error",
-    );
+    .expect("a top-level contract referenced by a builder section field should fold");
 
     let compiled = messages;
     let html = compiled

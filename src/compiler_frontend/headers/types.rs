@@ -1124,7 +1124,6 @@ fn rebind_declaration_source_identity(declaration: &mut DeclarationSyntax, file_
     rebind_parsed_type_ref_source_identity(&mut declaration.type_annotation, file_id);
     if let Some(contract) = &mut declaration.config_contract {
         contract.marker_span = SourceSpan::new(file_id, contract.marker_span.local());
-        rebind_parsed_type_ref_source_identity(&mut contract.type_annotation, file_id);
     }
     // Initializer references are scanned from this declaration's source-owned initializer tokens;
     // preserve each local range while moving it into the finalized source identity.
@@ -2626,7 +2625,6 @@ fn validate_declaration_syntax(
     validate_parsed_type_ref(&declaration.type_annotation, file_id)?;
     if let Some(contract) = &declaration.config_contract {
         validate_source_span(Some(contract.marker_span), file_id, "config marker")?;
-        validate_parsed_type_ref(&contract.type_annotation, file_id)?;
     }
     validate_source_range(
         declaration.initializer_range,

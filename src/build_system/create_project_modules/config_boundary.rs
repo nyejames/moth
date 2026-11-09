@@ -386,7 +386,7 @@ fn effective_input_contract_field(
         name,
         type_identity: canonical_type_identity_for_build_input(record.contract),
         value,
-        span: record.qualifier_span,
+        span: record.marker_span,
         fingerprint: record.fingerprint,
         kind: EffectiveProjectFieldKind::InputContract {
             input_name: record.input_name.clone(),

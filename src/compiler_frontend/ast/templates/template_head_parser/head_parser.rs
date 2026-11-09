@@ -960,7 +960,7 @@ pub fn parse_template_head(
                 );
             }
 
-            // Style and setting directives
+            // Template-head directives
             TokenTag::STYLE_DIRECTIVE => {
                 let directive = token_stream
                     .current_string_id_in(string_table)?
@@ -970,8 +970,9 @@ pub fn parse_template_head(
                             "template-head directive token had no string payload",
                         )
                     })?;
-                // Template directives share the `$name` token shape with style directives.
-                // Parse `$slot` / `$in` first, then fall back to style handling.
+                // Every template-head directive shares the `$name` token shape. `$slot`, `$in`,
+                // `$before` and `$after` parse their structural targets first; every other spec
+                // dispatches through the generic style handler.
                 let directive_span = token_stream.current_span();
                 head_state.has_explicit_template_directive = true;
                 let directive_name = string_table.resolve(directive).to_owned();

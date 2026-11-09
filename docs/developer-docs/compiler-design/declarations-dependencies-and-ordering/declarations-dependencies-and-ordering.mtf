@@ -144,7 +144,7 @@ Final prose and rendering of diagnostics wait for the diagnostics article. Here 
 
 - **Accepted design:** `PreparedHeaderSyntax`, `BoundModuleHeaders` and distinct relationship classes.
 - **Current implementation:** header and dependency progress rows.
-- **Queued work:** `general-directives-plan.md` updates retained directive and input-contract metadata; canonical module compilation, dependency binding and typed project values already landed. Use the progress matrix for remaining partial coverage.
+- **Delivered:** a `$config` source modifier attaches to one typed compile-time binding, and the declaration shell retains the single contract fact the input stage consumes. Canonical module compilation, dependency binding and typed project values already landed. Use the progress matrix for remaining partial coverage.
 - **Deferred or outside scope:** this page does not teach body type checking.
 
 ## Exit state

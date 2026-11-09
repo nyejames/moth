@@ -5,7 +5,7 @@
 //!       intermediate value a stage produced rather than only the final outcome.
 //! WHY:  stage-local unit tests can all pass while the handoff between two stages breaks. These
 //!       tests own the handoffs: source identity surviving into diagnostics, declaration ordering
-//!       surviving into lowering, and project-owned style directives reaching header parsing.
+//!       surviving into lowering, and frontend-owned style directives reaching header parsing.
 //!
 //! This harness is NOT the canonical module compilation sequence and must not be read as a model
 //! of it. [`module_compilation::compile_module`](crate::compiler_frontend::module_compilation)

@@ -476,14 +476,14 @@ pub fn resolve_declaration_syntax(
                 .is_some_and(|name| names.contains(name))
         });
     let source_build_config_context = config_constant_context && has_source_build_config_contract;
-    if let Some(contract) = &declaration_syntax.config_contract
+    if declaration_syntax.config_contract.is_some()
         && (config_resolution_context || source_build_config_context)
-        && build_input_type_from_parsed(&contract.type_annotation).is_none()
+        && build_input_type_from_parsed(&declaration_syntax.type_annotation).is_none()
     {
         return Err(project_config::invalid_config_reason(
             path_fork.component(qualified_name),
             InvalidConfigReason::ConfigQualifierUnsupportedType,
-            parsed_type_span(&contract.type_annotation),
+            parsed_type_span(&declaration_syntax.type_annotation),
         )
         .into());
     }
@@ -708,7 +708,9 @@ pub fn resolve_declaration_syntax(
             type_id: resolved_annotation
                 .type_id
                 .unwrap_or(builtin_type_ids::NONE),
-            type_syntax: None,
+            type_syntax: config_contract
+                .as_ref()
+                .map(|_| declaration_syntax.semantic_type()),
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::PendingConstant,
             binding_span: None,
@@ -1101,7 +1103,11 @@ pub fn resolve_declaration_syntax(
         type_id: expression_builder
             .view(parsed_initializer)?
             .value_type_id()?,
-        type_syntax: None,
+        // Only AST config resolution reads a constant's retained annotation.
+        type_syntax: config_contract
+            .as_ref()
+            .filter(|_| config_resolution_context)
+            .map(|_| declaration_syntax.semantic_type()),
         value_mode,
         value: DeclarationValue::Initializer(parsed_initializer),
         binding_span: None,

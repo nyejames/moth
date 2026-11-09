@@ -10,7 +10,7 @@ use std::fs;
 use std::path::PathBuf;
 
 #[test]
-fn frontend_builtin_directives_work_without_builder_registered_project_directives() {
+fn frontend_builtin_directives_work_with_a_minimal_builder() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
@@ -22,7 +22,7 @@ fn frontend_builtin_directives_work_without_builder_registered_project_directive
     )
     .expect("should write source file");
 
-    let builder = NoDirectiveBuilder;
+    let builder = MinimalBuilder;
     let result = successful_compilation_value(
         build_project(
             &builder,

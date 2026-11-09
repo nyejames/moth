@@ -406,11 +406,11 @@ Stage 0 belongs to the build system. It selects graphs, source sets, provider or
 
 ### Stage 1: tokenization
 
-Tokenization recognises lexical forms and records exact source locations, string/template delimiter context, numeric spelling, operator/assignment spacing and registered directive syntax. Retained tokens belong to their source. Later consumers use bounded ranges and typed handles rather than cloned token vectors.
+Tokenization recognises lexical forms and records exact source locations, string/template delimiter context, numeric spelling, operator/assignment spacing and recognised directive syntax. Retained tokens belong to their source. Later consumers use bounded ranges and typed handles rather than cloned token vectors.
 
 The neutral numeric spelling and destination-aware materialisation service belongs to `moth-lexical`. Tokenization retains source-local spelling so the compiler can select that service for its receiving type, rather than assigning every literal an `i32` or `f64` value early.
 
-The frontend owns every directive name, and there is no builder extension point. Tokenization and template parsing use one frontend registry while retaining their distinct lexical modes. A descriptor records ownership, permitted context, form, operand contract, processing phase and effects. It does not grant arbitrary callbacks into semantic stages. Recognition distinguishes unknown names, wrong placement and unavailable capabilities.
+The frontend owns every directive name, and there is no builder extension point. Tokenization and template parsing use one frontend registry while retaining their distinct lexical modes. A descriptor records ownership, permitted context, form, operand contract and effects. It does not grant arbitrary callbacks into semantic stages. Recognition distinguishes unknown names, wrong placement and unavailable capabilities.
 
 Ordinary `.moth` starts in code mode. `.mtf` starts in an implicit template body while preserving original locations. Plain Markdown `.md` is prepared before tokenization and has no tokenizer entry mode. Tokenization does not resolve dependencies, types or declarations.
 
@@ -689,7 +689,7 @@ A call whose declared contract is Never is valid only as a standalone statement.
 
 AST validates `~` on existing-place writes and on existing mutable places passed to mutable parameters, including named argument values. Each existing multi-bind target carries its own marker, and all incoming results are evaluated before updates. Mutable receivers separately require `~` on an existing mutable place. Fresh values, including `copy place`, enter ordinary mutable parameters unmarked. A mutable alias declaration uses `writer ~= source` without marking the source. These forms express access, not inferred transfer or type identity. Wire and Route retain their own receiving contracts.
 
-Handler directives take at most one bare compile-time operand, reject escaping or mutable evaluation and reject the call spelling `$name(...)`. Core template directives keep their own head syntax: `$slot` declarations with an optional compile-time String default, `$in` named targets, and bare `$before`/`$after` operands. Directives are compiler-defined; no builder or source file can extend the parser.
+Handler directives take at most one bare compile-time operand, reject escaping or mutable evaluation and reject the call spelling `$name(...)`. Core template directives keep their own head syntax: `$slot` declarations with an optional compile-time String default, `$in` named targets, and one bare `$before`/`$after` operand. Directives are compiler-defined; no builder or source file can extend the parser.
 
 `assert` is a reserved statement intrinsic with compiler-owned expectations equivalent to:
 
@@ -731,7 +731,7 @@ Binding-backed Never requires explicit `@moth.sig ... -> !`. Mixed annotation fo
 
 #### Constants, build configuration and const records
 
-Header preparation discovers constant dependencies. AST checks and folds them. `$config` marks one following explicitly typed top-level compile-time binding as an input contract. Project fields and ordinary helpers never supply or block inputs implicitly.
+Header preparation discovers constant dependencies. AST checks and folds them. `$config` is the only source modifier; it marks one following explicitly typed top-level compile-time binding in `config.moth` or a selected source module as an input contract. The binding name is the input key, the declared type is the contract and the initializer is the fallback; only a marked binding may omit one. Project fields and ordinary helpers never supply or block inputs implicitly.
 
 Bootstrap defaults fold within the config service. Source defaults remain self-contained primitive literals or `none`, resolved after graph discovery and before module AST semantics. The resolved value is an ordinary folded constant, with no runtime wrapper, HIR category or visibility rule. The build document owns the exact domain, precedence and matching contract.
 

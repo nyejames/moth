@@ -911,7 +911,7 @@ pub(crate) struct ConfigResolutionRecord {
     pub(crate) value: Option<PrimitiveBuildValue>,
     pub(crate) origin: BuildConfigValueOrigin,
     pub(crate) fingerprint: BuildConfigFingerprint,
-    pub(crate) qualifier_span: Option<SourceSpan>,
+    pub(crate) marker_span: Option<SourceSpan>,
     pub(crate) value_location: Option<BuildConfigValueLocation>,
 }
 
@@ -995,7 +995,7 @@ impl ConfigResolutionServices {
                     Some(BuildConfigValueLocation::Source(span)) => Some(*span),
                     Some(BuildConfigValueLocation::Command(_)) | None => None,
                 };
-                (record.origin, provider_span.or(record.qualifier_span))
+                (record.origin, provider_span.or(record.marker_span))
             })
     }
 

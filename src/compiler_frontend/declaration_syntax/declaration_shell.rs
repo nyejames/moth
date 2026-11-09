@@ -104,9 +104,6 @@ impl DeclarationSyntax {
     /// Source-qualified ranges are identity independent and therefore remain unchanged.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.type_annotation.remap_string_ids(remap);
-        if let Some(contract) = &mut self.config_contract {
-            contract.remap_string_ids(remap);
-        }
         for reference in &mut self.initializer_references {
             reference.remap_string_ids(remap);
         }
@@ -202,19 +199,8 @@ pub fn parse_declaration_syntax(
         }
     };
 
-    let config_contract = match config_contract_target {
-        Some(marker_span) => Some(BuildConfigContractSyntax {
-            // Absence of an initializer on an optional contract means absence; an authored `none`
-            // initializer states the same fact explicitly.
-            default_none: match initializer_range {
-                None => matches!(&target.type_annotation, ParsedTypeRef::Optional { .. }),
-                Some(range) => initializer_is_none_literal(token_stream, range)?,
-            },
-            type_annotation: target.type_annotation.clone(),
-            marker_span,
-        }),
-        None => None,
-    };
+    let config_contract =
+        config_contract_target.map(|marker_span| BuildConfigContractSyntax { marker_span });
 
     Ok(DeclarationSyntax {
         binding_mode: target.binding_mode,
@@ -224,30 +210,6 @@ pub fn parse_declaration_syntax(
         initializer_references,
         span: target.span,
     })
-}
-
-/// Whether one already-validated initializer range is exactly the `none` literal.
-///
-/// WHY: `$config` records absence as a contract fact, while the ordinary expression grammar owns
-/// the `none` value itself. Reading the single token keeps that distinction without re-parsing the
-/// initializer.
-fn initializer_is_none_literal(
-    token_stream: &DeclarationCursor<'_>,
-    range: TokenRange,
-) -> DeclarationShellResult<bool> {
-    if range.len() != 1 {
-        return Ok(false);
-    }
-    let source = token_stream.canonical_cursor().source_tokens();
-    let mut cursor = source.cursor(range).map_err(|error| {
-        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
-            crate::compiler_frontend::compiler_messages::CompilerStage::HeaderParsing,
-            format!("config default range is outside its canonical source owner: {error:?}"),
-        ))
-    })?;
-    Ok(cursor
-        .advance()
-        .is_some_and(|token| token.tag() == TokenTag::NONE_LITERAL))
 }
 
 pub fn parse_binding_target_syntax(

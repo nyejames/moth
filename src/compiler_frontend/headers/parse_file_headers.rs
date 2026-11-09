@@ -474,6 +474,7 @@ fn collect_source_build_config_contracts(
                     normalize_source_build_config_contract_from_token(
                         name,
                         name_span,
+                        &declaration.type_annotation,
                         contract_syntax,
                         Some(token),
                         string_table,
@@ -482,7 +483,7 @@ fn collect_source_build_config_contracts(
                     normalize_source_build_config_contract_non_primitive(
                         name,
                         name_span,
-                        contract_syntax,
+                        &declaration.type_annotation,
                         token.source_span(),
                         string_table,
                     )
@@ -491,6 +492,7 @@ fn collect_source_build_config_contracts(
                 normalize_source_build_config_contract_from_token(
                     name,
                     name_span,
+                    &declaration.type_annotation,
                     contract_syntax,
                     None,
                     string_table,

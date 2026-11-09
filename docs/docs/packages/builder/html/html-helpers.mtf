@@ -180,9 +180,8 @@ These constants produce CSS property values for style slots.
 ### The `$code` directive
 
 `$code` renders a balanced template body as an HTML code block with lexical
-highlighting. The HTML builder registers it as a style directive; the frontend
-formatter registry executes the hook, so it is available in HTML-builder
-projects.
+highlighting. The compiler owns the directive and its formatter, so it is
+available under every builder, not only the HTML one.
 
 Supported aliases:
 

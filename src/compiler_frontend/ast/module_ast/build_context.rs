@@ -144,7 +144,7 @@ pub(in crate::compiler_frontend) struct AstBuildContext<'a> {
     /// Backend-provided virtual package metadata and external symbol registry.
     pub external_package_registry: Arc<ExternalPackageRegistry>,
 
-    /// Merged frontend + builder style directive registry used by tokenizer and template parsing.
+    /// Frontend-owned style directive registry used by tokenizer and template parsing.
     pub style_directives: &'a StyleDirectiveRegistry,
 
     /// Mutable string table for interning paths, symbols, and diagnostic strings.

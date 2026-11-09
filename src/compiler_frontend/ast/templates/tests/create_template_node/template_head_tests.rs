@@ -108,7 +108,7 @@ fn incompatible_head_item_retains_exact_multibyte_source_span() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source_with_style_directives(
-        &source,
+        source,
         &style_directives,
         &mut string_table,
         &mut span_builder,

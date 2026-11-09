@@ -33,9 +33,9 @@ The prelude supplies HTML helpers only. Your own values need a qualified referen
 
 ### `$code` code blocks
 
-`$code` highlights a balanced template body as a code block. The HTML builder
-registers it as a style directive, executed through the frontend formatter
-registry.
+`$code` highlights a balanced template body as a code block. The compiler owns
+the directive and its formatter, so it works under every builder, not only the
+HTML one.
 
 [codeblock, $code "moth":
     [codeblock, $code "moth": value = 42]

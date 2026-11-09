@@ -202,7 +202,7 @@ performs semantic symbol resolution or syntax diagnostics.
 - `$async:` is the accepted future compiler-owned async block spelling. Semantics remain on the public Async draft and Wiring channel contract, not this TODO list.
 - `$checked:` is the accepted future compiler-owned proof-budget block spelling. Proof-tier algorithms remain an open proposal under Design Scope and the checked-proof-budget research pages.
 - `$export` block support is undecided. The queued export-directive TODO owns the later choice of prefix-only versus optional block form. Keep one final visibility syntax.
-- A possible separate custom-metadata directive remains open design. `$project` stays a closed predefined-field signature in the meantime.
+- A possible separate custom-metadata directive remains open design. The `project` config record stays a closed predefined-field signature in the meantime; `$project`, `$builder` and `$html_builder` are not directives.
 
 Permanent owners: `docs/docs/directives/directives.mtf`, `docs/docs/design-scope/`, `docs/docs/async/@entry.moth`, and the checked-proof-budget references. Do not treat these bullets as implementation-plan files.
 
@@ -287,8 +287,8 @@ This work remains deferred and does not reactivate paused programmes.
 
 ## Possible additional constraints
 
-The constraints foundation deliberately implements only `$fast_math`, `$safe_math` and
-`$infallible`. It need not grow into a general effects system. Future restrictions require
+The constraints foundation will implement only `$fast_math`, `$safe_math` and
+`$infallible`; none is implemented yet. It need not grow into a general effects system. Future restrictions require
 their own design and cost justification, not reserved syntax or speculative compiler machinery.
 
 Explore `$pure`, `$no_io` and possibly `$no_wrap` later. A no-wrap restriction could allow fast

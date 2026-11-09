@@ -9,7 +9,7 @@ use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView,
 };
-use crate::compiler_frontend::declaration_syntax::build_config_contract::BuildConfigContractSyntax;
+use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::tests::parse_support::{
     assert_ast_diagnostic, parse_single_file_ast_diagnostic,
 };
@@ -48,14 +48,11 @@ fn config_header(headers: &BoundModuleHeaders) -> &Header {
         .expect("the marked compile-time binding should produce a constant header")
 }
 
-fn config_contract(headers: &BoundModuleHeaders) -> &BuildConfigContractSyntax {
+fn config_declaration(headers: &BoundModuleHeaders) -> &DeclarationSyntax {
     let HeaderKind::Constant { declaration } = &config_header(headers).kind else {
         panic!("expected a compile-time constant header");
     };
     declaration
-        .config_contract
-        .as_ref()
-        .expect("the attached modifier should record a contract on the declaration")
 }
 
 fn config_header_from(headers: &[Header]) -> &Header {
@@ -67,8 +64,8 @@ fn config_header_from(headers: &[Header]) -> &Header {
 
 #[test]
 fn config_modifier_attaches_to_a_typed_compile_time_binding() {
-    // Record the attachment at the header stage; the initializer is ordinary until phase 3 owns
-    // contract building.
+    // The modifier attaches to the declaration shell at the header stage; source contract
+    // normalization reads that shell's own type annotation and initializer.
     let source = "$config\napi_url #String = \"https://example.test\"\n";
     let mut string_table = StringTable::new();
     let (output, _span_builder) = prepare_single_file(
@@ -103,10 +100,10 @@ fn config_modifier_attaches_across_comment_only_lines() {
 
     assert!(
         !matches!(
-            config_contract(&headers).type_annotation,
+            config_declaration(&headers).type_annotation,
             ParsedTypeRef::Inferred
         ),
-        "the contract keeps the authored explicit annotation"
+        "the declaration keeps the authored explicit annotation"
     );
 }
 
@@ -217,10 +214,10 @@ fn config_attachment_observes_crlf_boundaries() {
     );
     assert!(
         !matches!(
-            config_contract(&headers).type_annotation,
+            config_declaration(&headers).type_annotation,
             ParsedTypeRef::Inferred
         ),
-        "the contract keeps the authored explicit annotation"
+        "the declaration keeps the authored explicit annotation"
     );
 
     let broken = "$config\r\n\r\napi_url #String = \"x\"\r\n";

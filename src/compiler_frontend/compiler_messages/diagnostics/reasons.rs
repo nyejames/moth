@@ -952,7 +952,7 @@ pub enum HtmlTemplateWarning {
     InlineEventHandler,
 }
 
-/// Which project-owned validator emitted a malformed-template warning.
+/// Which frontend formatter validator emitted a malformed-template warning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MalformedTemplateReason {
     Css(CssTemplateWarning),

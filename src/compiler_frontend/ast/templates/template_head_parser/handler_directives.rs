@@ -1,13 +1,13 @@
 //! Handler-based style directive parsing.
 //!
 //! WHAT:
-//! - Parses optional typed handler arguments.
-//! - Normalizes argument values into `StyleDirectiveArgumentValue`.
+//! - Parses the one optional operand a handler directive declares.
+//! - Normalizes that operand into `StyleDirectiveArgumentValue`.
 //! - Applies handler effects and executes formatter factory callbacks.
 //!
 //! WHY:
-//! - Project-owned directives and frontend handler directives share one execution
-//!   contract, so this logic should be centralized and isolated from core directives.
+//! - Frontend handler directives share one execution contract, so this logic should be
+//!   centralized and isolated from core directives.
 
 use super::directive_args::{parse_optional_directive_operand, reject_directive_operand};
 use crate::compiler_frontend::ast::ScopeContext;
@@ -34,7 +34,6 @@ use crate::compiler_frontend::style_directives::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use moth_lexical::numeric::fixed_scalar::{FixedScalarClass, FixedScalarValue};
 /// Typed result shared by handler-directive parsing helpers.
 type HandlerDirectiveResult<T> = Result<T, TemplateError>;
 
@@ -101,14 +100,8 @@ fn apply_style_directive_effects(
     if let Some(style_id) = effects.style_id {
         style.id = style_id;
     }
-    if let Some(policy) = effects.body_whitespace_policy {
-        style.body_whitespace_policy = policy;
-    }
     if let Some(suppress_child_templates) = effects.suppress_child_templates {
         style.suppress_child_templates = suppress_child_templates;
-    }
-    if let Some(skip_parent_wrappers) = effects.skip_parent_child_wrappers {
-        style.skip_parent_child_wrappers = skip_parent_wrappers;
     }
 }
 
@@ -236,66 +229,6 @@ fn normalize_provided_style_argument_value(
             )
             .into()),
         },
-
-        StyleDirectiveArgumentType::Template => match expression.operation() {
-            ExpressionOperationView::Template(template) => Ok(
-                StyleDirectiveArgumentValue::Template(Box::new(template.clone())),
-            ),
-            _ => Err(with_argument_span(
-                templates::invalid_template_directive(
-                    Some(string_table.intern(directive_name)),
-                    InvalidTemplateDirectiveReason::invalid_argument(),
-                    argument_span,
-                ),
-                argument_span,
-            )
-            .into()),
-        },
-
-        StyleDirectiveArgumentType::Number => {
-            let number = match payload {
-                Some(ConstValuePayload::FixedScalar(value)) => style_argument_number(*value),
-                _ => None,
-            };
-            match number {
-                Some(number) => Ok(StyleDirectiveArgumentValue::Number(number)),
-                None => Err(with_argument_span(
-                    templates::invalid_template_directive(
-                        Some(string_table.intern(directive_name)),
-                        InvalidTemplateDirectiveReason::invalid_argument(),
-                        argument_span,
-                    ),
-                    argument_span,
-                )
-                .into()),
-            }
-        }
-
-        StyleDirectiveArgumentType::Bool => match payload {
-            Some(ConstValuePayload::Bool(value)) => Ok(StyleDirectiveArgumentValue::Bool(*value)),
-            _ => Err(with_argument_span(
-                templates::invalid_template_directive(
-                    Some(string_table.intern(directive_name)),
-                    InvalidTemplateDirectiveReason::invalid_argument(),
-                    argument_span,
-                ),
-                argument_span,
-            )
-            .into()),
-        },
-    }
-}
-
-/// Converts one exact numeric style-directive argument into its `f64` styling value.
-///
-/// WHY: style directives accept the exact fixed integers and binary floats, while `Byte` and
-///      `Dec` stay outside the numeric styling vocabulary.
-fn style_argument_number(value: FixedScalarValue) -> Option<f64> {
-    match value.scalar().class() {
-        FixedScalarClass::SignedInteger => value.as_i64().map(|value| value as f64),
-        FixedScalarClass::UnsignedInteger => value.as_u64().map(|value| value as f64),
-        FixedScalarClass::BinaryFloat => value.as_f64(),
-        FixedScalarClass::Octet => None,
     }
 }
 

@@ -119,17 +119,6 @@ impl<'a> DeclarationCursor<'a> {
         self.cursor.current().map(TokenRef::source_span)
     }
 
-    /// Read the follower tag through the active parser view.
-    #[cfg(test)]
-    pub(crate) fn peek_next_tag(&self) -> Option<TokenTag> {
-        let token = if self.cursor.is_segmented() {
-            self.cursor.parser_peek_next()
-        } else {
-            self.cursor.peek_next()
-        }?;
-        Some(token.tag())
-    }
-
     /// Borrow a token at a parser-coordinate offset without materialising its payload.
     pub(crate) fn token_ref_at_offset(&self, offset: usize) -> Option<TokenRef<'a>> {
         let index = self.cursor.parser_position().checked_add(offset)?;

@@ -55,12 +55,6 @@ pub(crate) fn css_formatter_factory(
                 "Unsupported `$css` operand \"{value}\". The only supported operand is \"inline\"."
             ));
         }
-        Some(_) => {
-            return Err(
-                "The `$css` directive takes at most one bare mode operand, for example `$css \"inline\"`."
-                    .to_string(),
-            );
-        }
     };
 
     Ok(css_validation_formatter(mode))

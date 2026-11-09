@@ -889,7 +889,7 @@ fn in_target_old_parenthesized_form_rejected() {
 #[test]
 fn bare_directive_has_no_operand() {
     let result = parse_optional_expression_source("[$css]").expect("a bare directive must parse");
-    assert!(matches!(result, None));
+    assert!(result.is_none());
 }
 
 #[test]
@@ -1162,7 +1162,7 @@ fn duplicate_insert_directives_are_rejected_in_one_head() {
 }
 
 #[test]
-fn project_owned_formatter_directives_are_exclusive_per_template_head() {
+fn frontend_formatter_directives_are_exclusive_per_template_head() {
     let style_directives = frontend_test_style_directives();
     let error =
         template_parse_error_with_style_directives("[$html, $css: body]", &style_directives);
@@ -1170,7 +1170,7 @@ fn project_owned_formatter_directives_are_exclusive_per_template_head() {
         error.contains(
             "`$html` and `$css` cannot be combined because both control template body formatting. Choose one formatter."
         ),
-        "unexpected project formatter-conflict reason: {error}"
+        "unexpected formatter-conflict reason: {error}"
     );
 }
 

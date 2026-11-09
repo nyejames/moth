@@ -3,12 +3,14 @@
 ## Status and scope
 
 - Status: ACTIVE. Fixed root roles and builder slots are integrated.
-- Current slice: Cleanup and validation.
+- Current slice: Final review and closeout.
 - Blockers: None known.
-- Next action: Remove dead qualifier paths and stale tests, reconcile the remaining roadmap and design docs, and run the full validation and code-bloat audit.
+- Next action: Run the final review gate, confirm the checkpoint sequence and close the plan.
 - Roadmap file: `docs/roadmap/plans/general-directives-plan.md`.
 - Deliver: a constrained two-context directive grammar, frontend ownership of existing template formatters and `$config` input contracts.
 - Preserve: optional `config.moth` and its existing named `project` and builder-settings records, including the selected builder's current schema, defaults and validation policy.
+
+Delivered: cleanup removed the last qualifier-era scans, duplicate contract facts, dead cursor helpers and unused directive-spec vocabulary; the roadmap, design scope, cheatsheet and progress matrices describe the delivered surface. `just validate-full` passes.
 
 Delivered: `$config` carries build-input contracts. The marked binding's ordinary `#T` annotation is the contract type, its initializer is the fallback, and only marked bindings may omit one. The retired input qualifier no longer parses, and authored sources, tests, CLI fixtures and docs use the directive.
 

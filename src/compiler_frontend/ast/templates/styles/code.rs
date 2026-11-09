@@ -4,9 +4,9 @@
 //! formatter under every builder; this module is the frontend owner of the
 //! directive implementation.
 //!
-//! This module owns both halves of the feature:
-//! - parsing the narrow `$code` / `$code "ext"` directive syntax
-//! - converting compile-time body string runs into safe HTML with optional syntax highlighting
+//! This module owns the formatting half of the feature: converting
+//! compile-time body string runs into safe HTML with optional syntax
+//! highlighting. The template head parser owns the `$code` operand syntax.
 //!
 //! The shared template formatter pipeline owns whitespace normalization before code reaches this
 //! module. This module owns presentation and the `<code>` wrapper; HTML character escaping is
@@ -111,11 +111,6 @@ pub(crate) fn code_formatter_factory(
                     ));
                 }
             }
-        }
-        Some(_) => {
-            return Err(
-                "The `$code` directive takes one bare language operand, for example `$code \"rust\"`.".to_string(),
-            );
         }
         None => CodeLanguage::Generic,
     };

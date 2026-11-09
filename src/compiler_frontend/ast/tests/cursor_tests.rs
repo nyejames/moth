@@ -336,11 +336,14 @@ fn declaration_cursor_inherits_contiguous_parser_window() {
 
     let mut walking = child.declaration_cursor();
     assert_eq!(walking.current_tag(), TokenTag::BOOL_LITERAL);
-    assert_eq!(walking.peek_next_tag(), Some(TokenTag::BOOL_LITERAL));
+    assert_eq!(
+        walking.token_ref_at_offset(1).map(|token| token.tag()),
+        Some(TokenTag::BOOL_LITERAL)
+    );
     walking.advance();
     assert_eq!(walking.current_tag(), TokenTag::BOOL_LITERAL);
     assert_eq!(
-        walking.peek_next_tag(),
+        walking.token_ref_at_offset(1).map(|token| token.tag()),
         None,
         "a declaration cursor must not peek past its window"
     );

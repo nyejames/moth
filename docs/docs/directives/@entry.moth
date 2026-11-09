@@ -9,7 +9,7 @@
     init_docs_sidebar
 
 #[$in title:["Directives"]]
-#[$in description:["General compiler and builder directives in Moth, including configuration, builder slots and shared argument rules."]]
+#[$in description:["General compiler directives in Moth, including the template-head form, the source-modifier form, configuration, builder slots and shared operand rules."]]
 #[$in head:[language_theme_head]]
 
 #[navbar]

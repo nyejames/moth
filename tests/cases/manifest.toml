@@ -14121,31 +14121,10 @@ contract = "language.templates.directive_slot_non_integer_rejected"
 role = "primary"
 
 [[case]]
-id = "template_directive_insert_empty_parens"
-path = "template_directive_insert_empty_parens"
-tags = ["integration", "templates", "directives", "diagnostics"]
-contract = "language.templates.directive_insert_empty_parens_rejected"
-role = "primary"
-
-[[case]]
 id = "template_directive_insert_integer"
 path = "template_directive_insert_integer"
 tags = ["integration", "templates", "directives", "diagnostics"]
 contract = "language.templates.directive_insert_integer_rejected"
-role = "primary"
-
-[[case]]
-id = "template_directive_children_empty_parens"
-path = "template_directive_children_empty_parens"
-tags = ["integration", "templates", "directives", "diagnostics"]
-contract = "language.templates.directive_children_empty_parens_rejected"
-role = "primary"
-
-[[case]]
-id = "template_directive_children_truncated_argument"
-path = "template_directive_children_truncated_argument"
-tags = ["integration", "templates", "directives", "diagnostics"]
-contract = "language.templates.directive_children_truncated_argument_rejected"
 role = "primary"
 
 [[case]]
