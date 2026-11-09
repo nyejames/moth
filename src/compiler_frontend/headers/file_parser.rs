@@ -227,7 +227,7 @@ fn parse_headers_in_file_inner(
             }
 
             HeaderFileItem::Export => {
-                reject_non_block_export(cursor, file_id, context, current_span)?;
+                reject_non_block_export(cursor, file_id, source_file, context, current_span)?;
             }
 
             HeaderFileItem::ExportBlock => {
@@ -281,6 +281,7 @@ fn parse_headers_in_file_inner(
 /// WHY: `@entry.moth` has no export surface, while ordinary helpers are not module roots at all.
 fn reject_export_outside_module_root(
     context: &HeaderParseContext<'_>,
+    source_file: PathId,
     export_span: SourceSpan,
 ) -> FileParserResult<()> {
     let reason = if context.is_config_file {
@@ -295,7 +296,7 @@ fn reject_export_outside_module_root(
 
     match reason {
         Some(reason) => Err(diagnostic_failure(
-            generics_traits_api::export_outside_module_root(reason, Some(export_span)),
+            generics_traits_api::export_outside_module_root(source_file, reason, Some(export_span)),
         )),
         None => Ok(()),
     }
@@ -304,10 +305,11 @@ fn reject_export_outside_module_root(
 fn reject_non_block_export(
     cursor: &TokenCursor<'_>,
     file_id: SourceId,
+    source_file: PathId,
     context: &mut HeaderParseContext<'_>,
     export_span: SourceSpan,
 ) -> FileParserResult<()> {
-    reject_export_outside_module_root(context, export_span)?;
+    reject_export_outside_module_root(context, source_file, export_span)?;
 
     // Without the block delimiter, the token is not an export target. Keep this diagnostic in
     // header parsing instead of interpreting the following tokens through another syntax path.
@@ -345,7 +347,7 @@ fn handle_export_block(
     context: &mut HeaderParseContext<'_>,
     export_span: SourceSpan,
 ) -> FileParserResult<()> {
-    reject_export_outside_module_root(context, export_span)?;
+    reject_export_outside_module_root(context, source_file, export_span)?;
 
     if state.seen_export_block.is_some() {
         return Err(diagnostic_failure(

@@ -1577,3 +1577,121 @@ fn diagnostic_recovery_deferred_package_check_only_stops_after_an_admitted_unit(
         "the orphan beyond the threshold must not be compiled: {rendered:?}"
     );
 }
+
+/// WHAT: an invalid qualified selection and a cyclic qualified dependency report typed user
+///       diagnostics under a project error threshold, and the whole request repeats byte-identically.
+/// WHY:  Stage 0 preparation feeds both per-file header diagnostics and Stage 3 declaration
+///       ordering. Neither may panic, reach `compiler_bug!`, or depend on worker completion order
+///       when the project budget stops later admissions.
+#[test]
+fn qualified_cycle_and_invalid_selection_under_project_budget_are_deterministic() {
+    const PROJECT_ERROR_LIMIT_TWO: &str =
+        "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n";
+    // Alphabetical module order is `a_invalid`, `b_cycle`, `zz_last`. The invalid qualified
+    // selection spends one binding error, so the cyclic module is still admitted and both
+    // user-diagnostic kinds are retained; `zz_last` then proves the cutoff refused further work.
+    // Keeping the invalid module first means the cycle's exact diagnostic count does not decide
+    // which failure kind survives.
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("temp project should exist");
+    let root = temp.path();
+    write_project(
+        root,
+        PROJECT_ERROR_LIMIT_TWO,
+        &[
+            (
+                "src/a_invalid/@entry.moth",
+                "broken = @helper missing\n#[:site]\n",
+            ),
+            ("src/a_invalid/helper.moth", "present #= 1\n"),
+            ("src/b_cycle/@entry.moth", "@alpha a\n#[:site]\n"),
+            ("src/b_cycle/alpha.moth", "a #= @beta b\n"),
+            ("src/b_cycle/beta.moth", "b #= @alpha a\n"),
+            ("src/zz_last/@entry.moth", "#[:site]\n"),
+        ],
+    );
+
+    let first = {
+        let (frontend, mut warning_owner, project_source_files) =
+            run_directory_lane(root, FrontendCompilationMode::Canonical);
+        for suffix in ["a_invalid", "b_cycle"] {
+            assert_eq!(
+                frontend
+                    .project
+                    .modules
+                    .slot(module_id_for_path(&frontend, suffix))
+                    .expect("module slot should resolve"),
+                ProviderSlot::Diagnosed,
+                "{suffix} should retain its admitted user diagnostics"
+            );
+        }
+        assert_eq!(
+            frontend
+                .project
+                .modules
+                .slot(module_id_for_path(&frontend, "zz_last"))
+                .expect("module slot should resolve"),
+            ProviderSlot::Unavailable,
+            "the refused module was never compiled"
+        );
+        let cutoff = frontend
+            .project
+            .scheduling_cutoff
+            .expect("spending the threshold before zz_last must record a cutoff");
+        assert!(
+            cutoff.returned_primary_errors() >= 2,
+            "the recorded cutoff proof must reach the configured threshold"
+        );
+        assert!(
+            warning_owner
+                .discovery_stops()
+                .contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF),
+            "the cutoff flag must arrive through the warning sink"
+        );
+        assert!(
+            frontend.project.blocked.is_empty(),
+            "user diagnostics must not be reclassified as blocked providers"
+        );
+        let reports = finish_diagnosed(frontend, &mut warning_owner, project_source_files);
+        assert_eq!(
+            reports.counts().errors,
+            cutoff.returned_primary_errors(),
+            "the retained report count must match the cutoff proof"
+        );
+        assert!(
+            reports
+                .iter_severity(DiagnosticSeverity::Error)
+                .all(|(_, view)| view.descriptor().code.starts_with("MOTH-")),
+            "every failure must be a typed user diagnostic"
+        );
+        let codes: Vec<_> = reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .map(|(_, view)| view.descriptor().code)
+            .collect();
+        assert!(
+            codes.contains(&"MOTH-RULE-0033"),
+            "the cyclic qualified constants must report the declaration-cycle diagnostic: {codes:?}"
+        );
+        assert!(
+            codes.contains(&"MOTH-IMPORT-0005"),
+            "the missing qualified target must report the dependency-target diagnostic: {codes:?}"
+        );
+        let rendered = terse::format_terse_diagnostic_reports(&reports);
+        assert!(
+            rendered.iter().all(|line| !line.contains("zz_last")),
+            "the refused module must not contribute diagnostics: {rendered:?}"
+        );
+        rendered
+    };
+
+    let second = {
+        let (frontend, mut warning_owner, project_source_files) =
+            run_directory_lane(root, FrontendCompilationMode::Canonical);
+        let reports = finish_diagnosed(frontend, &mut warning_owner, project_source_files);
+        terse::format_terse_diagnostic_reports(&reports)
+    };
+    assert_eq!(
+        first, second,
+        "repeated qualified failure reports must be byte-identical"
+    );
+}

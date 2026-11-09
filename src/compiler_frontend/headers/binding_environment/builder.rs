@@ -229,22 +229,23 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         !consumer_has_explicit_module && !target_has_explicit_module
     }
 
-    /// Validate a Stage 0-resolved same-module edge before binding uses the retained clause.
+    /// Validate a Stage 0-resolved same-module edge before binding uses the retained path.
     ///
     /// Stage 0 stores the final compiler `SourceId` on the retained dependency so semantic
     /// binding can verify that the edge still belongs to this module's prepared source slots.
-    /// Binding continues to resolve the authored symbol path for visibility, but it must fail
-    /// closed if a stale or provider-owned identity is attached to a local source edge.
+    /// Dependency clauses and expression-qualified occurrences share this check. Binding
+    /// continues to resolve the authored symbol path for visibility, but it must fail closed if
+    /// a stale or provider-owned identity is attached to a local source edge.
     fn validate_local_source_edge(
         &mut self,
-        dependency: &RetainedDependencyClause,
+        dependency: &RetainedDependencyPath,
     ) -> BuilderResult<()> {
-        let Some(local_source_id) = dependency.dependency.local_source_id else {
+        let Some(local_source_id) = dependency.local_source_id else {
             return Ok(());
         };
 
         if matches!(
-            dependency.dependency.target,
+            dependency.target,
             crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::ExternalProvider {
                 ..
             }
@@ -289,7 +290,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
 
         let Some(namespace_target) = resolve_namespace_target(NamespaceTargetResolutionInput {
-            dependency_path: &dependency.dependency.path,
+            dependency_path: &dependency.path,
             module_file_paths: &self.module_symbols.module_file_paths,
             external_package_registry: self.external_package_registry,
             string_table: self.string_table,
@@ -470,7 +471,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .get(source_file)
         {
             for dependency in dependencies {
-                self.validate_local_source_edge(dependency)?;
+                self.validate_local_source_edge(&dependency.dependency)?;
                 let selections = dependency
                     .selections(selection_table)
                     .map_err(BindingEnvironmentError::Internal)?;
@@ -1671,6 +1672,9 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             FxHashMap::default();
 
         for occurrence in occurrences {
+            // Occurrences travel through the same Stage 0-resolved edge as dependency clauses.
+            // Validate it before the memo can answer from another occurrence's resolution.
+            self.validate_local_source_edge(&occurrence.dependency)?;
             let memo_key = (occurrence.dependency.path, occurrence.selected);
             let target = if let Some(target) = resolved_by_selection.get(&memo_key) {
                 target.clone()

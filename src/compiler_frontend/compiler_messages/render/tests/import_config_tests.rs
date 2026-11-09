@@ -4,9 +4,12 @@
 //! WHY: these messages share path/string-table formatting concerns.
 
 use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
+use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
 use crate::compiler_frontend::compiler_messages::render::import_config::{
-    dependency_namespace_used_as_value_message, invalid_config_message,
+    dependency_namespace_used_as_value_message, explicit_source_extension_message,
+    invalid_config_message,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
@@ -147,5 +150,56 @@ fn resource_output_conflicts_render_typed_facts() {
     assert_eq!(
         reserved_message,
         "HTML resource origin 'module origin/assets/index.html' conflicts with HTML page output path 'assets/logo.svg'. Choose a different resource path or builder output destination.",
+    );
+}
+
+#[test]
+fn explicit_source_extension_suggests_the_extensionless_binding() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("notes.mtf", &mut string_table)
+        .expect("portable path fits");
+    let extension = string_table.intern("mtf");
+    let path_table = path_fork.snapshot_table();
+    let message = explicit_source_extension_message(
+        path,
+        extension,
+        DiagnosticRenderContext::new(&string_table).with_path_table(&path_table),
+    );
+
+    assert_eq!(
+        message,
+        "Dependency paths must not include the `.mtf` source-file extension: `@notes.mtf`.\nUse `@notes` instead.",
+    );
+}
+
+#[test]
+fn plus_prefixed_source_extension_asks_for_a_rename_instead_of_a_dead_binding() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let path = path_fork
+        .try_intern_portable_path("+notes.mtf", &mut string_table)
+        .expect("portable path fits");
+    let extension = string_table.intern("mtf");
+    let path_table = path_fork.snapshot_table();
+    let message = explicit_source_extension_message(
+        path,
+        extension,
+        DiagnosticRenderContext::new(&string_table).with_path_table(&path_table),
+    );
+
+    assert!(message.contains("`@+notes.mtf`"), "{message}");
+    assert!(
+        message.contains("the retired support-marker rule reserves"),
+        "{message}"
+    );
+    assert!(
+        message.contains("Rename the file without the `+` prefix"),
+        "{message}"
+    );
+    assert!(
+        !message.contains("Use `@+notes`"),
+        "the plus-prefixed stem must not be suggested as a binding: {message}"
     );
 }

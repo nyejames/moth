@@ -53,18 +53,20 @@ A root marker may be a symlink, but every root must resolve to a distinct physic
 Only `@mod.moth`, `@package.moth` and `@entry.moth` are authored root files. Any other special source spelling is a Stage 0 structure error with a rename suggestion:
 
 [codeblock, $code("text"):
-    @page.moth          rejected, use @entry.moth for runtime work or @mod.moth for API
-    @home.moth          rejected
-    @api.moth           rejected
-    @Entry.moth         rejected, root names are case-sensitive
+    @page.moth          rejected, use @entry.moth
+    @home.moth          rejected, use @entry.moth or @mod.moth
+    @api.moth           rejected, use @entry.moth or @mod.moth
+    @Entry.moth         rejected, use @entry.moth
     +package.moth       rejected, use @package.moth
-    #package.moth       rejected, legacy marker
-    @config.moth        rejected, use plain config.moth
+    #package.moth       rejected, use @package.moth
+    @config.moth        rejected, use @entry.moth or @mod.moth
 ]
 
 The rejected spellings are never reclassified as ordinary helper files. The diagnostic is `MOTH-CONFIG-0001` (`InvalidModuleRootFileName`).
 
 `config.moth` without a leading `@` keeps its config meaning. Non-`.moth` files with an `@` prefix, such as `@theme.css`, remain ordinary resources.
+
+A `+`-prefixed source name such as `+notes.mtf` is not a bindable dependency name: the retired support-marker rule reserves the leading `+`, so rename the file without the prefix.
 
 ### Root-local declarations stay in their root
 
@@ -123,7 +125,7 @@ Invalid dependency spellings:
     @@mod
 ]
 
-Do not concatenate the filesystem `@` with the dependency `@`. The cosmetic root filename is never a dependency name. Direct dependency clauses on a root file are rejected. Depend on the module directory instead.
+Do not concatenate the filesystem `@` with the dependency `@`. The exact root filename is the role, not a dependency name. Direct dependency clauses on a root file are rejected. Depend on the module directory instead.
 
 ### Normal files belong to the surrounding module
 
@@ -137,16 +139,7 @@ Compiling or importing a module never activates its entry. Only the selected bui
 
 ### Visibility status
 
-`export:` is the implemented public-API block. It is legal only in `@mod.moth` and `@package.moth`, and it has no effect in an entry or an ordinary helper. The accepted future `$export` migration will replace this spelling, restricted to the same two facades. It will never apply to `@entry.moth`, helpers, templates or config. Do not use `$export` as current syntax.
-
-### Migrating older projects
-
-- Rename the project config file to plain `config.moth`.
-- Rename each `@page.moth`, `@api.moth` or other arbitrary `@*.moth` root to the role it actually serves.
-- Rename each `+*.moth` support root to `@package.moth`.
-- Move runtime work, fragments and builder slots from a combined root into `@entry.moth`.
-- Keep API declarations and `export:` blocks in `@mod.moth` or `@package.moth`.
-- Move declarations that both roles need into an ordinary helper file.
+`export:` is the implemented public-API block. It is legal only in `@mod.moth` and `@package.moth`; an entry or ordinary helper that uses it is rejected with `MOTH-RULE-0077`. The accepted future `$export` migration will replace this spelling, restricted to the same two facades. It will never apply to `@entry.moth`, helpers, templates or config. Do not use `$export` as current syntax.
 
 ### Concepts related to module roots
 

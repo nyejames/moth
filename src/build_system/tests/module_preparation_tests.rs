@@ -1826,6 +1826,23 @@ fn reserved_name_file_sources(file_count: usize) -> Vec<(String, String)> {
     file_sources
 }
 
+/// A module whose numbered non-entry files each author an invalid qualified-reference path.
+///
+/// WHAT: every file writes one constant initializer selecting a symbol through `@../hop`, which
+///       dependency-path validation rejects with the parent-directory-segment diagnostic.
+/// WHY: qualified-reference recognition runs during file preparation, so these fixtures reach the
+///      same per-file diagnostic allowance and chunk-merge boundary as ordinary header errors.
+fn malformed_qualified_file_sources(malformed_count: usize) -> Vec<(String, String)> {
+    let mut file_sources = vec![(String::from("00.moth"), String::from("entry #= 0\n"))];
+    file_sources.extend((1..=malformed_count).map(|index| {
+        (
+            format!("{index:02}.moth"),
+            format!("value_{index} #= @../hop selected_{index}\n"),
+        )
+    }));
+    file_sources
+}
+
 struct PreparationAllowanceOutcome {
     all_source_ids: Vec<SourceId>,
     retained_source_ids: Vec<SourceId>,
@@ -2073,6 +2090,72 @@ fn diagnostic_recovery_parallel_preparation() {
     assert!(
         exactly_at_limit.stops.is_empty(),
         "reaching the allowance exactly must not claim skipped work"
+    );
+}
+
+/// Qualified-reference recognition also runs during file preparation. Invalid authored paths must
+/// stay user diagnostics under every preparation strategy, with the same module-allowance
+/// truncation as ordinary header errors. A parallel worker that panicked or reordered retained
+/// error groups would fail this test.
+#[test]
+fn diagnostic_recovery_parallel_preparation_reports_invalid_qualified_paths() {
+    const LIMIT: u32 = 3;
+    let allowance = NonZeroU32::new(LIMIT);
+    let file_sources = malformed_qualified_file_sources(6);
+
+    let serial = prepared_file_error_allowance(
+        &file_sources,
+        super::FilePreparationStrategy::Serial,
+        false,
+        allowance,
+    );
+    let per_file = prepared_file_error_allowance(
+        &file_sources,
+        super::FilePreparationStrategy::ParallelPerFile,
+        false,
+        allowance,
+    );
+    let chunked_reordered = prepared_file_error_allowance(
+        &file_sources,
+        super::FilePreparationStrategy::ParallelChunked,
+        true,
+        allowance,
+    );
+
+    let expected_retained = serial.all_source_ids[1..=LIMIT as usize].to_vec();
+    for (label, outcome) in [
+        ("serial", &serial),
+        ("parallel per-file", &per_file),
+        ("reordered chunked", &chunked_reordered),
+    ] {
+        assert_eq!(
+            outcome.diagnostic_count, LIMIT as usize,
+            "{label} preparation must retain exactly the module allowance"
+        );
+        assert_eq!(
+            outcome.retained_source_ids, expected_retained,
+            "{label} preparation must retain the first {LIMIT} invalid qualified paths in canonical file order"
+        );
+        assert!(
+            outcome
+                .stops
+                .contains(DiagnosticDiscoveryStops::MODULE_ERROR_ALLOWANCE),
+            "{label} preparation must record the allowance stop"
+        );
+        assert!(
+            !outcome
+                .stops
+                .contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF),
+            "{label} preparation is eager Stage 0 work and must not claim a scheduling cutoff"
+        );
+    }
+    assert_eq!(
+        serial.retained_source_ids, per_file.retained_source_ids,
+        "worker count must not change which invalid qualified paths survive"
+    );
+    assert_eq!(
+        serial.retained_source_ids, chunked_reordered.retained_source_ids,
+        "chunk completion order must not change which invalid qualified paths survive"
     );
 }
 

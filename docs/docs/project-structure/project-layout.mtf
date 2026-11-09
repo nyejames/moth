@@ -49,7 +49,7 @@ A source directory recognises exactly three optional root files: `@mod.moth`, `@
 
 `@mod.moth` publishes a normal API facade. `@package.moth` publishes a scoped support facade, or the external project package surface when it sits at the selected project root. `@entry.moth` owns executable page or application work. Only entry roots may hold top-level runtime code, page fragments and direct builder slots.
 
-Any other `@*.moth` or `+*.moth` spelling is rejected as a structure error. The filename never selects a role implicitly. See @#module-roots (Module roots) for the full vocabulary and visibility rules.
+Any other `@*.moth` or `+*.moth` spelling is rejected as a structure error. The exact filename is the role. See @#module-roots (Module roots) for the full vocabulary and visibility rules.
 
 A project produces an HTML page for each `@entry.moth` directory. Entry eligibility comes from file presence, not from the amount of authored activity:
 

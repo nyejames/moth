@@ -9,7 +9,7 @@ use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
     CountFact, FactCapacityError, FactCodec, IdRemap, OptStringFact, OptTokenFact, OptTypeFact,
-    OptUnitFact, StringFact, TypeFact, UnitCode, UnitFact, unit_code,
+    OptUnitFact, PathFact, StringFact, TypeFact, UnitCode, UnitFact, unit_code,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
     LabelDraftMessage, LabelMessageCode,
@@ -39,6 +39,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 unit_code! {
@@ -1562,7 +1563,10 @@ diagnostic_family! {
         category: DiagnosticCategory::Rule,
         severity: DiagnosticSeverity::Error,
         title: "`export:` is only valid in an API facade root file (`@mod.moth` or `@package.moth`)",
-        facts: [reason: UnitFact<ExportOutsideModuleRootReason>],
+        facts: [
+            file: PathFact,
+            reason: UnitFact<ExportOutsideModuleRootReason>,
+        ],
         labels: [],
         extra: None,
         ctor: manual,
@@ -1578,12 +1582,17 @@ unit_code! {
     }
 }
 
-/// Stores an `export:` role rejection and its typed reason.
+/// Stores an `export:` role rejection, the offending source file and its typed reason.
+///
+/// WHY: the entry-root reason must name the selected file. That file can be any explicitly
+///      selected single-file source, not only `@entry.moth`.
 pub(crate) fn export_outside_module_root(
+    file: PathId,
     reason: ExportOutsideModuleRootReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
     DiagnosticDraft::with_facts(&EXPORT_OUTSIDE_MODULE_ROOT, span, |cursor| {
+        cursor.push::<PathFact>(&file)?;
         cursor.push::<UnitFact<ExportOutsideModuleRootReason>>(&reason)?;
         Ok(())
     })

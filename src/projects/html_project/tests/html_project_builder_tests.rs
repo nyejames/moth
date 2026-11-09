@@ -767,6 +767,41 @@ fn directory_build_maps_routes_relative_to_selected_directory() {
     assert_eq!(project.entry_page_rel, Some(PathBuf::from("index.html")));
 }
 
+#[test]
+fn directory_build_without_homepage_launches_the_first_route() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::create_dir_all(root.join("src/docs/basics")).expect("should create docs dir");
+    fs::create_dir_all(root.join("src/blog")).expect("should create blog dir");
+    fs::create_dir_all(root.join("src/about")).expect("should create about dir");
+    let entry_root = fs::canonicalize(root.join("src")).expect("entry root should resolve");
+
+    let builder = HtmlProjectBuilder::new();
+    let config = Config::new(entry_root.clone());
+
+    // No module sits at the selected root, so the directory build has no homepage. The dev
+    // launch route is the lexicographically first emitted route, not the first input module.
+    let project = expect_successful_build(build_with_test_modules(
+        &builder,
+        vec![
+            entry_root.join("docs/basics").join("@entry.moth"),
+            entry_root.join("blog").join("@entry.moth"),
+            entry_root.join("about").join("@entry.moth"),
+        ],
+        &config,
+        &[],
+    ));
+
+    let output_paths = collect_output_paths(&project.output_files);
+    assert!(output_paths.contains(&PathBuf::from("about/index.html")));
+    assert!(output_paths.contains(&PathBuf::from("blog/index.html")));
+    assert!(output_paths.contains(&PathBuf::from("docs/basics/index.html")));
+    assert_eq!(
+        project.entry_page_rel,
+        Some(PathBuf::from("about/index.html"))
+    );
+}
+
 // Windows cannot create the reserved directory.
 #[cfg(not(windows))]
 #[test]

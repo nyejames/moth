@@ -987,24 +987,33 @@ pub(crate) fn render_root_local_declaration_not_visible(
     }
 }
 
-fn export_outside_module_root_message(reason: ExportOutsideModuleRootReason) -> &'static str {
+fn export_outside_module_root_message(
+    file: PathId,
+    reason: ExportOutsideModuleRootReason,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
     match reason {
         // The descriptor title already states the module-root rule for helpers and config.
-        ExportOutsideModuleRootReason::NoExportSurface => "",
+        ExportOutsideModuleRootReason::NoExportSurface => String::new(),
         ExportOutsideModuleRootReason::EntryRoot => {
-            "`export:` is not allowed in `@entry.moth`: an entry root has no export surface. Move the declaration to a shared helper file and export it from `@mod.moth` or `@package.moth`."
+            // The entry root is not always `@entry.moth`: a selected single-file source becomes
+            // that unit's explicit entry, so name the file the author actually wrote.
+            let file = context.render_path(file);
+            format!(
+                "`export:` is not allowed in `{file}`: an entry root has no export surface. Move the declaration to a shared helper file and export it from `@mod.moth` or `@package.moth`."
+            )
         }
     }
 }
 
-/// Renders the `export:` role rejection from its compact reason code.
+/// Renders the `export:` role rejection from its source file and compact reason code.
 pub(crate) fn render_export_outside_module_root(
     _diagnostic: &DiagnosticView<'_>,
     view: &ExportOutsideModuleRootView,
-    _context: DiagnosticRenderContext<'_>,
+    context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
     RenderedPayload {
-        message: export_outside_module_root_message(view.reason).to_owned(),
+        message: export_outside_module_root_message(view.file, view.reason, context),
         guidance: Vec::new(),
     }
 }

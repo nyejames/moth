@@ -841,9 +841,8 @@ runtime asset reachability checks and failure coverage for unavailable handles o
 snapshot input contract. Portable snapshot additions and the ordered event investigation follow as
 separate phases.
 
-Queued `io.set_title` is accepted Core IO design whose implementation belongs to the HTML page
-directive work. Config and HTML entry cutover remain prerequisites for that call's host-capability
-path. Do not treat it as delivered by this phase.
+Queued `io.set_title` is accepted Core IO design whose implementation belongs to the runtime title
+plan. Do not treat it as delivered by this phase.
 
 Mandatory closeout for every accepted IO implementation phase: full phase gate plus rich console,
 input, lifecycle and recovery coverage appropriate to that phase.

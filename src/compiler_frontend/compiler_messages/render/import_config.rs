@@ -24,7 +24,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::project_
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidPathView;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::source_packages::root_file::{
-    InvalidRootFilenameSuggestion, invalid_module_root_file_name_suggestion,
+    InvalidRootFilenameSuggestion, dependency_component_is_legacy_support_marker,
+    invalid_module_root_file_name_suggestion,
 };
 
 pub(crate) fn invalid_config_message(
@@ -736,6 +737,20 @@ pub(crate) fn explicit_source_extension_message(
     let extension = context.string_table.resolve(extension);
     let suffix = format!(".{extension}");
     let extensionless_path = path_text.strip_suffix(&suffix).unwrap_or(&path_text);
+    let file_name = extensionless_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(extensionless_path);
+    // A `+`-prefixed stem matches the retired support-marker rule after the source extension is
+    // removed, so the usual "drop the extension" spelling still names an unbindable provider.
+    // Ask for the rename that makes the file reachable instead of suggesting a dead dependency.
+    if dependency_component_is_legacy_support_marker(file_name) {
+        return format!(
+            "Dependency paths must not include the `.{extension}` source-file extension: `@{path_text}`.\n\
+             The stem `{file_name}` starts with `+`, which the retired support-marker rule reserves, so no dependency path can bind it.\n\
+             Rename the file without the `+` prefix, then bind the new name without the source extension.",
+        );
+    }
     format!(
         "Dependency paths must not include the `.{extension}` source-file extension: `@{path_text}`.\n\
          Use `@{extensionless_path}` instead.",

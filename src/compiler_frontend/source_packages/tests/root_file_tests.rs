@@ -93,7 +93,12 @@ fn legacy_support_marker_dependency_components_are_flagged() {
     assert!(!dependency_component_is_legacy_support_marker(
         "@package.moth"
     ));
-    assert!(dependency_component_is_legacy_support_marker("+pkg.js"));
+    for ordinary_plus_name in ["+pkg.js", "+notes.mtf", "+.moth", "+"] {
+        assert!(
+            !dependency_component_is_legacy_support_marker(ordinary_plus_name),
+            "{ordinary_plus_name} is not a retired support marker"
+        );
+    }
 }
 
 #[test]
@@ -152,12 +157,12 @@ fn legacy_support_marker_dependency_paths_are_flagged() {
 
     let ordinary_plus_extension = path(&["modules", "+pkg.js"], &mut string_table, &mut path_fork);
     assert!(
-        dependency_path_references_legacy_support_marker(
+        !dependency_path_references_legacy_support_marker(
             ordinary_plus_extension,
             &path_fork,
             &string_table
         ),
-        "any + component is a retired support marker, regardless of its extension"
+        "an ordinary + resource name is not a retired support marker"
     );
 }
 

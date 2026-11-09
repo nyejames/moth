@@ -314,8 +314,8 @@ impl ModuleSymbols {
 
     /// Every authored dependency path in this module, paired with its source and clause kind.
     ///
-    /// WHAT: walks prepared sources in canonical path order and yields each source's clauses
-    ///       followed by its expression-qualified occurrences.
+    /// WHAT: walks prepared sources in deterministic `PathId` (interning) order and yields each
+    ///       source's clauses followed by its expression-qualified occurrences.
     /// WHY: provider dependency assembly and facade validation consume exactly the sequence
     ///      Stage 0 discovered; one iterator keeps the union of both per-source maps and their
     ///      order owned here instead of rebuilt at each call site.

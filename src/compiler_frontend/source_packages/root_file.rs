@@ -167,13 +167,20 @@ pub(crate) fn dependency_component_is_config_file(component: &str) -> bool {
 
 /// Whether a dependency component uses the retired `+` support-root marker.
 ///
-/// WHAT: detects `+name` / `+name.moth` dependency components that tried to bind a former
-///       support-root file directly.
+/// WHAT: detects the retired `+name` and `+name.moth` support-root spellings, and only those.
 /// WHY: support facades are authored as `@package.moth` and are bound through their containing
-///      module directory, never by a special file filename. The diagnostic names the
-///      replacement spelling instead of silently resolving a missing package.
+///      module directory, never by a special file filename. The recognition is exact because a
+///      leading `+` also names ordinary resource files (`+notes.mtf`, `+runtime.js`); treating
+///      every `+` component as a retired marker would mask their real path diagnostics.
 pub(crate) fn dependency_component_is_legacy_support_marker(component: &str) -> bool {
-    component.starts_with('+') && component.len() > 1
+    let Some(name) = component.strip_prefix('+') else {
+        return false;
+    };
+
+    !name.is_empty()
+        && (!name.contains('.')
+            || (name.ends_with(LANGUAGE_SOURCE_SUFFIX)
+                && name.len() > LANGUAGE_SOURCE_SUFFIX.len()))
 }
 
 pub(crate) fn dependency_path_references_config_file(

@@ -1,8 +1,9 @@
 //! Stage 0 durable module identity and structural topology.
 //!
-//! WHAT: owns the dense `ModuleId`, `ModuleIdentityRecord`, deterministic assignment table,
-//! structural ancestry and the filename-to-root-role classifier produced by the one Stage 0
-//! source-tree traversal, and derives frontend module-root lookup tables from those identities.
+//! WHAT: owns the dense `ModuleId`, `ModuleIdentityRecord`, deterministic assignment table and
+//! structural ancestry produced by the one Stage 0 source-tree traversal, and derives frontend
+//! module-root lookup tables from those identities. The filename-to-root-role classifier lives
+//! in `compiler_frontend::source_packages::root_file`.
 //! A structural module is one rooted canonical directory. It may carry one normal `@mod.moth`
 //! root, one support `@package.moth` root, one entry `@entry.moth` root, or any combination.
 //! Helper files receive one role-neutral shared origin; each present root receives its own

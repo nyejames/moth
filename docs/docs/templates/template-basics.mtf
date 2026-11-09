@@ -1,8 +1,6 @@
 **Entries and page fragments.** HTML pages come from directories that contain
 `@entry.moth`. A direct top-level template in that file contributes page output.
-Direct const root `$in` inserts supply builder metadata. No root-purpose
-directive exists, and the former `$page` metadata design is superseded by
-builder slots. Exact entry and metadata rules live in Project Structure. This
+Direct const root `$in` inserts supply builder metadata. Exact entry and metadata rules live in Project Structure. This
 page describes the template and value boundary; current support is tracked in
 @../progress (Progress) and @../progress/packages-and-builders (Packages and builders).
 

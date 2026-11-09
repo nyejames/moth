@@ -179,7 +179,7 @@ The form, syntax and attachment details of root-local isolation belong to Stage 
 
 ### Entry-root start
 
-The `@entry` root's implicit entry is compiler-owned, non-exported and unavailable to dependency binding. Project entry eligibility is `@entry.moth` presence. Empty, static-only and metadata-only entries are eligible. The selected command and builder decide which eligible entries apply. A declaration-only module, a module with only `@mod` or `@package`, or a separately compiled dependency entry never becomes an active entry.
+The `@entry` root's implicit entry is compiler-owned, non-exported and unavailable to dependency binding. Project entry eligibility is `@entry.moth` presence. Empty, static-only and metadata-only entries are eligible. The selected command and builder decide which eligible entries apply. A module without `@entry.moth`, such as one with only `@mod` or `@package`, never becomes an active entry, and a separately compiled dependency entry never activates. An `@entry.moth` that contains only declarations remains an eligible entry like any other.
 
 The entry owns dormant runtime work and produces runtime fragment strings in source order. Entry assembly activates it at most once after compilation. Dependency binding, package assembly and compilation never activate it.
 

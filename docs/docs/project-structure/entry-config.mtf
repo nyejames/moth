@@ -1,4 +1,4 @@
-An HTML page's entry root is `@entry.moth`. Entry eligibility follows the file's presence, not the amount of authored runtime work. Direct const root inserts on the entry supply document metadata. No root-purpose directive exists, so `$page` and `$entry` are not source syntax.
+An HTML page's entry root is `@entry.moth`. Entry eligibility follows the file's presence, not the amount of authored runtime work. Direct const root inserts on the entry supply document metadata.
 
 This page describes entry metadata and its relationship to project configuration.
 

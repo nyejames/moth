@@ -1,4 +1,4 @@
-HTML pages come from directories that contain `@entry.moth`. Direct const root inserts supply builder metadata. No root-purpose directive exists, and the former `$page` metadata design is superseded by builder slots.
+HTML pages come from directories that contain `@entry.moth`. Direct const root inserts supply builder metadata.
 
 A template can be required to finish during compilation.
 

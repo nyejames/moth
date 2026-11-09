@@ -611,7 +611,7 @@ init_docs_sidebar()!
             [: Deferred]
             [: None]
             [: Frontend / build system]
-            [: [$html:<code>$test</code>] is a later non-page purpose after currently queued work. No runner, command or lifecycle is defined. Entry eligibility is owned by the [$html:<code>@entry.moth</code>] root role, and no [$html:<code>$entry</code>] or [$html:<code>$page</code>] directive is accepted.]
+            [: [$html:<code>$test</code>] is a later non-page purpose after currently queued work. No runner, command or lifecycle is defined. Entry eligibility is owned by the [$html:<code>@entry.moth</code>] root role.]
         ]
 
         [data:

@@ -12,11 +12,9 @@ Other helper files in the folder hold shared code. All roots can bind that share
 
 ### The names are fixed
 
-Only those three names work. The compiler rejects other special names and suggests the right one:
+Only those three names work. The compiler rejects any other `@*.moth` or `+*.moth` name and suggests a fixed root.
 
-- `@page.moth` becomes `@entry.moth` for page code or `@mod.moth` for API
-- `+package.moth` becomes `@package.moth`
-- `@api.moth` and `@Entry.moth` are rejected too
+A `+` prefix on another source file, such as `+notes.mtf`, is also reserved by the retired support-marker rule, so that file cannot be bound. Rename it without the `+`.
 
 `config.moth` stays the build config file. `@config.moth` is not a root and is rejected.
 

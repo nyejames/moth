@@ -19421,6 +19421,13 @@ contract = "language.modules.plus_root_filename_rejected"
 role = "primary"
 
 [[case]]
+id = "plus_prefixed_content_reference_rejected"
+path = "plus_prefixed_content_reference_rejected"
+tags = ["integration", "project-structure", "diagnostics", "root-roles"]
+contract = "language.modules.plus_prefixed_content_reference_reports_explicit_extension"
+role = "primary"
+
+[[case]]
 id = "closed_root_build_config_filename_rejected"
 path = "closed_root_build_config_filename_rejected"
 tags = ["integration", "project-structure", "diagnostics", "root-roles"]
@@ -19474,5 +19481,12 @@ id = "single_file_selected_support_facade_build_rejected"
 path = "single_file_selected_support_facade_build_rejected"
 tags = ["integration", "html", "single-file", "diagnostics", "root-roles"]
 contract = "language.entry.explicit_single_file_facade_selection_is_not_an_entry"
+role = "primary"
+
+[[case]]
+id = "single_file_selected_entry_export_rejected"
+path = "single_file_selected_entry_export_rejected"
+tags = ["integration", "html", "single-file", "diagnostics", "root-roles"]
+contract = "language.entry.selected_single_file_entry_rejects_export_surface"
 role = "primary"
 

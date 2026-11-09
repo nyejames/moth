@@ -1255,7 +1255,7 @@ fn named_value_or_default(
 /// WHAT: inspects the dependency path and produces a hint that names the module directory the
 /// author should bind instead of the retired special filename.
 /// WHY: support facades are published by `@package.moth` files but dependency identities always
-///      come from the containing module directory. Authors who write `@helper/+page symbol`
+///      come from the containing module directory. Authors who write `@helper/+package symbol`
 ///      should be told to use `@helper symbol` instead.
 pub(crate) fn support_root_import_suggestion(
     path: PathId,

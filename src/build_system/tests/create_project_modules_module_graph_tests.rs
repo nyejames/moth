@@ -1214,3 +1214,73 @@ fn qualified_occurrence_in_unused_function_body_reaches_provider() {
         "the unused-body occurrence resolves its same-module provider"
     );
 }
+
+/// WHAT: a qualified reference to a facade-exported `.mtf` content constant creates exactly the
+///       provider-first cross-module edge and no reverse edge.
+/// WHY:  source-level cross-module qualified cycles are not authorable: dependency paths resolve
+///       from the declaring module root and never ascend, so a child cannot name its ancestor.
+///       Generic cycle diagnosis is owned by the Stage 0 cycle tests; this pins the edge direction
+///       the qualified content selection contributes to that graph.
+#[test]
+fn facade_content_constant_qualified_reference_orders_provider_first() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    let module_a = src.join("module_a");
+    let module_b = module_a.join("module_b");
+    fs::create_dir_all(&module_b).expect("should create module_b");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    // The parent consumes the child facade's re-exported synthetic content constant.
+    fs::write(
+        module_a.join("@entry.moth"),
+        "page = @module_b intro\n#[:pageA]\n",
+    )
+    .expect("should write pageA");
+    // The child facade re-exports its own `.mtf` content under a public name.
+    fs::write(
+        module_b.join("@mod.moth"),
+        "export:\n    @intro content as intro\n;\n",
+    )
+    .expect("should write module_b root");
+    fs::write(module_b.join("intro.mtf"), "hello from the child\n")
+        .expect("should write the content provider");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
+
+    let (_modules, graph, source_tree_index, _source_files, _string_table) =
+        discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
+    let canonical_module_a = fs::canonicalize(&module_a).expect("module_a should canonicalize");
+    let canonical_module_b = fs::canonicalize(&module_b).expect("module_b should canonicalize");
+    let module_a_id = source_tree_index
+        .module_identities()
+        .module_id_for_directory(&canonical_module_a)
+        .expect("module_a should be a graph node");
+    let module_b_id = source_tree_index
+        .module_identities()
+        .module_id_for_directory(&canonical_module_b)
+        .expect("module_b should be a graph node");
+
+    assert!(
+        graph.has_dependency_edge(module_b_id, module_a_id),
+        "the qualified content selection must order the facade provider first"
+    );
+    assert!(
+        !graph.has_dependency_edge(module_a_id, module_b_id),
+        "the authored project contains no reverse edge"
+    );
+}

@@ -1094,7 +1094,7 @@ For example, a project might contain:
           @mod.moth
 ]
 
-From `@entry.moth` (or `helpers.moth`), imports can bind:
+From `@entry.moth`, imports can bind:
 
 [codeblock, $code("moth"):
     @tools/format format_title   -- ordinary file, same module
@@ -1203,7 +1203,7 @@ Source can't query the OS, architecture, backend or physical target. The selecte
 ## Pages and top-level work
 
 The **HTML project builder** turns every `@entry.moth` directory into a document and route. Entry eligibility follows file presence, so an empty,
-static-only or metadata-only entry still counts. `@mod.moth` and `@package.moth` never become pages. There is no `$entry` or `$page` directive.
+static-only or metadata-only entry still counts. `@mod.moth` and `@package.moth` never become pages.
 
 For an HTML page:
 
@@ -1224,7 +1224,6 @@ For an HTML page:
 Direct top-level const `$in` inserts route to builder-registered destinations. The HTML builder registers `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and `head`.
 Ordinary const and runtime fragments render into the body. Scalar metadata contributions concatenate and never raise a cardinality error, an explicitly empty value stays present, a missing value uses the builder fallback, each stylesheet insert needs one tracked CSS resource, and the builder deduplicates stylesheet links by stable origin. `head` is raw HTML after built-in head content and deduplicates identical complete contributions.
 Only direct root inserts route. Nested, stored and aliased inserts remain template composition. Runtime top-level named builder inserts are not supported. Old `page_*` names are ordinary constants with no implicit metadata effect.
-The former `$page` metadata design is superseded by builder slots.
 Helpers, `@mod.moth` and `@package.moth` facades and `config.moth` cannot supply entry contributions.
 
 Direct constant fragments become static HTML. Runtime work runs once at page startup, and runtime fragments publish only after successful completion.
