@@ -103,6 +103,8 @@ mod parse_file_headers_span_tests;
 mod parse_file_headers_trait_tests;
 #[path = "parse_file_headers_type_span_tests.rs"]
 mod parse_file_headers_type_span_tests;
+#[path = "source_directives_tests.rs"]
+mod source_directives_tests;
 
 struct HeaderTestDiagnostics {
     diagnostics: CompactDiagnosticBagForTest,

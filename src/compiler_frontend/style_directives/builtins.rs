@@ -13,9 +13,9 @@ use crate::compiler_frontend::style_directives::compatibility::{
     TemplateHeadCompatibility, TemplateHeadTag,
 };
 use crate::compiler_frontend::style_directives::specs::{
-    CoreStyleDirectiveKind, DOC_DIRECTIVE_NAME, INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME,
-    StyleDirectiveArgumentType, StyleDirectiveEffects, StyleDirectiveHandlerSpec,
-    StyleDirectiveSpec,
+    CONFIG_DIRECTIVE_NAME, CoreStyleDirectiveKind, DOC_DIRECTIVE_NAME, INSERT_DIRECTIVE_NAME,
+    SLOT_DIRECTIVE_NAME, SourceModifierTarget, StyleDirectiveArgumentType, StyleDirectiveContexts,
+    StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveSpec,
 };
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 
@@ -24,6 +24,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::core(
             "before",
             TemplateBodyMode::Normal,
+            StyleDirectiveContexts::TEMPLATE_HEAD,
             TemplateHeadCompatibility::blocks_same(
                 TemplateHeadTag::BEFORE_DIRECTIVE,
                 TemplateHeadConflictReason::DuplicateExclusiveDirective,
@@ -33,6 +34,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::core(
             "after",
             TemplateBodyMode::Normal,
+            StyleDirectiveContexts::TEMPLATE_HEAD,
             TemplateHeadCompatibility::blocks_same(
                 TemplateHeadTag::AFTER_DIRECTIVE,
                 TemplateHeadConflictReason::DuplicateExclusiveDirective,
@@ -42,6 +44,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::core(
             "fresh",
             TemplateBodyMode::Normal,
+            StyleDirectiveContexts::TEMPLATE_HEAD,
             TemplateHeadCompatibility {
                 presence_tags: TemplateHeadTag::MEANINGFUL_ITEM | TemplateHeadTag::FRESH_DIRECTIVE,
                 required_absent_tags: TemplateHeadTag::empty(),
@@ -53,6 +56,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::core(
             SLOT_DIRECTIVE_NAME,
             TemplateBodyMode::Normal,
+            StyleDirectiveContexts::TEMPLATE_HEAD,
             TemplateHeadCompatibility {
                 presence_tags: TemplateHeadTag::MEANINGFUL_ITEM | TemplateHeadTag::SLOT_DIRECTIVE,
                 required_absent_tags: TemplateHeadTag::MEANINGFUL_ITEM,
@@ -64,6 +68,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::core(
             INSERT_DIRECTIVE_NAME,
             TemplateBodyMode::Normal,
+            StyleDirectiveContexts::TEMPLATE_HEAD,
             TemplateHeadCompatibility::blocks_same(
                 TemplateHeadTag::IN_DIRECTIVE,
                 TemplateHeadConflictReason::DuplicateExclusiveDirective,
@@ -73,6 +78,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::core(
             "note",
             TemplateBodyMode::DiscardBalanced,
+            StyleDirectiveContexts::TEMPLATE_HEAD,
             TemplateHeadCompatibility {
                 presence_tags: TemplateHeadTag::MEANINGFUL_ITEM
                     | TemplateHeadTag::COMMENT_DIRECTIVE,
@@ -87,6 +93,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::core(
             "todo",
             TemplateBodyMode::DiscardBalanced,
+            StyleDirectiveContexts::TEMPLATE_HEAD,
             TemplateHeadCompatibility {
                 presence_tags: TemplateHeadTag::MEANINGFUL_ITEM
                     | TemplateHeadTag::COMMENT_DIRECTIVE,
@@ -101,6 +108,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::core(
             DOC_DIRECTIVE_NAME,
             TemplateBodyMode::Normal,
+            StyleDirectiveContexts::TEMPLATE_HEAD,
             TemplateHeadCompatibility {
                 presence_tags: TemplateHeadTag::MEANINGFUL_ITEM
                     | TemplateHeadTag::COMMENT_DIRECTIVE,
@@ -115,6 +123,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::core(
             "raw",
             TemplateBodyMode::Normal,
+            StyleDirectiveContexts::TEMPLATE_HEAD,
             TemplateHeadCompatibility {
                 presence_tags: TemplateHeadTag::MEANINGFUL_ITEM
                     | TemplateHeadTag::FORMATTER_DIRECTIVE
@@ -128,6 +137,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::handler(
             "md",
             TemplateBodyMode::Normal,
+            StyleDirectiveContexts::TEMPLATE_HEAD,
             TemplateHeadCompatibility {
                 presence_tags: TemplateHeadTag::MEANINGFUL_ITEM
                     | TemplateHeadTag::FORMATTER_DIRECTIVE,
@@ -147,6 +157,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::handler(
             "html",
             TemplateBodyMode::Normal,
+            StyleDirectiveContexts::TEMPLATE_HEAD,
             TemplateHeadCompatibility::blocks_same(
                 TemplateHeadTag::FORMATTER_DIRECTIVE,
                 TemplateHeadConflictReason::MultipleFormatters,
@@ -163,6 +174,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::handler(
             "css",
             TemplateBodyMode::Balanced,
+            StyleDirectiveContexts::TEMPLATE_HEAD,
             TemplateHeadCompatibility::blocks_same(
                 TemplateHeadTag::FORMATTER_DIRECTIVE,
                 TemplateHeadConflictReason::MultipleFormatters,
@@ -179,6 +191,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::handler(
             "escape_html",
             TemplateBodyMode::Normal,
+            StyleDirectiveContexts::TEMPLATE_HEAD,
             TemplateHeadCompatibility::blocks_same(
                 TemplateHeadTag::FORMATTER_DIRECTIVE,
                 TemplateHeadConflictReason::MultipleFormatters,
@@ -195,6 +208,7 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
         StyleDirectiveSpec::handler(
             "code",
             TemplateBodyMode::Balanced,
+            StyleDirectiveContexts::TEMPLATE_HEAD,
             TemplateHeadCompatibility {
                 presence_tags: TemplateHeadTag::MEANINGFUL_ITEM
                     | TemplateHeadTag::FORMATTER_DIRECTIVE
@@ -212,6 +226,10 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
                 },
                 Some(code_formatter_factory),
             ),
+        ),
+        StyleDirectiveSpec::source_modifier(
+            CONFIG_DIRECTIVE_NAME,
+            SourceModifierTarget::ExplicitTypedCompileTimeBinding,
         ),
     ]
 }

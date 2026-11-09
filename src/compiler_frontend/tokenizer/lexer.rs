@@ -220,6 +220,13 @@ fn emit_style_directive(
         .map_err(|error| map_token_emit_error(error, source))
 }
 
+fn emit_newline(stream: &mut TokenStream<'_>, blank_line: bool) -> TokenizeResult<TokenTag> {
+    let source = stream.file_id;
+    stream
+        .emit_newline(blank_line)
+        .map_err(|error| map_token_emit_error(error, source))
+}
+
 fn emit_char(stream: &mut TokenStream<'_>, value: char) -> TokenizeResult<TokenTag> {
     let source = stream.file_id;
     stream
@@ -945,13 +952,15 @@ fn get_token_tag(
 
             if current_char == '\n' {
                 // Skip trailing whitespace after a newline to reduce redundant tokens.
-                // The parser treats consecutive newlines as a single boundary.
-                consume_all_whitespace(stream);
-                return emit_static(stream, TokenTag::NEWLINE);
+                // The parser treats consecutive newlines as a single boundary, while the
+                // run's shape keeps the blank-physical-line fact for source-directive
+                // attachment.
+                let blank_line = consume_whitespace_after_line_break(stream);
+                return emit_newline(stream, blank_line);
             } else if current_char == '\r' {
                 let _ = normalize_consumed_carriage_return_newline(stream);
-                consume_all_whitespace(stream);
-                return emit_static(stream, TokenTag::NEWLINE);
+                let blank_line = consume_whitespace_after_line_break(stream);
+                return emit_newline(stream, blank_line);
             } else {
                 current_char = match stream.next() {
                     Some(ch) => {
@@ -1016,10 +1025,7 @@ fn get_token_tag(
         //  Style directives
         // -------------------
 
-        if current_char == '$'
-            && stream.mode == TokenizeMode::TemplateHead
-            && stream.peek() != Some(&'(')
-        {
+        if current_char == '$' && stream.peek() != Some(&'(') {
             return tokenize_style_directive(stream, style_directives, string_table);
         }
 
@@ -1581,12 +1587,6 @@ fn tokenize_style_directive(
     style_directives: &StyleDirectiveRegistry,
     string_table: &mut StringTable,
 ) -> TokenizeResult<TokenTag> {
-    if stream.mode != TokenizeMode::TemplateHead {
-        return Err(
-            token_lexical::invalid_character('$', Some(current_source_span(stream)?)).into(),
-        );
-    }
-
     let Some(&first_char) = stream.peek() else {
         return Err(token_lexical::unexpected_end_of_file(
             None,
@@ -1687,21 +1687,27 @@ pub(crate) fn tokenize_identifier_or_keyword(
     }
 }
 
-/// Consume all whitespace including newlines.
-/// WHY: Used after a newline token to skip trailing whitespace on the same line,
-/// and before the next meaningful token to normalize inter-token spacing.
-pub fn consume_all_whitespace(stream: &mut TokenStream) -> bool {
-    let mut consumed = false;
+/// Consume the whitespace that follows one line break and report whether it holds another.
+///
+/// WHAT: returns `true` when the remainder of the whitespace run contains a second line break.
+/// WHY: the token stream merges a whitespace run into one NEWLINE token, so a blank physical line
+///      is only observable as extra line breaks inside that run. Source-directive attachment
+///      must break on a blank line but not on indentation or comment-only lines, and comments
+///      produce no token of their own.
+fn consume_whitespace_after_line_break(stream: &mut TokenStream<'_>) -> bool {
+    let mut saw_line_break = false;
 
-    while stream
-        .peek()
-        .is_some_and(|character| character.is_whitespace())
-    {
+    while let Some(&character) = stream.peek() {
+        if !character.is_whitespace() {
+            break;
+        }
         stream.next();
-        consumed = true;
+        if is_line_break(character) {
+            saw_line_break = true;
+        }
     }
 
-    consumed
+    saw_line_break
 }
 
 #[cfg(test)]

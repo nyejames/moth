@@ -142,6 +142,8 @@ pub fn parse_file_headers_with_table(
     let mut parse_context = HeaderParseContext {
         file_role,
         is_config_file,
+        style_directives:
+            crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         string_table,
         path_fork,
         span_builder,

@@ -6,8 +6,52 @@ fn supported_directives_for_diagnostic_uses_stable_registry_order() {
 
     assert_eq!(
         registry.supported_directives_for_diagnostic(),
-        "'$before', '$after', '$fresh', '$slot', '$in', '$note', '$todo', '$doc', '$raw', '$md', '$html', '$css', '$escape_html', '$code'"
+        "'$before', '$after', '$fresh', '$slot', '$in', '$note', '$todo', '$doc', '$raw', '$md', '$html', '$css', '$escape_html', '$code', '$config'"
     );
+}
+
+#[test]
+fn config_is_the_only_source_modifier_directive() {
+    let built_ins = StyleDirectiveRegistry::built_ins();
+
+    let config = built_ins
+        .find("config")
+        .expect("missing '$config' directive");
+    assert!(config.contexts.allows_source_modifier());
+    assert!(!config.contexts.allows_template_head());
+    assert!(matches!(
+        config.kind,
+        StyleDirectiveKind::SourceModifier(SourceModifierTarget::ExplicitTypedCompileTimeBinding)
+    ));
+
+    for template_directive in [
+        "before",
+        "after",
+        "fresh",
+        "slot",
+        "in",
+        "note",
+        "todo",
+        "doc",
+        "raw",
+        "md",
+        "html",
+        "css",
+        "escape_html",
+        "code",
+    ] {
+        let directive = built_ins
+            .find(template_directive)
+            .unwrap_or_else(|| panic!("missing '${template_directive}' directive"));
+        assert!(
+            directive.contexts.allows_template_head(),
+            "'${template_directive}' keeps its template-head context"
+        );
+        assert!(
+            !directive.contexts.allows_source_modifier(),
+            "'${template_directive}' is not a source modifier"
+        );
+    }
 }
 
 #[test]

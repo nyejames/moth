@@ -146,8 +146,8 @@ pub fn parse_declaration_syntax(
         parse_binding_target_syntax(name, token_stream, string_table, span_builder)?
     };
 
-    // A source `#Config` declaration may omit its initializer so a later provider-independent
-    // resolution barrier can supply the required input.
+    // A source `#Config` declaration may omit its initializer so a later resolution barrier can
+    // supply the required input.
     if config_qualifier.is_some()
         && matches!(
             token_stream.current_tag(),

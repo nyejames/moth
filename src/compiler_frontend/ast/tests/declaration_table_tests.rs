@@ -689,6 +689,7 @@ fn semantic_header(kind: HeaderKind, path: PathId, _string_table: &mut StringTab
         synthetic_content_payload: None,
         tokens: TokenRange::new(SourceId::COMPILATION_ROOT, token_index, token_index)
             .expect("equal token indexes always form a valid range"),
+        config_input: false,
         declaration_path: path,
         token_sequence: None,
         capacity_references: Vec::new(),

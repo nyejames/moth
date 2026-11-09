@@ -115,15 +115,18 @@ fn tokenize_source_error(source: &str) -> (CompactDiagnosticBagForTest, StringTa
 }
 
 fn assert_invalid_character_at_dollar(source: &str) {
+    assert_invalid_character_after_dollar(source, '$');
+}
+
+fn assert_invalid_character_after_dollar(source: &str, character: char) {
     let (diagnostic, _string_table) = tokenize_source_error(source);
-    let dollar_offset = source
+    let offset = source
         .find('$')
         .expect("the rejected syntax must contain a dollar marker");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let dollar_span = SourceSpan::new(
+    let expected_span = SourceSpan::new(
         SourceId::COMPILATION_ROOT,
-        LocalSpan::exact(dollar_offset as u32, 1, &mut span_builder)
-            .expect("the short test span fits"),
+        LocalSpan::exact(offset as u32, 1, &mut span_builder).expect("the short test span fits"),
     );
 
     let diagnostic = first_diagnostic_view(&diagnostic);
@@ -133,16 +136,26 @@ fn assert_invalid_character_at_dollar(source: &str) {
             .family_view::<InvalidCharacterView>()
             .expect("the diagnostic is an invalid character")
             .character,
-        '$',
+        character,
     );
     let primary_span = match diagnostic.primary_site() {
         SiteRef::Local(span) | SiteRef::Foreign { span, .. } => span,
         SiteRef::Absent => panic!("invalid character diagnostics retain their source position"),
     };
     assert_eq!(
-        primary_span, dollar_span,
+        primary_span, expected_span,
         "the removed marker should retain its exact authored location",
     );
+}
+
+fn assert_unknown_directive(source: &str, expected_name: &str) {
+    let (diagnostic, string_table) = tokenize_source_error(source);
+    let diagnostic = first_diagnostic_view(&diagnostic);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0010");
+    let facts = diagnostic
+        .family_view::<InvalidStyleDirectiveView>()
+        .expect("the diagnostic is an invalid style directive");
+    assert_eq!(string_table.resolve(facts.directive_name), expected_name);
 }
 
 fn tokenize_source_with_registry(
@@ -1771,14 +1784,62 @@ fn rejects_legacy_style_child_template_prefix_syntax() {
 }
 
 #[test]
-fn rejects_removed_reactive_binding_spellings_as_ordinary_syntax() {
+fn rejects_removed_reactive_binding_spellings_as_unknown_directives() {
     for source in [
         "value $String = \"name\"\n",
-        "value $= \"name\"\n",
         "read_name |value $String| -> String:\n;\n",
     ] {
-        assert_invalid_character_at_dollar(source);
+        assert_unknown_directive(source, "String");
     }
+}
+
+#[test]
+fn rejects_removed_reactive_assignment_marker_as_invalid_character() {
+    assert_invalid_character_after_dollar("value $= \"name\"\n", '=');
+}
+
+#[test]
+fn tokenizes_source_directives_outside_template_heads() {
+    let (file_tokens, string_table) = tokenize_source("$config\napi_url #String = \"x\"\n");
+    let directive = find_token_index(file_tokens.tokens.as_ref(), |token| {
+        token.tag() == TokenTag::STYLE_DIRECTIVE && token_string_is(token, &string_table, "config")
+    });
+
+    assert_eq!(
+        token_at(file_tokens.tokens.as_ref(), directive).tag(),
+        TokenTag::STYLE_DIRECTIVE
+    );
+}
+
+#[test]
+fn newline_token_records_a_blank_physical_line() {
+    let blank_line_fact = |source: &str| -> Vec<bool> {
+        let (file_tokens, _string_table) = tokenize_source(source);
+        token_refs(file_tokens.tokens.as_ref())
+            .filter(|token| token.tag() == TokenTag::NEWLINE)
+            .map(|token| token.shape().newline_has_blank_line())
+            .collect()
+    };
+
+    // One whitespace run spanning two line breaks is a blank physical line.
+    assert_eq!(
+        blank_line_fact("$config\n\napi_url #String\n"),
+        [true, false]
+    );
+    // A comment-only line adds its own line-break token but no blank line.
+    assert_eq!(
+        blank_line_fact("$config\n-- note\napi_url #String\n"),
+        [false, false, false]
+    );
+    // A blank line inside a comment run is still blank; indentation is not.
+    assert_eq!(
+        blank_line_fact("$config\n-- note\n\napi_url #String\n"),
+        [false, true, false]
+    );
+    assert_eq!(
+        blank_line_fact("$config\n    api_url #String\n"),
+        [false, false]
+    );
 }
 
 #[test]

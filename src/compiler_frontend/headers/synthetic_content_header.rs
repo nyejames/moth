@@ -94,6 +94,7 @@ pub(crate) fn synthetic_content_header(
         name_span: None,
         synthetic_content_payload: Some(input.payload),
         tokens: input.initializer_range,
+        config_input: false,
         declaration_path: header_path,
         token_sequence: None,
         capacity_references: Vec::new(),

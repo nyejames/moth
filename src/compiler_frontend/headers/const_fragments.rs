@@ -259,6 +259,7 @@ pub(super) fn create_top_level_const_template(
         name_span: Some(name_span),
         synthetic_content_payload: None,
         tokens: retained_range,
+        config_input: false,
         declaration_path: full_name,
         token_sequence: None,
         capacity_references: Vec::new(),

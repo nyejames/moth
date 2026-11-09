@@ -488,6 +488,27 @@ pub(crate) fn invalid_template_directive_message(
                 "`${name}` requires one bare compile-time `String` or constant template wrapper."
             ),
         },
+        InvalidTemplateDirectiveReason::WrongContext => match name {
+            "config" => {
+                "`$config` is a source modifier and cannot appear in a template head.".to_owned()
+            }
+            _ => format!(
+                "Template directive '{name}' can only appear in a template head, not in source code."
+            ),
+        },
+        InvalidTemplateDirectiveReason::DuplicateModifier => {
+            format!("`${name}` is already applied to this declaration.")
+        }
+        InvalidTemplateDirectiveReason::DanglingModifier => format!(
+            "`${name}` must immediately precede an eligible declaration.\n                 Add a declaration on the following line, or remove the directive."
+        ),
+        InvalidTemplateDirectiveReason::WrongTarget => match name {
+            "config" => {
+                "`$config` must modify one explicitly typed top-level compile-time `#` binding."
+                    .to_owned()
+            }
+            _ => format!("`${name}` cannot modify this declaration."),
+        },
     }
 }
 
@@ -503,7 +524,7 @@ pub(crate) fn render_invalid_template_directive(
     let reason = facts.reason.to_reason(facts.detail);
     let guidance = if facts.reason == InvalidTemplateDirectiveCode::UnknownDirective {
         vec![
-            "Known template directives include `$md`, `$raw`, `$before`, `$after`, `$slot`, `$in`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, and `$doc`.".to_owned(),
+            "Known template directives include `$md`, `$raw`, `$before`, `$after`, `$slot`, `$in`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, `$doc`, and the `$config` source modifier.".to_owned(),
         ]
     } else {
         Vec::new()

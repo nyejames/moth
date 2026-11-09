@@ -7,7 +7,16 @@ use crate::compiler_frontend::style_directives::builtins::frontend_built_in_dire
 use crate::compiler_frontend::style_directives::specs::StyleDirectiveSpec;
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 use std::fmt::Write as _;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+
+/// Immutable frontend directive set shared by every registry clone.
+///
+/// WHAT: the ordered specs behind `StyleDirectiveRegistry::built_ins`.
+/// WHY: header parsing, tokenization and template parsing all need the same directive facts; one
+///      cached owner keeps every registry instance on the same `Arc` instead of rebuilding the
+///      spec vector per call or per scope.
+static BUILT_IN_SPECS: LazyLock<Arc<[StyleDirectiveSpec]>> =
+    LazyLock::new(|| frontend_built_in_directives().into());
 
 /// Ordered registry used by tokenizer and AST template parsing.
 ///
@@ -23,7 +32,7 @@ impl StyleDirectiveRegistry {
     /// Frontend-owned directives available under every builder.
     pub fn built_ins() -> Self {
         Self {
-            ordered: frontend_built_in_directives().into(),
+            ordered: Arc::clone(&BUILT_IN_SPECS),
         }
     }
 

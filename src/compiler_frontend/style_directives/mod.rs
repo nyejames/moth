@@ -31,8 +31,9 @@ pub(crate) use specs::{
     SLOT_DIRECTIVE_NAME,
 };
 pub use specs::{
-    CoreStyleDirectiveKind, StyleDirectiveArgumentType, StyleDirectiveArgumentValue,
-    StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveKind, StyleDirectiveSpec,
+    CoreStyleDirectiveKind, SourceModifierTarget, StyleDirectiveArgumentType,
+    StyleDirectiveArgumentValue, StyleDirectiveEffects, StyleDirectiveHandlerSpec,
+    StyleDirectiveKind, StyleDirectiveSpec,
 };
 
 #[cfg(test)]

@@ -265,6 +265,7 @@ impl HeaderFileParseState {
             name_span: None,
             synthetic_content_payload: None,
             tokens: start_range,
+            config_input: false,
             declaration_path: source_file,
             token_sequence: Some(token_sequence),
             capacity_references: Vec::new(),

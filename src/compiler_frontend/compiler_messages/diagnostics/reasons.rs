@@ -904,6 +904,14 @@ pub enum InvalidTemplateDirectiveReason {
     /// `$before` or `$after` received a value that is not a compile-time
     /// `String` or constant template wrapper.
     InvalidChildDecoratorValue,
+    /// A known directive appeared in a context its definition does not allow.
+    WrongContext,
+    /// The same source modifier was attached twice to one declaration.
+    DuplicateModifier,
+    /// A source modifier reached end of file or a non-declaration item instead of a target.
+    DanglingModifier,
+    /// A source modifier attached to a declaration its contract does not accept.
+    WrongTarget,
 }
 
 impl InvalidTemplateDirectiveReason {

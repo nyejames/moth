@@ -65,6 +65,10 @@ unit_code! {
         InvalidInsertTarget = 8,
         InvalidChildDecoratorValue = 9,
         InvalidSlotDefault = 10,
+        WrongContext = 11,
+        DuplicateModifier = 12,
+        DanglingModifier = 13,
+        WrongTarget = 14,
     }
 }
 
@@ -94,6 +98,10 @@ impl InvalidTemplateDirectiveCode {
             InvalidTemplateDirectiveReason::InvalidChildDecoratorValue => {
                 (Self::InvalidChildDecoratorValue, None)
             }
+            InvalidTemplateDirectiveReason::WrongContext => (Self::WrongContext, None),
+            InvalidTemplateDirectiveReason::DuplicateModifier => (Self::DuplicateModifier, None),
+            InvalidTemplateDirectiveReason::DanglingModifier => (Self::DanglingModifier, None),
+            InvalidTemplateDirectiveReason::WrongTarget => (Self::WrongTarget, None),
         }
     }
 
@@ -112,6 +120,10 @@ impl InvalidTemplateDirectiveCode {
             Self::InvalidChildDecoratorValue => {
                 InvalidTemplateDirectiveReason::InvalidChildDecoratorValue
             }
+            Self::WrongContext => InvalidTemplateDirectiveReason::WrongContext,
+            Self::DuplicateModifier => InvalidTemplateDirectiveReason::DuplicateModifier,
+            Self::DanglingModifier => InvalidTemplateDirectiveReason::DanglingModifier,
+            Self::WrongTarget => InvalidTemplateDirectiveReason::WrongTarget,
         }
     }
 }
@@ -661,7 +673,7 @@ diagnostic_family! {
             reason: UnitFact<InvalidTemplateDirectiveCode>,
             detail: OptStringFact,
         ],
-        labels: [],
+        labels: [LabelMessageCode::EARLIER_DIRECTIVE],
         extra: None,
         ctor: manual,
         reason_key: reason,

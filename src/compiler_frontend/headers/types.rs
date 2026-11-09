@@ -30,6 +30,7 @@ use crate::compiler_frontend::paths::file_references::PreparedFileReferenceTable
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::semantic_identity::{ModuleRootFiles, ModuleRootRole};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
@@ -625,6 +626,12 @@ pub struct Header {
     /// The range resolves through the canonical source-token owner. No header-owned token vector
     /// is retained.
     pub tokens: TokenRange,
+    /// Whether a `$config` source modifier attached to this declaration.
+    ///
+    /// WHAT: one durable attachment fact for the marked compile-time binding.
+    /// WHY: the input contract is prepared from declaration shells in a later stage, after source
+    ///      directive syntax has been consumed; it must not re-read or rescan authored tokens.
+    pub config_input: bool,
     /// Complete declaration path carried by the canonical source owner.
     pub declaration_path: PathId,
     /// Source-owned segmented syntax for the implicit `start` body.
@@ -2769,6 +2776,13 @@ impl FileFrontendPrepareError {
 pub(super) struct HeaderParseContext<'a> {
     pub file_role: FileRole,
     pub is_config_file: bool,
+    /// Frontend directive definitions used for source-directive recognition.
+    ///
+    /// WHAT: the immutable built-in registry the tokenizer also uses; registry clones share their
+    ///       spec storage.
+    /// WHY: the header walk checks each recognised `$name` token's eligible context without a
+    ///      second directive-name list.
+    pub style_directives: StyleDirectiveRegistry,
     pub string_table: &'a mut StringTable,
     pub path_fork: &'a mut PathInternerFork,
     pub span_builder: &'a mut ExtendedSpanBuilder,

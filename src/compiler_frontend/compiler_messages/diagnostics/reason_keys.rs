@@ -429,6 +429,10 @@ define_stable_reason_keys! {
         &InvalidTemplateDirectiveCode::InvalidSlotDefault => "invalid_template_directive.invalid_slot_default",
         &InvalidTemplateDirectiveCode::InvalidInsertTarget => "invalid_template_directive.invalid_insert_target",
         &InvalidTemplateDirectiveCode::InvalidChildDecoratorValue => "invalid_template_directive.invalid_child_decorator_value",
+        &InvalidTemplateDirectiveCode::WrongContext => "invalid_template_directive.wrong_context",
+        &InvalidTemplateDirectiveCode::DuplicateModifier => "invalid_template_directive.duplicate_modifier",
+        &InvalidTemplateDirectiveCode::DanglingModifier => "invalid_template_directive.dangling_modifier",
+        &InvalidTemplateDirectiveCode::WrongTarget => "invalid_template_directive.wrong_target",
     },
     CssTemplateWarning => {
         @delegate(reason => CssTemplateWarningCode::of(reason).stable_reason_key());

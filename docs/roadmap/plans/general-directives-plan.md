@@ -3,12 +3,14 @@
 ## Status and scope
 
 - Status: ACTIVE. Fixed root roles and builder slots are integrated.
-- Current slice: Source directive recognition and attachment.
+- Current slice: Typed input cutover.
 - Blockers: None known.
-- Next action: Recognise source-context directive names outside template heads, carry the blank-line boundary fact, and attach modifiers to the following declaration or statement.
+- Next action: Turn the attached `$config` fact into build-input contracts from the binding's ordinary `#T` annotation, migrate authored `#Config of T` sources and remove the qualifier grammar.
 - Roadmap file: `docs/roadmap/plans/general-directives-plan.md`.
 - Deliver: a constrained two-context directive grammar, frontend ownership of existing template formatters and `$config` input contracts.
 - Preserve: optional `config.moth` and its existing named `project` and builder-settings records, including the selected builder's current schema, defaults and validation policy.
+
+Delivered: source directives are recognised before context. `$config` is the only source modifier; `$name` lexes in every mode, a known name in the wrong context is a typed error, and attachment breaks on a blank physical line, EOF or a non-declaration item. A marked binding records `Header::config_input`.
 
 Delivered: the frontend owns `$html`, `$css`, `$escape_html` and `$code` with `StyleDirectiveRegistry::merged` and the builder directive hook deleted. Template-head operands are one bare compile-time value, an attached `(` is rejected as the removed call spelling, and `$before`/`$after` take one bare operand. Authored sources, templates, fixtures, benchmarks and the shipped wrapper package use the bare spellings.
 

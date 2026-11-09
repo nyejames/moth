@@ -4,6 +4,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
     InvalidLoopHeaderCode, InvalidLoopHeaderView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::UnknownValueNameView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidExpressionView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::DurableLabelMessage;
@@ -15,6 +18,19 @@ use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+
+#[test]
+fn template_head_rejects_source_modifier_directive() {
+    let diagnostic = parse_template_error("[$config: body]");
+    let view = diagnostic
+        .first()
+        .expect("the wrong-context diagnostic compacts to one record");
+    assert_eq!(view.descriptor().code, "MOTH-SYNTAX-0021");
+    let facts = view
+        .family_view::<InvalidTemplateDirectiveView>()
+        .expect("the wrong-context diagnostic retains typed directive facts");
+    assert_eq!(facts.reason, InvalidTemplateDirectiveCode::WrongContext);
+}
 
 #[test]
 fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token() {

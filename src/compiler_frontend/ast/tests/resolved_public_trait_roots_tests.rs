@@ -64,6 +64,7 @@ fn trait_header(
         synthetic_content_payload: None,
         tokens: TokenRange::new(SourceId::COMPILATION_ROOT, token_index, token_index)
             .expect("equal token indexes always form a valid range"),
+        config_input: false,
         declaration_path,
         token_sequence: None,
         capacity_references: Vec::new(),
@@ -93,6 +94,7 @@ fn function_header(
         synthetic_content_payload: None,
         tokens: TokenRange::new(SourceId::COMPILATION_ROOT, token_index, token_index)
             .expect("equal token indexes always form a valid range"),
+        config_input: false,
         declaration_path,
         token_sequence: None,
         capacity_references: Vec::new(),

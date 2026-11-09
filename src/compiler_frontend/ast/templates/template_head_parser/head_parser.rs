@@ -986,6 +986,19 @@ pub fn parse_template_head(
                     )
                     .into());
                 };
+                // Recognition happens by name first; only then does the directive's declared
+                // context decide whether this head may use it.
+                if !spec.contexts.allows_template_head() {
+                    return Err(with_current_token_span(
+                        token_stream,
+                        templates::invalid_template_directive(
+                            Some(directive),
+                            InvalidTemplateDirectiveReason::WrongContext,
+                            Some(directive_span),
+                        ),
+                    )
+                    .into());
+                }
                 enforce_head_compatibility(
                     &head_state,
                     &spec.head_compatibility,
@@ -1166,6 +1179,20 @@ fn parse_style_directive_from_spec(
             string_table,
             path_fork,
         )?,
+        // The head parser rejects a source-only directive before dispatch; this arm keeps the
+        // match exhaustive without inventing template behavior for a wrong-context name.
+        StyleDirectiveKind::SourceModifier(_) => {
+            let directive_id = string_table.intern(directive_name);
+            return Err(with_current_token_span(
+                token_stream,
+                templates::invalid_template_directive(
+                    Some(directive_id),
+                    InvalidTemplateDirectiveReason::WrongContext,
+                    Some(token_stream.current_span()),
+                ),
+            )
+            .into());
+        }
     };
 
     // Any explicit style directive switches the template into style-controlled whitespace mode.
