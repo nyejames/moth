@@ -22,6 +22,7 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::compiler_messages::PreparedFailure;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
@@ -213,7 +214,10 @@ fn value_match_lowering_joins_ordered_slot_at_shared_merge_block() {
                 false,
                 None,
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
@@ -291,7 +295,10 @@ fn then_value_without_active_target_is_hir_invariant_failure() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(
             NodeKind::ThenValue(ProducedValues {

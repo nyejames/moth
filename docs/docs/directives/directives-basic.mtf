@@ -1,26 +1,28 @@
-**Current support and accepted design.** Template directives work today. General source modifiers are accepted design queued for the general-directives plan. Entry selection uses the planned `@entry.moth` file role, not a directive. See @../progress (Progress) for current support.
+**Current support and accepted design.** Template directives work today. Source directives such as $config are planned. See @../progress (Progress) for current support.
 
 A directive modifies an existing construct. Template-head directives modify their template and source directives modify the following eligible construct.
 
 ### The two locations
 
-- In a template head, the directive applies to that template, for example `[$slot title]` or `[$md: Text]`.
-- Before other source syntax, a modifier applies to the next eligible declaration or statement. `$config` is such a modifier, even when it is the first item in a file.
-
-The compiler decides a directive's eligible target from its name, not the item's position in a file. There are no module-root directives.
-
-### Spacing and operands
-
-A source modifier uses its own line and must attach to the next meaningful line. Contiguous comment lines may intervene, but **an empty line between the modifier and its target is an error**.
-
-Each directive can have at most one optional compile-time operand: `$name`, `$name value` or `$name key = value`. No authored type or function-call-style argument list is allowed.
+Place a template directive in the template head to modify that template:
 
 [codeblock, $code("moth"):
-    -- Accepted general-directive syntax:
+    message #= [$md: Hello from Moth]
+]
+
+Place a source directive immediately before the declaration or statement it modifies. The following $config example is accepted design and is not yet implemented:
+
+[codeblock, $code("moth"):
     $config
     api_url #String = "https://example.com"
 ]
 
-The current config source retains named `project` and selected-builder records, using `#Config of T` inputs until the `$config` migration. There are no `$project` or `$builder` directives. HTML metadata uses direct const `$in` slots in the selected entry; the planned `@entry.moth` role makes entry eligibility explicit.
+Source directives must remain attached to their target. Comment-only lines may intervene, but a blank line breaks attachment. A directive at the start of a file still modifies the following construct.
 
-See @../directives/#directives (Directives), @../project-structure/#project-config (Project config) and @../project-structure/#entry-config (Entry metadata and builder slots).
+### Directive operands
+
+A directive may have one optional compile-time operand in the form $name, $name value or $name key = value. It cannot have a type annotation or a function-call-style argument list. Template heads retain their own slot names and separators.
+
+Module entry selection uses the fixed @entry.moth filename, not a directive. Project and builder settings stay as named constants inside config.moth. The current typed input spelling is #Config of T until $config is implemented.
+
+See @../directives (Directives), @../project-structure/#project-config (Project config) and @../project-structure/#entry-config (Entry metadata and builder slots).

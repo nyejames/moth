@@ -9,14 +9,18 @@ use crate::build_system::build::{FileKind, OutputFile};
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering,
     ExternalPackageRegistry,
 };
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
-use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
+use crate::compiler_frontend::hir::functions::{
+    HirFunction, HirFunctionOrigin, HirFunctionReturnContract,
+};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::collect_module_function_link_facts;
@@ -24,7 +28,7 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::module_compilation::artefact::{
-    ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
+    EntryRootMetadata, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
 };
 use crate::compiler_frontend::module_compilation::{
     Module, ModuleExternalImport, ModuleRootActivity,
@@ -57,8 +61,10 @@ pub(crate) fn create_test_hir_module() -> HirModule {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        returns: Box::new([]),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [],
+            None,
+        )),
     }];
     module
         .function_provenance
@@ -107,14 +113,15 @@ pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut String
             functions: function_link_facts,
         },
         metadata: ModuleCompilerMetadata {
-            entry_point,
-            const_top_level_fragments: vec![],
-            // Most builder fixtures represent active page roots. API-only modules opt into the
-            // explicit default when a test needs to verify artifact filtering.
-            root_activity: ModuleRootActivity {
-                has_non_trivial_root_body: true,
-                ..ModuleRootActivity::default()
-            },
+            // Most builder fixtures represent active entry roots. API-only modules clear this
+            // typed presence when a test needs to verify artifact filtering.
+            entry: Some(EntryRootMetadata {
+                entry_point,
+                const_top_level_fragments: vec![],
+                root_activity: ModuleRootActivity {
+                    runtime_fragment_count: 1,
+                },
+            }),
             doc_fragments: vec![],
             materialisation_context: None,
         },
@@ -143,8 +150,7 @@ pub(crate) fn add_reachable_external_import(
             ExternalFunctionSpec {
                 name: format!("runtime_call_{import_index}"),
                 parameters: vec![],
-                returns: vec![],
-                error_return_type: None,
+                return_contract: external_returns(vec![], None),
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression("undefined".to_owned())),

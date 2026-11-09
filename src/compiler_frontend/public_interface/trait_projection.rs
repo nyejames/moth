@@ -14,7 +14,7 @@
 
 use super::model::{
     PublicTraitParameterContract, PublicTraitReceiverAccess, PublicTraitRequirementParameter,
-    PublicTraitRequirementReturn, PublicTraitRequirementSurface, PublicTraitSemantics,
+    PublicTraitRequirementSurface, PublicTraitReturnContract, PublicTraitSemantics,
     TraitSurfaceTypeIdentity,
 };
 use super::type_projection::project_trait_source_fact_to_canonical_identity;
@@ -29,6 +29,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::datatypes::FunctionReturnContract;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
@@ -419,28 +420,40 @@ fn project_trait_requirement(
         })
         .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
 
-    let returns = requirement
-        .returns
-        .iter()
-        .map(|return_slot| {
-            let type_identity = project_trait_surface_type_identity(
-                return_slot.type_id,
-                owning_this_type,
-                type_environment,
-                context,
-            )?;
-            Ok(PublicTraitRequirementReturn {
-                channel: return_slot.channel,
-                type_identity,
-            })
-        })
-        .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
+    let return_contract = match &requirement.return_contract {
+        FunctionReturnContract::Returns(returns) => PublicTraitReturnContract::Returns {
+            success: returns
+                .success()
+                .iter()
+                .map(|type_id| {
+                    project_trait_surface_type_identity(
+                        *type_id,
+                        owning_this_type,
+                        type_environment,
+                        context,
+                    )
+                })
+                .collect::<Result<Vec<_>, InfrastructureFailure>>()?,
+            error: returns
+                .error()
+                .map(|type_id| {
+                    project_trait_surface_type_identity(
+                        type_id,
+                        owning_this_type,
+                        type_environment,
+                        context,
+                    )
+                })
+                .transpose()?,
+        },
+        FunctionReturnContract::Never => PublicTraitReturnContract::Never,
+    };
 
     Ok(PublicTraitRequirementSurface {
         name,
         receiver_access,
         parameters,
-        returns,
+        return_contract,
     })
 }
 

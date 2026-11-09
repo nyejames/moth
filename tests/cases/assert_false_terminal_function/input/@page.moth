@@ -1,7 +1,0 @@
--- assert(false, "msg") should be statically terminal in a non-Void function
-
-returns_int || -> I32:
-    assert(false, "unreachable")
-;
-
-io.line("assert_false_terminal_function")

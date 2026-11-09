@@ -34,7 +34,7 @@ fn compile_html_module_wasm_exports_moth_start_directly() {
     //       wrappers discovered by entry-body call scanning.
     // WHY: the compiler-owned entry is the sole runtime fragment producer; JS calls it directly.
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     let reachability = entry_reachability(&module);
     let slot_plan = HtmlSlotPlan::default();
 
@@ -51,13 +51,18 @@ fn compile_html_module_wasm_exports_moth_start_directly() {
         project_name: "",
         document_config: &HtmlDocumentConfig::default(),
         build_profile: crate::build_system::BuildProfile::Dev,
-        root_activity: &module.metadata.root_activity,
+        root_activity: &module
+            .metadata
+            .entry
+            .as_ref()
+            .expect("fixture module represents an entry root")
+            .root_activity,
         external_package_registry: Arc::new(
             crate::compiler_frontend::external_packages::ExternalPackageRegistry::new(),
         ),
     };
-    let route =
-        derive_logical_html_path(Path::new("@page.moth"), None).expect("root route should resolve");
+    let route = derive_logical_html_path(Path::new("@entry.moth"), None)
+        .expect("root route should resolve");
     let output_plan = HtmlResourceOutputPlan::new("");
     let resource_url_context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
     let structural_url_renderer =
@@ -89,7 +94,7 @@ fn compile_html_module_wasm_exports_moth_start_directly() {
 fn wasm_export_plan_contains_single_entry_start_export() {
     // WHAT: export plan must contain exactly one function export: moth_start for the start function.
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     let reachability = entry_reachability(&module);
 
     let plan_a = build_html_wasm_plan(&module.executable.hir, &reachability, Vec::new())
@@ -125,7 +130,7 @@ fn wasm_export_plan_contains_single_entry_start_export() {
 #[test]
 fn wasm_export_plan_wires_required_helper_exports() {
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     let reachability = entry_reachability(&module);
 
     let plan = build_html_wasm_plan(&module.executable.hir, &reachability, Vec::new())
@@ -145,7 +150,7 @@ fn wasm_export_plan_wires_required_helper_exports() {
 #[test]
 fn compile_html_module_wasm_preserves_nested_logical_html_route() {
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("docs/@page.moth"), &mut string_table);
+    let module = create_test_module(PathBuf::from("docs/@entry.moth"), &mut string_table);
     let reachability = entry_reachability(&module);
 
     let slot_plan = HtmlSlotPlan::default();
@@ -162,12 +167,17 @@ fn compile_html_module_wasm_preserves_nested_logical_html_route() {
         project_name: "",
         document_config: &HtmlDocumentConfig::default(),
         build_profile: crate::build_system::BuildProfile::Dev,
-        root_activity: &module.metadata.root_activity,
+        root_activity: &module
+            .metadata
+            .entry
+            .as_ref()
+            .expect("fixture module represents an entry root")
+            .root_activity,
         external_package_registry: Arc::new(
             crate::compiler_frontend::external_packages::ExternalPackageRegistry::new(),
         ),
     };
-    let route = derive_logical_html_path(Path::new("src/docs/@page.moth"), Some(Path::new("src")))
+    let route = derive_logical_html_path(Path::new("src/docs/@entry.moth"), Some(Path::new("src")))
         .expect("nested route should resolve");
     let output_plan = HtmlResourceOutputPlan::new("");
     let resource_url_context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());

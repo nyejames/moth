@@ -585,30 +585,56 @@ pub(super) fn validate_html_baseline_contract(index: &BuiltArtifactIndex<'_>) ->
     validate_html_baseline_document(index, "html").err()
 }
 
-/// Shared `index.html` lookup and shell check for the HTML and HTML-Wasm baselines.
+/// Shared HTML lookup and shell check for the HTML and HTML-Wasm baselines.
 ///
-/// Returns the document text so the HTML-Wasm baseline can continue with its own contract.
+/// Prefers the conventional `index.html` homepage when the project produces one. A project whose
+/// only selected entry is a descendant directory legitimately produces e.g. `about/index.html`,
+/// so a sole HTML artifact is accepted and validated instead. Only an output set with no HTML
+/// document fails the baseline.
+///
+/// Returns the produced HTML path and document text so the HTML-Wasm baseline can locate the
+/// page script and Wasm module written beside it.
 pub(crate) fn validate_html_baseline_document<'index>(
-    index: &BuiltArtifactIndex<'index>,
+    index: &'index BuiltArtifactIndex<'index>,
     baseline_name: &str,
-) -> Result<&'index str, String> {
-    let Some(index_html) = index.get("index.html") else {
-        return Err(format!(
-            "{baseline_name} baseline contract expected 'index.html', but it was not produced."
-        ));
-    };
-
-    let Some(html) = output_text_content(index_html, ArtifactKind::Html) else {
-        return Err(format!(
-            "{baseline_name} baseline contract expected 'index.html' as an HTML artifact."
-        ));
+) -> Result<(&'index str, &'index str), String> {
+    let (path, html) = if let Some(index_html) = index.get("index.html") {
+        let Some(html) = output_text_content(index_html, ArtifactKind::Html) else {
+            return Err(format!(
+                "{baseline_name} baseline contract expected 'index.html' as an HTML artifact."
+            ));
+        };
+        ("index.html", html)
+    } else {
+        let documents: Vec<(&str, &str)> = index
+            .paths()
+            .into_iter()
+            .filter_map(|path| {
+                let output = index.get(path)?;
+                output_text_content(output, ArtifactKind::Html).map(|html| (path, html))
+            })
+            .collect();
+        match documents.as_slice() {
+            [] => {
+                return Err(format!(
+                    "{baseline_name} baseline contract expected an HTML artifact, but none was produced."
+                ));
+            }
+            [(path, html)] => (*path, *html),
+            _ => {
+                return Err(format!(
+                    "{baseline_name} baseline contract expected 'index.html' or one HTML artifact, but the build produced {} HTML documents and no homepage.",
+                    documents.len()
+                ));
+            }
+        }
     };
 
     match html_shell_violation(html) {
         Some(violation) => Err(format!(
-            "{baseline_name} baseline contract expected 'index.html' to follow the document shell: {violation}."
+            "{baseline_name} baseline contract expected '{path}' to follow the document shell: {violation}."
         )),
-        None => Ok(html),
+        None => Ok((path, html)),
     }
 }
 

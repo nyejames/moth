@@ -8,6 +8,6 @@ diagnostic_codes = ["MOTH-SYNTAX-0008"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0008"
 reason = "invalid_number_literal.inexact_number_scale"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 3
 column = 23

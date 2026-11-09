@@ -25,7 +25,7 @@ use crate::compiler_frontend::hir::reachability::{
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::module_compilation::artefact::{
-    Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts, ModuleRootActivity,
+    Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
 };
 use crate::compiler_frontend::module_compilation::context::ModuleCompilationContext;
 use crate::compiler_frontend::module_compilation::external_imports::{
@@ -33,6 +33,7 @@ use crate::compiler_frontend::module_compilation::external_imports::{
 };
 use crate::compiler_frontend::module_compilation::generated::artefacts::GeneratedFunctionSidecar;
 use crate::compiler_frontend::module_compilation::generated::convergence::exact_generated_sidecar_summary;
+use crate::compiler_frontend::module_compilation::generated::never_proofs::GeneratedNeverProofs;
 use crate::compiler_frontend::module_compilation::generated::provider_materialisations::{
     DeclaringMaterialisation, declaring_materialisation,
 };
@@ -48,7 +49,6 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
-use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -62,6 +62,14 @@ struct MaterialisingRequest {
 }
 
 /// Materialise every request this module emitted from its own AST.
+///
+/// `never_proofs` already holds the requester's translated exact-target Never nodes and receives
+/// each completed sidecar's nodes in materialisation order. The caller checks the accumulated
+/// graph once every request has completed.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the root driver keeps the module context, request list, transaction, requester preparation, Never proof accumulator, frontend, entry path and the timers-only context separate; the timers parameter pushes feature builds over clippy's threshold"
+)]
 pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_request_roots<
     'build,
 >(
@@ -69,8 +77,8 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
     request_ids: &[GeneratedRequestId],
     transaction: &mut GeneratedFunctionTransaction<'_>,
     requester_context: &ModuleMaterialisationPreparation,
+    never_proofs: &mut GeneratedNeverProofs,
     compiler: &mut CompilerFrontend<'_>,
-    entry_file_path: &Path,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
 ) -> Result<(), PreparedFailure> {
     for request_id in request_ids {
@@ -88,21 +96,25 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
             },
             transaction,
             requester_context,
+            never_proofs,
             compiler,
-            entry_file_path,
         )?;
     }
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one generated request keeps its module context, identity, transaction, requester preparation, Never proof accumulator, frontend and entry path separate"
+)]
 fn materialise_generated_request<'build>(
     context: &ModuleCompilationContext<'build>,
     request_id: GeneratedRequestId,
     request: &MaterialisingRequest,
     transaction: &mut GeneratedFunctionTransaction<'_>,
     requester_context: &ModuleMaterialisationPreparation,
+    never_proofs: &mut GeneratedNeverProofs,
     compiler: &mut CompilerFrontend<'_>,
-    entry_file_path: &Path,
 ) -> Result<(), PreparedFailure> {
     match transaction.enter(request_id) {
         GeneratedRequestEntry::Complete => return Ok(()),
@@ -252,6 +264,7 @@ fn materialise_generated_request<'build>(
         deferred_generic_requests: nested_requests,
         assertion_validation_generic_requests: nested_validation_requests,
         module_resources,
+        exact_never_proofs: sidecar_never_proofs,
         ..
     } = build_result;
     let module_resources = module_resources.ok_or_else(|| {
@@ -294,9 +307,25 @@ fn materialise_generated_request<'build>(
                         call_span: request.call_span,
                     }
                 }));
+            // The sidecar's own nodes translate against this domain's registered spellings, so
+            // push after registration and before recursing into nested materialisation.
+            never_proofs.push_sidecar(
+                (instance_path, request_id),
+                sidecar_never_proofs,
+                &nested_requests,
+                transaction,
+            );
             Some((generated_context, nested_request_ids))
         }
-        None if nested_requests.is_empty() && nested_validation_requests.is_empty() => None,
+        None if nested_requests.is_empty() && nested_validation_requests.is_empty() => {
+            never_proofs.push_sidecar(
+                (instance_path, request_id),
+                sidecar_never_proofs,
+                &[],
+                transaction,
+            );
+            None
+        }
         None => {
             return Err(PreparedFailure::from(InfrastructureFailure::internal(
                 CompilerStage::ProjectBuildAssembly,
@@ -337,8 +366,8 @@ fn materialise_generated_request<'build>(
                     },
                     transaction,
                     &generated_context,
+                    never_proofs,
                     &mut generated_compiler,
-                    entry_file_path,
                 )?;
             }
             // Nested materialisation consumes only detached facts. Release its requester services
@@ -444,10 +473,10 @@ fn materialise_generated_request<'build>(
                     external_import_candidates,
                     functions,
                 },
+                // A generated sidecar is a function body, not a structural module with an
+                // entry root: it carries no entry metadata, no start and no fragment schedule.
                 metadata: ModuleCompilerMetadata {
-                    entry_point: entry_file_path.to_path_buf(),
-                    const_top_level_fragments: Vec::new(),
-                    root_activity: ModuleRootActivity::default(),
+                    entry: None,
                     doc_fragments: lowering_metadata.doc_fragments,
                     materialisation_context: None,
                 },

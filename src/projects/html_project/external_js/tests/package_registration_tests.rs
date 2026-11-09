@@ -38,9 +38,13 @@ fn parsed_fixed_scalar_functions_register_canonical_parameter_and_result_types()
                 .get_function_by_id(registered.exported_free_functions[0])
                 .expect("registered function resolves");
             let fixed = ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar));
+            let returns = function
+                .return_contract
+                .ordinary()
+                .expect("fixed scalar function has an ordinary return contract");
             assert_eq!(function.parameters[0].language_type, fixed);
-            assert_eq!(function.returns[0].value_type, fixed);
-            assert_eq!(function.error_return_type.is_some(), !error_slot.is_empty());
+            assert_eq!(returns.success[0].value_type, fixed);
+            assert_eq!(returns.error.is_some(), !error_slot.is_empty());
             assert!(function.lowerings.wasm.is_none());
             let mut environment = TypeEnvironment::new();
             assert_eq!(
@@ -49,6 +53,36 @@ fn parsed_fixed_scalar_functions_register_canonical_parameter_and_result_types()
             );
         }
     }
+}
+
+#[test]
+fn parsed_never_contract_registers_and_mixed_forms_are_rejected() {
+    let source =
+        "/** @moth.sig stop |code I32| -> ! */\nexport function stop(code) { throw code; }";
+    let parsed = parse_js_module(source, &RuntimeModuleRegistry::v1());
+    assert!(parsed.diagnostics.is_empty());
+    let mut registry = ExternalPackageRegistry::new();
+    let package = registry
+        .register_package(
+            "@test/never",
+            crate::builder_surface::PackageOrigin::ProjectLocal,
+        )
+        .expect("test package registers");
+    let registered = register_parsed_js_module(package, &parsed, &mut registry)
+        .expect("Never external registers");
+    let function = registry
+        .get_function_by_id(registered.exported_free_functions[0])
+        .expect("registered external resolves");
+    assert!(function.return_contract.is_never());
+
+    let mixed = parse_js_module(
+        "/** @moth.sig stop || -> !, I32 */\nexport function stop() { throw 1; }",
+        &RuntimeModuleRegistry::v1(),
+    );
+    assert!(mixed.diagnostics.iter().any(|diagnostic| matches!(
+        diagnostic.kind,
+        crate::projects::html_project::external_js::parser::parsed_js_module::JsDiagnosticKind::MixedNeverReturnContract
+    )));
 }
 
 #[test]

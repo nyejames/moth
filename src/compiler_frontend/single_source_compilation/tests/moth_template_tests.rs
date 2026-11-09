@@ -526,7 +526,6 @@ fn prepare_bundle_source(
     let context = FrontendFilePrepareContext {
         source_files,
         style_directives,
-        entry_file_path: source_path,
         options: &options,
     };
     let input = FrontendFilePrepareInput {

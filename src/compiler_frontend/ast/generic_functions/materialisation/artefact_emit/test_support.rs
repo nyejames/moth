@@ -7,7 +7,9 @@
 
 use super::super::frozen_syntax::{StableBodyOwner, StableBodySyntax};
 use super::super::semantic_closure::StableSemanticClosure;
-use super::super::stable_types::{GenericTemplateArtefact, StableFunctionSignature};
+use super::super::stable_types::{
+    GenericTemplateArtefact, StableFunctionReturnContract, StableFunctionSignature, StableReturns,
+};
 use super::super::visibility::StableFileVisibility;
 use super::ModuleMaterialisationContext;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
@@ -50,11 +52,14 @@ impl ModuleMaterialisationContext {
                     source_path_table: None,
                     source_string_table: None,
                     resolved_file_references: Box::new([]),
+                    qualified_references: Box::new([]),
                 },
                 signature: StableFunctionSignature {
                     parameters: Box::new([]),
-                    returns: Box::new([]),
-                    error_return: None,
+                    return_contract: StableFunctionReturnContract::Returns(StableReturns {
+                        success: Box::new([]),
+                        error: None,
+                    }),
                 },
                 generic_parameters: Box::new([]),
                 visibility: StableFileVisibility::default(),

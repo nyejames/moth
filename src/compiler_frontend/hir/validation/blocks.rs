@@ -779,15 +779,24 @@ impl<'a> HirValidator<'a> {
                 self.require_same_function_cfg_owner(block_id, *target)?;
             }
 
+            HirTerminator::NeverCall { target, args } => {
+                self.validate_never_call(target, *args, anchor)?;
+            }
+
             HirTerminator::Return(values) => {
                 let values = self.value_ids(*values)?;
                 let function_id = self.statement_function_id(block_id)?;
                 let function = self.module.functions.iter().find(|function| function.id == function_id)
                     .ok_or_else(|| self.error_with_hir("Return owner function is missing"))?;
-                if values.len() != function.returns.len() {
+                let Some(returns) = function.return_contract.ordinary() else {
+                    return Err(self.error_with_hir(
+                        "Return terminator appears in a declared Never function",
+                    ));
+                };
+                if values.len() != returns.success().len() {
                     return Err(self.error_with_hir("Return success slot arity does not match function signature"));
                 }
-                for (value, expected) in values.iter().zip(function.returns.iter()) {
+                for (value, expected) in values.iter().zip(returns.success()) {
                     self.validate_expression(*value, anchor)?;
                     if self.expression_row(*value)?.ty != *expected {
                         return Err(self.error_with_hir("Return success slot type does not match function signature"));
@@ -800,7 +809,11 @@ impl<'a> HirValidator<'a> {
                 let function_id = self.statement_function_id(block_id)?;
                 let function = self.module.functions.iter().find(|function| function.id == function_id)
                     .ok_or_else(|| self.error_with_hir("ReturnError owner function is missing"))?;
-                if function.error_return != Some(self.expression_row(*value)?.ty) {
+                let error = function
+                    .return_contract
+                    .ordinary()
+                    .and_then(|returns| returns.error());
+                if error != Some(self.expression_row(*value)?.ty) {
                     return Err(self.error_with_hir("ReturnError value type does not match function error slot"));
                 }
             }

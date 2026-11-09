@@ -196,7 +196,7 @@ fn source_config_contracts_stay_out_of_header_topology_and_provider_symbols() {
 #[test]
 fn source_config_initializer_paths_stay_out_of_structural_file_references() {
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let (output, _span_builder) = prepare_single_file(
         "asset #Config of String = @assets/missing.mtf\n",
         &file_path,
@@ -228,7 +228,7 @@ fn source_config_initializer_paths_stay_out_of_structural_file_references() {
 #[test]
 fn active_root_config_marker_after_declaration_gap_hides_file_value_reference() {
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let (output, _span_builder) = prepare_single_file(
         "helper #= 1\nvalue = @assets/missing.mtf #Config of String\n",
         &file_path,
@@ -243,14 +243,14 @@ fn active_root_config_marker_after_declaration_gap_hides_file_value_reference() 
 }
 
 #[test]
-fn imported_root_discarded_body_config_marker_is_rejected() {
+fn reached_root_discarded_body_config_marker_is_rejected() {
     let errors = expect_header_error(
-        parse_single_file_headers_with_entry(
+        parse_single_file_headers_with_reached_role(
             "value = @assets/missing.mtf #Config of String\n",
-            "src/@page.moth",
-            "src/@root.moth",
+            "src/widgets/@mod.moth",
+            FileRole::ReachedApiFacadeRoot(ModuleRootRole::Normal),
         ),
-        "discarded imported-root body config markers must be rejected during preparation",
+        "discarded reached-root body config markers must be rejected during preparation",
     );
 
     assert!(errors.diagnostics.views().any(|diagnostic| {
@@ -271,7 +271,7 @@ fn source_config_contracts_reject_generic_parameters_and_comma_termination() {
 
     for source in cases {
         let errors = expect_header_error(
-            parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth"),
+            parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
             "malformed source config declaration should fail during header preparation",
         );
         assert!(
@@ -285,8 +285,8 @@ fn source_config_contracts_reject_generic_parameters_and_comma_termination() {
 fn malformed_decorator_wrapper_constant_initializer_reports_eof_delimiter_error() {
     let result = parse_single_file_headers_with_entry(
         "broken #= [$before = [:<li>]:\n<ul>[$slot]</ul>\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
 
     assert!(

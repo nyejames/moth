@@ -82,7 +82,7 @@ fn write_directory_html_project(root: &Path, page_source: &str) {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("config should be written");
-    fs::write(root.join("@page.moth"), page_source).expect("page source should be written");
+    fs::write(root.join("@entry.moth"), page_source).expect("page source should be written");
 }
 
 fn write_directory_html_config_input_project(root: &Path) {
@@ -92,7 +92,7 @@ fn write_directory_html_config_input_project(root: &Path) {
     )
     .expect("config should be written");
     fs::write(
-        root.join("@page.moth"),
+        root.join("@entry.moth"),
         "enabled #Config of Bool\nresult ~= 0\nif enabled:\n    ~result = 1\n;\n",
     )
     .expect("page source should be written");
@@ -121,8 +121,8 @@ fn cross_directory_root_alias_is_a_typed_diagnostic_not_a_compiler_bug() {
     fs::create_dir_all(project.join("child")).expect("child directory should be created");
     write_directory_html_project(&project, "page_title #= \"root\"\n");
     symlink(
-        project.join("@page.moth"),
-        project.join("child/@child.moth"),
+        project.join("@entry.moth"),
+        project.join("child/@entry.moth"),
     )
     .expect("child root symlink should be created");
 
@@ -151,11 +151,11 @@ fn write_support_scope_project(project: &Path) {
         "config.moth",
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     );
-    write_source(project, "@site.moth", "");
-    write_source(project, "pages/@pages.moth", "");
+    write_source(project, "@mod.moth", "");
+    write_source(project, "pages/@mod.moth", "");
     write_source(
         project,
-        "pages/extras/+extras.moth",
+        "pages/extras/@package.moth",
         "export:\n    extra #= 1\n;\n",
     );
 }
@@ -174,7 +174,7 @@ fn support_scope_diagnostic_matches_canonical_and_check_only_lanes() {
     let root = tempdir().expect("temporary directory should be created");
     let canonical_project = root.path().join("canonical");
     write_support_scope_project(&canonical_project);
-    write_source(&canonical_project, "pages/+package.moth", "@extras extra\n");
+    write_source(&canonical_project, "pages/@package.moth", "@extras extra\n");
 
     let canonical = run_moth(&[
         "check",
@@ -195,7 +195,7 @@ fn support_scope_diagnostic_matches_canonical_and_check_only_lanes() {
     write_support_scope_project(&check_only_project);
     write_source(
         &check_only_project,
-        "pages/+package.moth",
+        "pages/@package.moth",
         "export:\n    marker #= 1\n;\n",
     );
     write_source(&check_only_project, "pages/orphan.moth", "@extras extra\n");
@@ -233,10 +233,10 @@ fn paired_provider_check_only_uses_the_selected_surface() {
         "config.moth",
         "project #= (name = \"check_only\")\nhtml #= ()\n",
     );
-    write_source(&project, "@page.moth", "@consumer run\n[:run]\n");
+    write_source(&project, "@entry.moth", "@consumer run\n[:run]\n");
     write_source(
         &project,
-        "consumer/@consumer.moth",
+        "consumer/@mod.moth",
         "export:\n    run #= \"ok\"\n;\n",
     );
     write_source(
@@ -246,7 +246,7 @@ fn paired_provider_check_only_uses_the_selected_surface() {
     );
     write_source(
         &project,
-        "pkg/+package.moth",
+        "pkg/@package.moth",
         "export:\n    support_only #= \"support\"\n;\n",
     );
     write_source(
@@ -366,7 +366,7 @@ fn check_orders_the_module_stop_before_the_terse_summary_and_omits_it_when_compl
     let root = tempdir().expect("temporary directory should be created");
     fs::write(root.path().join("config.moth"), MODULE_LIMIT_CONFIG_SOURCE)
         .expect("limited config should be written");
-    fs::write(root.path().join("@page.moth"), TWO_FAILING_BODIES_SOURCE)
+    fs::write(root.path().join("@entry.moth"), TWO_FAILING_BODIES_SOURCE)
         .expect("page source should be written");
     let stop_line =
         "Diagnostic discovery stopped early (module error limit): later code was not checked.";
@@ -910,10 +910,10 @@ fn check_only_shared_helper_rejects_lateral_support_import() {
         "config.moth",
         "project #= (name = \"check_only\")\nhtml #= ()\n",
     );
-    write_source(&project, "@page.moth", "[:ok]\n");
+    write_source(&project, "@entry.moth", "[:ok]\n");
     write_source(
         &project,
-        "+package.moth",
+        "@package.moth",
         "export:\n    root_support #= \"root\"\n;\n",
     );
     write_source(
@@ -923,7 +923,7 @@ fn check_only_shared_helper_rejects_lateral_support_import() {
     );
     write_source(
         &project,
-        "pkg/+package.moth",
+        "pkg/@package.moth",
         "export:\n    support_only #= \"support\"\n;\n",
     );
 

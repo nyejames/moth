@@ -47,16 +47,16 @@ use crate::compiler_frontend::ast::generic_functions::{
     GenericRequestRange, IfGenericRequestRanges,
 };
 use crate::compiler_frontend::ast::numeric_construction::{
-    AssignmentContinuation, BindingContinuation, BodyDraft, BodyEntry,
-    CompoundAssignmentContinuation, DeferredArmPattern, DeferredAssignmentTarget, DeferredBody,
-    DeferredCall, DeferredCallArgument, DeferredCallHandling, DeferredConstruct,
-    DeferredExpression, DeferredExpressionCompletion, DeferredExpressionServices,
-    DeferredExpressionSuffix, DeferredIf, DeferredLoop, DeferredLoopHeader, DeferredMatch,
-    DeferredMultiBindTarget, DeferredMultiBindValue, DeferredNumericExpression,
-    DeferredRangeHeader, DeferredRangeSpec, DeferredSourceCall, ExpressionStatementContinuation,
-    ForwardProducerId, MultiBindContinuation, NumericBindingId, NumericConstructionState,
-    NumericContinuation, NumericContinuationId, NumericRecipe, PendingBindingRow,
-    PendingMultiBindProducer, PendingMultiBindProducerKind, ReturnContinuation,
+    AssignmentContinuation, BindingContinuation, BodyDraft, BodyEntry, CallCompletion,
+    CompletedExpression, CompoundAssignmentContinuation, DeferredArmPattern,
+    DeferredAssignmentTarget, DeferredBody, DeferredCall, DeferredCallArgument,
+    DeferredCallHandling, DeferredConstruct, DeferredExpression, DeferredExpressionCompletion,
+    DeferredExpressionServices, DeferredExpressionSuffix, DeferredIf, DeferredLoop,
+    DeferredLoopHeader, DeferredMatch, DeferredMultiBindTarget, DeferredMultiBindValue,
+    DeferredNumericExpression, DeferredRangeHeader, DeferredRangeSpec, DeferredSourceCall,
+    ExpressionStatementContinuation, ForwardProducerId, MultiBindContinuation, NumericBindingId,
+    NumericConstructionState, NumericContinuation, NumericContinuationId, NumericRecipe,
+    PendingBindingRow, PendingMultiBindProducer, PendingMultiBindProducerKind, ReturnContinuation,
     StatementExpression, accept_forward_binding_result, binding_annotation_type,
     binding_known_shape, directed_annotation_destination, merged_receiver_type,
     numeric_witness_type, resolve_raw_binding, union_alias_classes,
@@ -77,16 +77,20 @@ use crate::compiler_frontend::ast::statements::loop_headers::{
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchPattern, ensure_pattern_compatible_with_subject, finish_pending_option_pattern,
 };
+use crate::compiler_frontend::ast::statements::never_call::{NeverCall, NeverCallTarget};
 use crate::compiler_frontend::ast::templates::template_head_parser::validate_template_head_value_type;
 use crate::compiler_frontend::ast::templates::tir::{
     NumericTemplateIntakePosition, RangeOperandSlot, TemplateIrNodeId,
 };
+
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::casts::resolution::{
     CastResolutionInput, resolve_cast_expression,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::InvalidCallShapeReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
     names_declarations, types_borrows_targets,
 };
@@ -1228,16 +1232,24 @@ impl Completion<'_, '_> {
         &mut self,
         continuation: ExpressionStatementContinuation,
     ) -> Result<Vec<AstNode>, ExpressionParseError> {
-        let expression = self.complete_statement_expression(continuation.expression)?;
-        validate_resumed_statement_expression(
-            self.expression_builder.view_owned(expression)?,
-            continuation.in_statement_match_arm,
-        )?;
-        Ok(vec![AstNode {
-            kind: NodeKind::ExpressionStatement(expression.id()),
-            span: continuation.span,
-            scope: continuation.scope,
-        }])
+        match self.complete_statement_expression_outcome(continuation.expression)? {
+            CompletedExpression::Value(expression) => {
+                validate_resumed_statement_expression(
+                    self.expression_builder.view_owned(expression)?,
+                    continuation.in_statement_match_arm,
+                )?;
+                Ok(vec![AstNode {
+                    kind: NodeKind::ExpressionStatement(expression.id()),
+                    span: continuation.span,
+                    scope: continuation.scope,
+                }])
+            }
+            CompletedExpression::NeverCall(never_call) => Ok(vec![AstNode {
+                kind: NodeKind::NeverCall(never_call),
+                span: continuation.span,
+                scope: continuation.scope,
+            }]),
+        }
     }
 
     /// Resume one retained multi-bind statement after its actual producer slots resolve.
@@ -1330,7 +1342,7 @@ impl Completion<'_, '_> {
             }
         }
         let value = match deferred_value {
-            DeferredMultiBindValue::Call(call) => self.finish_deferred_call(call)?,
+            DeferredMultiBindValue::Call(call) => self.finish_deferred_call(call)?.into_value()?,
             DeferredMultiBindValue::Catch {
                 handler,
                 success_slot_count,
@@ -1905,17 +1917,74 @@ impl Completion<'_, '_> {
             .map_err(ExpressionParseError::from)
     }
 
+    /// Complete a statement-position expression, preserving a Never call as its own outcome.
+    ///
+    /// WHAT: statement position is the only owner that may accept a terminating call, so it
+    ///       checks for one after the retained arguments complete and before evaluation.
+    fn complete_statement_expression_outcome(
+        &mut self,
+        expression: StatementExpression,
+    ) -> Result<CompletedExpression, ExpressionParseError> {
+        match expression {
+            StatementExpression::Built(built) => {
+                validate_completed_typed_errors(self.expression_builder.view(built)?)?;
+                Ok(CompletedExpression::Value(
+                    self.expression_builder.own(built),
+                ))
+            }
+            StatementExpression::Retained(deferred) => {
+                let DeferredNumericExpression {
+                    items,
+                    expected,
+                    value_mode,
+                    suffix,
+                    ..
+                } = deferred;
+                match self.complete_items_inner_outcome(items, expected, &value_mode)? {
+                    CompletedExpression::NeverCall(never_call) => {
+                        if !matches!(suffix, DeferredExpressionSuffix::None) {
+                            return Err(calls_data::invalid_call_shape(
+                                InvalidCallShapeReason::NeverCallHandled,
+                                Some(never_call.name),
+                                never_call.span,
+                            )
+                            .into());
+                        }
+                        // Completion rebuilt the call outside the parse-time boundary, so its
+                        // now-ready receiver and arguments must close their typed-error
+                        // boundary here unless an enclosing catch owns that recovery.
+                        if !self.protected_typed_errors {
+                            never_call.validate_typed_errors(self.expression_builder)?;
+                        }
+                        Ok(CompletedExpression::NeverCall(never_call))
+                    }
+                    CompletedExpression::Value(value) => {
+                        let value =
+                            crate::compiler_frontend::ast::statements::fallible_handling::apply_completed_handling_suffix(
+                                value,
+                                suffix,
+                                self.context,
+                                self.type_interner,
+                                self.expression_builder,
+                            )?;
+                        if !self.protected_typed_errors {
+                            validate_completed_typed_errors(
+                                self.expression_builder.view_owned(value)?,
+                            )?;
+                        }
+                        Ok(CompletedExpression::Value(value))
+                    }
+                }
+            }
+        }
+    }
+
     fn complete_statement_expression(
         &mut self,
         expression: StatementExpression,
     ) -> Result<OwnedExpr, ExpressionParseError> {
-        match expression {
-            StatementExpression::Built(built) => {
-                validate_completed_typed_errors(self.expression_builder.view(built)?)?;
-                Ok(self.expression_builder.own(built))
-            }
-            StatementExpression::Retained(deferred) => self.complete_deferred_expression(deferred),
-        }
+        self.complete_statement_expression_outcome(expression)?
+            .into_value()
     }
 
     /// Complete one retained range step with the literal context its bounds select.
@@ -2131,9 +2200,31 @@ impl Completion<'_, '_> {
         expected: ExpectedType,
         value_mode: &ValueMode,
     ) -> Result<OwnedExpr, ExpressionParseError> {
+        self.complete_items_inner_outcome(items, expected, value_mode)?
+            .into_value()
+    }
+
+    /// Complete one fragment while preserving a lone Never call as a named outcome.
+    ///
+    /// WHAT: resolves origins and arguments first, then either accepts exactly one terminating
+    ///       call or evaluates the ordinary value exactly as before.
+    /// WHY: statement position needs the call itself, while every other caller must reject it
+    ///       through the same placement diagnostic instead of evaluating an operand with no value.
+    fn complete_items_inner_outcome(
+        &mut self,
+        items: Vec<ExpressionRpnItem>,
+        expected: ExpectedType,
+        value_mode: &ValueMode,
+    ) -> Result<CompletedExpression, ExpressionParseError> {
         let items = self.substitute_bindings(items)?;
         let literal_destination = expected.known_type_id();
-        let items = self.complete_fragment_items(items, value_mode, literal_destination)?;
+        let mut items = self.complete_fragment_items(items, value_mode, literal_destination)?;
+        if matches!(items.as_slice(), [ExpressionRpnItem::NeverCall(_)]) {
+            let Some(ExpressionRpnItem::NeverCall(never_call)) = items.pop() else {
+                unreachable!("the fragment is exactly one Never call");
+            };
+            return Ok(CompletedExpression::NeverCall(never_call));
+        }
         let mut expected = expected;
         let expression = evaluate_expression(
             self.context,
@@ -2147,7 +2238,7 @@ impl Completion<'_, '_> {
             self.string_table,
             self.path_fork,
         )?;
-        Ok(expression)
+        Ok(CompletedExpression::Value(expression))
     }
 
     /// Replace pending binding references with their resolved canonical operands.
@@ -2473,8 +2564,16 @@ impl Completion<'_, '_> {
                 completed.push(ExpressionRpnItem::Operand(cast.id()));
             }
             ExpressionRpnItem::PendingNumericCall { call, .. } => {
-                let expression = self.finish_deferred_call(*call)?;
-                completed.push(ExpressionRpnItem::Operand(expression.id()));
+                match self.finish_deferred_call(*call)? {
+                    CompletedExpression::Value(expression) => {
+                        completed.push(ExpressionRpnItem::Operand(expression.id()));
+                    }
+                    // A completed terminating call keeps its payload in the fragment: statement
+                    // position lifts it, and every value owner rejects it at the choke point.
+                    CompletedExpression::NeverCall(never_call) => {
+                        completed.push(ExpressionRpnItem::NeverCall(never_call));
+                    }
+                }
             }
             ExpressionRpnItem::PendingNumericExpression { expression, .. } => {
                 // Rebuild the exact authored value-block/catch constructor through its owning
@@ -2487,7 +2586,13 @@ impl Completion<'_, '_> {
                         crate::compiler_frontend::ast::statements::fallible_handling::complete_deferred_catch_handler(*handler, self)?
                     }
                     DeferredExpression::OperandContinuation(payload) => {
-                        crate::compiler_frontend::ast::field_access::complete_retained_operand_continuation(*payload, self)?
+                        match crate::compiler_frontend::ast::field_access::complete_retained_operand_continuation(*payload, self)? {
+                            CompletedExpression::Value(value) => value,
+                            CompletedExpression::NeverCall(call) => {
+                                completed.push(ExpressionRpnItem::NeverCall(call));
+                                return Ok(());
+                            }
+                        }
                     }
                     DeferredExpression::Collection(literal) => {
                         crate::compiler_frontend::ast::statements::collections::complete_deferred_collection(*literal, literal_destination, self)?
@@ -2506,25 +2611,30 @@ impl Completion<'_, '_> {
     fn finish_deferred_call(
         &mut self,
         call: DeferredCall,
-    ) -> Result<OwnedExpr, ExpressionParseError> {
+    ) -> Result<CompletedExpression, ExpressionParseError> {
+        // The retained record's own contract-derived fact decides value versus termination; no
+        // outer marker may disagree with it.
+        let completion = call.completion();
         match call {
             DeferredCall::Source(deferred) => self.finish_source_call(*deferred),
             // The concrete-receiver producer owns the method constructor and its slot routing;
             // it resumes through this session's shared call-argument completion service.
             DeferredCall::Receiver(deferred) => {
                 crate::compiler_frontend::ast::field_access::complete_deferred_receiver_call(
-                    *deferred, self,
+                    *deferred, self, completion,
                 )
             }
             // The external-call producer owns the host constructor and its ABI slot routing; it
-            // resumes through this session's shared call-argument completion service.
+            // resumes through this session's shared call-argument completion service. Its retained
+            // record carries the contract-derived completion kind so completion is not re-decided.
             DeferredCall::External(deferred) => {
                 crate::compiler_frontend::ast::expressions::function_calls::complete_deferred_external_call(
                     *deferred, self,
                 )
             }
             // The generic-call producer owns the instantiation lane and its reserved request
-            // ticket; it resumes through this session's shared call-argument completion service.
+            // ticket; it resumes through this session's shared call-argument completion service,
+            // and the completed signature's return contract decides value versus Never.
             DeferredCall::Generic(deferred) => {
                 crate::compiler_frontend::ast::generic_functions::complete_deferred_generic_call(
                     *deferred, self,
@@ -2536,11 +2646,13 @@ impl Completion<'_, '_> {
                 crate::compiler_frontend::ast::expressions::struct_instance::complete_deferred_struct_call(
                     *deferred, self,
                 )
+                .map(CompletedExpression::Value)
             }
             DeferredCall::Choice(deferred) => {
                 crate::compiler_frontend::ast::expressions::choice_constructor::complete_deferred_choice_call(
                     *deferred, self,
                 )
+                .map(CompletedExpression::Value)
             }
             // The generic nominal producer owns the generic struct/choice instance and its seeded
             // bindings; it resumes through this session's shared call-argument completion service.
@@ -2548,24 +2660,39 @@ impl Completion<'_, '_> {
                 crate::compiler_frontend::ast::expressions::generic_nominal_retention::complete_deferred_generic_nominal_call(
                     *deferred, self,
                 )
+                .map(CompletedExpression::Value)
             }
         }
     }
 
     /// Resume one retained non-generic source call with its now-complete arguments.
+    ///
+    /// The retained record settled whether the callee's contract completes as a value or
+    /// terminates; completion reads that contract fact instead of a caller preference.
     fn finish_source_call(
         &mut self,
         deferred: DeferredSourceCall,
-    ) -> Result<OwnedExpr, ExpressionParseError> {
+    ) -> Result<CompletedExpression, ExpressionParseError> {
         let DeferredSourceCall {
             function_path,
             success_result_type_ids,
             error_return_type_id,
+            completion,
             expectations,
             arguments,
             call_span,
             authored_handling,
         } = deferred;
+        // A terminating call declares no success slot and no error channel, so it has no authored
+        // handling to replay and completion owns only the completed argument list.
+        let callee_name = (completion == CallCompletion::Never).then(|| {
+            self.path_fork.component(function_path).unwrap_or_else(|| {
+                crate::compiler_bug!(
+                    CompilerStage::AstConstruction,
+                    "a resolved Never call has no terminal path component"
+                )
+            })
+        });
         let mut completed_arguments = Vec::with_capacity(arguments.len());
         for argument in arguments {
             completed_arguments.push(self.complete_call_argument(argument)?);
@@ -2581,13 +2708,25 @@ impl Completion<'_, '_> {
             self.const_values,
             self.path_fork,
         )?;
+        if let Some(name) = callee_name {
+            return Ok(CompletedExpression::NeverCall(Box::new(NeverCall {
+                target: NeverCallTarget::Source(function_path),
+                receiver: None,
+                arguments: args
+                    .into_iter()
+                    .map(|argument| argument.map_value(OwnedExpr::id))
+                    .collect(),
+                name,
+                span: call_span,
+            })));
+        }
         let call = HandledFallibleCall {
             name: function_path,
             result_type_ids: success_result_type_ids,
             args,
             call_span,
         };
-        match authored_handling {
+        let expression = match authored_handling {
             DeferredCallHandling::Unhandled => self.finish_handled_call(call, error_return_type_id),
             DeferredCallHandling::Propagate { span } => {
                 // Replay the authored `!` through the same constructor the completed call path
@@ -2607,7 +2746,8 @@ impl Completion<'_, '_> {
                     self.expression_builder,
                 )
             }
-        }
+        }?;
+        Ok(CompletedExpression::Value(expression))
     }
 
     fn complete_call_argument(

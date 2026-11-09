@@ -1,41 +1,39 @@
-**Current support and accepted design.** Template-head directives are implemented. General source modifiers, including `$config`, remain accepted design queued for implementation. Entry selection instead uses the planned fixed root filename `@entry.moth`. `config.moth` retains its named `project` and builder-specific records. See @../progress (Progress) for current support.
+**Current support and accepted design.** Moth supports directives in template heads today. Source directives such as $config are planned. See @../progress (Progress) for current support.
 
 A directive modifies an existing construct. Template-head directives modify their template and source directives modify the following eligible construct.
 
-### Two attachment locations
+### Where directives go
 
-The directive's compiler-defined contract determines its eligible target. Position cannot turn a source modifier into a template directive or a module-wide marker.
-
-[table:
-    [th:
-        [: Location]
-        [: Target]
-        [: Example]
-    ]
-    [td:
-        [: Inside a template head]
-        [: The containing template]
-        [: `[$slot title]` or `[$md: text]`]
-    ]
-    [td:
-        [: Before a source declaration or statement]
-        [: Exactly the next eligible construct]
-        [: `$config` followed by `api_url #String`]
-    ]
-]
-
-A source modifier has its own line and must attach to the next eligible construct in the same scope. Contiguous comment-only lines may intervene, but **any blank physical line breaks attachment**, including whitespace-only lines and blank lines between comments. A source modifier cannot cross an unrelated item, ending scope or file boundary. Compatible modifiers may stack without blank lines; duplicates and incompatible combinations are errors. A modifier at the very beginning of a file still attaches to its following declaration.
+A directive in a template head modifies the containing template. For example, $md formats the template body as Markdown:
 
 [codeblock, $code("moth"):
-    -- Accepted source modifier syntax:
+    message #= [$md: Hello from Moth]
+]
+
+The target is the template whose head contains the directive, not an enclosing template. Other template directives declare slots, insert content and control formatting. See @../templates/#template-directives (Template directives).
+
+A source directive modifies the next eligible declaration or statement. The compiler defines which kinds of constructs each directive can modify. For example, the accepted $config design marks a typed compile-time constant as a build input:
+
+[codeblock, $code("moth"):
     $config
     api_url #String = "https://example.com"
 ]
 
-The source example describes accepted syntax, not current Alpha compiler support. No module-root directive category exists. The proposed fixed-root-roles module structure instead uses `@mod.moth` for the normal API facade, `@package.moth` for the scoped or external package facade and `@entry.moth` for executable entry work. `config.moth` remains separate. The compiler and builder select entries from the role facts, not from directives or authored runtime activity.
-### Operands and ownership
+This $config syntax is not yet implemented. The current spelling uses #Config of T, described under @../project-structure/#build-inputs (Build configuration values).
 
-The compiler defines directive names, valid target kinds, phases and operand contracts. A directive has at most one optional compile-time operand:
+Source directives use their own line. The next eligible construct must follow without an empty line. Comments may appear between the directive and its target as long as no blank line intervenes:
+
+[codeblock, $code("moth"):
+    $config
+    -- Default server address.
+    api_url #String = "https://example.com"
+]
+
+An empty line, even one containing only spaces, breaks attachment. A directive also cannot cross another declaration, a scope boundary or the end of a file. Multiple compatible modifiers can appear together without blank lines. A directive at the beginning of a file still modifies the following construct.
+
+### Compile-time operands
+
+A directive may accept one compile-time operand, with either a value or a named value. Its permitted form depends on the directive:
 
 [codeblock, $code("text"):
     $name
@@ -43,22 +41,19 @@ The compiler defines directive names, valid target kinds, phases and operand con
     $name key = value
 ]
 
-A named operand is one key/value pair, not a parameter list. It has no authored type annotation. Values reuse existing compile-time expression rules where the directive permits a value. A directive may require a specific literal shape, phase or value type. Mutable, runtime or side-effectful operands are invalid. Call-style `$name(...)` and arbitrary `$name: ... ;` source blocks are outside this contract. Ordinary Moth calls such as `f()` are unaffected.
+A named operand contains one key and one value. It is not a function parameter list, and it cannot have an authored type annotation. Values use Moth's compile-time expression rules and cannot depend on runtime state or cause side effects.
 
-Template heads keep their own delimiters and static slot labels. `$slot title`, `$slot 1`, `$slot title = "Fallback"`, `$in title` and `$fresh` are examples. Current `$before = value` and `$after = value` wrappers migrate to `$before value` and `$after value` under the general plan. `$code("moth")` migrates to a single operand. These are syntax migrations, not new template behaviours. See @../templates/#template-directives (Template directives).
+Directive calls such as $name(...) are not part of this accepted grammar. Ordinary function calls such as f() are unaffected.
 
-Directives are compiler-owned modifiers, not attributes available to arbitrary source code, macros, user-defined annotations or new independent control-flow constructs. Builders may supply configuration and destination schemas, but cannot register new directive names or semantic callbacks once the general plan lands. Directive names do not reserve matching ordinary source identifiers.
+Template heads retain their own separators and slot labels. For example, $slot title names a slot, $slot title = "Untitled" supplies a default and $in title contributes to that slot. The currently supported $code("moth") spelling will become a single-operand directive, and $before = value and $after = value will use $before value and $after value. These changes do not alter how those directives compose templates.
 
-### Examples and contexts
+### Module roots and configuration
 
-- `$config` marks one explicitly typed top-level compile-time `#` constant as an input contract. Its type and fallback are written on the declaration itself. It is valid in selected bootstrap configuration and eligible selected source modules. `#Config of T` remains the operational spelling until this migration.
-- There is no entry-purpose directive. `@entry.moth` identifies an eligible executable entry under the fixed-root-roles design. `$page` is not an alias.
-- `$test`, `$export`, `$layout` and computation constraints are separate planned designs. Their exact targets and semantics are not implemented by this reference.
-- `$async` and `$checked` remain undecided proposals. Their earlier block spellings do not establish a general-purpose directive block grammar.
-- Project and active-builder settings remain ordinary named compile-time records inside `config.moth`. There are no accepted `$project`, `$builder` or `$html_builder` directives.
+Module roles come from filenames rather than directives. A directory can contain @mod.moth for its normal public API, @package.moth for its support package API and @entry.moth for its executable entry. The presence of @entry.moth makes the entry eligible for builder selection. No directive marks a module or file as an entry.
+
+The separate config.moth file continues to use ordinary named constants for project and builder settings:
 
 [codeblock, $code("moth"):
-    -- Operational named configuration records:
     project #= (
         name = "my_site",
     )
@@ -66,23 +61,22 @@ Directives are compiler-owned modifiers, not attributes available to arbitrary s
     html #= ()
 ]
 
-See @../project-structure/#project-config (Project configuration), @../project-structure/#build-inputs (Build configuration values) and @../project-structure/#entry-config (Entry metadata and builder slots).
+There are no $project, $builder or $html_builder directives. See @../project-structure/#project-config (Project configuration) and @../project-structure/#entry-config (Entry metadata and builder slots).
 
-### Diagnostics and recovery
+### Invalid directives
 
-The compiler recognises a known directive name **before** validating context, so a known directive outside its allowed location receives a placement diagnostic rather than an unknown-name or generic invalid-character diagnostic. Distinguish unknown names, known but unavailable/deferred names, invalid target kinds, invalid operand shapes and incompatible combinations.
+The compiler checks a directive's name and its permitted target. A known directive in the wrong context should receive a placement error rather than an unknown-name error. For example, $md belongs inside a template head, while $config belongs before an eligible source declaration.
 
-Diagnostics identify the directive's authored span, the target when present and the nearest useful fix:
+A source directive without a target, separated from its target by a blank line or repeated where only one is allowed is an error. Diagnostics identify the directive and, where useful, the conflicting or invalid target. LF and CRLF line endings follow the same attachment rules.
 
-- `$config` separated from its declaration by an empty line, unrelated item or scope boundary: place the target directly after the modifier. A wrong target such as a function or local value identifies the allowed declaration kind.
-- `$md` in ordinary source or `$config` inside a template head: use the valid directive context. A `$slot` in a malformed head receives its existing structural diagnostics.
-- Unknown spellings and recognised but unimplemented directives have distinct diagnostics. Invalid directives never act as successful no-ops and recovery must not consume following unrelated source.
+Directives are compiler-defined. Moth code cannot define new directives, and project builders cannot register arbitrary syntax or semantic callbacks. A directive cannot act as a macro that rewrites another construct.
 
-A declaration modifier appearing first in a file is still a declaration modifier. Directive matching never depends on capitalisation. CRLF and LF line endings must have identical attachment semantics.
+Future source directives such as $export, $test and numeric constraints will have their own eligible targets. The planned $export modifier is restricted to declarations in @mod.moth and @package.moth, not @entry.moth or ordinary helper files. This page defines the common syntax, not the implementation of those future features.
+
 ### Related references
 
 - @../templates/#template-directives (Template directives)
-- @../project-structure/#project-config (Project configuration)
 - @../project-structure/#build-inputs (Build configuration values)
+- @../project-structure/#project-config (Project configuration)
 - @../project-structure/#entry-config (Entry metadata and builder slots)
 - @../design-scope (Design scope)

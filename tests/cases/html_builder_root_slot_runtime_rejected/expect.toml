@@ -7,7 +7,7 @@ diagnostic_codes = ["MOTH-SYNTAX-0022"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0022"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1
 
 [backends.html_wasm]
@@ -17,5 +17,5 @@ diagnostic_codes = ["MOTH-SYNTAX-0022"]
 
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0022"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1

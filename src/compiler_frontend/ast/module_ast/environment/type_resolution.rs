@@ -756,10 +756,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         )?;
                     }
 
-                    for return_slot in &resolved_signature.signature.returns {
-                        if let Some(type_id) = return_slot.type_id {
+                    if let Some(returns) = resolved_signature.signature.return_contract.ordinary() {
+                        for return_type_id in returns.success() {
                             self.validate_nominal_generic_bound_type_id(
-                                type_id,
+                                *return_type_id,
+                                header.name_span,
+                                &validation_context,
+                            )?;
+                        }
+                        if let Some(return_type_id) = returns.error() {
+                            self.validate_nominal_generic_bound_type_id(
+                                return_type_id,
                                 header.name_span,
                                 &validation_context,
                             )?;

@@ -13,6 +13,8 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::builder_root_slots::ConstFragmentDestination;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::environment::{
     TypeEnvironment, TypeEnvironmentRemapCache,
 };
@@ -71,14 +73,16 @@ impl Module {
 
 /// One successful canonical module artefact.
 ///
-/// WHAT: pairs the backend-neutral executable/link/metadata lanes with the immutable semantic
-///       interface published to later graph waves.
+/// WHAT: pairs the backend-neutral executable/link/metadata lanes with the immutable API surfaces
+///       the module's present facade roots published to later graph waves.
 /// WHY: provider publication must point at a complete success value without retaining diagnostics
-///      in a semantic artefact.
+///      in a semantic artefact. An entry-only module publishes neither surface, and each surface
+///      is present exactly when its facade root exists.
 pub(crate) struct CompiledModuleArtifact {
     pub(crate) module: Module,
-    pub(crate) interface: PublicSemanticInterface,
-    /// The paired support surface published by the same successful module transaction.
+    /// The normal `@mod` facade surface, present exactly when the module owns a normal root.
+    pub(crate) normal_interface: Option<PublicSemanticInterface>,
+    /// The support `@package` facade surface, present exactly when the module owns a support root.
     pub(crate) support_interface: Option<PublicSemanticInterface>,
 }
 
@@ -160,17 +164,18 @@ pub(crate) struct ModuleLinkFacts {
 
 /// Non-HIR compiler and builder-facing metadata for one compiled module.
 ///
-/// WHAT: owns the resolved root-local entry path, resolved const top-level fragments with their
-///       body/named destinations and authored spans, header-derived root activity, and resolved
-///       documentation fragments.
+/// WHAT: owns the optional entry-root metadata, resolved documentation fragments and the
+///       declaring-module materialisation context.
 /// WHY: these are compiler-metadata lanes, not executable HIR state or link facts. Consolidating
 ///      them into one owned lane on the `Module` payload keeps HIR limited to executable/semantic
-///      IR and gives backend assembly a single metadata owner.
+///      IR and gives backend assembly a single metadata owner. Entry metadata is an explicit
+///      typed absence for API-only and support-only modules, so no consumer can mistake the
+///      preparation anchor for an executable entry.
 pub(crate) struct ModuleCompilerMetadata {
-    /// Canonical entry file for the compiled module.
-    pub(crate) entry_point: PathBuf,
-    pub(crate) const_top_level_fragments: Vec<ResolvedConstFragment>,
-    pub(crate) root_activity: ModuleRootActivity,
+    /// Start-bearing root metadata. Present exactly when this module owns an entry root or an
+    /// explicitly selected synthetic application source; `None` for API-only and support-only
+    /// modules.
+    pub(crate) entry: Option<EntryRootMetadata>,
     #[allow(dead_code)] // Retained for deferred documentation-metadata consumers.
     pub(crate) doc_fragments: Vec<ModuleDocFragment>,
     /// Self-contained declaring-module semantics used by generated-function materialisation.
@@ -179,26 +184,54 @@ pub(crate) struct ModuleCompilerMetadata {
     /// the build system's artefact storage grows behind it.
     pub(crate) materialisation_context: Option<Arc<ModuleMaterialisationContext>>,
 }
+
+/// Entry-root metadata carried only by a module with a start-bearing root.
+///
+/// WHAT: owns the resolved entry path, resolved const top-level fragments with their body/named
+///       destinations and authored spans, and the header-derived dormant root activity.
+/// WHY: an entryless module has no dormant start, no entry fragment schedule and no entry path,
+///      so these facts live behind one typed presence rather than as empty placeholders.
+pub(crate) struct EntryRootMetadata {
+    /// Canonical entry file: a project-local `@entry.moth`, or the explicitly selected source of
+    /// a synthetic single-file compilation.
+    pub(crate) entry_point: PathBuf,
+    pub(crate) const_top_level_fragments: Vec<ResolvedConstFragment>,
+    pub(crate) root_activity: ModuleRootActivity,
+}
+
 impl ModuleCompilerMetadata {
     pub(crate) fn from_hir_lowering(
-        entry_point: PathBuf,
+        entry: Option<EntryRootMetadata>,
         lowering_metadata: HirLoweringMetadata,
-        const_top_level_fragments: Vec<ResolvedConstFragment>,
-        root_activity: ModuleRootActivity,
         materialisation_context: Option<Arc<ModuleMaterialisationContext>>,
     ) -> Self {
         Self {
-            entry_point,
+            entry,
             doc_fragments: lowering_metadata.doc_fragments,
-            const_top_level_fragments,
-            root_activity,
             materialisation_context,
         }
     }
 
-    /// WHY: every retained field remaps exactly once. Const-fragment spans are global, values are
-    ///      already owned folded strings, destinations are owned builder names, root activity has
-    ///      no interned fields, and the entry path is a `PathBuf`.
+    /// Borrow the entry metadata, or report that an entry consumer received an entryless module.
+    ///
+    /// WHY: entry selection, HTML artefact planning and entry resource assembly are only valid
+    ///      for a start-bearing root. Callers must receive the typed absence rather than
+    ///      fabricating an entry path or an empty fragment schedule.
+    pub(crate) fn require_entry(
+        &self,
+        consumer: &str,
+    ) -> Result<&EntryRootMetadata, InfrastructureFailure> {
+        self.entry.as_ref().ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!("{consumer} received a module without entry metadata"),
+            )
+        })
+    }
+
+    /// WHY: entry metadata owns every remapped field; `entry_point` is a `PathBuf`, const-fragment
+    ///      spans are global, values are already owned folded strings and root activity has no
+    ///      interned fields. Only the materialisation context carries path identities.
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         if let Some(context) = &mut self.materialisation_context {
             Arc::make_mut(context).remap_path_ids(remap);
@@ -206,25 +239,14 @@ impl ModuleCompilerMetadata {
     }
 }
 
-/// Header-derived root activity metadata passed to backend builders.
+/// Header-derived runtime-fragment metadata for one compiled entry root.
 ///
-/// WHAT: records the builder-relevant dormant activity of one compiled module root.
-/// WHY: header parsing already classifies root bodies and page fragments, so builders can apply
-///      artifact policy without scanning tokens or HIR for the same facts.
+/// WHAT: records how many runtime fragments the entry root contributes.
+/// WHY: the HTML JS and Wasm emitters stage runtime fragments by insertion count, so the count
+///      travels from header preparation instead of being rescanned from tokens or HIR.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ModuleRootActivity {
-    pub(crate) has_non_trivial_root_body: bool,
-    pub(crate) const_fragment_count: usize,
     pub(crate) runtime_fragment_count: usize,
-}
-
-impl ModuleRootActivity {
-    /// Return whether the HTML builder has any root activity from which to assemble a page.
-    pub(crate) fn has_html_artifact_activity(&self) -> bool {
-        self.has_non_trivial_root_body
-            || self.const_fragment_count > 0
-            || self.runtime_fragment_count > 0
-    }
 }
 
 /// A resolved const top-level fragment: an owned folded string, its destination, its authored

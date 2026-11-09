@@ -29,31 +29,45 @@ const REQUIRED_RUNTIME_EXPORTS: [(&str, ExternalKind); 5] = [
 pub(super) fn validate_html_wasm_baseline_contract(
     index: &BuiltArtifactIndex<'_>,
 ) -> Option<String> {
-    let html = match super::artifacts::validate_html_baseline_document(index, "html_wasm") {
-        Ok(html) => html,
-        Err(reason) => return Some(reason),
+    let (html_path, html) =
+        match super::artifacts::validate_html_baseline_document(index, "html_wasm") {
+            Ok(document) => document,
+            Err(reason) => return Some(reason),
+        };
+    // The Wasm module and its bootstrap live beside the HTML document, so a descendant entry
+    // produces e.g. `about/index.html` with `about/page.js` and `about/page.wasm`.
+    let sibling_prefix = html_path
+        .rsplit_once('/')
+        .map_or("", |(directory, _)| directory);
+    let sibling_path = |name: &str| {
+        if sibling_prefix.is_empty() {
+            name.to_string()
+        } else {
+            format!("{sibling_prefix}/{name}")
+        }
     };
 
     if let Some(reason) = validate_page_script_include(html) {
         return Some(reason);
     }
 
-    let Some(page_js) = index.get("page.js") else {
-        return Some(
-            "html_wasm baseline contract expected 'page.js', but it was not produced.".to_string(),
-        );
+    let page_js_path = sibling_path("page.js");
+    let Some(page_js) = index.get(&page_js_path) else {
+        return Some(format!(
+            "html_wasm baseline contract expected '{page_js_path}', but it was not produced."
+        ));
     };
 
     let Some(js) = super::artifacts::output_text_content(page_js, ArtifactKind::Js) else {
-        return Some(
-            "html_wasm baseline contract expected 'page.js' as a JS artifact.".to_string(),
-        );
+        return Some(format!(
+            "html_wasm baseline contract expected '{page_js_path}' as a JS artifact."
+        ));
     };
 
     for required_fragment in ["__moth_instantiate_wasm", "\"./page.wasm\""] {
         if !js.contains(required_fragment) {
             return Some(format!(
-                "html_wasm baseline contract expected 'page.js' to contain '{required_fragment}'."
+                "html_wasm baseline contract expected '{page_js_path}' to contain '{required_fragment}'."
             ));
         }
     }
@@ -63,11 +77,11 @@ pub(super) fn validate_html_wasm_baseline_contract(
         Err(reason) => return Some(reason),
     };
 
-    let Some(page_wasm) = index.get("page.wasm") else {
-        return Some(
-            "html_wasm baseline contract expected 'page.wasm', but it was not produced."
-                .to_string(),
-        );
+    let page_wasm_path = sibling_path("page.wasm");
+    let Some(page_wasm) = index.get(&page_wasm_path) else {
+        return Some(format!(
+            "html_wasm baseline contract expected '{page_wasm_path}', but it was not produced."
+        ));
     };
 
     let Some(wasm_bytes) = super::artifacts::output_wasm_bytes(page_wasm) else {
@@ -119,7 +133,7 @@ fn validate_page_script_include(html: &str) -> Option<String> {
     let occurrences = html.match_indices(PAGE_SCRIPT_TAG).count();
     if occurrences != 1 {
         return Some(format!(
-            "html_wasm baseline contract expected 'index.html' to include '{PAGE_SCRIPT_TAG}' \
+            "html_wasm baseline contract expected the HTML document to include '{PAGE_SCRIPT_TAG}' \
              exactly once, but found it {occurrences} time(s)."
         ));
     }
@@ -132,7 +146,7 @@ fn validate_page_script_include(html: &str) -> Option<String> {
         html.find("</body>"),
     ) else {
         return Some(
-            "html_wasm baseline contract expected 'index.html' to carry the document shell body."
+            "html_wasm baseline contract expected the HTML document to carry the document shell body."
                 .to_string(),
         );
     };

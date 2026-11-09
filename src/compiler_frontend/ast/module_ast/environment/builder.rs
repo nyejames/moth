@@ -65,7 +65,7 @@ use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
 use crate::compiler_frontend::public_interface::{
     PublicChoiceSemantics, PublicConstantSemantics, PublicDeclarationSemantics,
     PublicFunctionCategory, PublicGenericParameterSurface, PublicParameterTypeSlot,
-    PublicReceiverMethodCategory, PublicReturnTypeSlot, PublicStructSemantics,
+    PublicReceiverMethodCategory, PublicStructSemantics,
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, OriginDeclarationId, OriginTypeId,

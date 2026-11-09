@@ -10,10 +10,11 @@ use crate::compiler_frontend::ast::expressions::expression_store::{AstExpression
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::module_compilation::artefact::{
     ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
 };
-use crate::compiler_frontend::module_compilation::{FrontendOptions, Module, ModuleRootActivity};
+use crate::compiler_frontend::module_compilation::{FrontendOptions, Module};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase, SourceSpan};
@@ -68,10 +69,7 @@ fn frontend_check_borrows_propagates_failures() {
         crate::compiler_frontend::source::LocalSpan::source_start(),
     );
 
-    let start_fn = entry_start_node(FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    }, vec![
+    let start_fn = entry_start_node(FunctionSignature { parameters: vec![], return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots([], None)),  }, vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(
                 x,
@@ -193,7 +191,10 @@ fn successful_borrow_report_can_be_stored_on_module() {
     let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -261,9 +262,7 @@ fn successful_borrow_report_can_be_stored_on_module() {
             functions: function_link_facts,
         },
         metadata: ModuleCompilerMetadata {
-            entry_point: std::path::PathBuf::from("main.moth"),
-            const_top_level_fragments: Vec::new(),
-            root_activity: ModuleRootActivity::default(),
+            entry: None,
             doc_fragments: Vec::new(),
             materialisation_context: None,
         },

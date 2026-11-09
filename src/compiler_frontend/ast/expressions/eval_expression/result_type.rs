@@ -140,7 +140,8 @@ fn index_expression_nodes(
             | ExpressionRpnItem::PendingNumericBinding { .. }
             | ExpressionRpnItem::PendingNumericCall { .. }
             | ExpressionRpnItem::PendingNumericCast { .. }
-            | ExpressionRpnItem::PendingNumericExpression { .. } => {
+            | ExpressionRpnItem::PendingNumericExpression { .. }
+            | ExpressionRpnItem::NeverCall(_) => {
                 return Err(pending_expression_item_bug("expression result typing").into());
             }
             ExpressionRpnItem::Operator { operator, span }
@@ -278,7 +279,8 @@ fn resolve_indexed_expression(
                 | ExpressionRpnItem::PendingNumericBinding { .. }
                 | ExpressionRpnItem::PendingNumericCall { .. }
                 | ExpressionRpnItem::PendingNumericCast { .. }
-                | ExpressionRpnItem::PendingNumericExpression { .. } => {
+                | ExpressionRpnItem::PendingNumericExpression { .. }
+                | ExpressionRpnItem::NeverCall(_) => {
                     // Construction-only items are replaced by body completion before typed
                     // evaluation; any later stage reports their presence as a broken invariant.
                     return Err(pending_expression_item_bug("expression result typing").into());

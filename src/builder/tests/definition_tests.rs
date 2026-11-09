@@ -30,12 +30,7 @@ fn invalid_definition_message(
 fn finish_registers_source_and_host_packages_with_builder_provenance() {
     let ui_dir = package_dir();
     let definition = BuilderDefinition::new("game")
-        .source_package(
-            SourcePackage::new("@ui")
-                .from_dir(ui_dir.path())
-                .available_in_templates(),
-        )
-        .moth_templates()
+        .source_package(SourcePackage::new("@ui").from_dir(ui_dir.path()))
         .host_package(
             HostPackage::new("@platform").function(
                 HostFunction::new("parse_count")
@@ -56,11 +51,6 @@ fn finish_registers_source_and_host_packages_with_builder_provenance() {
         .get_root("ui")
         .expect("source package should register by its prefix");
     assert_eq!(source_root.metadata.origin, PackageOrigin::Builder);
-    assert!(
-        surface
-            .implicit_template_scope_source_packages
-            .contains("ui")
-    );
 
     let package = surface
         .binding_packages
@@ -90,8 +80,12 @@ fn finish_registers_source_and_host_packages_with_builder_provenance() {
             ),
         ]
     );
-    let return_types = function
-        .returns
+    let returns = function
+        .return_contract
+        .ordinary()
+        .expect("host function has an ordinary return contract");
+    let return_types = returns
+        .success
         .iter()
         .map(|slot| &slot.value_type)
         .collect::<Vec<_>>();
@@ -101,10 +95,7 @@ fn finish_registers_source_and_host_packages_with_builder_provenance() {
             FixedScalar::U32
         ))]
     );
-    assert_eq!(
-        function.error_return_type,
-        Some(ExternalSignatureType::BuiltinError)
-    );
+    assert_eq!(returns.error, Some(&ExternalSignatureType::BuiltinError));
 }
 
 #[test]
@@ -143,13 +134,17 @@ fn byte_and_u8_keep_distinct_identities_and_optionals_keep_their_payload() {
     let (_, maybe_name) = registry
         .resolve_package_function("@platform", "maybe_name")
         .expect("function should register");
+    let maybe_name_returns = maybe_name
+        .return_contract
+        .ordinary()
+        .expect("host function has an ordinary return contract");
     assert_eq!(
-        maybe_name.returns[0].value_type,
+        maybe_name_returns.success[0].value_type,
         ExternalSignatureType::Optional(Box::new(ExternalSignatureType::Abi(
             ExternalAbiType::Utf8Str
         )))
     );
-    assert_eq!(maybe_name.error_return_type, None);
+    assert_eq!(maybe_name_returns.error, None);
 }
 
 #[test]
@@ -337,53 +332,20 @@ fn finish_rejects_source_packages_without_an_installed_directory() {
 }
 
 #[test]
-fn available_in_templates_requires_moth_templates() {
-    let ui_dir = package_dir();
-    let ui_source = || {
-        SourcePackage::new("@ui")
-            .from_dir(ui_dir.path())
-            .available_in_templates()
-    };
+fn reserved_html_source_package_paths_are_rejected() {
+    let custom_html_dir = package_dir();
 
-    for (case, draft) in [
-        (
-            "no source kinds",
-            BuilderDefinition::new("game").source_package(ui_source()),
-        ),
-        (
-            "markdown only",
+    for (case, path) in [("root", "@html"), ("nested", "@html/docs")] {
+        let message = invalid_definition_message(
+            case,
             BuilderDefinition::new("game")
-                .markdown()
-                .source_package(ui_source()),
-        ),
-    ] {
-        let message = invalid_definition_message(case, draft.finish());
-        assert!(message.contains("@ui"), "{case}: {message}");
-    }
-
-    for (case, draft) in [
-        (
-            "moth_templates after the package",
-            BuilderDefinition::new("game")
-                .source_package(ui_source())
-                .moth_templates(),
-        ),
-        (
-            "moth_templates before the package",
-            BuilderDefinition::new("game")
-                .moth_templates()
-                .source_package(ui_source()),
-        ),
-    ] {
-        let definition = draft
-            .finish()
-            .unwrap_or_else(|error| panic!("{case}: {error}"));
+                .source_package(SourcePackage::new(path).from_dir(custom_html_dir.path()))
+                .finish(),
+        );
+        assert!(message.contains("reserved"), "{case}: {message}");
         assert!(
-            definition
-                .surface()
-                .implicit_template_scope_source_packages
-                .contains("ui"),
-            "{case}"
+            message.contains("standard HTML builder package set"),
+            "{case}: {message}"
         );
     }
 }
@@ -419,10 +381,9 @@ fn source_kinds_are_opt_in() {
     assert!(!plain.surface().source_file_kinds.is_supported("md"));
 
     let documents = BuilderDefinition::new("game")
-        .moth_templates()
         .markdown()
         .finish()
-        .expect("valid");
-    assert!(documents.surface().source_file_kinds.is_supported("mtf"));
+        .expect("markdown needs no template prelude");
+    assert!(!documents.surface().source_file_kinds.is_supported("mtf"));
     assert!(documents.surface().source_file_kinds.is_supported("md"));
 }

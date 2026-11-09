@@ -185,12 +185,14 @@ impl<'a> HirValidator<'a> {
                     self.require_concrete_type_id(parameter.type_id, visited)?;
                 }
 
-                for return_type in &function.returns {
-                    self.require_concrete_type_id(*return_type, visited)?;
-                }
+                if let Some(returns) = function.return_contract.ordinary() {
+                    for return_type in returns.success() {
+                        self.require_concrete_type_id(*return_type, visited)?;
+                    }
 
-                if let Some(error_return_type) = function.error_return {
-                    self.require_concrete_type_id(error_return_type, visited)?;
+                    if let Some(error_return_type) = returns.error() {
+                        self.require_concrete_type_id(error_return_type, visited)?;
+                    }
                 }
 
                 Ok(())

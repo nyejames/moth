@@ -1,0 +1,23 @@
+export:
+    STOPPABLE must:
+        stop |This| -> !
+    ;
+
+    abort type T is STOPPABLE |value T| -> !:
+        settle(value)
+    ;
+
+    Other = |
+        code I32,
+    |
+;
+
+settle type T is STOPPABLE |value T| -> !:
+    value.stop()
+;
+
+stop |this Other| -> !:
+    assert(false, "other stops")
+;
+
+Other must STOPPABLE

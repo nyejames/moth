@@ -1,0 +1,22 @@
+@linking-entries-and-reachability content as reference_content
+@styles navbar, section, theme_css, sidebar, init_docs_sidebar
+@diagrams css as diagrams_css
+
+#[$in title:["15. Linking, entries and reachability"]]
+#[$in description:["How dormant roots become an explicit entry and reachable function union."]]
+#[$in head:<style>[theme_css] [diagrams_css]</style>]
+
+#[navbar]
+#[sidebar]
+init_docs_sidebar()!
+
+#[section, $md:
+    Compilation and activation stay separate. Entry assembly selects roots and builds a reachable function union.
+]
+
+#[section, reference_content]
+
+#[section, $md:
+    @../ (Compiler design) / @../module-artefacts-and-reuse (Previous) / @../target-planning-and-validation (Next)
+]
+

@@ -5,8 +5,8 @@
 //! generic identities and ordered source/core trait bounds on generic free functions,
 //! stability of generic identity across donor-local allocation differences, nested
 //! option/collection and imported public nominal references projecting to canonical
-//! identities, the `InfrastructureFailure` totality failures for missing nominal origin, missing
-//! signature `TypeId`, category mismatch and unregistered generic parameters, and the
+//! identities, the `InfrastructureFailure` totality failures for missing nominal origin, category
+//! mismatch and unregistered generic parameters, and the
 //! receiver-method join invariants: same-named methods on distinct receivers join by exact
 //! stable origin, and duplicate receiver seed, path and category mismatches are rejected.
 //! WHY: these are projection invariants owned by `compiler_frontend::public_interface`, so
@@ -24,9 +24,7 @@ use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore,
 };
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot,
-};
+use crate::compiler_frontend::ast::statements::functions::{FunctionParameter, FunctionSignature};
 use crate::compiler_frontend::ast::{
     ReceiverMethodEntry, ResolvedPublicTypeRoot, ResolvedPublicTypeRootKind,
     ResolvedPublicTypeRootTable,
@@ -48,11 +46,13 @@ use crate::compiler_frontend::datatypes::definitions::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterListId, NominalTypeId, TypeId};
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
 use crate::compiler_frontend::public_interface::{
-    CallableSeed, CallableSeedKind, PublicDeclarationSemantics, PublicFunctionCategory,
-    PublicGenericParameterSurface, PublicInterfaceDraftBuildFailure, PublicStructSemantics,
+    CallableSeed, CallableSeedKind, PublicCallableReturnContract, PublicDeclarationSemantics,
+    PublicFunctionCategory, PublicGenericParameterSurface, PublicInterfaceDraftBuildFailure,
+    PublicStructSemantics,
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
@@ -183,31 +183,16 @@ fn field_def(
     }
 }
 
-fn return_slot(type_id: TypeId, channel: ReturnChannel) -> ReturnSlot {
-    ReturnSlot {
-        type_id: Some(type_id),
-        channel,
-    }
-}
-
-fn unresolved_return_slot(channel: ReturnChannel) -> ReturnSlot {
-    ReturnSlot {
-        type_id: None,
-        channel,
-    }
-}
-
 fn free_function_signature(
     parameters: Vec<FunctionParameter>,
     return_type_ids: Vec<TypeId>,
 ) -> FunctionSignature {
-    let returns = return_type_ids
-        .into_iter()
-        .map(|type_id| return_slot(type_id, ReturnChannel::Success))
-        .collect();
     FunctionSignature {
         parameters,
-        returns,
+        return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            return_type_ids,
+            None,
+        )),
     }
 }
 
@@ -1421,8 +1406,12 @@ fn projects_nested_collection_and_option_types() {
         })),
         "nested option(collection(int)) must project recursively"
     );
+
+    let PublicCallableReturnContract::Returns { success, .. } = &function.return_contract else {
+        panic!("an ordinary success slot must project an ordinary return contract");
+    };
     assert_eq!(
-        &function.returns[0].type_identity,
+        &success[0].type_identity,
         &CanonicalTypeIdentity::Collection {
             element: Box::new(CanonicalTypeIdentity::Builtin(
                 CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
@@ -1640,50 +1629,6 @@ fn missing_nominal_origin_is_infrastructure_failure() {
 }
 
 #[test]
-fn missing_signature_slot_type_id_is_infrastructure_failure() {
-    let env = TypeEnvironment::new();
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-
-    let param = param_declaration("value", int_id, &mut string_table, &mut path_fork);
-    let signature = FunctionSignature {
-        parameters: vec![param],
-        returns: vec![unresolved_return_slot(ReturnChannel::Success)],
-    };
-    let root = function_root(
-        "unresolved_return",
-        signature,
-        None,
-        &mut string_table,
-        &mut path_fork,
-    );
-
-    let binding = export_binding(
-        "unresolved_return",
-        OriginDeclarationId::Function(free_function_origin("unresolved_return")),
-    );
-
-    let result = build_draft(
-        vec![root],
-        Vec::new(),
-        vec![binding],
-        FxHashMap::default(),
-        &DraftRefs {
-            nominal_origins: &FxHashMap::default(),
-            trait_origins: &FxHashMap::default(),
-            env: &env,
-            string_table: &string_table,
-            path_fork: &path_fork,
-        },
-    );
-    assert!(
-        result.is_err(),
-        "a return slot with no TypeId must be an InfrastructureFailure, not silently omitted"
-    );
-}
-
-#[test]
 fn category_mismatch_between_root_and_binding_is_infrastructure_failure() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
@@ -1891,7 +1836,10 @@ fn project_struct_with_receiver_method(
         ReceiverKey::Struct(receiver_path),
         FunctionSignature {
             parameters: vec![receiver_parameter],
-            returns: Vec::new(),
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
     );
     entry.receiver_mutable = receiver_mutable;
@@ -2041,7 +1989,10 @@ fn receiver_methods_join_by_exact_origin_not_rendered_name() {
             let param = param_declaration("delta", int_id, string_table, &mut path_fork);
             let signature = FunctionSignature {
                 parameters: vec![param],
-                returns: vec![return_slot(int_id, ReturnChannel::Success)],
+                return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                    [int_id],
+                    None,
+                )),
             };
             receiver_entry(method_path, ReceiverKey::Struct(receiver_path), signature)
         };
@@ -2133,7 +2084,10 @@ fn duplicate_receiver_method_entry_is_infrastructure_failure() {
     let param = param_declaration("delta", int_id, &mut string_table, &mut path_fork);
     let signature = FunctionSignature {
         parameters: vec![param],
-        returns: vec![return_slot(int_id, ReturnChannel::Success)],
+        return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [int_id],
+            None,
+        )),
     };
 
     // Two entries with the same exact stable receiver origin and method name.
@@ -2187,7 +2141,10 @@ fn duplicate_exact_seed_path_with_distinct_origins_is_infrastructure_failure() {
     let param = param_declaration("delta", int_id, &mut string_table, &mut path_fork);
     let signature = FunctionSignature {
         parameters: vec![param],
-        returns: vec![return_slot(int_id, ReturnChannel::Success)],
+        return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [int_id],
+            None,
+        )),
     };
     let entry_alpha = receiver_entry(
         shared_method_path,
@@ -2262,7 +2219,10 @@ fn struct_receiver_key_with_choice_origin_is_infrastructure_failure() {
     let param = param_declaration("delta", int_id, &mut string_table, &mut path_fork);
     let signature = FunctionSignature {
         parameters: vec![param],
-        returns: vec![return_slot(int_id, ReturnChannel::Success)],
+        return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [int_id],
+            None,
+        )),
     };
     let entry = receiver_entry(method_path, ReceiverKey::Struct(receiver_path), signature);
 
@@ -2315,7 +2275,10 @@ fn choice_receiver_key_with_struct_origin_is_infrastructure_failure() {
     let param = param_declaration("delta", int_id, &mut string_table, &mut path_fork);
     let signature = FunctionSignature {
         parameters: vec![param],
-        returns: vec![return_slot(int_id, ReturnChannel::Success)],
+        return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [int_id],
+            None,
+        )),
     };
     let entry = receiver_entry(method_path, ReceiverKey::Choice(receiver_path), signature);
 

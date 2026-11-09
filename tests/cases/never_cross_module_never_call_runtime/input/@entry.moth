@@ -1,0 +1,3 @@
+@helper remote_halt
+
+remote_halt()

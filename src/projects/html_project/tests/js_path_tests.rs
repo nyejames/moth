@@ -264,7 +264,7 @@ fn render_entry_fragments_renders_site_root_piece_at_builder_boundary() {
 #[test]
 fn no_runtime_fragments_still_emits_start_call() {
     let mut string_table = StringTable::new();
-    let module = create_test_module(std::path::PathBuf::from("@page.moth"), &mut string_table);
+    let module = create_test_module(std::path::PathBuf::from("@entry.moth"), &mut string_table);
     let function_names = HashMap::from([(
         module
             .executable
@@ -274,8 +274,8 @@ fn no_runtime_fragments_still_emits_start_call() {
         String::from("start_entry"),
     )]);
 
-    let route =
-        derive_logical_html_path(Path::new("@page.moth"), None).expect("root route should resolve");
+    let route = derive_logical_html_path(Path::new("@entry.moth"), None)
+        .expect("root route should resolve");
     let plan = HtmlResourceOutputPlan::new("");
     let context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
@@ -356,8 +356,8 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
         String::from("start_entry"),
     )]);
 
-    let route =
-        derive_logical_html_path(Path::new("@page.moth"), None).expect("root route should resolve");
+    let route = derive_logical_html_path(Path::new("@entry.moth"), None)
+        .expect("root route should resolve");
     let plan = HtmlResourceOutputPlan::new("");
     let context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");
@@ -416,8 +416,8 @@ fn module_script_places_escaped_import_preamble_before_the_bundle() {
         String::from("start_entry"),
     )]);
 
-    let route =
-        derive_logical_html_path(Path::new("@page.moth"), None).expect("root route should resolve");
+    let route = derive_logical_html_path(Path::new("@entry.moth"), None)
+        .expect("root route should resolve");
     let plan = HtmlResourceOutputPlan::new("");
     let context = ResourceUrlContext::PageDocument(route.logical_html_path.clone());
     let renderer = StructuralUrlRenderer::new(&plan, &context, "/");

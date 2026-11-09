@@ -168,6 +168,9 @@ pub(super) fn parse_source_callable_member(
                     path_fork,
                 )?;
             }
+            ParsedFunctionCallExpression::Terminating(never_call) => {
+                expression.push(ExpressionRpnItem::NeverCall(never_call));
+            }
             // Retained generic calls take their authored operand position exactly like retained
             // non-generic calls; see the non-generic branch below.
             ParsedFunctionCallExpression::RetainedOperand(item) => {
@@ -213,6 +216,11 @@ pub(super) fn parse_source_callable_member(
                 function_call_expression,
                 path_fork,
             )?;
+        }
+        // A Never call has no value: it occupies one operand position so the statement owner can
+        // lift it into `NeverCall`, while every value owner rejects it at evaluation.
+        ParsedFunctionCallExpression::Terminating(never_call) => {
+            expression.push(ExpressionRpnItem::NeverCall(never_call));
         }
         // A call whose numeric-dependent arguments were retained takes its authored operand
         // position as one pending item; the enclosing fragment either completes where it was

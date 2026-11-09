@@ -64,12 +64,12 @@ Those paths converge. Moth template preparation synthesises an ordinary private 
 
 The greeting project uses `.moth` files. Document kinds still matter because the same compiler owners serve docs sites and content dependencies without a second semantic pipeline.
 
-[diagram:
+[@diagrams diagram:
     [$in label: Three source kinds, one semantic pipeline]
     [$in caption: Each source kind gets its own way in. After preparation they all look like ordinary declarations, so no later stage needs a document dialect.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Entry]
             [$in title: Three ways in]
@@ -77,18 +77,18 @@ The greeting project uses `.moth` files. Document kinds still matter because the
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Entry preparation]
-                [fanout:
-                [detail:
+                [@diagrams fanout:
+                [@diagrams detail:
                     [$in href: ./]
                     `.moth` starts in code mode
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../templates-and-tir/]
                     `.mtf` starts inside a template body
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     `.md` is prepared before tokenizing
                 ]
@@ -97,8 +97,8 @@ The greeting project uses `.moth` files. Document kinds still matter because the
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../declarations-dependencies-and-ordering/]
             [$in eyebrow: Converged]
             [$in title: One ordinary declaration]
@@ -106,8 +106,8 @@ The greeting project uses `.moth` files. Document kinds still matter because the
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../ast-semantics-and-types/]
             [$in eyebrow: Shared]
             [$in title: The same later stages]
@@ -165,7 +165,7 @@ Defer semantic errors to their owning stages. A good lexer stays humble.
 
 - **Accepted design:** located tokens and retained source preparation.
 - **Current implementation:** progress rows for source-kind coverage. The numeric surface includes `Dec`, `DecN` and `Byte`. `moth-lexical` owns lexical facts shared with MON, AST owns semantic typing and HIR owns numeric domains and failure.
-- **Queued work:** `general-directives-and-project-config-plan.md` extends registered directive recognition while preserving lexical modes and diagnostic ownership.
+- **Queued work:** `general-directives-plan.md` extends registered directive recognition while preserving lexical modes and diagnostic ownership.
 - **Deferred or outside scope:** tokenization does not infer target support or type identity.
 
 ## Exit state

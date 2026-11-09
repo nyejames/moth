@@ -6,6 +6,7 @@
 //! validation and backend lowering from treating it as a panic unwrap.
 
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
+use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{
@@ -103,8 +104,17 @@ impl<'a> HirBuilder<'a> {
         self.set_current_block(none_block)?;
         let none_region = self.current_region_or_error()?;
         let current_function_id = self.current_function_id_or_error()?;
-        let returns = &self.function_by_id_or_error(current_function_id)?.returns;
-        let [function_return_type] = returns.as_ref() else {
+        let returns = self
+            .function_by_id_or_error(current_function_id)?
+            .return_contract
+            .ordinary()
+            .map(|returns| returns.success())
+            .ok_or_else(|| {
+                InfrastructureFailure::hir_transformation(
+                    "Option propagation reached HIR lowering in a declared Never function",
+                )
+            })?;
+        let [function_return_type] = returns else {
             crate::compiler_bug!(
                 CompilerStage::HirConstruction,
                 "Option propagation requires one success return slot",

@@ -20,18 +20,6 @@ use crate::projects::html_project::resource_output_plan::ResourceDiagnosticSite;
 use std::path::Path;
 use std::sync::Arc;
 
-pub(crate) fn missing_homepage_diagnostic(
-    entry_root: &Path,
-    string_table: &mut DiagnosticStringBuilder,
-) -> DiagnosticDraft {
-    html_config_diagnostic(
-        |string_table| InvalidConfigReason::MissingHtmlHomepage {
-            entry_root: path_id(entry_root, string_table),
-        },
-        string_table,
-    )
-}
-
 pub(crate) fn duplicate_html_output_path_diagnostic(
     duplicate_entry_point: &Path,
     existing_entry_point: &Path,

@@ -5,7 +5,7 @@ semantics; general ownership, context, argument and diagnostic rules live in
 The template directives documented here are current supported semantics. General
 non-template `$config` remains accepted queued design.
 Named project and builder settings remain ordinary compile-time records in
-`config.moth`. The former `$page` metadata design is superseded by direct const builder slots.
+`config.moth`.
 
 Template-head directives modify their containing template, regardless of whether
 the head also has ordinary expressions. Their syntax does not change the placement

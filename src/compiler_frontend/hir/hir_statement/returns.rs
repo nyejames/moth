@@ -22,8 +22,17 @@ impl<'a> HirBuilder<'a> {
         authored_span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         let function_id = self.current_function_id_or_error()?;
+        let expected_count = {
+            let contract = &self.function_by_id_or_error(function_id)?.return_contract;
+            let Some(shape) = contract.ordinary() else {
+                return Err(InfrastructureFailure::hir_transformation(
+                    "return reached HIR lowering in a declared Never function; AST terminality validation should have rejected it",
+                )
+                .into());
+            };
+            shape.success().len()
+        };
 
-        let expected_count = self.function_by_id_or_error(function_id)?.returns.len();
         let mut lowered_values = Vec::with_capacity(expected_count);
         for value in values {
             lowered_values
@@ -36,7 +45,12 @@ impl<'a> HirBuilder<'a> {
             .into());
         }
         for (index, value) in lowered_values.iter_mut().enumerate() {
-            let expected_type = self.function_by_id_or_error(function_id)?.returns[index];
+            let expected_type = self
+                .function_by_id_or_error(function_id)?
+                .return_contract
+                .ordinary()
+                .expect("return lowering checked the ordinary contract before the slot loop")
+                .success()[index];
             *value = self.wrap_value_to_optional_type(*value, expected_type, span_ref)?;
             if self.module.expressions.expression(*value).ty != expected_type {
                 return Err(InfrastructureFailure::hir_transformation(
@@ -66,11 +80,16 @@ impl<'a> HirBuilder<'a> {
         authored_span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         let function_id = self.current_function_id_or_error()?;
-        let err = match self.function_by_id_or_error(function_id)?.error_return {
+        let err = match self
+            .function_by_id_or_error(function_id)?
+            .return_contract
+            .ordinary()
+            .and_then(|returns| returns.error())
+        {
             Some(err) => err,
             None => {
                 return Err(InfrastructureFailure::hir_transformation(
-                    "return! reached HIR lowering in a function without an error channel",
+                    "return! reached HIR lowering in a function without an ordinary error channel",
                 )
                 .into());
             }

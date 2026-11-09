@@ -2,10 +2,12 @@
 //!
 //! WHAT: classifies canonical root/config filenames so Stage 0 discovery, header dependency
 //!      validation and diagnostic rendering share one filename policy.
-//! WHY: normal `@*.moth` roots, support `+*.moth` roots and the canonical `config.moth` are
-//!      the only special filenames the compiler recognises. Legacy `#*.moth` root-like
-//!      filenames are rejected during Stage 0 discovery.
+//! WHY: `@mod.moth`, `@package.moth` and `@entry.moth` are the only authored root filenames and
+//!      `config.moth` is the only build-only special source name. Every other `@*.moth`,
+//!      `+*.moth` or `#*.moth` filename is an authored structure error diagnosed during Stage 0
+//!      discovery.
 
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::{CONFIG_FILE_NAME, LANGUAGE_SOURCE_SUFFIX};
@@ -14,7 +16,7 @@ use std::path::PathBuf;
 
 /// Immutable source-backed package roots and their prepared public-surface files.
 ///
-/// WHAT: carries canonical filesystem roots and their validated direct-child normal-root
+/// WHAT: carries canonical filesystem roots and their validated direct-child public-surface root
 /// files from Stage 0 into path resolution and header preparation. Missing, multiple and
 /// unreadable roots never enter this successful view.
 ///
@@ -53,33 +55,28 @@ impl PreparedSourcePackageRoots {
     }
 }
 
-/// Whether a filesystem filename is a non-config normal Moth module root (`@*.moth`).
-pub(crate) fn file_name_is_normal_module_root_file(file_name: &str) -> bool {
-    let Some(root_name) = file_name.strip_prefix('@') else {
-        return false;
-    };
-    let Some(root_name) = root_name.strip_suffix(LANGUAGE_SOURCE_SUFFIX) else {
-        return false;
-    };
+/// The one normal API-facade root filename.
+pub(crate) const NORMAL_ROOT_FILE_NAME: &str = "@mod.moth";
+/// The one support API-facade root filename.
+pub(crate) const SUPPORT_ROOT_FILE_NAME: &str = "@package.moth";
+/// The one executable entry root filename.
+pub(crate) const ENTRY_ROOT_FILE_NAME: &str = "@entry.moth";
 
-    !root_name.is_empty()
+/// The fixed root role of one authored root filename, or `None` for every other file.
+///
+/// The recognition is exact and case-sensitive: `@Entry.moth` is not an entry root.
+pub(crate) fn module_root_role_for_file_name(file_name: &str) -> Option<ModuleRootRole> {
+    match file_name {
+        ENTRY_ROOT_FILE_NAME => Some(ModuleRootRole::Entry),
+        SUPPORT_ROOT_FILE_NAME => Some(ModuleRootRole::Support),
+        NORMAL_ROOT_FILE_NAME => Some(ModuleRootRole::Normal),
+        _ => None,
+    }
 }
 
-/// Whether a filesystem filename is a `+*.moth` support root file.
-pub(crate) fn file_name_is_support_root_file(file_name: &str) -> bool {
-    let Some(root_name) = file_name.strip_prefix('+') else {
-        return false;
-    };
-    let Some(root_name) = root_name.strip_suffix(LANGUAGE_SOURCE_SUFFIX) else {
-        return false;
-    };
-
-    !root_name.is_empty()
-}
-
-/// Whether a filesystem filename is any canonical Moth module root (`@*.moth` or `+*.moth`).
+/// Whether a filesystem filename is one of the three canonical Moth module roots.
 pub(crate) fn file_name_is_module_root_file(file_name: &str) -> bool {
-    file_name_is_normal_module_root_file(file_name) || file_name_is_support_root_file(file_name)
+    module_root_role_for_file_name(file_name).is_some()
 }
 
 /// Whether a filesystem filename is the canonical project configuration file.
@@ -87,37 +84,29 @@ pub(crate) fn file_name_is_config_file(file_name: &str) -> bool {
     file_name == CONFIG_FILE_NAME
 }
 
-/// Whether a filesystem filename is a legacy `#*.moth` root-like filename.
+/// Whether a `.moth` filename uses a special marker outside the accepted root vocabulary.
 ///
-/// WHAT: identifies the `#` root marker so Stage 0 can reject it with a structured diagnostic
-/// that tells the author to rename `#name.moth` to `@name.moth`.
-/// WHY: `#`-prefixed root files are invalid; this predicate is used only for the rejection
-/// diagnostic, not for root classification.
-pub(crate) fn file_name_is_legacy_hash_root_file(file_name: &str) -> bool {
-    let Some(root_name) = file_name.strip_prefix('#') else {
+/// WHAT: recognizes a case-sensitive `.moth` stem that starts with `@`, `+` or `#` but is not
+///       exactly `@mod.moth`, `@package.moth` or `@entry.moth`.
+/// WHY: Stage 0 discovery, synthetic single-file selection and helper-name inventory must agree
+///      that these spellings are invalid authored root markers, never ordinary helpers. The
+///      recognition is exact: case variants such as `@Entry.moth` are invalid, and `config.moth`
+///      has no marker, so it retains its separate build-only config meaning.
+pub(crate) fn file_name_is_invalid_module_root_marker(file_name: &str) -> bool {
+    if module_root_role_for_file_name(file_name).is_some() {
         return false;
-    };
-    let Some(root_name) = root_name.strip_suffix(LANGUAGE_SOURCE_SUFFIX) else {
+    }
+
+    let Some(stem) = file_name.strip_suffix(LANGUAGE_SOURCE_SUFFIX) else {
         return false;
     };
 
-    !root_name.is_empty()
+    stem.starts_with('@') || stem.starts_with('+') || stem.starts_with('#')
 }
 
 /// Whether a dependency component identifies the canonical project config file.
 pub(crate) fn dependency_component_is_config_file(component: &str) -> bool {
     component == "config" || file_name_is_config_file(component)
-}
-
-/// Whether an extensionless dependency component looks like a support root file reference.
-///
-/// WHAT: detects when an author wrote `+name` or `+name.moth` as a dependency component, which
-/// would attempt to dependency a support root file directly rather than the support package facade.
-/// WHY: support packages are bound by their directory name, not by root filename. A helpful
-///      diagnostic guides the author to drop the `+` prefix and dependency the package path instead.
-pub(crate) fn dependency_component_is_support_root_file(component: &str) -> bool {
-    file_name_is_support_root_file(component)
-        || (component.starts_with('+') && !component.contains('.') && component.len() > 1)
 }
 
 pub(crate) fn dependency_path_references_config_file(
@@ -127,19 +116,6 @@ pub(crate) fn dependency_path_references_config_file(
 ) -> bool {
     dependency_source_component(path, path_fork, string_table)
         .is_some_and(dependency_component_is_config_file)
-}
-
-/// Whether a dependency provider root's source component is a support-root file.
-///
-/// WHAT: checks the provider root's final component to detect attempts to dependency a support root
-/// file by its filename rather than through the support package directory.
-pub(crate) fn dependency_path_references_support_root_file(
-    path: PathId,
-    path_fork: &PathInternerFork,
-    string_table: &StringTable,
-) -> bool {
-    dependency_source_component(path, path_fork, string_table)
-        .is_some_and(dependency_component_is_support_root_file)
 }
 
 fn dependency_source_component<'a>(

@@ -25,6 +25,9 @@ contract instead.
 
 Assertion failure is not a recoverable error and cannot be caught.
 
+`assert(false)` ends the current path. That proves divergence for the path,
+but it is not a Never value and does not by itself declare `-> !`.
+
 Assertions remain checked in development and release builds.
 
 Use `Error!` for failures callers are expected to handle. Use `assert` for

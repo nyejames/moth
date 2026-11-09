@@ -35,9 +35,10 @@
 
 use super::direct_projection::{FoldedValueJoinContext, PublicInterfaceDraftBuildFailure};
 use super::model::{
-    PublicChoiceVariantSurface, PublicFieldTypeSlot, PublicFunctionCategory,
-    PublicFunctionSemantics, PublicGenericParameterSurface, PublicGenericTemplateDescriptor,
-    PublicParameterContract, PublicParameterTypeSlot, PublicReturnTypeSlot,
+    PublicCallableReturnContract, PublicChoiceVariantSurface, PublicFieldTypeSlot,
+    PublicFunctionCategory, PublicFunctionSemantics, PublicGenericParameterSurface,
+    PublicGenericTemplateDescriptor, PublicParameterContract, PublicParameterTypeSlot,
+    PublicReturnTypeSlot,
 };
 use crate::compiler_frontend::ast::ReceiverMethodEntry;
 use crate::compiler_frontend::ast::ResolvedTraitSourceFact;
@@ -45,7 +46,7 @@ use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ParameterContract, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, ParameterContract,
 };
 use crate::compiler_frontend::ast::{
     ResolvedPublicTypeRoot, ResolvedPublicTypeRootKind, ResolvedPublicTypeRootTable,
@@ -61,6 +62,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::generics
 use crate::compiler_frontend::compiler_messages::{
     InvalidGenericParameterReason, InvalidReceiverDeclarationReason,
 };
+use crate::compiler_frontend::datatypes::FunctionReturnContract;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantPayloadDefinition, StructTypeDefinition, TypeDefinition,
@@ -94,8 +96,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ProjectedReceiverMethodSignature {
     pub(super) parameters: Vec<PublicParameterTypeSlot>,
-    pub(super) returns: Vec<PublicReturnTypeSlot>,
-    pub(super) error_return: Option<CanonicalTypeIdentity>,
+    pub(super) return_contract: PublicCallableReturnContract,
     pub(super) default_provenance: SyntheticInterfaceProvenance,
     /// The generic parameter surfaces (with bounds) of a generic-template method; empty for a
     /// concrete-local method.
@@ -910,8 +911,8 @@ pub(super) fn project_free_function_semantics(
         })
         .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
 
-    let (returns, error_return) =
-        project_return_slots(&signature.returns, type_environment, context)?;
+    let return_contract =
+        project_callable_return_contract(&signature.return_contract, type_environment, context)?;
 
     let category = if generic_parameters.is_empty() {
         PublicFunctionCategory::ConcreteLocal
@@ -924,8 +925,7 @@ pub(super) fn project_free_function_semantics(
     Ok(PublicFunctionSemantics {
         category,
         parameters,
-        returns,
-        error_return,
+        return_contract,
     })
 }
 
@@ -1137,45 +1137,36 @@ pub(super) fn project_constant_type_identity(
 //  Shared leaf projection helpers
 // ---------------------------------------------------------------------------
 
-/// Project success and error return slots, returning them separately.
+/// Project one callable's whole return contract.
 ///
-/// A resolved public signature slot missing `TypeId` is `InfrastructureFailure`; no slot is omitted.
-pub(super) fn project_return_slots(
-    return_slots: &[ReturnSlot],
+/// WHAT: maps the ordinary success/error shape onto canonical identities, and a declared Never
+///       contract onto the public Never variant with no slot identity.
+/// WHY: the public boundary must keep Never exact instead of projecting it as no-value; a Never
+///      contract carries no type identity at all.
+pub(super) fn project_callable_return_contract(
+    contract: &FunctionReturnContract,
     type_environment: &TypeEnvironment,
     context: &CanonicalTypeProjectionContext,
-) -> Result<(Vec<PublicReturnTypeSlot>, Option<CanonicalTypeIdentity>), InfrastructureFailure> {
-    let mut returns = Vec::new();
-    let mut error_return = None;
+) -> Result<PublicCallableReturnContract, InfrastructureFailure> {
+    let FunctionReturnContract::Returns(returns) = contract else {
+        return Ok(PublicCallableReturnContract::Never);
+    };
 
-    for slot in return_slots {
-        let type_id = slot.type_id.ok_or_else(|| {
-            InfrastructureFailure::internal(
-                CompilerStage::AstConstruction,
-                "defined public type-surface projection: a resolved public signature return \
-                 slot has no TypeId; the signature was not fully resolved before projection",
-            )
-        })?;
+    let success = returns
+        .success()
+        .iter()
+        .map(|type_id| {
+            project_type_id_to_canonical_identity(*type_id, type_environment, context)
+                .map(|type_identity| PublicReturnTypeSlot { type_identity })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
-        let type_identity =
-            project_type_id_to_canonical_identity(type_id, type_environment, context)?;
+    let error = returns
+        .error()
+        .map(|type_id| project_type_id_to_canonical_identity(type_id, type_environment, context))
+        .transpose()?;
 
-        match slot.channel {
-            ReturnChannel::Success => returns.push(PublicReturnTypeSlot { type_identity }),
-            ReturnChannel::Error => {
-                if error_return.is_some() {
-                    return Err(InfrastructureFailure::internal(
-                        CompilerStage::AstConstruction,
-                        "defined public type-surface projection: a public signature carries \
-                         multiple error-channel return slots",
-                    ));
-                }
-                error_return = Some(type_identity);
-            }
-        }
-    }
-
-    Ok((returns, error_return))
+    Ok(PublicCallableReturnContract::Returns { success, error })
 }
 
 /// Total-join retained struct field declarations against the canonical

@@ -7,7 +7,7 @@ diagnostic_codes = ["MOTH-RULE-0051"]
 code = "MOTH-RULE-0051"
 occurrence = 1
 reason = "invalid_fallible_handling.catch_on_non_fallible"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1
 
 [backends.html_wasm]
@@ -20,5 +20,5 @@ diagnostic_codes = ["MOTH-RULE-0051"]
 code = "MOTH-RULE-0051"
 occurrence = 1
 reason = "invalid_fallible_handling.catch_on_non_fallible"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1

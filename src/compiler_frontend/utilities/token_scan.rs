@@ -14,7 +14,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::{
     draft::DiagnosticDraft,
     families::{templates, token_lexical},
 };
-use crate::compiler_frontend::source::{SourceId, SourceSpan};
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::{
     DOC_DIRECTIVE_NAME, INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME,
 };
@@ -63,11 +64,69 @@ impl InitializerReference {
     }
 }
 
+/// One expression-qualified selection recognized in a token window.
+///
+/// WHAT: pairs one authored `PATH` handle with the single `SYMBOL` that immediately follows it on
+///       the same physical line, keeping both source-local spans.
+/// WHY: the syntax-shape decision "is this one qualified reference?" must have exactly one owner.
+///      Occurrence collection and shallow initializer-reference scanning read this recognition
+///      instead of each re-deriving an ad-hoc predecessor check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ScannedQualifiedSelection {
+    pub(crate) path_syntax_id: PathSyntaxId,
+    pub(crate) path_span: LocalSpan,
+    pub(crate) selected_name: StringId,
+    pub(crate) selected_span: LocalSpan,
+}
+
+/// Recognize one expression-qualified selection whose `PATH` token sits at `path_index`.
+///
+/// WHAT: recognizes a dependency path immediately followed by one symbol token.
+/// WHY: whitespace produces no token, so an authored physical newline between the path and its
+///      selected symbol can only appear as a `NEWLINE` token. Requiring the next token to be the
+///      `SYMBOL` therefore enforces the same-line contract without a second line index or a
+///      second path parser. Recognition decides syntax shape only; provider and value validity
+///      belong to later stages.
+pub(crate) fn recognize_qualified_selection(
+    tokens: TokenFactView<'_>,
+    path_index: usize,
+) -> Option<ScannedQualifiedSelection> {
+    let path = tokens.get(path_index)?;
+    if path.tag != TokenTag::PATH {
+        return None;
+    }
+    let path_syntax_id = path.path_syntax_id?;
+    let selected = tokens.get(path_index.checked_add(1)?)?;
+    if selected.tag != TokenTag::SYMBOL {
+        return None;
+    }
+    Some(ScannedQualifiedSelection {
+        path_syntax_id,
+        path_span: path.span,
+        selected_name: selected.symbol?,
+        selected_span: selected.span,
+    })
+}
+
+/// Whether the symbol at `symbol_index` is the selected name owned by the preceding path token.
+///
+/// WHY: a selected name is not an unrelated bare value reference. Shallow scanners must skip it
+///      so no false local-name dependency or collision is derived from the occurrence.
+pub(crate) fn scanned_symbol_is_qualified_selection(
+    tokens: TokenFactView<'_>,
+    symbol_index: usize,
+) -> bool {
+    let Some(path_index) = symbol_index.checked_sub(1) else {
+        return false;
+    };
+    recognize_qualified_selection(tokens, path_index).is_some()
+}
+
 /// Scan short-lived scanned facts for symbol-shaped references.
 ///
 /// WHAT: produces `InitializerReference` hints for every bare symbol that is not a
-/// dot/namespace accessor, an assignment target, preceded by a dot/double-colon, or a direct
-/// `$slot`/`$in` target.
+/// dot/namespace accessor, an assignment target, preceded by a dot/double-colon, a direct
+/// `$slot`/`$in` target, or the selected symbol of a preceding qualified path.
 /// WHY: indexed callers read on demand from slices or canonical stores without projecting
 /// a per-query window first; the scan touches only its window.
 pub(crate) fn collect_scanned_symbol_references(
@@ -99,6 +158,13 @@ pub(crate) fn collect_scanned_symbol_references(
             .and_then(|i| tokens.get(i))
             .map(|t| t.tag);
         if previous == Some(TokenTag::DOT) || previous == Some(TokenTag::DOUBLE_COLON) {
+            continue;
+        }
+
+        // A symbol immediately after a dependency path is that occurrence's selected name, not a
+        // bare value reference. Skipping it here keeps the qualified occurrence the single owner
+        // of the selected token, so no false local-name edge or collision is derived.
+        if scanned_symbol_is_qualified_selection(tokens, index) {
             continue;
         }
 

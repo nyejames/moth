@@ -9,20 +9,19 @@ use super::*;
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidValueReceiverView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
-    DuplicatePublicExportView, DuplicateTraitRequirementView, GenericBoundPrivateSurfaceLeakView,
-    InvalidTraitConformanceNames, InvalidTraitConformanceShape, InvalidTraitConformanceView,
-    InvalidTraitIncompatibilityView, InvalidTraitKeywordUsageView, PrivateTypeInExportedApiView,
-    TraitNameUsedAsTypeView, TraitPrivateSurfaceLeakView, UnknownTraitView,
-    UnsupportedTraitFeatureView, decode_invalid_trait_conformance_names,
+    DuplicatePublicExportView, DuplicateTraitRequirementView, ExportOutsideModuleRootView,
+    GenericBoundPrivateSurfaceLeakView, InvalidTraitConformanceNames, InvalidTraitConformanceShape,
+    InvalidTraitConformanceView, InvalidTraitIncompatibilityView, InvalidTraitKeywordUsageView,
+    PrivateTypeInExportedApiView, TraitNameUsedAsTypeView, TraitPrivateSurfaceLeakView,
+    UnknownTraitView, UnsupportedTraitFeatureView, decode_invalid_trait_conformance_names,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
     AmbiguousImportTargetView, BareFileImportView, CrossModuleImportNotExportedView,
     DependencyAliasCaseMismatchView, DirectSpecialFileImportView, ImportNameCollisionView,
     MissingModuleRootPublicSurfaceView, MissingPackageSymbolView, NotExportedByPublicSurfaceView,
-    NotExportedBySourceFileView,
+    NotExportedBySourceFileView, RootLocalDeclarationNotVisibleView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::CircularDependencyView;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::LegacyDependencyClauseView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::ProjectContextEscapeView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::UnescapedImplicitTemplateCloseView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
@@ -37,8 +36,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::types_bo
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticCapacityResource, InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason,
-    ProjectContextEscapeReason, PublicGenericOwnerKind, TypeMismatchContext, ValueReceiverContext,
+    DiagnosticCapacityResource, ExportOutsideModuleRootReason, InvalidTraitIncompatibilityReason,
+    InvalidTraitKeywordUsageReason, ProjectContextEscapeReason, PublicGenericOwnerKind,
+    RootLocalDeclarationRole, TypeMismatchContext, ValueReceiverContext,
 };
 
 pub(crate) struct RenderedPayload {
@@ -305,33 +305,6 @@ pub(crate) fn render_non_utf8_source(
         guidance: Vec::new(),
     }
 }
-fn legacy_dependency_clause_message(
-    replacement: Option<StringId>,
-    string_table: &dyn StringTableResolver,
-) -> String {
-    match replacement {
-        Some(replacement) => format!(
-            "Source dependency clauses no longer use `import`. Write `{}`.",
-            string_table.resolve(replacement)
-        ),
-        None => "Source dependency clauses no longer use `import`, and this clause has no automatic delimiter-free replacement. Choose either a namespace alias or direct flat selections beginning with `@`.".to_owned(),
-    }
-}
-
-/// WHAT: renders a legacy dependency clause from its compact replacement fact.
-/// WHY: the legacy reason is fixed to the import keyword, and its replacement is the only message fact.
-pub(crate) fn render_legacy_dependency_clause(
-    _diagnostic: &DiagnosticView<'_>,
-    facts: &LegacyDependencyClauseView,
-    context: DiagnosticRenderContext<'_>,
-) -> RenderedPayload {
-    let _ = facts.reason;
-    RenderedPayload {
-        message: legacy_dependency_clause_message(facts.replacement, context.string_table),
-        guidance: Vec::new(),
-    }
-}
-
 fn source_span_capacity_message(
     start: u32,
     length: u32,
@@ -556,10 +529,6 @@ fn invalid_trait_conformance_message(
     };
 
     match shape {
-        Shape::ImportedModuleRoot => {
-            "Trait conformance declarations are not allowed in imported module root files."
-                .to_owned()
-        }
         Shape::AliasTarget => {
             format!(
                 "Type alias '{target}' cannot declare trait conformance. Use the underlying nominal type."
@@ -645,6 +614,10 @@ fn invalid_trait_conformance_message(
         ),
         Shape::ReturnChannelMismatch { return_index } => format!(
             "'{target}' cannot conform{trait_text} because return {return_index} of '{}' uses a different return channel.",
+            reason_name()
+        ),
+        Shape::ReturnContractMismatch => format!(
+            "'{target}' cannot conform{trait_text} because the return contract of '{}' differs from the requirement; a `-> !` contract and an ordinary return contract never match.",
             reason_name()
         ),
         Shape::InferredFailureInInfallibleCast => format!(
@@ -954,6 +927,69 @@ pub(crate) fn render_not_exported_by_source_file(
     }
 }
 
+/// The root-file description named by a root-local declaration diagnostic.
+fn root_local_declaration_role_text(role: RootLocalDeclarationRole) -> &'static str {
+    match role {
+        RootLocalDeclarationRole::NormalFacade => "the normal facade root file",
+        RootLocalDeclarationRole::SupportFacade => "the support facade root file",
+        RootLocalDeclarationRole::EntryRoot => "the entry root file",
+    }
+}
+
+/// Renders a cross-file read of a root-local declaration from its path, role and root-file facts.
+///
+/// WHAT: the message names the actual authored root file rather than only a role spelling. A
+///       symlinked or case-variant root therefore stays accurate, and a
+///       namespace binding that passes the root file path as its symbol path still reads
+///       correctly because the message states where declarations are visible, not where the
+///       selected path was authored.
+pub(crate) fn render_root_local_declaration_not_visible(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &RootLocalDeclarationNotVisibleView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    let symbol_path = context.render_path(view.symbol_path);
+    let root_role = root_local_declaration_role_text(view.root_role);
+    let root_file = context.render_path(view.root_file);
+    RenderedPayload {
+        message: format!(
+            "Cannot bind '{symbol_path}' because root-local declarations are visible only inside {root_role} '{root_file}' itself. Another root file or an ordinary helper cannot read them; move shared implementation into an ordinary helper file."
+        ),
+        guidance: Vec::new(),
+    }
+}
+
+fn export_outside_module_root_message(
+    file: PathId,
+    reason: ExportOutsideModuleRootReason,
+    context: DiagnosticRenderContext<'_>,
+) -> String {
+    match reason {
+        // The descriptor title already states the module-root rule for helpers and config.
+        ExportOutsideModuleRootReason::NoExportSurface => String::new(),
+        ExportOutsideModuleRootReason::EntryRoot => {
+            // The entry root is not always `@entry.moth`: a selected single-file source becomes
+            // that unit's explicit entry, so name the file the author actually wrote.
+            let file = context.render_path(file);
+            format!(
+                "`export:` is not allowed in `{file}`: an entry root has no export surface. Move the declaration to a shared helper file and export it from `@mod.moth` or `@package.moth`."
+            )
+        }
+    }
+}
+
+/// Renders the `export:` role rejection from its source file and compact reason code.
+pub(crate) fn render_export_outside_module_root(
+    _diagnostic: &DiagnosticView<'_>,
+    view: &ExportOutsideModuleRootView,
+    context: DiagnosticRenderContext<'_>,
+) -> RenderedPayload {
+    RenderedPayload {
+        message: export_outside_module_root_message(view.file, view.reason, context),
+        guidance: Vec::new(),
+    }
+}
+
 fn not_exported_by_public_surface_message(
     requested_path: PathId,
     public_surface_name: StringId,
@@ -1082,9 +1118,10 @@ fn direct_special_file_import_message(
 ) -> String {
     let special_file = special_file_name_from_path(path, context);
     let path_text = context.render_path(path);
-    let suggestion = support_root_import_suggestion(path, context);
+    // The direct-special-file diagnostic covers only the build-only config source, which has no
+    // authored facade or importable surface.
     format!(
-        "Cannot depend directly on '{special_file}' via '{path_text}'. Support roots are referenced through their package directory, not by filename.{suggestion}"
+        "Cannot depend directly on '{special_file}' via '{path_text}'. `config.moth` is a build-only source and is not importable."
     )
 }
 

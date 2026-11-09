@@ -1,0 +1,7 @@
+mixed_add |left I8, right U8| -> I16:
+    return left + right catch then -32768
+;
+
+narrow_add |left U8, right U8| -> U8:
+    return left + right catch then 0
+;

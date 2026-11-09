@@ -31,7 +31,7 @@ use crate::compiler_frontend::hir::expression_store::{
     HirConstructionFailure, HirStringPieceRange,
 };
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
-use crate::compiler_frontend::hir::hir_builder::HirBuilder;
+use crate::compiler_frontend::hir::hir_builder::{HirBuilder, LoopExitPolicy};
 use crate::compiler_frontend::hir::ids::{HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
@@ -547,6 +547,7 @@ impl<'a> HirBuilder<'a> {
             TemplateLoopHeader::Conditional { condition } => {
                 self.lower_while_with_body_emitter(
                     append_context.anchor.bind(*condition)?,
+                    LoopExitPolicy::Template,
                     span_ref,
                     None,
                     emit_template_iteration,

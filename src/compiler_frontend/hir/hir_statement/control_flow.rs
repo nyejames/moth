@@ -217,6 +217,10 @@ impl<'a> HirBuilder<'a> {
             authored_span,
         )?;
 
+        if let Some(targets) = self.loop_targets.last_mut() {
+            targets.saw_break = true;
+        }
+
         self.log_control_flow_edge(current_block, targets.break_target, "loop.break");
         Ok(())
     }
@@ -1230,11 +1234,19 @@ impl<'a> HirBuilder<'a> {
         self.loop_targets.push(LoopTargets {
             break_target,
             continue_target,
+            saw_break: false,
         });
     }
 
     pub(super) fn pop_loop_targets(&mut self) {
         let _ = self.loop_targets.pop();
+    }
+
+    /// Whether the innermost active loop has lowered at least one `break`.
+    pub(super) fn current_loop_saw_break(&self) -> bool {
+        self.loop_targets
+            .last()
+            .is_some_and(|targets| targets.saw_break)
     }
 
     pub(super) fn current_loop_targets_or_error(

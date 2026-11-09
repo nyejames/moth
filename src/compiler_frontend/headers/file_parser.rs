@@ -17,8 +17,8 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
 };
 use crate::compiler_frontend::compiler_messages::{CapacityResource, CompilerStage};
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, InvalidConfigReason, InvalidDeclarationReason,
-    InvalidReceiverDeclarationReason,
+    CommonSyntaxMistakeReason, ExportOutsideModuleRootReason, InvalidConfigReason,
+    InvalidDeclarationReason, InvalidReceiverDeclarationReason,
 };
 use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker_in_cursor;
 use crate::compiler_frontend::headers::file_dependency_clauses::{
@@ -31,6 +31,9 @@ use crate::compiler_frontend::headers::header_dispatch::{
 };
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
 use crate::compiler_frontend::headers::parse_file_headers::find_config_qualifier_marker_in_declaration_defaults;
+use crate::compiler_frontend::headers::qualified_references::{
+    collect_qualified_references, push_header_expression_ranges,
+};
 use crate::compiler_frontend::headers::start_capture::capture_runtime_template_range_from_cursor;
 use crate::compiler_frontend::headers::symbol_collection::is_receiver_method_candidate;
 use crate::compiler_frontend::headers::top_level_classifier::{
@@ -44,7 +47,6 @@ use crate::compiler_frontend::headers::types::{
     HeaderBuildContext, HeaderExportMode, HeaderKind, HeaderParseContext, HeaderParseFailure,
     RetainedDependencyClause, SourceTokenOwner,
 };
-use crate::compiler_frontend::paths::const_paths::can_serialize_path_component_bare;
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
@@ -54,7 +56,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
 };
-use crate::compiler_frontend::utilities::token_scan::{NestingDepth, ScannedToken, TokenFactView};
+use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
@@ -154,7 +156,8 @@ fn parse_headers_in_file_inner(
         let current_tag = current.tag();
         if !runtime_nesting.is_top_level() && current_tag != TokenTag::EOF {
             if current_tag == TokenTag::TEMPLATE_HEAD {
-                // Imported roots discard runtime bodies, so validate nested template balance here.
+                // A rejected foreign-root body has no AST consumer, so validate nested template
+                // balance here.
                 cursor.advance();
                 let range = capture_runtime_template_range_from_cursor(
                     current,
@@ -223,7 +226,7 @@ fn parse_headers_in_file_inner(
             }
 
             HeaderFileItem::Export => {
-                reject_non_block_export(cursor, file_id, context, current_span)?;
+                reject_non_block_export(cursor, file_id, source_file, context, current_span)?;
             }
 
             HeaderFileItem::ExportBlock => {
@@ -270,17 +273,42 @@ fn parse_headers_in_file_inner(
     Ok(())
 }
 
+/// Reject an authored `export:` clause whose file role owns no export surface.
+///
+/// WHAT: entry roots receive a root-specific reason; helpers, config and non-facade roots keep
+///       the generic module-root rule.
+/// WHY: `@entry.moth` has no export surface, while ordinary helpers are not module roots at all.
+fn reject_export_outside_module_root(
+    context: &HeaderParseContext<'_>,
+    source_file: PathId,
+    export_span: SourceSpan,
+) -> FileParserResult<()> {
+    let reason = if context.is_config_file {
+        Some(ExportOutsideModuleRootReason::NoExportSurface)
+    } else {
+        match context.file_role {
+            FileRole::ActiveEntryRoot => Some(ExportOutsideModuleRootReason::EntryRoot),
+            role if role.is_export_capable() => None,
+            _ => Some(ExportOutsideModuleRootReason::NoExportSurface),
+        }
+    };
+
+    match reason {
+        Some(reason) => Err(diagnostic_failure(
+            generics_traits_api::export_outside_module_root(source_file, reason, Some(export_span)),
+        )),
+        None => Ok(()),
+    }
+}
+
 fn reject_non_block_export(
     cursor: &TokenCursor<'_>,
     file_id: SourceId,
+    source_file: PathId,
     context: &mut HeaderParseContext<'_>,
     export_span: SourceSpan,
 ) -> FileParserResult<()> {
-    if !context.file_role.is_export_capable() || context.is_config_file {
-        return Err(diagnostic_failure(
-            generics_traits_api::export_outside_module_root(Some(export_span)),
-        ));
-    }
+    reject_export_outside_module_root(context, source_file, export_span)?;
 
     // Without the block delimiter, the token is not an export target. Keep this diagnostic in
     // header parsing instead of interpreting the following tokens through another syntax path.
@@ -318,11 +346,7 @@ fn handle_export_block(
     context: &mut HeaderParseContext<'_>,
     export_span: SourceSpan,
 ) -> FileParserResult<()> {
-    if !context.file_role.is_export_capable() || context.is_config_file {
-        return Err(diagnostic_failure(
-            generics_traits_api::export_outside_module_root(Some(export_span)),
-        ));
-    }
+    reject_export_outside_module_root(context, source_file, export_span)?;
 
     if state.seen_export_block.is_some() {
         return Err(diagnostic_failure(
@@ -554,70 +578,11 @@ fn parse_export_block_item(
     }
 }
 
-/// The recognised start of a removed `import` `@path` clause.
-///
-/// WHAT: records the `import` token and the following path token after optional newlines.
-/// WHY: end scanning, replacement generation and diagnostic spans must share one path index
-///      instead of independently skipping trivia from `import` again.
-struct LegacyDependencyStart {
-    import_index: TokenIndex,
-    path_index: TokenIndex,
-}
-
-fn checked_legacy_index(index: usize, offset: usize, owner: &str) -> FileParserResult<usize> {
-    index.checked_add(offset).ok_or_else(|| {
-        crate::compiler_bug!(
-            CompilerStage::HeaderParsing,
-            "{owner} token index overflowed its source range",
-        )
-    })
-}
-
-/// Recognise only `import`, optional newlines, then a path token.
-///
-/// Comments are not produced as tokens, so comments between the keyword and path are
-/// already transparent. `import = 1` and `import` followed by an unrelated statement
-/// do not match.
-fn recognize_legacy_dependency_start(
-    tokens: TokenFactView<'_>,
-    import_index: TokenIndex,
-    string_table: &StringTable,
-) -> FileParserResult<Option<LegacyDependencyStart>> {
-    let Some(import) = tokens.get(import_index.index()) else {
-        return Ok(None);
-    };
-    if import.tag != TokenTag::SYMBOL
-        || import
-            .symbol
-            .is_none_or(|name| string_table.resolve(name) != "import")
-    {
-        return Ok(None);
-    }
-
-    let mut index = checked_legacy_index(import_index.index(), 1, "legacy dependency")?;
-    while tokens
-        .get(index)
-        .is_some_and(|token| token.tag == TokenTag::NEWLINE)
-    {
-        index = checked_legacy_index(index, 1, "legacy dependency")?;
-    }
-
-    if !tokens
-        .get(index)
-        .is_some_and(|token| token.tag == TokenTag::PATH)
-    {
-        return Ok(None);
-    }
-    let Some(path_index) = TokenIndex::try_from_index(index) else {
-        crate::compiler_bug!(
-            CompilerStage::HeaderParsing,
-            "legacy dependency path index exceeded its checked domain",
-        );
-    };
-    Ok(Some(LegacyDependencyStart {
-        import_index,
-        path_index,
-    }))
+/// One already-read top-level symbol with the source facts its header dispatch needs.
+struct SymbolItemRequest {
+    name_id: StringId,
+    current_span: SourceSpan,
+    current_index: TokenIndex,
 }
 
 fn handle_symbol_item(
@@ -628,279 +593,7 @@ fn handle_symbol_item(
     context: &mut HeaderParseContext<'_>,
     symbol: SymbolItemRequest,
 ) -> FileParserResult<()> {
-    let SymbolItemRequest {
-        name_id,
-        current_span,
-        current_index,
-    } = symbol;
-    let canonical = cursor.source_tokens();
-    if canonical.source() != file_id {
-        return Err(HeaderParseFailure::Infrastructure(
-            InfrastructureFailure::internal(
-                CompilerStage::HeaderParsing,
-                "legacy dependency scan source token owner does not match its file identity",
-            ),
-        ));
-    }
-    let facts = TokenFactView::from_source(canonical);
-    if let Some(start) =
-        recognize_legacy_dependency_start(facts, current_index, context.string_table)?
-    {
-        let path_syntax = (!context.is_config_file).then(|| Arc::clone(&context.path_syntax));
-        return Err(diagnostic_failure(legacy_dependency_clause_diagnostic(
-            facts,
-            file_id,
-            path_syntax.as_deref(),
-            context,
-            current_span,
-            start,
-        )?));
-    }
-
     let export_mode = state.export_mode;
-    handle_symbol_item_with_export_mode(
-        cursor,
-        file_id,
-        source_file,
-        state,
-        context,
-        SymbolItemRequest {
-            name_id,
-            current_span,
-            current_index,
-        },
-        export_mode,
-    )
-}
-
-/// Build the one-way migration diagnostic for the removed `import @...` grammar.
-///
-/// A replacement is offered only when the old clause maps mechanically to one current clause.
-/// Filtered namespaces and nested groups deliberately require an author choice.
-fn legacy_dependency_clause_diagnostic(
-    tokens: TokenFactView<'_>,
-    source_id: SourceId,
-    path_syntax: Option<&PathSyntaxTable>,
-    context: &mut HeaderParseContext<'_>,
-    current_span: SourceSpan,
-    start: LegacyDependencyStart,
-) -> Result<DiagnosticDraft, HeaderParseFailure> {
-    let start_span = tokens
-        .get(start.import_index.index())
-        .map(|token| SourceSpan::new(source_id, token.span))
-        .unwrap_or(current_span);
-    let end_span = legacy_dependency_clause_end(tokens, start.path_index)?
-        .and_then(|index| tokens.get(index.index()))
-        .map(|token| SourceSpan::new(source_id, token.span))
-        .unwrap_or(start_span);
-    let clause_span = start_span
-        .join(end_span, context.span_builder)
-        .map_err(|error| {
-            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
-                CompilerStage::HeaderParsing,
-                format!("legacy dependency clause span could not be joined: {error:?}"),
-            ))
-        })?;
-
-    let replacement = if context.is_config_file {
-        None
-    } else {
-        let path_syntax = path_syntax.ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
-                CompilerStage::HeaderParsing,
-                "legacy dependency replacement is missing its path syntax table",
-            ))
-        })?;
-        legacy_dependency_replacement(
-            tokens,
-            source_id,
-            path_syntax,
-            context.string_table,
-            context.path_fork,
-            start.path_index,
-        )?
-        .map(|replacement| context.string_table.intern(&replacement))
-    };
-    Ok(project_config::legacy_dependency_clause(
-        replacement,
-        Some(clause_span),
-    ))
-}
-
-fn legacy_dependency_clause_end(
-    tokens: TokenFactView<'_>,
-    path_index: TokenIndex,
-) -> FileParserResult<Option<TokenIndex>> {
-    let mut index = path_index.index();
-    let mut brace_depth = 0usize;
-    let mut last = None;
-    while let Some(token) = tokens.get(index) {
-        match token.tag {
-            TokenTag::OPEN_CURLY => {
-                let Some(next_depth) = brace_depth.checked_add(1) else {
-                    crate::compiler_bug!(
-                        CompilerStage::HeaderParsing,
-                        "legacy dependency brace depth overflowed its source range",
-                    );
-                };
-                brace_depth = next_depth;
-            }
-            TokenTag::CLOSE_CURLY => brace_depth = brace_depth.saturating_sub(1),
-            TokenTag::NEWLINE if brace_depth == 0 => break,
-            TokenTag::END | TokenTag::EOF => break,
-            _ => {}
-        }
-        let Some(last_token_index) = TokenIndex::try_from_index(index) else {
-            crate::compiler_bug!(
-                CompilerStage::HeaderParsing,
-                "legacy dependency clause index exceeded its checked domain",
-            );
-        };
-        last = Some(last_token_index);
-        index = checked_legacy_index(index, 1, "legacy dependency clause")?;
-    }
-    Ok(last)
-}
-
-fn legacy_dependency_replacement(
-    tokens: TokenFactView<'_>,
-    source_id: SourceId,
-    path_syntax: &PathSyntaxTable,
-    string_table: &StringTable,
-    path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-    path_index: TokenIndex,
-) -> Result<Option<String>, HeaderParseFailure> {
-    let Some(path_token) = tokens.get(path_index.index()) else {
-        return Ok(None);
-    };
-    if path_token.tag != TokenTag::PATH {
-        return Ok(None);
-    }
-    let Some(path_syntax_id) = path_token.path_syntax_id else {
-        return Ok(None);
-    };
-    let path = path_syntax
-        .try_path_for_token(path_syntax_id, SourceSpan::new(source_id, path_token.span))?
-        .root;
-    if path == PathId::ROOT {
-        // Exact `@/` is represented by the empty canonical path, and so is the bare introducer
-        // `@`. The retained row cannot tell the two spellings apart, so it suggests neither.
-        return Ok(None);
-    }
-    let mut components = Vec::new();
-    path_fork.resolve_components(path, &mut components);
-    if components
-        .iter()
-        .any(|component| !can_serialize_path_component_bare(string_table.resolve(*component)))
-    {
-        // The canonical path row intentionally does not retain component quoting. Do not emit a
-        // normalized spelling that would turn a valid quoted path into invalid unquoted syntax.
-        return Ok(None);
-    }
-    let path = path_fork.render_portable(path, string_table, &mut components);
-    let mut replacement = format!("@{path}");
-    let mut index = checked_legacy_index(path_index.index(), 1, "legacy dependency replacement")?;
-
-    if tokens
-        .get(index)
-        .is_some_and(|token| token.tag == TokenTag::AS)
-    {
-        let alias_index = checked_legacy_index(index, 1, "legacy dependency replacement")?;
-        let Some(alias) = tokens.get(alias_index) else {
-            return Ok(None);
-        };
-        let Some(alias_name) = alias.symbol.filter(|_| alias.tag == TokenTag::SYMBOL) else {
-            return Ok(None);
-        };
-        replacement.push_str(" as ");
-        replacement.push_str(string_table.resolve(alias_name));
-        index = checked_legacy_index(alias_index, 1, "legacy dependency replacement")?;
-        return Ok(clause_terminator(tokens.get(index)).then_some(replacement));
-    }
-
-    if !tokens
-        .get(index)
-        .is_some_and(|token| token.tag == TokenTag::OPEN_CURLY)
-    {
-        return Ok(clause_terminator(tokens.get(index)).then_some(replacement));
-    }
-    index = checked_legacy_index(index, 1, "legacy dependency replacement")?;
-    replacement.push(' ');
-
-    let mut first_selection = true;
-    loop {
-        while tokens
-            .get(index)
-            .is_some_and(|token| token.tag == TokenTag::NEWLINE)
-        {
-            index = checked_legacy_index(index, 1, "legacy dependency replacement")?;
-        }
-        let Some(token) = tokens.get(index) else {
-            return Ok(None);
-        };
-        if token.tag == TokenTag::CLOSE_CURLY {
-            let after_close = checked_legacy_index(index, 1, "legacy dependency replacement")?;
-            return Ok(
-                (!first_selection && clause_terminator(tokens.get(after_close)))
-                    .then_some(replacement),
-            );
-        }
-        let Some(name) = token.symbol.filter(|_| token.tag == TokenTag::SYMBOL) else {
-            return Ok(None);
-        };
-        if !first_selection {
-            replacement.push_str(", ");
-        }
-        replacement.push_str(string_table.resolve(name));
-        first_selection = false;
-        index = checked_legacy_index(index, 1, "legacy dependency replacement")?;
-
-        if tokens
-            .get(index)
-            .is_some_and(|token| token.tag == TokenTag::AS)
-        {
-            let alias_index = checked_legacy_index(index, 1, "legacy dependency replacement")?;
-            let Some(alias) = tokens.get(alias_index) else {
-                return Ok(None);
-            };
-            let Some(alias_name) = alias.symbol.filter(|_| alias.tag == TokenTag::SYMBOL) else {
-                return Ok(None);
-            };
-            replacement.push_str(" as ");
-            replacement.push_str(string_table.resolve(alias_name));
-            index = checked_legacy_index(alias_index, 1, "legacy dependency replacement")?;
-        }
-
-        match tokens.get(index).map(|token| token.tag) {
-            Some(TokenTag::COMMA) => {
-                index = checked_legacy_index(index, 1, "legacy dependency replacement")?
-            }
-            Some(TokenTag::CLOSE_CURLY | TokenTag::NEWLINE) => {}
-            _ => return Ok(None),
-        }
-    }
-}
-
-fn clause_terminator(token: Option<ScannedToken>) -> bool {
-    token.is_none_or(|token| matches!(token.tag, TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF))
-}
-
-/// One already-read top-level symbol with the source facts its header dispatch needs.
-struct SymbolItemRequest {
-    name_id: StringId,
-    current_span: SourceSpan,
-    current_index: TokenIndex,
-}
-
-fn handle_symbol_item_with_export_mode(
-    cursor: &mut TokenCursor<'_>,
-    file_id: SourceId,
-    source_file: PathId,
-    state: &mut HeaderFileParseState,
-    context: &mut HeaderParseContext<'_>,
-    symbol: SymbolItemRequest,
-    export_mode: HeaderExportMode,
-) -> FileParserResult<()> {
     let SymbolItemRequest {
         name_id,
         current_span,
@@ -1108,7 +801,7 @@ fn handle_runtime_template_item(
     state
         .record_start_body_source_range_from_source_tokens(range, canonical)
         .map_err(HeaderParseFailure::Infrastructure)?;
-    if context.file_role == FileRole::ActiveModuleRoot {
+    if context.file_role.synthesizes_entry_start() {
         state.runtime_fragment_count =
             state.runtime_fragment_count.checked_add(1).ok_or_else(|| {
                 HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
@@ -1120,6 +813,13 @@ fn handle_runtime_template_item(
 
     Ok(())
 }
+
+/// Scan the captured start-body ranges of a reached foreign root for a misplaced `#Config`
+/// marker.
+///
+/// A reached foreign facade keeps its declaration surface and rejects its top-level body, so
+/// no later AST stage can report a config marker authored there. Preparation scans the rejected
+/// ranges first so the specific config diagnostic wins over the generic root-runtime rejection.
 fn find_config_marker_in_start_ranges(
     state: &HeaderFileParseState,
     canonical: &SourceTokens,
@@ -1164,7 +864,7 @@ pub(super) fn finish_file_output(
     state: HeaderFileParseState,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let canonical = owner.tokens_ref();
-    if context.file_role == FileRole::ImportedModuleRoot
+    if matches!(context.file_role, FileRole::ReachedApiFacadeRoot(_))
         && let Some((marker_span, adjacent)) = find_config_marker_in_start_ranges(
             &state,
             canonical,
@@ -1205,7 +905,7 @@ pub(super) fn finish_file_output(
 
     if matches!(
         context.file_role,
-        FileRole::Normal | FileRole::ActiveApiOnlyModuleRoot
+        FileRole::Normal | FileRole::ActiveApiOnlyModuleRoot(_) | FileRole::ReachedApiFacadeRoot(_)
     ) && state.has_non_trivial_start_body()
     {
         let span = state
@@ -1216,7 +916,7 @@ pub(super) fn finish_file_output(
         )));
     }
 
-    let mut output = if context.file_role == FileRole::ActiveModuleRoot {
+    let mut output = if context.file_role.synthesizes_entry_start() {
         state
             .into_entry_output(
                 owner,
@@ -1239,21 +939,25 @@ pub(super) fn finish_file_output(
                 "prepared file output is missing its canonical source token owner",
             ))
         })?;
-    attach_structural_file_facts(
+    if let Err(failure) = attach_structural_file_facts(
         &mut output,
         &canonical_owner,
         context.string_table,
         context.path_fork,
-    )
-    .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+    ) {
+        return Err(FileFrontendPrepareFailure::from_header_parse(
+            failure,
+            output.warnings,
+        ));
+    }
     Ok(output)
 }
 
 /// Classify this file's graph-active file-value paths and derive shell ordering facts from them.
 ///
-/// WHAT: classifies every non-dependency path row once, then records content-source ordering
-///       hints from the classified rows into each declaration shell that folds before body
-///       emission.
+/// WHAT: recognizes expression-qualified occurrences and classifies every non-consumed path row
+///       once, then records content-source ordering hints from the classified rows into each
+///       declaration shell that folds before body emission.
 /// WHY: classification is the single graph-activity fact source, and the content ordering edges
 ///       must come from the same prepared rows at token level rather than an expression parse.
 ///       Source `#Config` initializers are excluded until their primitive-only contract validation
@@ -1263,7 +967,7 @@ fn attach_structural_file_facts(
     canonical: &SourceTokens,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<(), InfrastructureFailure> {
+) -> Result<(), HeaderParseFailure> {
     let is_config_file = path_fork
         .component(output.source_file)
         .is_some_and(|name| file_name_is_config_file(string_table.resolve(name)));
@@ -1271,7 +975,8 @@ fn attach_structural_file_facts(
         return Err(InfrastructureFailure::internal(
             CompilerStage::HeaderParsing,
             "source token owner does not match its file stream identity",
-        ));
+        )
+        .into());
     }
     let mut consumed_path_syntax_ids = Vec::new();
     consumed_path_syntax_ids.extend(
@@ -1280,14 +985,12 @@ fn attach_structural_file_facts(
             .iter()
             .map(|clause| clause.dependency.path_syntax),
     );
+    let mut qualified_reference_ranges = Vec::new();
     fn append_source_range_paths(
         output: &mut Vec<crate::compiler_frontend::paths::path_syntax::PathSyntaxId>,
         canonical: &SourceTokens,
-        range: Option<TokenRange>,
+        range: TokenRange,
     ) -> Result<(), InfrastructureFailure> {
-        let Some(range) = range else {
-            return Ok(());
-        };
         let cursor = canonical.cursor(range).map_err(|error| {
             InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                 "retained declaration range could not be resolved for path collection: {error:?}"
@@ -1310,12 +1013,13 @@ fn attach_structural_file_facts(
         }
     }
 
-    for header in &output.headers {
+    for (header_index, header) in output.headers.iter().enumerate() {
         if header.tokens.source() != output.file_id {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::HeaderParsing,
                 "retained header range does not match its source token owner",
-            ));
+            )
+            .into());
         }
         let declaration_owned_marker = matches!(
             &header.kind,
@@ -1352,78 +1056,60 @@ fn attach_structural_file_facts(
             find_config_qualifier_marker_in_declaration_defaults(header, canonical, string_table)?
                 .is_some()
         };
-        if is_config_file
-            || (!declaration_owned_marker
-                && !body_has_config_marker
-                && !declaration_has_config_marker)
-        {
+        if is_config_file {
+            // Config syntax paths are values, not qualified-reference occurrences.
+            continue;
+        }
+        let config_owned =
+            declaration_owned_marker || body_has_config_marker || declaration_has_config_marker;
+        if !config_owned {
+            // Ordinary expression context: recognize `PATH SYMBOL` occurrences in this header's
+            // body, initializer and defaults. Configuration-qualified bodies stay out of scope.
+            push_header_expression_ranges(
+                header,
+                header_index,
+                canonical,
+                &mut qualified_reference_ranges,
+            )?;
             continue;
         }
 
-        if let Some(cursor) = body_cursor {
-            append_source_paths(&mut consumed_path_syntax_ids, cursor);
-        }
-        match &header.kind {
-            HeaderKind::Constant { declaration } => {
-                append_source_range_paths(
-                    &mut consumed_path_syntax_ids,
-                    canonical,
-                    declaration.initializer_range,
-                )?;
-            }
-            HeaderKind::Function { signature, .. } => {
-                for parameter in &signature.parameters {
-                    append_source_range_paths(
-                        &mut consumed_path_syntax_ids,
-                        canonical,
-                        parameter.default_range,
-                    )?;
-                }
-            }
-            HeaderKind::Struct { fields, .. } => {
-                for field in fields {
-                    append_source_range_paths(
-                        &mut consumed_path_syntax_ids,
-                        canonical,
-                        field.default_range,
-                    )?;
-                }
-            }
-            HeaderKind::Choice { variants, .. } => {
-                for variant in variants {
-                    let crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax::Record {
-                        fields,
-                    } = &variant.payload
-                    else {
-                        continue;
-                    };
-                    for field in fields {
-                        append_source_range_paths(
-                            &mut consumed_path_syntax_ids,
-                            canonical,
-                            field.default_range,
-                        )?;
-                    }
-                }
-            }
-            HeaderKind::Trait { declaration } => {
-                for requirement in &declaration.requirements {
-                    for parameter in &requirement.signature.parameters {
-                        append_source_range_paths(
-                            &mut consumed_path_syntax_ids,
-                            canonical,
-                            parameter.default_range,
-                        )?;
-                    }
-                }
-            }
-            HeaderKind::StartFunction
-            | HeaderKind::TypeAlias { .. }
-            | HeaderKind::ConstTemplate { .. }
-            | HeaderKind::TraitConformance { .. }
-            | HeaderKind::TraitIncompatibility { .. } => {}
+        // Config-qualified shells are not expression syntax, but their path rows are still
+        // consumed so the file-reference classifier never treats them as file values. Reuse the
+        // same range collection the expression lane uses instead of repeating its header match.
+        let mut config_owned_ranges = Vec::new();
+        push_header_expression_ranges(header, header_index, canonical, &mut config_owned_ranges)?;
+        for expression_range in config_owned_ranges {
+            append_source_range_paths(
+                &mut consumed_path_syntax_ids,
+                canonical,
+                expression_range.range,
+            )?;
         }
     }
+
+    let first_occurrence_shell_ordinal = u32::try_from(output.file_dependency_clauses.len())
+        .map_err(|_| {
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "dependency clause count exceeded the file-local shell ordinal domain",
+            )
+        })?;
+    let qualified_references = collect_qualified_references(
+        canonical,
+        qualified_reference_ranges,
+        output.file_id,
+        first_occurrence_shell_ordinal,
+        output.path_syntax.table(),
+        string_table,
+        path_fork,
+    )?;
+    consumed_path_syntax_ids.extend(
+        qualified_references
+            .iter()
+            .map(|occurrence| occurrence.dependency.path_syntax),
+    );
+    output.qualified_references = qualified_references;
 
     output.structural_file_references = classify_prepared_file_references(
         output.path_syntax.table(),
@@ -1441,12 +1127,13 @@ fn attach_structural_file_facts(
         string_table,
         path_fork,
     )
+    .map_err(HeaderParseFailure::Infrastructure)
 }
 
 /// Scan one retained source-owned range for a `#Config` marker without materializing it.
 ///
-/// The structural fact pass only needs marker presence; placement/adjacency diagnostics remain
-/// on the span-aware `find_config_qualifier_marker_in_cursor` path used by start-body validation.
+/// The structural fact pass only needs marker presence; placement and adjacency diagnostics
+/// remain on the span-aware `find_config_qualifier_marker_in_cursor` header paths.
 fn source_cursor_contains_config_marker(
     mut cursor: TokenCursor<'_>,
     string_table: &StringTable,

@@ -203,3 +203,51 @@ fn dependency_origin_is_representable_in_binding_metadata() {
     assert_eq!(dependency.origin, PackageOrigin::Dependency);
     assert_eq!(dependency.backing, PackageBacking::ExternalBinding);
 }
+
+#[test]
+fn template_prelude_accepts_only_the_official_html_root() {
+    use crate::builder_surface::definition::{
+        BuilderSurfaceValidationError, TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
+    };
+    use crate::builder_surface::{BuilderSurface, SourceFileKind};
+
+    let mut surface = BuilderSurface::with_mandatory_core();
+    surface
+        .source_file_kinds
+        .register("mtf", SourceFileKind::MothTemplate);
+    surface
+        .source_packages
+        .register_filesystem_root(
+            TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
+            std::path::PathBuf::from("/tmp/custom-html"),
+            PackageOrigin::Builder,
+        )
+        .expect("the registry accepts the reserved prefix; surface validation owns the policy");
+    let error = surface
+        .validate()
+        .expect_err("a custom @html directory cannot supply the template prelude");
+    let message = match error {
+        BuilderSurfaceValidationError::InvalidDefinition(message) => message,
+        other => panic!("expected an invalid-definition capability error, got {other:?}"),
+    };
+    assert!(
+        message.contains("reserved") && message.contains("standard HTML builder package set"),
+        "{message}"
+    );
+
+    let mut surface = BuilderSurface::with_mandatory_core();
+    surface
+        .source_file_kinds
+        .register("mtf", SourceFileKind::MothTemplate);
+    surface
+        .source_packages
+        .register_filesystem_root(
+            TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
+            BuilderSurface::builtin_source_package_root(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX),
+            PackageOrigin::Builder,
+        )
+        .expect("the official HTML root registers");
+    surface
+        .validate()
+        .expect("the standard HTML builder package set supplies the template prelude");
+}

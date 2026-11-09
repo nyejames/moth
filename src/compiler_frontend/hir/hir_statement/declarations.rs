@@ -19,8 +19,9 @@ use crate::compiler_frontend::ast::const_values::store::{
     ConstStringValue, ConstValueId, ConstValueVisit,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionStore;
-use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnChannel};
+use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::TypeId;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKey;
@@ -30,7 +31,7 @@ use crate::compiler_frontend::hir::expression_store::HirVariantFieldRange;
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirVariantCarrier, HirVariantField, OPTION_SOME_VARIANT_INDEX, ValueKind,
 };
-use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionReturnContract};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
 use crate::compiler_frontend::hir::ids::{FieldId, HirValueId, LocalId};
@@ -536,44 +537,25 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<crate::compiler_frontend::hir::ids::FunctionId, HirConstructionFailure> {
         let function_id = self.allocate_function_id();
 
-        let success_return_slot_count = signature.success_return_slot_count();
-        let success_return_type_ids: Vec<Option<TypeId>> = signature
-            .returns
-            .iter()
-            .filter(|slot| slot.channel == ReturnChannel::Success)
-            .map(|slot| slot.type_id)
-            .collect();
-
-        let resolved_success_count = success_return_type_ids
-            .iter()
-            .filter(|id| id.is_some())
-            .count();
-        if resolved_success_count != success_return_slot_count {
-            return Err(InfrastructureFailure::hir_transformation(format!(
-                    "HIR invariant: function signature has {} success return slots but {} resolved canonical TypeIds.",
-                    success_return_slot_count, resolved_success_count
-                )).into());
-        }
-
-        let success_return_type_ids: Vec<_> = success_return_type_ids
-            .into_iter()
-            .flatten()
-            .map(|type_id| self.lower_type_id(type_id))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let has_error_return_slot = signature
-            .returns
-            .iter()
-            .any(|slot| slot.channel == ReturnChannel::Error);
-        let error_return_type_id = match (has_error_return_slot, signature.error_return_type_id()) {
-            (true, Some(type_id)) => Some(self.lower_type_id(type_id)?),
-            (true, None) => {
-                return Err(InfrastructureFailure::hir_transformation("HIR invariant: function signature has an error return slot without a canonical TypeId.").into());
+        let return_contract = match &signature.return_contract {
+            crate::compiler_frontend::datatypes::FunctionReturnContract::Never => {
+                HirFunctionReturnContract::Never
             }
-            (false, Some(_)) => {
-                return Err(InfrastructureFailure::hir_transformation("HIR invariant: function signature has an error return TypeId without an error return slot.").into());
+            crate::compiler_frontend::datatypes::FunctionReturnContract::Returns(returns) => {
+                let success_type_ids = returns
+                    .success()
+                    .iter()
+                    .map(|type_id| self.lower_type_id(*type_id))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let error_return_type_id = returns
+                    .error()
+                    .map(|type_id| self.lower_type_id(type_id))
+                    .transpose()?;
+                HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                    success_type_ids,
+                    error_return_type_id,
+                ))
             }
-            (false, None) => None,
         };
 
         let region_id = self.allocate_region_id();
@@ -595,8 +577,7 @@ impl<'a> HirBuilder<'a> {
             id: function_id,
             entry: entry_block_id,
             params: vec![],
-            returns: success_return_type_ids.into_boxed_slice(),
-            error_return: error_return_type_id,
+            return_contract,
         };
 
         self.side_table.map_function(*span, &function);
@@ -609,20 +590,22 @@ impl<'a> HirBuilder<'a> {
         Ok(function_id)
     }
 
-    /// Reject a missing or misplaced entry body for this module role.
+    /// Reject a missing or misplaced entry body for this module.
     ///
-    /// WHAT: normal roots require exactly one entry; support roots and the package facade allow none.
-    /// WHY: the entry body is module-owned structure, so a mismatch is a compiler invariant failure
-    ///      rather than a user error.
+    /// WHAT: a module whose preparation synthesized a start-bearing root requires exactly one
+    ///       entry; an API-only module allows none.
+    /// WHY: the entry body is module-owned structure, so a mismatch is a compiler invariant
+    ///      failure rather than a user error. The expectation is one retained fact from
+    ///      preparation, not a re-derived role predicate.
     fn validate_entry_presence(&mut self, ast: &Ast) -> Result<(), HirConstructionFailure> {
-        match (ast.root_role.has_implicit_start(), self.module.start_function) {
+        match (ast.synthesizes_entry_start, self.module.start_function) {
             (true, Some(_)) | (false, None) => Ok(()),
             (true, None) => Err(InfrastructureFailure::hir_transformation(
-                "HIR invariant: a normal module root reached HIR lowering without its implicit entry body",
+                "HIR invariant: a start-bearing module reached HIR lowering without its implicit entry body",
             )
             .into()),
             (false, Some(_)) => Err(InfrastructureFailure::hir_transformation(
-                "HIR invariant: a module without an implicit entry reached HIR lowering with an entry body",
+                "HIR invariant: an API-only module reached HIR lowering with an entry body",
             )
             .into()),
         }

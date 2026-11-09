@@ -1,27 +1,27 @@
-Project-local source-backed packages are scoped `+*.moth` support packages discovered structurally from the project source tree. The retired `package_folders` config field no longer exists and is rejected; structural discovery is the only package-root source.
+Project-local source-backed packages are scoped `@package.moth` support packages discovered structurally from the project source tree. The retired `package_folders` config field no longer exists and is rejected. Structural discovery is the only package-root source.
 
 ### Directory structure
 
 [codeblock, $code("text"):
     project-root/
     ├── config.moth
-    ├── @site.moth
+    ├── @entry.moth
     ├── markdown/
-    │   ├── +package.moth
+    │   ├── @package.moth
     │   ├── parser/
-    │   │   └── @parser.moth
+    │   │   └── @mod.moth
     │   └── rendering/
-    │       └── @rendering.moth
+    │       └── @mod.moth
     ├── pages/
-    │   └── @pages.moth
-    └── +package.moth
+    │   └── @mod.moth
+    └── @package.moth
 ]
 
-The `markdown` directory contains a `+package.moth` root, making `@markdown` a scoped support package visible to `@site`, `@pages` and their descendants.
+The `markdown` directory contains an `@package.moth` root, making `@markdown` a scoped support package visible to the entry root, `@pages` and their descendants.
 
 ### Scoped visibility
 
-For a support package `S` whose nearest ancestor normal module is `P`:
+For a support package `S` whose nearest ancestor normal-position module is `P`:
 
 - `S` is visible to `P`
 - `S` is visible to normal sibling modules of `S` and their descendants
@@ -30,9 +30,13 @@ For a support package `S` whose nearest ancestor normal module is `P`:
 - `S` is not visible inside its own private implementation subtree
 - another support package in the same owner scope cannot depend on `S`
 
+A module with `@mod.moth` or `@entry.moth` occupies the normal-position owner role. An entry-only module can therefore own support descendants even though it publishes no normal API. A co-located `@entry.moth` gives no entry privileges to its `@package.moth` facade.
+
 ### Public surface
 
 Outside dependency clauses can only see declarations and direct-selection re-exports marked public by the support root's `export:` block. Internal implementation files are hidden unless the root re-exports them.
+
+Shared helpers in a paired directory must obey the intersection of imports legal to every root that can consume them.
 
 ### Private subtrees
 
@@ -42,20 +46,13 @@ Consumers see only the support facade's `export:` surface. They cannot address `
 
 ### Depended-on package roots do not produce routes
 
-Support roots are API-only and cannot declare an application root purpose. They
-reject top-level runtime work and direct page fragments, including direct
-builder slot contributions, export declarations instead and produce no HTML
-artefact. A future `$entry` purpose will apply only to normal module roots;
-`$test` remains deferred as a separate purpose. The earlier `$page` proposal is
-superseded. See @../project-structure/#html-routing-and-artifacts (HTML routing and artefacts).
+Support roots are API-only. They reject top-level runtime work, direct fragments and builder-slot contributions, export declarations instead and produce no HTML artefact. Only `@entry.moth` creates a page. Importing a support package never activates an entry in its directory. See @../project-structure/#html-routing-and-artifacts (HTML routing and artefacts).
 
-Support packages may hold reusable ordinary `#` constants and expose them through
-their current public surface. They do not need custom `$project` metadata; project
-metadata remains the separate `config.moth` contract.
+Support packages may hold reusable ordinary `#` constants and expose them through their public surface. They do not need custom project metadata. Project metadata remains the separate `config.moth` contract.
 
 ### Origin and backing are separate
 
-Scoped `+*.moth` packages are ProjectLocal packages backed by Moth source. `@html` is also source-backed but has Builder origin. `@core/math` and `@web/canvas` are binding-backed packages with Core and Builder origins respectively. See @#package-origins-and-backing (Package origins and backing).
+Scoped `@package.moth` packages are ProjectLocal packages backed by Moth source. `@html` is also source-backed but has Builder origin. `@core/math` and `@web/canvas` are binding-backed packages with Core and Builder origins respectively. See @#package-origins-and-backing (Package origins and backing).
 
 ### Concepts related to project-local packages
 

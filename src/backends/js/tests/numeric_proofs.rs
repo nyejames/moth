@@ -11,6 +11,7 @@ use super::support::*;
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -20,7 +21,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
-use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionReturnContract};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
@@ -82,8 +83,10 @@ fn lower_numeric_fixture(
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            returns: vec![return_type].into_boxed_slice(),
-            error_return: None,
+            return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                vec![return_type],
+                None,
+            )),
         },
         fixture.local_names,
     )
@@ -906,8 +909,10 @@ fn lower_recoverable_fixture(
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            returns: returns.into_boxed_slice(),
-            error_return: Some(types.error),
+            return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                returns,
+                Some(types.error),
+            )),
         },
         names,
     )

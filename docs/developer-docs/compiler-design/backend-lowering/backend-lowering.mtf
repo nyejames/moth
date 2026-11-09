@@ -50,12 +50,12 @@ Those two variants share validated topology and source semantics. Their target, 
 
 For the walkthrough, target-labelled entry, `greet` and template work arrive ready. The JavaScript path might own page orchestration. Neutral string work may sit in either partition depending on assignment.
 
-[diagram:
+[@diagrams diagram:
     [$in label: One validated input, two target paths]
     [$in caption: Everything before the split is decided once. After it, each backend only chooses how to spell the result.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../hir/]
             [$in eyebrow: Shared]
             [$in title: Validated HIR and its plans]
@@ -63,8 +63,8 @@ For the walkthrough, target-labelled entry, `greet` and template work arrive rea
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../target-planning-and-validation/]
             [$in eyebrow: Assignment]
             [$in title: Per-function target labels]
@@ -72,14 +72,14 @@ For the walkthrough, target-labelled entry, `greet` and template work arrive rea
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Target-native spelling]
-                [fanout:
-                [detail:
+                [@diagrams fanout:
+                [@diagrams detail:
                     [$in href: ./]
                     JavaScript values, functions and host GC
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     Wasm structured LIR, ABI and handles
                 ]
@@ -88,8 +88,8 @@ For the walkthrough, target-labelled entry, `greet` and template work arrive rea
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../html-assembly-and-output/]
             [$in eyebrow: Output]
             [$in title: Records for the builder]

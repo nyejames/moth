@@ -5,6 +5,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     ArgumentListView, CallView, ExpressionOperationView, ExpressionView, ResolvedCallableTarget,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expression_store::{HirConstructionFailure, HirValueRange};
@@ -45,17 +46,24 @@ impl<'a> HirBuilder<'a> {
         result_type_ids: &[TypeId],
         span: &Option<SourceSpan>,
     ) -> Result<EmittedFallibleResults, HirConstructionFailure> {
-        let (types, error) = self.result_call_slots(&target)?;
+        let returns = self.result_call_slots(&target)?;
+        let types = returns.success();
         if types != result_type_ids {
             return Err(InfrastructureFailure::hir_transformation(
                 "Fallible call success slots mismatch",
             )
             .into());
         }
+        let error = returns.error().ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::HirConstruction,
+                "Fallible call result contract has no error slot",
+            )
+        })?;
         let args = self.lower_invoke_arguments(args, receiver, span)?;
         self.emit_fallible_operation(
             HirFallibleOperation::Call { target, args },
-            &types,
+            types,
             error,
             span,
         )

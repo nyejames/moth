@@ -35,13 +35,15 @@ use crate::compiler_frontend::ast::numeric_known_shape::{
     KnownShape, KnownShapeId, fragment_shape, register_shape_witness, union_shape_classes,
 };
 use crate::compiler_frontend::ast::statements::body_dispatch::ParsedBody;
+use crate::compiler_frontend::ast::statements::control_flow_exits::{
+    ControlFlowExitSummary, analyze_control_flow_exits,
+};
 use crate::compiler_frontend::ast::statements::value_production::completeness::{
-    analyze_branch_exits, visit_authored_then_values_mut, visit_reachable_then_values,
+    visit_authored_then_values_mut, visit_reachable_then_values,
 };
 use crate::compiler_frontend::ast::statements::value_production::parse_values::{
     ProducedValuesParseInput, validate_and_coerce_completed_then_group,
 };
-use crate::compiler_frontend::ast::statements::value_production::types::BranchExitSummary;
 use crate::compiler_frontend::ast::statements::value_production::{
     ActiveValueProductionTarget, ProducedValues, ThenValueContinuation, ThenValueSlot,
     ValueReceiverKind, is_missing_produced_value_boundary, parse_retained_produced_values,
@@ -570,7 +572,7 @@ impl FallbackWalk<'_> {
         &self,
         body: &CatchHandlerBody,
         state: &mut NumericConstructionState,
-    ) -> BranchExitSummary {
+    ) -> ControlFlowExitSummary {
         match body {
             CatchHandlerBody::Ready(nodes) => self.visit_built_nodes(nodes, state),
             CatchHandlerBody::Draft { body: deferred, .. } => {
@@ -587,7 +589,7 @@ impl FallbackWalk<'_> {
         &self,
         nodes: &[AstNode],
         state: &mut NumericConstructionState,
-    ) -> BranchExitSummary {
+    ) -> ControlFlowExitSummary {
         let visited: Result<(), Infallible> = visit_reachable_then_values(
             nodes,
             &mut |produced: &ProducedValues| {
@@ -601,7 +603,7 @@ impl FallbackWalk<'_> {
             Ok(()) => {}
             Err(never) => match never {},
         }
-        analyze_branch_exits(nodes, self.expression_builder, self.const_values)
+        analyze_control_flow_exits(nodes, self.expression_builder.store(), self.const_values)
     }
 
     /// Applies a retained body's entries in authored order, stopping once no path falls through.
@@ -609,8 +611,8 @@ impl FallbackWalk<'_> {
         &self,
         body: &DeferredBody,
         state: &mut NumericConstructionState,
-    ) -> BranchExitSummary {
-        let mut exits = BranchExitSummary::FALLS_THROUGH;
+    ) -> ControlFlowExitSummary {
+        let mut exits = ControlFlowExitSummary::FALLS_THROUGH;
         for entry in &body.draft.entries {
             let entry_exits = match entry {
                 BodyEntry::Node(node) => self.visit_built_nodes(std::slice::from_ref(node), state),
@@ -626,16 +628,17 @@ impl FallbackWalk<'_> {
 
     /// Applies one pending continuation's fallback witnesses and reports how it exits.
     ///
-    /// WHY: a `then` produces and a `return` terminates. A pending `assert` falls through, following
-    ///      the owner's convention. A missing continuation is a broken invariant that body
-    ///      completion reports, so the walk stops here without supplying a constraint.
+    /// WHY: a `then` produces and a `return` gives control back to the caller. A pending `assert`
+    ///      falls through, following the owner's convention. A missing continuation is a broken
+    ///      invariant that body completion reports, so the walk stops here without supplying a
+    ///      constraint.
     fn visit_pending_entry(
         &self,
         id: NumericContinuationId,
         state: &mut NumericConstructionState,
-    ) -> BranchExitSummary {
+    ) -> ControlFlowExitSummary {
         let Some(continuation) = self.continuations.get(id) else {
-            return BranchExitSummary::TERMINATES;
+            return ControlFlowExitSummary::DIVERGES;
         };
         match continuation {
             NumericContinuation::Binding(_)
@@ -643,11 +646,11 @@ impl FallbackWalk<'_> {
             | NumericContinuation::CompoundAssignment(_)
             | NumericContinuation::ExpressionStatement(_)
             | NumericContinuation::MultiBind(_)
-            | NumericContinuation::Assertion(_) => BranchExitSummary::FALLS_THROUGH,
-            NumericContinuation::Return(_) => BranchExitSummary::TERMINATES,
+            | NumericContinuation::Assertion(_) => ControlFlowExitSummary::FALLS_THROUGH,
+            NumericContinuation::Return(_) => ControlFlowExitSummary::RETURNS_TO_CALLER,
             NumericContinuation::ThenValue(values) => {
                 self.apply_known_group(values, state);
-                BranchExitSummary::PRODUCES
+                ControlFlowExitSummary::PRODUCES_VALUE
             }
             NumericContinuation::Construct(construct) => {
                 self.visit_pending_construct(construct, state)
@@ -657,19 +660,21 @@ impl FallbackWalk<'_> {
 
     /// Applies a retained `if` or `match`'s every branch and unions their exits.
     ///
-    /// WHY: every branch is applied, so a later branch's exact type reaches its slot too. A loop
-    ///      falls through as the owner's exit facts assume and supplies no constraint.
+    /// WHY: every branch is applied, so a later branch's exact type reaches its slot too. A
+    ///      deferred loop is not walked, so its body's completion, breaks and continuations are
+    ///      still unknown. Claiming divergence from a folded-true condition alone would ignore a
+    ///      reachable break, so the walker keeps the conservative post-loop fallthrough.
     fn visit_pending_construct(
         &self,
         construct: &DeferredConstruct,
         state: &mut NumericConstructionState,
-    ) -> BranchExitSummary {
+    ) -> ControlFlowExitSummary {
         match construct {
             DeferredConstruct::If(deferred_if) => {
                 let then_exits = self.visit_deferred_body(&deferred_if.then_body, state);
                 let else_exits = match &deferred_if.else_body {
                     Some(else_body) => self.visit_deferred_body(else_body, state),
-                    None => BranchExitSummary::FALLS_THROUGH,
+                    None => ControlFlowExitSummary::FALLS_THROUGH,
                 };
                 then_exits.union(else_exits)
             }
@@ -679,7 +684,7 @@ impl FallbackWalk<'_> {
                     .iter()
                     .map(|arm| &arm.body)
                     .chain(deferred_match.default.as_ref());
-                let mut exits: Option<BranchExitSummary> = None;
+                let mut exits: Option<ControlFlowExitSummary> = None;
                 for body in bodies {
                     let body_exits = self.visit_deferred_body(body, state);
                     exits = Some(match exits {
@@ -687,9 +692,11 @@ impl FallbackWalk<'_> {
                         None => body_exits,
                     });
                 }
-                exits.unwrap_or(BranchExitSummary::FALLS_THROUGH)
+                exits.unwrap_or(ControlFlowExitSummary::FALLS_THROUGH)
             }
-            DeferredConstruct::Loop(_) => BranchExitSummary::FALLS_THROUGH,
+            // The deferred loop body is not walked here, so a reachable break cannot be ruled
+            // out. Keep the post-loop continuation reachable for producer collection.
+            DeferredConstruct::Loop(_) => ControlFlowExitSummary::FALLS_THROUGH,
         }
     }
 

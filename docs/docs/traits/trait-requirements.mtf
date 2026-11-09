@@ -27,6 +27,9 @@ Trait requirements describe the method shapes a conforming type must provide. Th
 - Requirements have no body.
 - Parameter names are not part of the later conformance shape.
 - Parameter access modes, types, return types and return channels are part of the shape.
+- The whole return contract is part of the shape. A requirement declared
+  `-> !` matches only another `-> !` contract. An ordinary return contract
+  does not match Never, and Never does not match an ordinary return.
 
 ### Multiple requirements
 

@@ -422,10 +422,10 @@ fn build_project_late_backend_infrastructure_discards_frontend_warnings() {
         "project #= (\n    name = \"late_failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write project config");
-    fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
+    fs::write(src.join("@entry.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         package.join("@mod.moth"),
-        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n",
+        "export:\n    warn || -> String:\n        value ~= \"hello\"\n        result ~= \"unset\"\n        if value is:\n            \"one\" => ~result = \"one\"\n            \"one\" => ~result = \"one\"\n            else => ~result = \"other\"\n        ;\n        return result\n    ;\n;\n",
     )
     .expect("should write warning package root");
 
@@ -491,7 +491,7 @@ fn build_project_calls_validate_project_config() {
 }
 
 #[test]
-fn project_compilation_selects_only_modules_with_root_activity_as_entries() {
+fn project_compilation_selects_only_modules_with_entry_roots_as_entries() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let temp = tempfile::tempdir().expect("should create temp dir");
     let root = temp.path().to_path_buf();
@@ -502,8 +502,8 @@ fn project_compilation_selects_only_modules_with_root_activity_as_entries() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "value = 1\n").expect("should write active root");
-    fs::write(src.join("api/@api.moth"), "value #= 1\n").expect("should write API-only root");
+    fs::write(src.join("@entry.moth"), "value = 1\n").expect("should write active root");
+    fs::write(src.join("api/@mod.moth"), "value #= 1\n").expect("should write API-only root");
 
     let module_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let entry_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -541,8 +541,8 @@ fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "value = 1\n").expect("should write valid root");
-    fs::write(src.join("broken/@broken.moth"), "value = missing_name\n")
+    fs::write(src.join("@entry.moth"), "value = 1\n").expect("should write valid root");
+    fs::write(src.join("broken/@entry.moth"), "value = missing_name\n")
         .expect("should write diagnosed root");
 
     let validated = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -586,12 +586,12 @@ fn diagnosed_module_prevents_project_compilation_from_reaching_backend() {
     )
     .expect("should write cutoff config");
     fs::write(
-        cutoff_src.join("first/@first.moth"),
+        cutoff_src.join("first/@entry.moth"),
         "first || -> I32:\n    return missing_one\n;\n",
     )
     .expect("should write first failing module root");
     fs::write(
-        cutoff_src.join("second/@second.moth"),
+        cutoff_src.join("second/@entry.moth"),
         "second || -> I32:\n    return missing_two\n;\n",
     )
     .expect("should write second failing module root");
@@ -1537,9 +1537,9 @@ html #= (
 "#,
     )
     .expect("should write config");
-    fs::write(root.join("@page.moth"), "value = 1\n").expect("should write entry module");
+    fs::write(root.join("@entry.moth"), "value = 1\n").expect("should write entry module");
     fs::write(
-        normalized_dev_root.join("@stale.moth"),
+        normalized_dev_root.join("stale.moth"),
         "value = missing_stale_value\n",
     )
     .expect("should write source-looking stale output");
@@ -1581,9 +1581,9 @@ html #= (
 "#,
     )
     .expect("should write config");
-    fs::write(root.join("@page.moth"), "value = 1\n").expect("should write entry module");
+    fs::write(root.join("@entry.moth"), "value = 1\n").expect("should write entry module");
     fs::write(
-        physical_output_root.join("@stale.moth"),
+        physical_output_root.join("stale.moth"),
         "value = missing_stale_value\n",
     )
     .expect("should write source-looking stale output");
@@ -1627,9 +1627,9 @@ html #= (
 "#,
     )
     .expect("should write config");
-    fs::write(root.join("@page.moth"), "value = 1\n").expect("should write entry module");
+    fs::write(root.join("@entry.moth"), "value = 1\n").expect("should write entry module");
     fs::write(
-        physical_output_descendant.join("@stale.moth"),
+        physical_output_descendant.join("stale.moth"),
         "value = missing_stale_value\n",
     )
     .expect("should write source-looking stale output");
@@ -1726,35 +1726,6 @@ fn validated_output_settings_reject_canonical_root_aliases() {
 }
 
 #[test]
-fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
-    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
-    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-    let root = _tmp_root.path().to_path_buf();
-    let src = root.join("src");
-    fs::create_dir_all(src.join("about")).expect("should create about folder");
-
-    fs::write(
-        root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
-    )
-    .expect("should write config");
-    fs::write(src.join("about").join("@page.moth"), "#[:<h1>About</h1>]\n")
-        .expect("should write about");
-
-    let builder = HtmlProjectBuilder::new();
-    let result = build_project(
-        &builder,
-        root.to_str().expect("root path should be valid UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-        &mut discovery_stops,
-    )
-    .unwrap_or_else(|never| match never {});
-
-    assert_has_config_error(&result);
-}
-
-#[test]
 fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -1766,7 +1737,7 @@ fn build_project_routes_invalid_page_url_style_through_typed_config_diagnostic()
         "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    page_url_style = \"slashy\",\n)\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(src.join("@entry.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = HtmlProjectBuilder::new();
     let result = build_project(
@@ -2433,7 +2404,7 @@ fn empty_directory_output_setting_is_rejected() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"\",\n)\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(src.join("@entry.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = HtmlProjectBuilder::new();
     let result = build_project(
@@ -2460,7 +2431,7 @@ fn absolute_output_setting_is_rejected() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"/absolute/path\",\n)\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(src.join("@entry.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = HtmlProjectBuilder::new();
     let result = build_project(
@@ -2480,7 +2451,7 @@ fn hidden_output_inside_source_root_is_accepted_and_visible_output_is_rejected()
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    fs::write(root.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(root.join("@entry.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
     let write_config = |dev_output: &str| {
         fs::write(
@@ -2538,7 +2509,7 @@ fn identical_dev_and_release_folders_are_rejected() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"output\",\n    release_output = \"output\",\n)\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(src.join("@entry.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = HtmlProjectBuilder::new();
     let result = build_project(
@@ -2563,7 +2534,7 @@ fn valid_distinct_output_folders_resolve_to_hidden_roots() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
     )
     .expect("should write config");
-    fs::write(root.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(root.join("@entry.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = HtmlProjectBuilder::new();
     let build_result = successful_compilation_value(
@@ -2600,7 +2571,7 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
     )
     .expect("should write config");
     fs::write(
-        root.join("@page.moth"),
+        root.join("@entry.moth"),
         "value ~= \"hello\"\n\
          result ~= \"unset\"\n\
          \n\
@@ -2740,7 +2711,7 @@ fn first_dev_and_release_builds_create_independent_owned_manifests() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
     )
     .expect("should write config");
-    fs::write(root.join("@page.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
+    fs::write(root.join("@entry.moth"), "#[:<h1>Home</h1>]\n").expect("should write home page");
 
     let builder = HtmlProjectBuilder::new();
     let dev_build = successful_compilation_value(

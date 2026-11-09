@@ -27,7 +27,6 @@ use crate::compiler_frontend::headers::module_symbols::{
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
 use crate::compiler_frontend::headers::types::DependencyBindingSyntax;
 use crate::compiler_frontend::public_interface::PublicDeclarationSemantics;
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::source_packages::match_package_prefix;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
@@ -448,12 +447,14 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 return Ok(None);
             }
 
-            let consumer_surface = self
+            let Some(consumer_surface) = self
                 .module_symbols
                 .file_roles_by_source
                 .get(source_file)
-                .and_then(|role| role.active_surface())
-                .unwrap_or(ModuleRootRole::Normal);
+                .and_then(|role| role.consumer_surface())
+            else {
+                continue;
+            };
             if boundary.surface != consumer_surface {
                 continue;
             }
@@ -479,6 +480,18 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         clause: &RetainedDependencyClause,
         source_file: &PathId,
     ) -> NamespaceBindingResult<()> {
+        // A namespace names the whole target surface, so a root file may expose its surface only
+        // to itself. Sibling roots and ordinary helpers must not bind it.
+        if let Some(diagnostic) = diagnostics::cross_file_root_local_declaration(
+            self.module_symbols,
+            source_file,
+            target_file,
+            &clause.dependency.path,
+            Some(clause.dependency.span),
+        ) {
+            return Err(diagnostic.into());
+        }
+
         if let Some(target_package) = self
             .module_symbols
             .file_package_membership

@@ -170,6 +170,27 @@ pub(crate) fn transfer_terminator(
                 .internal_error("Uninitialized terminator reached borrow validation"));
         }
 
+        // A terminating call applies ordinary argument access, mutation and optional final-use
+        // effects, then leaves the block without a result or a successor. There is deliberately
+        // no post-call state: the fixed-point driver never propagates this block's exit state.
+        HirTerminator::NeverCall { target, args } => {
+            super::statement::transfer_never_call(
+                &mut super::statement::CallTransferContext {
+                    context,
+                    layout,
+                    state,
+                    block_id,
+                    current_order: terminator_order,
+                    tracker: &mut tracker,
+                    location,
+                    stats,
+                    value_fact_buffer,
+                },
+                target,
+                context.expressions.values(*args),
+            )?;
+        }
+
         HirTerminator::Break { .. } | HirTerminator::Continue { .. } => {}
     }
 

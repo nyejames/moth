@@ -16,9 +16,11 @@ use crate::build_system::create_project_modules::module_artifact_store::Provider
 use crate::build_system::create_project_modules::module_identity::ModuleId;
 use crate::build_system::project_config::{ProjectConfigParseServices, load_project_config};
 use crate::compiler_frontend::FrontendBuildProfile;
+use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
 use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::CompileTimeEvaluationErrorView;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
 use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseBuilder};
@@ -320,8 +322,8 @@ fn diagnostic_recovery_project_soft_cutoff() {
         root,
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n",
         &[
-            ("src/first/@first.moth", THREE_FAILING_BODIES),
-            ("src/second/@second.moth", ONE_FAILING_BODY),
+            ("src/first/@entry.moth", THREE_FAILING_BODIES),
+            ("src/second/@entry.moth", ONE_FAILING_BODY),
         ],
     );
 
@@ -359,7 +361,7 @@ fn diagnostic_recovery_project_soft_cutoff() {
         frontend
             .project
             .modules
-            .interface(second_module)
+            .normal_interface(second_module)
             .expect("slot lookup should resolve")
             .is_none(),
         "an unvisited slot can never satisfy a provider"
@@ -391,14 +393,13 @@ fn diagnostic_recovery_project_soft_cutoff() {
     assert!(
         rendered
             .iter()
-            .any(|line| line.contains("first/@first.moth")),
+            .any(|line| line.contains("first/@entry.moth")),
         "the admitted module's diagnostics must stay rendered: {rendered:?}"
     );
     assert!(
-        rendered
-            .iter()
-            .all(|line| !line.contains("second/@second.moth")
-                && !line.contains("only_second_module")),
+        rendered.iter().all(
+            |line| !line.contains("second/@entry.moth") && !line.contains("only_second_module")
+        ),
         "the refused module must not contribute diagnostics: {rendered:?}"
     );
 
@@ -422,8 +423,8 @@ fn diagnostic_recovery_project_soft_cutoff_none_compiles_every_module() {
         root,
         "project_error_limit #I32? = none\nproject #= (\n    name = \"docs\",\n        max_errors_per_project = project_error_limit,\n)\nhtml #= ()\n",
         &[
-            ("src/first/@first.moth", THREE_FAILING_BODIES),
-            ("src/second/@second.moth", ONE_FAILING_BODY),
+            ("src/first/@entry.moth", THREE_FAILING_BODIES),
+            ("src/second/@entry.moth", ONE_FAILING_BODY),
         ],
     );
 
@@ -460,12 +461,12 @@ fn diagnostic_recovery_project_soft_cutoff_on_last_module_records_no_stop() {
         root,
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 3,\n)\nhtml #= ()\n",
         &[
-            ("src/@page.moth", "#[:site]\n"),
+            ("src/@entry.moth", "#[:site]\n"),
             (
-                "src/first/@first.moth",
+                "src/first/@entry.moth",
                 "answer || -> I32:\n    return 1\n;\n",
             ),
-            ("src/second/@second.moth", THREE_FAILING_BODIES),
+            ("src/second/@entry.moth", THREE_FAILING_BODIES),
         ],
     );
 
@@ -507,7 +508,7 @@ fn diagnostic_recovery_project_soft_cutoff_counts_shared_provider_once() {
         root,
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n",
         &[
-            ("src/@page.moth", "@shared broken\n#[:site]\n"),
+            ("src/@entry.moth", "@shared broken\n#[:site]\n"),
             (
                 "src/shared/@mod.moth",
                 "export:\n    broken || -> I32:\n        return shared_missing_one\n    ;\n\n\
@@ -545,7 +546,7 @@ fn diagnostic_recovery_project_soft_cutoff_counts_shared_provider_once() {
         frontend
             .project
             .modules
-            .interface(dependant_module)
+            .normal_interface(dependant_module)
             .expect("slot lookup should resolve")
             .is_none(),
         "a blocked dependant never publishes an interface"
@@ -576,7 +577,7 @@ fn diagnostic_recovery_check_only_units_share_owner_allowance() {
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 30,\n    max_errors_per_module = 2,\n)\nhtml #= ()\n",
         &[
             (
-                "src/first/@first.moth",
+                "src/first/@entry.moth",
                 "owner || -> I32:\n    return 1\n;\n",
             ),
             (
@@ -632,7 +633,7 @@ fn diagnostic_recovery_check_only_allowance_subtracts_owner_errors() {
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 30,\n    max_errors_per_module = 2,\n)\nhtml #= ()\n",
         &[
             (
-                "src/first/@first.moth",
+                "src/first/@entry.moth",
                 "owner || -> I32:\n    return owner_missing\n;\n",
             ),
             (
@@ -684,6 +685,97 @@ fn diagnostic_recovery_check_only_allowance_subtracts_owner_errors() {
 }
 
 #[test]
+fn diagnostic_recovery_paired_roots_report_together_before_the_budget_stops_later_work() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("temp project should exist");
+    let root = temp.path();
+    // One module owns both a support facade and an entry root whose bodies fail independently.
+    // The module transaction retains both root diagnostics as one returned batch even though the
+    // batch overshoots the project threshold. Only the later module is refused, so a scheduling
+    // cutoff never suppresses a co-located root diagnostic.
+    write_project(
+        root,
+        "project #= (\n    name = \"docs\",\n    max_errors_per_project = 1,\n)\nhtml #= ()\n",
+        &[
+            (
+                "src/@package.moth",
+                "export:\n    support_value || -> I32:\n        return support_missing\n    ;\n;\n",
+            ),
+            (
+                "src/@entry.moth",
+                "entry_value || -> I32:\n    return entry_missing\n;\n",
+            ),
+            ("src/other/@entry.moth", "other_missing\n#[:site]\n"),
+        ],
+    );
+
+    let (frontend, mut warning_owner, project_source_files) =
+        run_directory_lane(root, FrontendCompilationMode::Canonical);
+    assert_eq!(
+        frontend.project.diagnosed.len(),
+        1,
+        "the paired module is the only admitted diagnosed module"
+    );
+    assert_eq!(
+        frontend.project.diagnosed[0].module_id,
+        module_id_with_path(&frontend, ""),
+        "both root diagnostics belong to the selected-root structural module"
+    );
+    assert_eq!(
+        frontend.project.diagnosed[0]
+            .diagnostics
+            .primary_error_count(),
+        2,
+        "the support facade and the entry root each keep their own retained error"
+    );
+    assert_eq!(
+        frontend
+            .project
+            .scheduling_cutoff
+            .map(|cutoff| cutoff.returned_primary_errors()),
+        Some(2),
+        "the intact batch charged both retained errors before the threshold stopped admission"
+    );
+    assert_eq!(
+        frontend
+            .project
+            .modules
+            .slot(module_id_with_path(&frontend, "other"))
+            .expect("the later module slot should resolve"),
+        ProviderSlot::Unavailable,
+        "the later module is never compiled after the project threshold is reached"
+    );
+    assert!(
+        warning_owner
+            .discovery_stops()
+            .contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF),
+        "refusing the later module records the command scheduling cutoff"
+    );
+
+    let reports = finish_diagnosed(frontend, &mut warning_owner, project_source_files);
+    assert_eq!(
+        reports.counts().errors,
+        2,
+        "a returned module batch is never truncated to the project threshold"
+    );
+    let rendered = terse::format_terse_diagnostic_reports(&reports);
+    assert!(
+        rendered.iter().any(|line| line.contains("support_missing")),
+        "the support facade error must stay: {rendered:?}"
+    );
+    assert!(
+        rendered.iter().any(|line| line.contains("entry_missing")),
+        "the entry root error must stay: {rendered:?}"
+    );
+    assert!(
+        rendered
+            .iter()
+            .all(|line| !line.contains("other_missing") && !line.contains("other/@entry.moth")),
+        "the refused module must contribute no diagnostic: {rendered:?}"
+    );
+}
+
+#[test]
 fn diagnostic_recovery_project_budget_spans_source_package_work() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let temp = tempfile::tempdir().expect("temp project should exist");
@@ -695,10 +787,10 @@ fn diagnostic_recovery_project_budget_spans_source_package_work() {
         root,
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n",
         &[
-            ("src/a/@page.moth", "owner_missing\n#[:site]\n"),
-            ("src/b/@page.moth", "second_missing\n#[:site]\n"),
+            ("src/a/@entry.moth", "owner_missing\n#[:site]\n"),
+            ("src/b/@entry.moth", "second_missing\n#[:site]\n"),
             (
-                "src/uses/@page.moth",
+                "src/uses/@entry.moth",
                 "@shared render\nvalue = render() catch:\n    then \"\"\n;\n#[:site]\n",
             ),
             (
@@ -764,7 +856,7 @@ fn diagnostic_recovery_stopped_check_only_unit_treats_unvisited_provider_as_stop
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n",
         &[
             (
-                "src/first/@first.moth",
+                "src/first/@entry.moth",
                 "a || -> I32:\n    return first_missing_one\n;\n\n\
                  b || -> I32:\n    return first_missing_two\n;\n\n\
                  c || -> I32:\n    return first_missing_three\n;\n",
@@ -835,11 +927,11 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
         root,
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
         &[
-            ("src/@page.moth", "#[:site]\n"),
-            ("src/broken/@broken.moth", RESOURCE_FAILING_MODULE_ROOT),
+            ("src/@entry.moth", "#[:site]\n"),
+            ("src/broken/@mod.moth", RESOURCE_FAILING_MODULE_ROOT),
             ("src/broken/extra.moth", RESOURCE_FAILING_MODULE_EXTRA),
             (
-                "src/ok/@ok.moth",
+                "src/ok/@mod.moth",
                 "export:\n    greeting || -> String:\n        logo = @assets/ok.svg\n        return logo\n    ;\n;\n",
             ),
             ("src/broken/assets/broken.svg", "<svg/>"),
@@ -880,7 +972,7 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
         frontend
             .project
             .modules
-            .interface(broken_module)
+            .normal_interface(broken_module)
             .expect("slot lookup should resolve")
             .is_none(),
         "a diagnosed module never publishes an interface"
@@ -890,8 +982,9 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
             .project
             .successful_artefacts_in_module_id_order()
             .all(
-                |artifact| artifact.interface.module_origin.logical_module_path()
-                    != Path::new("broken")
+                |artifact| artifact.normal_interface.as_ref().is_none_or(|interface| {
+                    interface.module_origin.logical_module_path() != Path::new("broken")
+                })
             ),
         "a diagnosed module never publishes an artefact"
     );
@@ -934,7 +1027,11 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
     let ok_artefact = frontend
         .project
         .successful_artefacts_in_module_id_order()
-        .find(|artifact| artifact.interface.module_origin.logical_module_path() == Path::new("ok"))
+        .find(|artifact| {
+            artifact.normal_interface.as_ref().is_some_and(|interface| {
+                interface.module_origin.logical_module_path() == Path::new("ok")
+            })
+        })
         .expect("the clean module should publish an artefact");
     let ok_origins = ok_artefact.module.executable.resource_table.origins();
     assert_eq!(
@@ -976,7 +1073,7 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
         .collect::<Vec<_>>();
     let root_site = sites
         .iter()
-        .find(|(path, ..)| path.ends_with("broken/@broken.moth"))
+        .find(|(path, ..)| path.ends_with("broken/@mod.moth"))
         .expect("the first body error keeps its authored file");
     assert_eq!(
         root_site.1,
@@ -999,11 +1096,8 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
 
     // Repairing both bodies on the same root proves the repaired source compiles and now
     // publishes the association; each lane run builds fresh registries.
-    fs::write(
-        root.join("broken/@broken.moth"),
-        RESOURCE_REPAIRED_MODULE_ROOT,
-    )
-    .expect("the repaired root source should be written");
+    fs::write(root.join("broken/@mod.moth"), RESOURCE_REPAIRED_MODULE_ROOT)
+        .expect("the repaired root source should be written");
     fs::write(
         root.join("broken/extra.moth"),
         RESOURCE_REPAIRED_MODULE_EXTRA,
@@ -1056,7 +1150,7 @@ fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
         PROJECT_ERROR_LIMIT_TWO,
         &[
             (
-                "src/@page.moth",
+                "src/@entry.moth",
                 "@shared render\nvalue = render() catch:\n    then 0\n;\n#[:site]\n",
             ),
             (
@@ -1064,11 +1158,11 @@ fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
                 "@helper value\nexport:\n    render || -> I32:\n        return value()\n    ;\n;\n",
             ),
             (
-                "packages/shared/helper/@helper.moth",
+                "packages/shared/helper/@mod.moth",
                 "export:\n    value || -> I32:\n        return 1\n    ;\n;\n",
             ),
             (
-                "packages/shared/z_broken/@z_broken.moth",
+                "packages/shared/z_broken/@entry.moth",
                 "a || -> I32:\n    return pkg_missing_one\n;\n\n\
                  b || -> I32:\n    return pkg_missing_two\n;\n",
             ),
@@ -1131,7 +1225,7 @@ fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
         package
             .boundary
             .modules
-            .interface(package.root_module_id)
+            .normal_interface(package.root_module_id)
             .expect("package slot lookup should resolve")
             .is_none(),
         "an unvisited package root publishes no facade interface"
@@ -1146,7 +1240,7 @@ fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
         frontend
             .project
             .modules
-            .interface(page_module)
+            .normal_interface(page_module)
             .expect("project slot lookup should resolve")
             .is_none()
     );
@@ -1159,7 +1253,7 @@ fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
             .site_position(view.primary_site())
             .expect("the frozen package diagnostic keeps its authored site");
         assert!(
-            position.path.ends_with("z_broken/@z_broken.moth"),
+            position.path.ends_with("z_broken/@entry.moth"),
             "the retained diagnostic must keep its package-logical source identity: {:?}",
             position.path
         );
@@ -1174,7 +1268,7 @@ fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
     assert!(
         rendered
             .iter()
-            .all(|line| line.contains("z_broken/@z_broken.moth")),
+            .all(|line| line.contains("z_broken/@entry.moth")),
         "only the admitted module may render diagnostics: {rendered:?}"
     );
 }
@@ -1191,7 +1285,7 @@ fn diagnostic_recovery_package_cutoff_can_diagnose_its_own_root() {
         PROJECT_ERROR_LIMIT_TWO,
         &[
             (
-                "src/@page.moth",
+                "src/@entry.moth",
                 "@shared a\nvalue = a() catch:\n    then 0\n;\n#[:site]\n",
             ),
             (
@@ -1200,7 +1294,7 @@ fn diagnostic_recovery_package_cutoff_can_diagnose_its_own_root() {
                  b || -> I32:\n        return root_missing_two\n    ;\n;\n",
             ),
             (
-                "packages/shared/later/@later.moth",
+                "packages/shared/later/@mod.moth",
                 "export:\n    value || -> I32:\n        return 1\n    ;\n;\n",
             ),
         ],
@@ -1226,7 +1320,7 @@ fn diagnostic_recovery_package_cutoff_can_diagnose_its_own_root() {
         package
             .boundary
             .modules
-            .interface(package.root_module_id)
+            .normal_interface(package.root_module_id)
             .expect("package slot lookup should resolve")
             .is_none()
     );
@@ -1243,7 +1337,7 @@ fn diagnostic_recovery_package_cutoff_can_diagnose_its_own_root() {
         package
             .boundary
             .modules
-            .interface(later_module)
+            .normal_interface(later_module)
             .expect("package slot lookup should resolve")
             .is_none()
     );
@@ -1279,7 +1373,7 @@ fn write_deferred_check_only_package_project(
         &config,
         &[
             (
-                "src/@page.moth",
+                "src/@entry.moth",
                 "@shared render\nvalue = render() catch:\n    then 0\n;\n#[:site]\n",
             ),
             (
@@ -1287,12 +1381,12 @@ fn write_deferred_check_only_package_project(
                 "export:\n    render || -> I32:\n        return 7\n    ;\n;\n",
             ),
             (
-                "packages/shared/broken/@broken.moth",
+                "packages/shared/broken/@entry.moth",
                 "a || -> I32:\n    return pkg_missing_one\n;\n\n\
                  b || -> I32:\n    return pkg_missing_two\n;\n",
             ),
             (
-                "packages/shared/z_late/@z_late.moth",
+                "packages/shared/z_late/@mod.moth",
                 "export:\n    late_value || -> I32:\n        return 1\n    ;\n;\n",
             ),
             ("packages/shared/a_orphan.moth", first_orphan),
@@ -1483,5 +1577,301 @@ fn diagnostic_recovery_deferred_package_check_only_stops_after_an_admitted_unit(
             .iter()
             .all(|line| !line.contains("b_orphan.moth") && !line.contains("orphan_skipped_missing")),
         "the orphan beyond the threshold must not be compiled: {rendered:?}"
+    );
+}
+
+/// WHAT: an invalid qualified selection and a cyclic qualified dependency report typed user
+///       diagnostics under a project error threshold, and the whole request repeats byte-identically.
+/// WHY:  Stage 0 preparation feeds both per-file header diagnostics and Stage 3 declaration
+///       ordering. Neither may panic, reach `compiler_bug!`, or depend on worker completion order
+///       when the project budget stops later admissions.
+#[test]
+fn qualified_cycle_and_invalid_selection_under_project_budget_are_deterministic() {
+    const PROJECT_ERROR_LIMIT_TWO: &str =
+        "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n";
+    // Alphabetical module order is `a_invalid`, `b_cycle`, `zz_last`. The invalid qualified
+    // selection spends one binding error, so the cyclic module is still admitted and both
+    // user-diagnostic kinds are retained; `zz_last` then proves the cutoff refused further work.
+    // Keeping the invalid module first means the cycle's exact diagnostic count does not decide
+    // which failure kind survives.
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("temp project should exist");
+    let root = temp.path();
+    write_project(
+        root,
+        PROJECT_ERROR_LIMIT_TWO,
+        &[
+            (
+                "src/a_invalid/@entry.moth",
+                "broken = @helper missing\n#[:site]\n",
+            ),
+            ("src/a_invalid/helper.moth", "present #= 1\n"),
+            ("src/b_cycle/@entry.moth", "@alpha a\n#[:site]\n"),
+            ("src/b_cycle/alpha.moth", "a #= @beta b\n"),
+            ("src/b_cycle/beta.moth", "b #= @alpha a\n"),
+            ("src/zz_last/@entry.moth", "#[:site]\n"),
+        ],
+    );
+
+    let first = {
+        let (frontend, mut warning_owner, project_source_files) =
+            run_directory_lane(root, FrontendCompilationMode::Canonical);
+        for suffix in ["a_invalid", "b_cycle"] {
+            assert_eq!(
+                frontend
+                    .project
+                    .modules
+                    .slot(module_id_for_path(&frontend, suffix))
+                    .expect("module slot should resolve"),
+                ProviderSlot::Diagnosed,
+                "{suffix} should retain its admitted user diagnostics"
+            );
+        }
+        assert_eq!(
+            frontend
+                .project
+                .modules
+                .slot(module_id_for_path(&frontend, "zz_last"))
+                .expect("module slot should resolve"),
+            ProviderSlot::Unavailable,
+            "the refused module was never compiled"
+        );
+        let cutoff = frontend
+            .project
+            .scheduling_cutoff
+            .expect("spending the threshold before zz_last must record a cutoff");
+        assert!(
+            cutoff.returned_primary_errors() >= 2,
+            "the recorded cutoff proof must reach the configured threshold"
+        );
+        assert!(
+            warning_owner
+                .discovery_stops()
+                .contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF),
+            "the cutoff flag must arrive through the warning sink"
+        );
+        assert!(
+            frontend.project.blocked.is_empty(),
+            "user diagnostics must not be reclassified as blocked providers"
+        );
+        let reports = finish_diagnosed(frontend, &mut warning_owner, project_source_files);
+        assert_eq!(
+            reports.counts().errors,
+            cutoff.returned_primary_errors(),
+            "the retained report count must match the cutoff proof"
+        );
+        assert!(
+            reports
+                .iter_severity(DiagnosticSeverity::Error)
+                .all(|(_, view)| view.descriptor().code.starts_with("MOTH-")),
+            "every failure must be a typed user diagnostic"
+        );
+        let codes: Vec<_> = reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .map(|(_, view)| view.descriptor().code)
+            .collect();
+        assert!(
+            codes.contains(&"MOTH-RULE-0033"),
+            "the cyclic qualified constants must report the declaration-cycle diagnostic: {codes:?}"
+        );
+        assert!(
+            codes.contains(&"MOTH-IMPORT-0005"),
+            "the missing qualified target must report the dependency-target diagnostic: {codes:?}"
+        );
+        let rendered = terse::format_terse_diagnostic_reports(&reports);
+        assert!(
+            rendered.iter().all(|line| !line.contains("zz_last")),
+            "the refused module must not contribute diagnostics: {rendered:?}"
+        );
+        rendered
+    };
+
+    let second = {
+        let (frontend, mut warning_owner, project_source_files) =
+            run_directory_lane(root, FrontendCompilationMode::Canonical);
+        let reports = finish_diagnosed(frontend, &mut warning_owner, project_source_files);
+        terse::format_terse_diagnostic_reports(&reports)
+    };
+    assert_eq!(
+        first, second,
+        "repeated qualified failure reports must be byte-identical"
+    );
+}
+
+/// WHAT: one constant initializer contains two same-file qualified forward references; the header
+///       diagnostic pass emits them in authored span order under a one-error module allowance and
+///       under the normal allowance, and an in-process repeat retains identical facts.
+/// WHY: retained qualified hints live in a hash set used only for graph-edge deduplication.
+///      Diagnostics preserve insertion order and bounded error reporting keeps the first retained
+///      errors, so randomized hash iteration must never decide which authored occurrence reports
+///      first.
+#[test]
+fn qualified_forward_reference_diagnostics_follow_authored_span_order() {
+    const SETTINGS_SOURCE: &str =
+        "combined #= @settings last + @settings later\nlater #= 2\nlast #= 3\n";
+    const ENTRY_SOURCE: &str = "@settings combined\n#[:site]\n";
+
+    /// Exact user-facing facts retained for one error: code, typed reason, authored excerpt and
+    /// half-open line/column positions.
+    type Facts = (
+        String,
+        CompileTimeEvaluationErrorReason,
+        String,
+        (u32, u32),
+        (u32, u32),
+    );
+
+    fn compile_once(root: &Path) -> Vec<Facts> {
+        let (frontend, mut warning_owner, project_source_files) =
+            run_directory_lane(root, FrontendCompilationMode::Canonical);
+        let reports = finish_diagnosed(frontend, &mut warning_owner, project_source_files);
+        reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .map(|(report, view)| {
+                let facts = view
+                    .family_view::<CompileTimeEvaluationErrorView>()
+                    .expect("the same-file qualified failure keeps compile-time evaluation facts");
+                let site = view.primary_site();
+                let context = DiagnosticRenderContext::for_report(report);
+                let position = context
+                    .site_position(site)
+                    .expect("the qualified failure keeps its authored source position");
+                let excerpt = position
+                    .line
+                    .chars()
+                    .skip(position.start.column as usize)
+                    .take((position.end.column - position.start.column) as usize)
+                    .collect::<String>();
+                (
+                    view.descriptor().code.to_owned(),
+                    facts.reason,
+                    excerpt,
+                    (position.start.line, position.start.column),
+                    (position.end.line, position.end.column),
+                )
+            })
+            .collect()
+    }
+
+    let line = SETTINGS_SOURCE
+        .lines()
+        .next()
+        .expect("settings source has a first line");
+    let expected_last_start = line.find("last").expect("first qualified selection exists") as u32;
+    let expected_later_start = line
+        .find("later")
+        .expect("second qualified selection exists") as u32;
+
+    let mut first_diagnostic_per_allowance = Vec::new();
+    for (label, limit_setting) in [
+        (
+            "one-error allowance",
+            "        max_errors_per_module = 1,\n",
+        ),
+        ("normal allowance", "        max_errors_per_module = 5,\n"),
+    ] {
+        let temp = tempfile::tempdir().expect("temp project should exist");
+        let root = temp.path();
+        let config = format!("project #= (\n    name = \"docs\",\n{limit_setting})\nhtml #= ()\n");
+        write_project(
+            root,
+            &config,
+            &[
+                ("src/@entry.moth", ENTRY_SOURCE),
+                ("src/settings.moth", SETTINGS_SOURCE),
+            ],
+        );
+
+        let first = compile_once(root);
+        let second = compile_once(root);
+        assert_eq!(
+            first, second,
+            "{label}: an in-process repeat must retain identical diagnostics, spans and codes"
+        );
+        assert!(
+            !first.is_empty(),
+            "{label}: the invalid initializer must retain a qualified forward-reference diagnostic"
+        );
+        assert_eq!(
+            first.len(),
+            2,
+            "{label}: both authored selections must be retained so their order is exercised"
+        );
+
+        for (code, reason, excerpt, start, end) in &first {
+            assert_eq!(
+                code, "MOTH-RULE-0053",
+                "{label}: qualified failures use the compile-time evaluation family"
+            );
+            assert_eq!(
+                *reason,
+                CompileTimeEvaluationErrorReason::SameFileForwardConstantReference,
+                "{label}: both authored selections are same-file forward references"
+            );
+            assert_eq!(
+                start.0, end.0,
+                "{label}: each diagnostic spans one authored line"
+            );
+            assert!(
+                excerpt == "last" || excerpt == "later",
+                "{label}: the diagnostic must underline the selected symbol, got {excerpt:?}"
+            );
+        }
+
+        let (code, reason, excerpt, start, end) = &first[0];
+        assert_eq!(code, "MOTH-RULE-0053");
+        assert_eq!(
+            *reason,
+            CompileTimeEvaluationErrorReason::SameFileForwardConstantReference
+        );
+        assert_eq!(
+            excerpt, "last",
+            "{label}: the first retained diagnostic must be the earlier authored span"
+        );
+        assert_eq!(
+            *start,
+            (start.0, expected_last_start),
+            "{label}: the first diagnostic starts at the first selection"
+        );
+        assert_eq!(
+            *end,
+            (start.0, expected_last_start + 4),
+            "{label}: the first diagnostic ends at the first selection"
+        );
+
+        if let Some((second_code, second_reason, second_excerpt, second_start, second_end)) =
+            first.get(1)
+        {
+            assert_eq!(second_code, "MOTH-RULE-0053");
+            assert_eq!(
+                *second_reason,
+                CompileTimeEvaluationErrorReason::SameFileForwardConstantReference
+            );
+            assert_eq!(
+                second_excerpt, "later",
+                "{label}: the later authored span must report second"
+            );
+            assert_eq!(
+                *second_start,
+                (start.0, expected_later_start),
+                "{label}: the second diagnostic starts at the second selection"
+            );
+            assert_eq!(
+                *second_end,
+                (start.0, expected_later_start + 5),
+                "{label}: the second diagnostic ends at the second selection"
+            );
+            assert!(
+                *start < *second_start,
+                "{label}: retained diagnostics must be ordered by authored span"
+            );
+        }
+
+        first_diagnostic_per_allowance.push(first[0].clone());
+    }
+
+    assert_eq!(
+        first_diagnostic_per_allowance[0], first_diagnostic_per_allowance[1],
+        "the first retained diagnostic must not depend on the module error allowance"
     );
 }

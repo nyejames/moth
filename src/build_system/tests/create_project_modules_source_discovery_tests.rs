@@ -18,7 +18,7 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@helper\n#[:entry]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@helper\n#[:entry]\n").expect("should write entry");
     fs::write(src.join("helper.moth"), "message #= \"helper\"\n").expect("should write helper");
 
     let mut config = Config::new(root.clone());
@@ -42,7 +42,7 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     assert_eq!(modules.len(), 1);
-    for source in [src.join("@page.moth"), src.join("helper.moth")] {
+    for source in [src.join("@entry.moth"), src.join("helper.moth")] {
         let canonical = fs::canonicalize(source).expect("source should canonicalize");
         assert_eq!(
             super::source_loading_test_support::source_read_count_for_path_for_test(&canonical),
@@ -52,7 +52,7 @@ fn stage0_reuses_scanned_moth_source_when_assembling_input_files() {
     }
     assert_eq!(
         module_prepared_source_names(modules[0]),
-        vec!["@page.moth", "helper.moth"]
+        vec!["@entry.moth", "helper.moth"]
     );
 }
 
@@ -71,7 +71,7 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@reachable\n@leaf\n#[:entry]\n")
+    fs::write(src.join("@entry.moth"), "@reachable\n@leaf\n#[:entry]\n")
         .expect("should write entry");
     fs::write(
         src.join("reachable.moth"),
@@ -124,11 +124,11 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
     );
     assert_eq!(
         module_prepared_source_names(module),
-        vec!["@page.moth", "leaf.moth", "reachable.moth"],
+        vec!["@entry.moth", "leaf.moth", "reachable.moth"],
         "retained source identities must stay in canonical source order"
     );
 
-    let all_source_paths = std::iter::once(src.join("@page.moth"))
+    let all_source_paths = std::iter::once(src.join("@entry.moth"))
         .chain(std::iter::once(src.join("reachable.moth")))
         .chain(std::iter::once(src.join("leaf.moth")))
         .chain(unreachable_names.iter().map(|name| src.join(name)))
@@ -151,7 +151,7 @@ fn stage0_parallel_owned_batch_is_speculative_and_deterministic() {
     }
 
     let selected_source_paths = [
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         src.join("reachable.moth"),
         src.join("leaf.moth"),
     ];
@@ -243,7 +243,7 @@ fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@intro\n@notes\n#[:entry]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@intro\n@notes\n#[:entry]\n").expect("should write entry");
     fs::write(src.join("intro.mtf"), "moth template body\n").expect("should write moth template");
     fs::write(src.join("notes.md"), "# Markdown body\n").expect("should write markdown");
 
@@ -269,7 +269,7 @@ fn stage0_loads_asset_sources_and_preserves_deterministic_input_order() {
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
     assert_eq!(
         module_prepared_source_names(modules[0]),
-        vec!["@page.moth", "intro.mtf", "notes.md"]
+        vec!["@entry.moth", "intro.mtf", "notes.md"]
     );
     assert!(modules[0].prepared.contains_moth_template);
 }
@@ -517,7 +517,7 @@ fn provider_backed_imports_are_resolved_without_becoming_source_inputs() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@drawing.js as drawing\n#[:entry]\n",
     )
     .expect("should write entry");
@@ -548,7 +548,10 @@ fn provider_backed_imports_are_resolved_without_becoming_source_inputs() {
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     assert_eq!(calls.load(Ordering::Relaxed), 1);
-    assert_eq!(module_prepared_source_names(modules[0]), vec!["@page.moth"]);
+    assert_eq!(
+        module_prepared_source_names(modules[0]),
+        vec!["@entry.moth"]
+    );
 }
 
 #[test]
@@ -564,9 +567,9 @@ fn synthetic_nested_module_provider_resolves_from_owning_module_root() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "#[:entry]\n").expect("should write entry root");
+    fs::write(src.join("@entry.moth"), "#[:entry]\n").expect("should write entry root");
     fs::write(
-        feature.join("@page.moth"),
+        feature.join("@entry.moth"),
         "@drawing.js as drawing\n#[:feature]\n",
     )
     .expect("should write nested entry");
@@ -585,7 +588,7 @@ fn synthetic_nested_module_provider_resolves_from_owning_module_root() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
     let nested_entry =
-        fs::canonicalize(feature.join("@page.moth")).expect("nested entry should canonicalize");
+        fs::canonicalize(feature.join("@entry.moth")).expect("nested entry should canonicalize");
     let nested_provider =
         fs::canonicalize(feature.join("drawing.js")).expect("nested provider should canonicalize");
 
@@ -646,9 +649,9 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
             "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
         )
         .expect("should write config");
-        fs::write(src.join("@page.moth"), "#[:entry]\n").expect("should write entry root");
+        fs::write(src.join("@entry.moth"), "#[:entry]\n").expect("should write entry root");
         fs::write(
-            feature.join("@page.moth"),
+            feature.join("@entry.moth"),
             format!("{clauses}#[:feature]\n"),
         )
         .expect("should write nested entry");
@@ -666,8 +669,8 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
         )
         .expect("config should parse");
         let resolver = configured_resolver(&config);
-        let nested_entry =
-            fs::canonicalize(feature.join("@page.moth")).expect("nested entry should canonicalize");
+        let nested_entry = fs::canonicalize(feature.join("@entry.moth"))
+            .expect("nested entry should canonicalize");
 
         let mut providers = ExternalImportProviderRegistry::empty();
         providers.register(Arc::new(CanonicalPathPackageProvider::new()));
@@ -697,7 +700,7 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
         )
         .expect("both nested provider clauses should resolve");
 
-        let source = "src/feature/@page.moth";
+        let source = "src/feature/@entry.moth";
         let local = resolution_table
             .get(source, "drawing.js")
             .expect("local module-relative provider key should exist");
@@ -752,12 +755,12 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
 
     // Two entry points with independent module-local dependency trees.
     fs::write(
-        src.join("page_a/@pageA.moth"),
+        src.join("page_a/@entry.moth"),
         "@helper\n@a_only\n#[:pageA]\n",
     )
     .expect("should write pageA");
     fs::write(
-        src.join("page_b/@pageB.moth"),
+        src.join("page_b/@entry.moth"),
         "@helper\n@b_only\n#[:pageB]\n",
     )
     .expect("should write pageB");
@@ -788,10 +791,10 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
     for source in [
-        src.join("page_a/@pageA.moth"),
+        src.join("page_a/@entry.moth"),
         src.join("page_a/helper.moth"),
         src.join("page_a/a_only.moth"),
-        src.join("page_b/@pageB.moth"),
+        src.join("page_b/@entry.moth"),
         src.join("page_b/helper.moth"),
         src.join("page_b/b_only.moth"),
     ] {
@@ -810,13 +813,14 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
         .map(|module| {
             prepared_entry_file_path(&module.prepared.semantic)
                 .expect("prepared module retains its entry file identity")
-                .file_name()
+                .parent()
+                .and_then(|directory| directory.file_name())
                 .and_then(OsStr::to_str)
                 .unwrap_or_default()
                 .to_string()
         })
         .collect();
-    assert_eq!(module_names, vec!["@pageA.moth", "@pageB.moth"]);
+    assert_eq!(module_names, vec!["page_a", "page_b"]);
 
     // Per-module input order must be deterministic.
     let module_a_inputs = module_prepared_source_names(modules[0]);
@@ -825,11 +829,11 @@ fn canonical_multi_entry_discovery_is_deterministic_and_reads_each_source_once()
     // Canonical source order is deterministic by logical path (file name within this test).
     assert_eq!(
         module_a_inputs,
-        vec!["@pageA.moth", "a_only.moth", "helper.moth"]
+        vec!["@entry.moth", "a_only.moth", "helper.moth"]
     );
     assert_eq!(
         module_b_inputs,
-        vec!["@pageB.moth", "b_only.moth", "helper.moth"]
+        vec!["@entry.moth", "b_only.moth", "helper.moth"]
     );
 }
 
@@ -848,9 +852,9 @@ fn canonical_multi_entry_discovery_calls_provider_once() {
     .expect("should write config");
 
     // Entry A is plain provider-free; entry B imports a .js file.
-    fs::write(src.join("page_a/@pageA.moth"), "a #= 1\n").expect("should write pageA");
+    fs::write(src.join("page_a/@entry.moth"), "a #= 1\n").expect("should write pageA");
     fs::write(
-        src.join("page_b/@pageB.moth"),
+        src.join("page_b/@entry.moth"),
         "@drawing.js as drawing\n#[:pageB]\n",
     )
     .expect("should write pageB");
@@ -892,7 +896,7 @@ fn canonical_multi_entry_discovery_calls_provider_once() {
     assert_eq!(module_prepared_source_names(modules[0]).len(), 1);
     assert_eq!(
         module_prepared_source_names(modules[1]),
-        vec!["@pageB.moth"]
+        vec!["@entry.moth"]
     );
 }
 
@@ -912,11 +916,11 @@ fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
     .expect("should write config");
 
     // Entry A is provider-free; entry B imports a .js file backed by a registered provider.
-    fs::write(src.join("page_a/@pageA.moth"), "@helper\n#[:pageA]\n").expect("should write pageA");
+    fs::write(src.join("page_a/@entry.moth"), "@helper\n#[:pageA]\n").expect("should write pageA");
     fs::write(src.join("page_a/helper.moth"), "helper #= 1\n")
         .expect("should write module-local helper");
     fs::write(
-        src.join("page_b/@pageB.moth"),
+        src.join("page_b/@entry.moth"),
         "@drawing.js as drawing\n#[:pageB]\n",
     )
     .expect("should write pageB");
@@ -951,13 +955,13 @@ fn canonical_provider_discovery_reads_and_tokenizes_each_source_once() {
     ));
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
-    // Three unique Moth sources: @pageA.moth, page_a/helper.moth, and @pageB.moth.
+    // Three unique Moth sources: @entry.moth, page_a/helper.moth, and @entry.moth.
     // SourceTreeIndex ownership sends each directly to one module queue, which reads each once
     // before header preparation.
     for source in [
-        src.join("page_a/@pageA.moth"),
+        src.join("page_a/@entry.moth"),
         src.join("page_a/helper.moth"),
-        src.join("page_b/@pageB.moth"),
+        src.join("page_b/@entry.moth"),
     ] {
         let canonical = fs::canonicalize(source).expect("source should canonicalize");
         assert_eq!(
@@ -997,9 +1001,9 @@ fn unsupported_external_extension_in_multi_entry_preserves_diagnostic_shape() {
     )
     .expect("should write config");
 
-    fs::write(src.join("page_a/@pageA.moth"), "a #= 1\n").expect("should write pageA");
+    fs::write(src.join("page_a/@entry.moth"), "a #= 1\n").expect("should write pageA");
     fs::write(
-        src.join("page_b/@pageB.moth"),
+        src.join("page_b/@entry.moth"),
         "@drawing.js as drawing\n#[:pageB]\n",
     )
     .expect("should write pageB");
@@ -1060,7 +1064,7 @@ fn directory_provider_dependency_calls_provider_once_for_repeated_physical_sourc
     // The entry imports the same .js file twice under distinct local aliases, so the physical
     // provider source is reached twice during one traversal.
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@drawing.js as drawing\n@drawing.js as drawing2\n#[:entry]\n",
     )
     .expect("should write entry");
@@ -1111,7 +1115,7 @@ fn directory_provider_dependency_rejects_cross_module_target() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@feature/private.js as private\n#[:entry]\n",
     )
     .expect("should write entry importing a cross-module provider file");
@@ -1171,7 +1175,7 @@ fn directory_provider_dependency_missing_target_reports_structured_diagnostic_wi
     .expect("should write config");
     // The imported .js file does not exist on disk, so it is absent from the source tree index.
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@missing.js as missing\n#[:entry]\n",
     )
     .expect("should write entry importing a missing provider file");
@@ -1224,7 +1228,7 @@ fn directory_provider_dependency_missing_target_reports_structured_diagnostic_wi
         "expected missing import target diagnostic, got {}",
         diagnostic.descriptor().code
     );
-    assert_primary_span_text(&failure, &src.join("@page.moth"), "@missing.js");
+    assert_primary_span_text(&failure, &src.join("@entry.moth"), "@missing.js");
 }
 
 #[test]
@@ -1244,9 +1248,9 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
     .expect("should write config");
 
     // Entry A depends on its direct child module B, which should queue module B's root.
-    fs::write(module_a.join("@pageA.moth"), "@module_b b\n#[:pageA]\n")
+    fs::write(module_a.join("@entry.moth"), "@module_b b\n#[:pageA]\n")
         .expect("should write pageA");
-    fs::write(module_b.join("@api.moth"), "export:\n    b #= 1\n;\n")
+    fs::write(module_b.join("@mod.moth"), "export:\n    b #= 1\n;\n")
         .expect("should write module_b root");
     fs::write(module_b.join("impl.moth"), "impl #= 1\n").expect("should write module_b impl");
 
@@ -1278,7 +1282,7 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
             prepared_entry_file_path(&module.prepared.semantic)
                 .expect("prepared module retains its entry file identity")
                 .file_name()
-                .is_some_and(|name| name == "@pageA.moth")
+                .is_some_and(|name| name == "@entry.moth")
         })
         .expect("module A should be discovered");
     let module_b = modules
@@ -1287,19 +1291,19 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
             prepared_entry_file_path(&module.prepared.semantic)
                 .expect("prepared module retains its entry file identity")
                 .file_name()
-                .is_some_and(|name| name == "@api.moth")
+                .is_some_and(|name| name == "@mod.moth")
         })
         .expect("module B should be discovered");
     let module_a_inputs = module_prepared_source_names(module_a);
     let module_b_inputs = module_prepared_source_names(module_b);
 
     assert!(
-        !module_a_inputs.contains(&"@api.moth".to_string())
+        !module_a_inputs.contains(&"@mod.moth".to_string())
             && !module_a_inputs.contains(&"impl.moth".to_string()),
         "the consumer inventory must exclude all provider source files"
     );
     assert!(
-        module_b_inputs.contains(&"@api.moth".to_string())
+        module_b_inputs.contains(&"@mod.moth".to_string())
             && !module_b_inputs.contains(&"impl.moth".to_string()),
         "the queued provider module must retain its root without making an unreferenced private file semantic"
     );
@@ -1320,14 +1324,14 @@ fn scoped_support_package_is_visible_by_name_to_owner_and_sibling_descendant() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@site.moth"), "@markdown render\n#[:site]\n")
+    fs::write(src.join("@entry.moth"), "@markdown render\n#[:site]\n")
         .expect("should write owner root");
     fs::write(
-        support.join("+package.moth"),
+        support.join("@package.moth"),
         "export:\n    render || -> String:\n        return \"support\"\n    ;\n;\n",
     )
     .expect("should write support root");
-    fs::write(pages.join("@page.moth"), "@markdown render\n#[:page]\n")
+    fs::write(pages.join("@entry.moth"), "@markdown render\n#[:page]\n")
         .expect("should write sibling module root");
 
     let mut config = Config::new(root.clone());
@@ -1364,7 +1368,7 @@ fn recognized_source_stem_collision_is_ambiguous_without_extension_precedence() 
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@HELPER\n#[:page]\n").expect("should write root");
+    fs::write(src.join("@entry.moth"), "@HELPER\n#[:page]\n").expect("should write root");
     fs::write(src.join("helper.moth"), "value #= 1\n").expect("should write Moth source");
     fs::write(src.join("Helper.md"), "# Helper\n").expect("should write Markdown source");
 
@@ -1385,7 +1389,7 @@ fn recognized_source_stem_collision_is_ambiguous_without_extension_precedence() 
         first_error_diagnostic(&failure).descriptor().code,
         "MOTH-IMPORT-0006"
     );
-    assert_primary_span_text(&failure, &src.join("@page.moth"), "@HELPER");
+    assert_primary_span_text(&failure, &src.join("@entry.moth"), "@HELPER");
 }
 
 #[test]
@@ -1401,9 +1405,11 @@ fn binding_package_and_local_module_prefix_collision_is_ambiguous() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@core/io input\n#[:page]\n").expect("should write root");
-    fs::write(local_core.join("@core.moth"), "#[:local core]\n")
-        .expect("should write colliding local module");
+    fs::write(src.join("@entry.moth"), "@core/io input\n#[:page]\n").expect("should write root");
+    fs::write(local_core.join("@mod.moth"), "export:\n    local #= 1\n;\n")
+        .expect("should write colliding local facade");
+    fs::write(local_core.join("@entry.moth"), "#[:local core]\n")
+        .expect("should write colliding local module entry");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -1435,7 +1441,7 @@ fn binding_package_case_variant_import_with_local_file_is_ambiguous() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@core/IO\n#[:[IO.value]]\n").expect("should write root");
+    fs::write(src.join("@entry.moth"), "@core/IO\n#[:[IO.value]]\n").expect("should write root");
     // Package identities reject case-only overlaps, so `@core/IO` can't select this local file
     // just because the registered `@core/io` lookup is exact.
     fs::write(local_core.join("IO.moth"), "value #= 1\n").expect("should write local file");
@@ -1455,7 +1461,7 @@ fn binding_package_case_variant_import_with_local_file_is_ambiguous() {
         first_error_diagnostic(&failure).descriptor().code,
         "MOTH-IMPORT-0006"
     );
-    assert_primary_span_text(&failure, &src.join("@page.moth"), "@core/IO");
+    assert_primary_span_text(&failure, &src.join("@entry.moth"), "@core/IO");
 }
 
 #[test]
@@ -1470,7 +1476,7 @@ fn directory_source_dependency_rejects_obsolete_relative_form() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@./helper value\n#[:page]\n").expect("should write root");
+    fs::write(src.join("@entry.moth"), "@./helper value\n#[:page]\n").expect("should write root");
     fs::write(src.join("helper.moth"), "value #= 1\n").expect("should write helper");
 
     let mut config = Config::new(root.clone());
@@ -1503,9 +1509,9 @@ fn direct_child_private_path_bypass_is_rejected() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@child/private value\n#[:page]\n")
+    fs::write(src.join("@entry.moth"), "@child/private value\n#[:page]\n")
         .expect("should write parent root");
-    fs::write(child.join("@api.moth"), "export:\n    value #= 1\n;\n")
+    fs::write(child.join("@mod.moth"), "export:\n    value #= 1\n;\n")
         .expect("should write child root");
     fs::write(child.join("private.moth"), "value #= 2\n")
         .expect("should write private child source");
@@ -1534,7 +1540,7 @@ fn module_import_through_hidden_directory_reports_hidden_reason() {
     let src = root.join("src");
     let hidden = src.join("_private/child");
     fs::create_dir_all(&hidden).expect("should create hidden child");
-    fs::write(hidden.join("@child.moth"), "export:\n    value #= 1\n;\n")
+    fs::write(hidden.join("@mod.moth"), "export:\n    value #= 1\n;\n")
         .expect("should write hidden root");
 
     fs::write(
@@ -1542,7 +1548,7 @@ fn module_import_through_hidden_directory_reports_hidden_reason() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@_private/child value\n#[:page]\n")
+    fs::write(src.join("@entry.moth"), "@_private/child value\n#[:page]\n")
         .expect("should write page");
 
     let mut config = Config::new(root.clone());
@@ -1570,7 +1576,7 @@ fn module_import_through_hidden_directory_reports_hidden_reason() {
             .reason,
         InvalidImportPathCode::HiddenDirectory
     );
-    assert_primary_span_text(&failure, &src.join("@page.moth"), "@_private/child");
+    assert_primary_span_text(&failure, &src.join("@entry.moth"), "@_private/child");
 }
 
 #[test]
@@ -1585,7 +1591,7 @@ fn single_component_hidden_import_remains_ambiguous_missing_target() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@_private value\n#[:page]\n").expect("should write page");
+    fs::write(src.join("@entry.moth"), "@_private value\n#[:page]\n").expect("should write page");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -1623,7 +1629,7 @@ fn underscore_prefixed_helper_file_remains_importable() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@_helper value\n#[:page]\n").expect("should write page");
+    fs::write(src.join("@entry.moth"), "@_helper value\n#[:page]\n").expect("should write page");
     fs::write(src.join("_helper.moth"), "value #= 1\n").expect("should write helper");
 
     let mut config = Config::new(root.clone());
@@ -1654,7 +1660,7 @@ fn selected_hidden_root_can_import_its_visible_child_module() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(selected.join("@site.moth"), "@visible v\n#[:site]\n").expect("should write root");
+    fs::write(selected.join("@entry.moth"), "@visible v\n#[:site]\n").expect("should write root");
     fs::write(child.join("@mod.moth"), "export:\n    v #= 1\n;\n")
         .expect("should write child root");
 
@@ -1687,7 +1693,7 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@helper\n@intro\n#[:entry]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@helper\n@intro\n#[:entry]\n").expect("should write entry");
     fs::write(src.join("helper.moth"), "value #= 42\n").expect("should write helper");
     fs::write(src.join("intro.mtf"), "moth template body\n").expect("should write moth template");
     fs::write(src.join("notes.md"), "# Markdown body\n").expect("should write markdown");
@@ -1713,10 +1719,10 @@ fn stage0_consumes_moth_tokens_into_retained_header_syntax() {
     assert_eq!(modules[0].prepared.semantic.source_file_count, 3);
     assert_eq!(
         module_prepared_source_names(modules[0]),
-        vec!["@page.moth", "helper.moth", "intro.mtf"]
+        vec!["@entry.moth", "helper.moth", "intro.mtf"]
     );
     assert!(modules[0].prepared.contains_moth_template);
-    let entry_path = fs::canonicalize(src.join("@page.moth")).expect("entry should canonicalize");
+    let entry_path = fs::canonicalize(src.join("@entry.moth")).expect("entry should canonicalize");
     let module_symbols = &modules[0]
         .prepared
         .semantic
@@ -1764,9 +1770,9 @@ fn canonical_discovery_consumes_moth_tokens_for_every_reachable_file() {
     .expect("should write config");
 
     // Two entry points retain independent canonical source ownership. Each module depends on a helper.
-    fs::write(module_a.join("@pageA.moth"), "@helperA\n#[:pageA]\n").expect("should write pageA");
+    fs::write(module_a.join("@entry.moth"), "@helperA\n#[:pageA]\n").expect("should write pageA");
     fs::write(module_a.join("helperA.moth"), "a #= 1\n").expect("should write helperA");
-    fs::write(module_b.join("@pageB.moth"), "@helperB\n#[:pageB]\n").expect("should write pageB");
+    fs::write(module_b.join("@entry.moth"), "@helperB\n#[:pageB]\n").expect("should write pageB");
     fs::write(module_b.join("helperB.moth"), "b #= 2\n").expect("should write helperB");
 
     let mut config = Config::new(root.clone());
@@ -1790,11 +1796,11 @@ fn canonical_discovery_consumes_moth_tokens_for_every_reachable_file() {
 
     assert_eq!(
         module_prepared_source_names(modules[0]),
-        vec!["@pageA.moth", "helperA.moth"]
+        vec!["@entry.moth", "helperA.moth"]
     );
     assert_eq!(
         module_prepared_source_names(modules[1]),
-        vec!["@pageB.moth", "helperB.moth"]
+        vec!["@entry.moth", "helperB.moth"]
     );
     assert!(modules.iter().all(|module| {
         module
@@ -1806,4 +1812,338 @@ fn canonical_discovery_consumes_moth_tokens_for_every_reachable_file() {
             .values()
             .any(|dependencies| !dependencies.is_empty())
     }));
+}
+
+// -------------------------
+//  Qualified-reference provider diagnostics
+// -------------------------
+
+/// Write one single-module project whose entry body is supplied verbatim.
+fn write_qualified_reference_probe_project(
+    root: &std::path::Path,
+    entry_body: &str,
+    extra_files: &[(&str, &str)],
+) -> (
+    Config,
+    ProjectPathResolver,
+    StyleDirectiveRegistry,
+    std::path::PathBuf,
+) {
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@entry.moth"), entry_body).expect("should write entry");
+    for (relative_path, contents) in extra_files {
+        let path = src.join(relative_path);
+        fs::create_dir_all(path.parent().expect("extra file has a parent"))
+            .expect("should create extra file parent");
+        fs::write(path, contents).expect("should write extra file");
+    }
+
+    let mut config = Config::new(root.to_path_buf());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    (config, resolver, style_directives, src)
+}
+
+#[test]
+fn resource_path_qualified_occurrence_uses_the_provider_lane_without_reading_the_resource() {
+    // An authored resource path without a selection stays a file value. Adding a selection must
+    // not reinterpret the resource as a namespace: it enters the same provider lane as the
+    // explicit direct-selection clause and never becomes a resource read.
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let (config, resolver, style_directives, src) = write_qualified_reference_probe_project(
+        &root,
+        "logo = @images/logo.svg name\n#[:entry]\n",
+        &[("images/logo.svg", "<svg/>")],
+    );
+
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+    let diagnostic = first_error_diagnostic(&failure);
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-IMPORT-0021",
+        "a selected resource path must use the unsupported-provider diagnostic, got {}",
+        diagnostic.descriptor().code
+    );
+    diagnostic
+        .family_view::<UnsupportedExternalExtensionView>()
+        .expect("the provider lane retains typed extension facts");
+    assert_primary_span_text(&failure, &src.join("@entry.moth"), "@images/logo.svg");
+
+    // The authored clause form produces the same diagnostic and span for the same path.
+    let _clause_root = tempfile::tempdir().expect("should create temp dir");
+    let clause_root = _clause_root.path().to_path_buf();
+    let (clause_config, clause_resolver, clause_directives, clause_src) =
+        write_qualified_reference_probe_project(
+            &clause_root,
+            "@images/logo.svg name\n#[:entry]\n",
+            &[("images/logo.svg", "<svg/>")],
+        );
+    let clause_failure =
+        discover_modules_for_test(&clause_config, &clause_resolver, &clause_directives);
+    let clause_diagnostic = first_error_diagnostic(&clause_failure);
+    assert_eq!(
+        clause_diagnostic.descriptor().code,
+        diagnostic.descriptor().code,
+        "the occurrence and clause forms share the provider error lane"
+    );
+    assert_primary_span_text(
+        &clause_failure,
+        &clause_src.join("@entry.moth"),
+        "@images/logo.svg",
+    );
+}
+
+#[test]
+fn explicit_moth_extension_qualified_occurrence_keeps_the_source_extension_diagnostic() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let (config, resolver, style_directives, src) = write_qualified_reference_probe_project(
+        &root,
+        "value = @helper.moth answer\n#[:entry]\n",
+        &[("helper.moth", "answer #= 1\n")],
+    );
+
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+    let diagnostic = first_error_diagnostic(&failure);
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-IMPORT-0020",
+        "an explicit .moth source path keeps its dependency diagnostic, got {}",
+        diagnostic.descriptor().code
+    );
+    assert_primary_span_text(&failure, &src.join("@entry.moth"), "@helper.moth");
+
+    let _clause_root = tempfile::tempdir().expect("should create temp dir");
+    let clause_root = _clause_root.path().to_path_buf();
+    let (clause_config, clause_resolver, clause_directives, _clause_src) =
+        write_qualified_reference_probe_project(
+            &clause_root,
+            "@helper.moth answer\n#[:entry]\n",
+            &[("helper.moth", "answer #= 1\n")],
+        );
+    let clause_failure =
+        discover_modules_for_test(&clause_config, &clause_resolver, &clause_directives);
+    assert_eq!(
+        first_error_diagnostic(&clause_failure).descriptor().code,
+        diagnostic.descriptor().code,
+    );
+}
+
+#[test]
+fn entry_only_child_qualified_occurrence_matches_the_clause_error_lane() {
+    let write_entry_only_child_fixture = |root: &std::path::Path, body: &str| {
+        let src = root.join("src");
+        fs::create_dir_all(&src).expect("should create src");
+        fs::write(
+            root.join(settings::CONFIG_FILE_NAME),
+            "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+        )
+        .expect("should write config");
+        fs::write(src.join("@entry.moth"), body).expect("should write entry");
+        let child = src.join("child");
+        fs::create_dir_all(&child).expect("should create child");
+        fs::write(child.join("@entry.moth"), "hidden #= 1\n").expect("should write child entry");
+
+        let mut config = Config::new(root.to_path_buf());
+        let style_directives = test_style_directives();
+        parse_project_config_for_test(
+            &mut config,
+            &root.join(settings::CONFIG_FILE_NAME),
+            &style_directives,
+        )
+        .expect("config should parse");
+        let resolver = configured_resolver(&config);
+        (config, resolver, style_directives, src)
+    };
+
+    let _occurrence_root = tempfile::tempdir().expect("should create temp dir");
+    let occurrence_root = _occurrence_root.path().to_path_buf();
+    let (occurrence_config, occurrence_resolver, occurrence_directives, occurrence_src) =
+        write_entry_only_child_fixture(&occurrence_root, "value = @child hidden\n#[:entry]\n");
+    let occurrence_failure = discover_modules_for_test(
+        &occurrence_config,
+        &occurrence_resolver,
+        &occurrence_directives,
+    );
+    let occurrence_diagnostic = first_error_diagnostic(&occurrence_failure);
+    assert_primary_span_text(
+        &occurrence_failure,
+        &occurrence_src.join("@entry.moth"),
+        "@child",
+    );
+
+    let _clause_root = tempfile::tempdir().expect("should create temp dir");
+    let clause_root = _clause_root.path().to_path_buf();
+    let (clause_config, clause_resolver, clause_directives, clause_src) =
+        write_entry_only_child_fixture(&clause_root, "@child hidden\n#[:entry]\n");
+    let clause_failure =
+        discover_modules_for_test(&clause_config, &clause_resolver, &clause_directives);
+    let clause_diagnostic = first_error_diagnostic(&clause_failure);
+    assert_primary_span_text(&clause_failure, &clause_src.join("@entry.moth"), "@child");
+
+    assert_eq!(
+        occurrence_diagnostic.descriptor().code,
+        clause_diagnostic.descriptor().code,
+        "an entry-only child has no importable surface for either authored form"
+    );
+}
+
+#[test]
+fn duplicate_qualified_occurrences_invoke_a_registered_provider_once() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let (config, resolver, style_directives, _src) = write_qualified_reference_probe_project(
+        &root,
+        "first = @app.js one\nsecond = @app.js two\n#[:entry]\n",
+        &[("app.js", "export const one = 1;\n")],
+    );
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut providers = ExternalImportProviderRegistry::empty();
+    providers.register(Arc::new(CountingExternalImportProvider::new(Arc::clone(
+        &calls,
+    ))));
+
+    let _modules = successful_compilation_value(discover_modules_for_test_with_providers(
+        &config,
+        &resolver,
+        &style_directives,
+        &providers,
+    ));
+    assert_eq!(
+        calls.load(Ordering::Relaxed),
+        1,
+        "two occurrences selecting one provider path must invoke the provider once"
+    );
+}
+
+#[test]
+fn check_only_qualified_occurrence_reaches_the_same_provider_binding_as_a_clause() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    let first = src.join("first");
+    let child = first.join("child");
+    fs::create_dir_all(&child).expect("should create module directories");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        first.join("@entry.moth"),
+        "owner || -> I32:\n    return 1\n;\n",
+    )
+    .expect("should write owner root");
+    // Both sources are owned but unreached, so check-only preparation handles them.
+    fs::write(
+        first.join("a_clause.moth"),
+        "@child value\nprobe || -> I32:\n    return value\n;\n",
+    )
+    .expect("should write clause orphan");
+    fs::write(
+        first.join("b_occurrence.moth"),
+        "probe || -> I32:\n    result = @child value\n    return result\n;\n",
+    )
+    .expect("should write occurrence orphan");
+    fs::write(child.join("@mod.moth"), "export:\n    value #= 7\n;\n")
+        .expect("should write child root");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let (schedule, graph, source_tree_index, _source_files, _string_table) =
+        discover_modules_and_graph_for_test_with_check_only(
+            &config,
+            &resolver,
+            &style_directives,
+            true,
+        );
+    let (_waves, _provider_bindings, _source_package_dependencies, check_only_jobs) =
+        schedule.into_parts();
+    assert_eq!(
+        check_only_jobs.len(),
+        2,
+        "both unreached owned sources become check-only units"
+    );
+
+    let canonical_child = fs::canonicalize(&child).expect("child should canonicalize");
+    let child_id = source_tree_index
+        .module_identities()
+        .module_id_for_directory(&canonical_child)
+        .expect("child module should be a graph node");
+    let canonical_first = fs::canonicalize(&first).expect("first should canonicalize");
+    let first_id = source_tree_index
+        .module_identities()
+        .module_id_for_directory(&canonical_first)
+        .expect("first module should be a graph node");
+
+    let mut check_only_sources = Vec::new();
+    for job in &check_only_jobs {
+        assert_eq!(
+            job.provider_bindings.len(),
+            1,
+            "each check-only unit publishes one cross-module provider binding"
+        );
+        let binding = &job.provider_bindings[0];
+        assert_eq!(binding.provider_module_id, child_id);
+        assert_eq!(binding.provider_surface, ModuleRootRole::Normal);
+        assert_eq!(
+            binding.dependency_shell_id.ordinal, 0,
+            "each source's first authored shell is ordinal zero"
+        );
+        let names: Vec<String> = job
+            .prepared
+            .semantic
+            .prepared_header_syntax
+            .module_symbols
+            .module_file_paths
+            .iter()
+            .map(|path| {
+                job.prepared.semantic.path_fork.render_portable(
+                    *path,
+                    &job.prepared.semantic.string_table,
+                    &mut Vec::new(),
+                )
+            })
+            .collect();
+        check_only_sources.extend(names);
+    }
+    check_only_sources.sort();
+    assert_eq!(
+        check_only_sources,
+        vec![
+            "src/first/a_clause.moth".to_owned(),
+            "src/first/b_occurrence.moth".to_owned(),
+        ],
+        "the clause form and the qualified-occurrence form both reach check-only binding"
+    );
+    assert!(
+        graph
+            .dependency_providers(first_id)
+            .expect("frozen adjacency is readable")
+            .is_empty(),
+        "check-only units must not insert canonical graph edges"
+    );
 }

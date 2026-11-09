@@ -1,0 +1,13 @@
+-- assert(false, "msg") should be statically terminal in a non-Void function
+off #= false
+
+returns_int || -> I32:
+    assert(false, "unreachable")
+;
+
+-- A named folded constant must classify exactly like the literal.
+returns_int_named_const || -> I32:
+    assert(off, "unreachable")
+;
+
+io.line("assert_false_terminal_function")

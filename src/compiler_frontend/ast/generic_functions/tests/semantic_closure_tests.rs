@@ -62,7 +62,7 @@ fn prepared_module(source: &str, package: &str) -> PreparedModule {
     template.declaration_identity = Some(GeneratedDeclarationIdentity::ModulePrivate(
         ModulePrivateExecutableIdentity::new(
             module_origin.clone(),
-            "@page.moth".to_owned(),
+            "@entry.moth".to_owned(),
             ModulePrivateExecutableCategory::GenericFunction,
             "probe".to_owned(),
             None,

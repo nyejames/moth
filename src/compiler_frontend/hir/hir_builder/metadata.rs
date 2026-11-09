@@ -189,12 +189,22 @@ impl<'a> HirBuilder<'a> {
                     )
                 })?,
             };
-            let boundary = match signature.error_return_type_id() {
-                Some(error_type) if Some(error_type) == builtin_error_type => {
-                    HirBuiltinFailureBoundary::BuiltinErrorSlot
+            let boundary = if signature.return_contract.is_never() {
+                // A `-> !` body has no error channel. Implicit built-in failure that can escape
+                // the body is a closed-boundary diagnostic, not a private lane.
+                HirBuiltinFailureBoundary::Never
+            } else {
+                match signature
+                    .return_contract
+                    .ordinary()
+                    .and_then(|returns| returns.error())
+                {
+                    Some(error_type) if Some(error_type) == builtin_error_type => {
+                        HirBuiltinFailureBoundary::BuiltinErrorSlot
+                    }
+                    Some(error_type) => HirBuiltinFailureBoundary::CustomErrorSlot(error_type),
+                    None => HirBuiltinFailureBoundary::InferPrivate,
                 }
-                Some(error_type) => HirBuiltinFailureBoundary::CustomErrorSlot(error_type),
-                None => HirBuiltinFailureBoundary::InferPrivate,
             };
             let pending = summaries.function_facts(identity).ok_or_else(|| {
                 InfrastructureFailure::internal(

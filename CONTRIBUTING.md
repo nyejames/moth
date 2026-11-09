@@ -13,7 +13,7 @@ This codebase uses AI in a measured capacity. See the [AI policy](./HUMANS.md) f
 ## Language and current support
 
 - [User-facing documentation](docs/docs/)
-- [Progress matrix](docs/docs/progress/@page.moth)
+- [Progress matrix](docs/docs/progress/@entry.moth)
 - [Roadmap](docs/roadmap/roadmap.md)
 
 ## Compiler and memory design

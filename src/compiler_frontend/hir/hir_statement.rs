@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, LoopBindings, MultiBindTarget, MultiBindTargetKind, NodeKind, RangeLoopSpec,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    ExprId, ExpressionOperationView, ExpressionStore, ExpressionView, PlaceView,
+    ExprId, ExpressionStore, ExpressionView, PlaceView,
 };
 
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
@@ -37,6 +37,7 @@ mod declarations;
 mod entry_start;
 mod loop_lowering;
 mod match_captures;
+mod never_call;
 mod returns;
 mod value_blocks;
 
@@ -158,10 +159,25 @@ impl<'a> HirBuilder<'a> {
             return Ok(());
         }
 
+        // A declared Never body must diverge. AST terminality validation rejects fallthrough, so
+        // no implicit return is emitted here: a surviving fallthrough is an internal invariant
+        // failure rather than an ordinary empty success return.
         if self
             .function_by_id_or_error(function_id)?
-            .returns
-            .is_empty()
+            .return_contract
+            .is_never()
+        {
+            return Err(InfrastructureFailure::hir_transformation(
+                "HIR lowering reached a Never function body after AST terminality validation",
+            )
+            .into());
+        }
+
+        if self
+            .function_by_id_or_error(function_id)?
+            .return_contract
+            .ordinary()
+            .is_some_and(|returns| returns.success().is_empty())
         {
             self.emit_terminator(
                 current_block,
@@ -239,6 +255,10 @@ impl<'a> HirBuilder<'a> {
 
             NodeKind::ExpressionStatement(expr) => {
                 self.lower_expression_statement(expressions.view(*expr)?, &node.span, node.span)
+            }
+
+            NodeKind::NeverCall(call) => {
+                self.lower_never_call_statement(expressions, call, node.span)
             }
 
             NodeKind::Return(values) => {
@@ -542,16 +562,13 @@ impl<'a> HirBuilder<'a> {
         Ok(())
     }
 
+    /// Reads a folded `Bool` condition from the shared AST constant authority.
+    ///
+    /// WHY: HIR lowering must classify assertion and loop conditions exactly as the AST exit
+    /// analysis does. Re-deriving a literal-only match here would disagree with a named
+    /// constant or a body-local `#=` binding and leave an accepted body without a terminator.
     pub(super) fn expression_constant_bool(&self, expression: ExpressionView<'_>) -> Option<bool> {
-        let ExpressionOperationView::Constant(value) = expression.operation() else {
-            return None;
-        };
-        match self.module_const_values.payload(value) {
-            Some(crate::compiler_frontend::ast::const_values::store::ConstValuePayload::Bool(
-                value,
-            )) => Some(*value),
-            _ => None,
-        }
+        self.module_const_values.folded_bool_value(expression)
     }
 
     // -------------------------

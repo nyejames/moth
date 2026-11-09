@@ -26,7 +26,7 @@ use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionInstantiationRequest, GenericRequestRange, GenericRequestSlot,
     IfGenericRequestRanges,
 };
-use crate::compiler_frontend::ast::statements::value_production::analyze_branch_exits;
+use crate::compiler_frontend::ast::statements::control_flow_exits::analyze_control_flow_exits;
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueLexicalScope,
 };
@@ -352,6 +352,15 @@ impl StaticIfSpecializer<'_> {
             NodeKind::LexicalScope { body } => {
                 let mut nested_environment = environment.clone();
                 self.specialize_body(body, &mut nested_environment)?;
+                None
+            }
+            NodeKind::NeverCall(call) => {
+                if let Some(receiver) = &mut call.receiver {
+                    self.specialize_expression(receiver, environment)?;
+                }
+                for argument in &mut call.arguments {
+                    self.specialize_expression(&mut argument.value, environment)?;
+                }
                 None
             }
             NodeKind::Match {
@@ -813,8 +822,8 @@ fn take_terminal_value_body(
 ) -> Result<Option<(Vec<AstNode>, PathId)>, InfrastructureFailure> {
     match builder.view(expression)?.operation() {
         ExpressionOperationView::ValueBlock(ValueBlock::LexicalScope(scope)) => {
-            let exits = analyze_branch_exits(&scope.body, builder, constants);
-            if exits.terminates && !exits.produces_value && !exits.can_fall_through {
+            let exits = analyze_control_flow_exits(&scope.body, builder.store(), constants);
+            if exits.leaves_without_value() {
                 // The immutable expression may still be read by another candidate.
                 Ok(Some((scope.body.clone(), scope.scope)))
             } else {

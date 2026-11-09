@@ -1,14 +1,41 @@
 Dependency paths resolve declaration surfaces, not file bytes. Every source dependency clause resolves from the declaring file's owning module root, not the file's physical directory.
 
-A dependency clause and a file path in expression position are two different semantic roles for the same `@` spelling. A clause binds declarations or a namespace and produces no value. An explicit-extension path in expression position evaluates to a `String`. Neither owner reinterprets the other's paths: a clause never becomes a file value, and a file value never exposes a provider namespace. See @../resources/#file-paths (File paths).
+A dependency path has three distinct roles:
+
+- `@module symbol` in expression position is a qualified expression reference. It selects one symbol as an operand.
+- `@module symbol, other` in statement position is an ordinary dependency clause. It binds the selected names for later statements.
+- `@file.ext` is a file value. It evaluates to a `String`.
+
+The spelling and provider rules are shared, but the roles never convert into each other. A clause never becomes a file value, and a file value never exposes a provider namespace. See @../resources/#file-paths (File paths) and @../moth-templates/#template-scope (Template scope).
+
+### Qualified expression references
+
+A `PATH` token followed by exactly one `SYMBOL` token on the same physical line forms one expression primary:
+
+[codeblock, $code("moth"):
+    name = @settings site_name
+    color = @settings palette.background
+    value = @math square(12)
+]
+
+A newline ends the selection. Spaces and tabs may separate the two tokens, a newline may not. The selected symbol creates no visible local binding, so it never collides with a local name or with another provider's selection. Ordinary expression suffixes still apply after the selected symbol.
+
+The same form works inside template heads in `.moth` templates and inside the synthetic `.mtf` body:
+
+[codeblock, $code("text"):
+    # Welcome to [@settings site_name]
+]
+
+A qualified reference creates an early provider-dependency fact, not a dependency clause. The provider must expose the selected symbol under the consuming source's access rules. An unassigned top-level `@math square(12)` is rejected: a top-level path starts a dependency clause, and a call is not a valid selection list. Bind the name with a clause and call it there.
 
 ### Path families
 
 - **Module-root-relative**: dependency clauses resolve from the declaring file's owning module root. Example: inside `internal/deep/renderer.moth`, `@accounts Account` resolves to `accounts.moth`, not `internal/deep/accounts.moth`.
-- **Child module**: reaching a child normal module ends filesystem traversal and exposes only its `export:` facade. Dependency clauses cannot bypass that facade with paths such as `@child/internal`.
-- **Support package**: scoped `+*.moth` support packages are depended on by package name. Consumers do not encode ancestor paths.
+- **Child module**: reaching a child normal module exposes only its `@mod.moth` facade. Dependency clauses cannot bypass that facade with paths such as `@child/internal`.
+- **Support package**: scoped `@package.moth` packages are depended on by package name. Consumers never encode ancestor paths. A support-only child remains importable only by eligible consumers through its support surface.
+- **Entry-only child module**: an entry-only directory has no importable normal interface. A dependency that requests one receives a missing-surface diagnostic. The entry is never activated.
 - **Core binding-backed package**: `@core/math`, `@core/text` and current peers are registered by the builder.
-- **Builder source-backed package**: `@html` is a builder-provided source-backed package.
+- **Builder source-backed package**: `@html` is a builder-provided source-backed package and the fixed template prelude provider.
 - **Builder binding-backed package**: `@web/canvas` is a builder-owned runtime package.
 - **JavaScript file**: project-local annotated JavaScript files require `.js` and a builder external import provider. The `.js` extension is kept.
 
@@ -23,29 +50,26 @@ A dependency clause and a file path in expression position are two different sem
 - Scoped support packages are injected by package name, not physical ancestor paths.
 - Core and builder runtime packages use their registered package path.
 - Specific symbol bindings use flat direct selections. Direct symbol paths such as `@core/math/sin` remain invalid.
-- Direct dependency clauses on `+*.moth` support root files and `config.moth` are rejected.
-- `@@name` is invalid. The leading `@` starts a dependency path and is not part of the module name. Normal module-root filenames such as `@page.moth` are not depended on directly.
+- Direct dependency clauses on `@mod.moth`, `@package.moth`, `@entry.moth` and `config.moth` are rejected. Depend on the module directory instead.
+- `@@name` is invalid. The leading `@` starts a dependency path and is not part of the module name.
 - A bare explicit-extension clause requires `as` or at least one direct selection. An explicit-extension clause with no registered provider gets a targeted diagnostic.
-- A recognised source extension used with an explicit extension gets an extensionless-source diagnostic. `@docs/intro.mtf content` stays invalid as a clause even though `@docs/intro.mtf` is valid in expression position.
+- A recognised source extension used with an explicit extension gets an extensionless-source diagnostic. `@docs/intro.mtf content` stays invalid as a clause even though `@docs/intro.mtf` is a valid file value in expression position.
 - Moth template `.mtf` and plain Markdown `.md` content files both expose generated `content` constants. See @../moth-templates/#content-dependencies (Moth template content dependencies) and @../markdown/#markdown-dependencies (Markdown dependencies).
-- The bound public surface of a module root comes from its `export:` block. See @#module-visibility (Module visibility).
+- The bound public surface of a module comes from its `export:` block in `@mod.moth` or `@package.moth`. See @#module-visibility (Module visibility).
 
 ### Same-module dependencies
 
-Files in the same module can bind ordinary sibling source files directly. Same-module dependency clauses bypass the public-surface boundary. See @#module-visibility (Module visibility).
+Files in the same module can bind ordinary sibling source files directly. Same-module dependency clauses bypass the public-surface boundary. Root-local declarations are the exception: a declaration authored directly in `@mod.moth`, `@package.moth` or `@entry.moth` stays in that root file. See @#module-visibility (Module visibility).
 
 ### Cross-module dependencies
 
-Dependency clauses that cross into another module boundary can only access what that module's `export:` block makes public. Cross-module dependency clauses cannot bypass the public API. See @#module-visibility (Module visibility).
+Dependency clauses that cross into another module boundary can only access what that module's applicable facade makes public. Cross-module dependency clauses cannot bypass the public API. See @#module-visibility (Module visibility).
 
 ### Content-file dependencies
 
 Moth template and plain Markdown content files are bound with the same extensionless syntax. Their dependency shape is covered by the Moth template and Plain Markdown pages, not here.
 
-`export:` remains the current module-boundary marker. A later `$export` migration
-will replace it rather than create a permanent dual syntax; its block support is
-undecided. This future spelling does not change module-root-relative path resolution.
-
+`export:` remains the current module-boundary marker. A later `$export` migration will replace it rather than create a permanent dual syntax. The future spelling stays restricted to `@mod.moth` and `@package.moth`. It does not change module-root-relative path resolution.
 
 ### Concepts related to dependency paths
 

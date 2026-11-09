@@ -51,43 +51,7 @@ pub(crate) fn lower_statement(
                 lowered_args.push(lowered.value);
             }
 
-            let callee = match target {
-                CallTarget::Local(function_id) => {
-                    // User calls stay function-id based after semantic lowering.
-                    let function_id = context
-                        .module_context
-                        .function_map
-                        .get(function_id)
-                        .copied()
-                        .ok_or_else(|| {
-                            InfrastructureFailure::lir_transformation(format!(
-                                "Wasm lowering missing function id mapping for {function_id:?}"
-                            ))
-                        })?;
-                    WasmCalleeRef::Function(function_id)
-                }
-                // Unreachable: `validate_wasm_cross_module_calls` rejects every reachable
-                // cross-module call (`CrossModuleCalls`) before lowering.
-                CallTarget::CrossModule(origin) => crate::compiler_bug!(
-                    CompilerStage::BackendLowering,
-                    "Wasm lowering received unresolved cross-module function target {origin:?}"
-                ),
-                // Unreachable: `validate_hir_linked_function_targets` rejects module-private and
-                // generated call targets (`LinkedFunctionTargets`) before lowering.
-                CallTarget::ModulePrivate(identity) => crate::compiler_bug!(
-                    CompilerStage::BackendLowering,
-                    "Wasm lowering received unresolved module-private function target {identity:?}"
-                ),
-                CallTarget::Generated(identity) => crate::compiler_bug!(
-                    CompilerStage::BackendLowering,
-                    "Wasm lowering received unresolved generated function target {identity:?}"
-                ),
-                CallTarget::External(_) => {
-                    // Host calls lower to deterministic import ids.
-                    let import_id = resolve_host_call_import(context.module_context, target)?;
-                    WasmCalleeRef::Import(import_id)
-                }
-            };
+            let callee = lower_call_callee(context, target)?;
 
             let mut lowered_results = Vec::with_capacity(results.len());
             for destination in results {
@@ -198,6 +162,55 @@ pub(crate) fn lower_statement(
             lower_push_runtime_fragment(context, vec_local, *value, statements)
         }
     }
+}
+
+/// Resolve one HIR call target to its lowered Wasm callee.
+///
+/// WHAT: owns the single target-to-callee mapping shared by call statements and terminating
+///       Never calls.
+/// WHY: a terminating call must preserve target identity exactly like an ordinary call; duplicating
+///      the mapping would let the two paths disagree about local, linked or import identity.
+pub(crate) fn lower_call_callee(
+    context: &mut WasmFunctionLoweringContext<'_, '_>,
+    target: &CallTarget,
+) -> Result<WasmCalleeRef, InfrastructureFailure> {
+    Ok(match target {
+        CallTarget::Local(function_id) => {
+            // User calls stay function-id based after semantic lowering.
+            let function_id = context
+                .module_context
+                .function_map
+                .get(function_id)
+                .copied()
+                .ok_or_else(|| {
+                    InfrastructureFailure::lir_transformation(format!(
+                        "Wasm lowering missing function id mapping for {function_id:?}"
+                    ))
+                })?;
+            WasmCalleeRef::Function(function_id)
+        }
+        // Unreachable: `validate_wasm_cross_module_calls` rejects every reachable
+        // cross-module call (`CrossModuleCalls`) before lowering.
+        CallTarget::CrossModule(origin) => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm lowering received unresolved cross-module function target {origin:?}"
+        ),
+        // Unreachable: `validate_hir_linked_function_targets` rejects module-private and
+        // generated call targets (`LinkedFunctionTargets`) before lowering.
+        CallTarget::ModulePrivate(identity) => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm lowering received unresolved module-private function target {identity:?}"
+        ),
+        CallTarget::Generated(identity) => crate::compiler_bug!(
+            CompilerStage::BackendLowering,
+            "Wasm lowering received unresolved generated function target {identity:?}"
+        ),
+        CallTarget::External(_) => {
+            // Host calls lower to deterministic import ids.
+            let import_id = resolve_host_call_import(context.module_context, target)?;
+            WasmCalleeRef::Import(import_id)
+        }
+    })
 }
 
 fn lower_checked_integer_operation(

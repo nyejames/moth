@@ -1,0 +1,13 @@
+IDENTITY must:
+    identify |This| -> I32
+;
+
+Thing = |
+    value I32,
+|
+
+identify |this Thing| -> !:
+    assert(false, "identify")
+;
+
+Thing must IDENTITY

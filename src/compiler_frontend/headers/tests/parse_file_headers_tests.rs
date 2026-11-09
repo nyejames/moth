@@ -27,6 +27,7 @@ use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSy
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     FunctionReturnSyntax, FunctionSignatureSyntax, ReturnChannelSyntax, ReturnSlotSyntax,
 };
+use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings,
     ExternalPackageRegistry, ExternalReturnAlias, ExternalSymbolId, ExternalSymbolPath,
@@ -41,7 +42,7 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::semantic_identity::{ModuleRootFiles, ModuleRootRole};
 use crate::compiler_frontend::source::test_support::TestSourceContext;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
@@ -82,8 +83,6 @@ mod parse_file_headers_dependency_tests;
 mod parse_file_headers_entry_runtime_tests;
 #[path = "parse_file_headers_export_tests.rs"]
 mod parse_file_headers_export_tests;
-#[path = "parse_file_headers_legacy_import_tests.rs"]
-mod parse_file_headers_legacy_import_tests;
 #[path = "parse_file_headers_module_role_tests.rs"]
 mod parse_file_headers_module_role_tests;
 #[path = "parse_file_headers_multifile_tests.rs"]
@@ -92,6 +91,8 @@ mod parse_file_headers_multifile_tests;
 mod parse_file_headers_prepared_tests;
 #[path = "parse_file_headers_provider_collision_tests.rs"]
 mod parse_file_headers_provider_collision_tests;
+#[path = "parse_file_headers_qualified_reference_tests.rs"]
+mod parse_file_headers_qualified_reference_tests;
 #[path = "parse_file_headers_signature_choice_tests.rs"]
 mod parse_file_headers_signature_choice_tests;
 #[path = "parse_file_headers_source_config_tests.rs"]
@@ -105,7 +106,6 @@ mod parse_file_headers_type_span_tests;
 
 struct HeaderTestDiagnostics {
     diagnostics: CompactDiagnosticBagForTest,
-    string_table: StringTable,
 }
 
 impl std::fmt::Debug for HeaderTestDiagnostics {
@@ -168,8 +168,7 @@ fn find_diagnostic_family<View: FamilyView>(
 
 struct HeaderTestPrepareContext<'a> {
     source_id: SourceId,
-    entry_file_path: &'a Path,
-    options: &'a HeaderParseOptions,
+    options: &'a HeaderParseOptions<'a>,
     style_directives: &'a StyleDirectiveRegistry,
 }
 
@@ -209,6 +208,24 @@ pub(crate) fn prepare_single_file(
     )
 }
 
+/// Prepare one API facade root fixture selected as a normal `@mod.moth` module root.
+pub(crate) fn prepare_api_root_with_fork(
+    source: &str,
+    file_path: &Path,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> (FileFrontendPrepareOutput, ExtendedSpanBuilder) {
+    prepare_single_file_with_fork_role(
+        source,
+        file_path,
+        Some(FileRole::ActiveApiOnlyModuleRoot(
+            crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
+        )),
+        string_table,
+        path_fork,
+    )
+}
+
 /// Prepare one file in the caller-owned path table that will later consume its output.
 pub(crate) fn prepare_single_file_with_fork(
     source: &str,
@@ -217,31 +234,33 @@ pub(crate) fn prepare_single_file_with_fork(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> (FileFrontendPrepareOutput, ExtendedSpanBuilder) {
-    let options = HeaderParseOptions::default();
-    let style_directives = StyleDirectiveRegistry::built_ins();
-    let interned_path = path_fork
-        .try_intern_filesystem_path(file_path, string_table)
-        .expect("test path should be UTF-8");
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
-        source,
-        interned_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        string_table,
-        path_fork,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
-    .expect("tokenization should succeed");
+    let selected_role = (entry_file_path == file_path).then_some(FileRole::ActiveEntryRoot);
+    prepare_single_file_with_fork_role(source, file_path, selected_role, string_table, path_fork)
+}
 
-    let (owner, path_syntax) = owner_from_lexed_source(file_tokens);
-    let output = prepare_file_from_tokens(
-        owner,
-        interned_path,
-        path_syntax,
-        entry_file_path,
-        &options,
+fn prepare_single_file_with_fork_role(
+    source: &str,
+    file_path: &Path,
+    selected_role: Option<FileRole>,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> (FileFrontendPrepareOutput, ExtendedSpanBuilder) {
+    let options =
+        selected_role.map_or_else(HeaderParseOptions::default, |role| HeaderParseOptions {
+            selected_file: Some((SourceId::COMPILATION_ROOT, role)),
+            ..Default::default()
+        });
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let context = HeaderTestPrepareContext {
+        source_id: SourceId::COMPILATION_ROOT,
+        options: &options,
+        style_directives: &style_directives,
+    };
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let output = prepare_test_source_file(
+        source,
+        file_path,
+        &context,
         string_table,
         0,
         0,
@@ -286,7 +305,6 @@ fn prepare_test_source_file(
         owner,
         interned_path,
         path_syntax,
-        context.entry_file_path,
         context.options,
         string_table,
         const_template_offset,
@@ -319,12 +337,19 @@ fn prepare_tampered_path_clause(source: &str, file_path: &str) -> FileFrontendPr
     let (owner, _path_syntax) = owner_from_lexed_source(file_tokens);
     let invalid_path_syntax = Arc::new(PathSyntaxTable::new());
 
+    let options = crate::compiler_frontend::tests::parse_support::fixture_file_role(
+        &file_path,
+        Path::new("src/@entry.moth"),
+    )
+    .map_or_else(HeaderParseOptions::default, |role| HeaderParseOptions {
+        selected_file: Some((SourceId::COMPILATION_ROOT, role)),
+        ..Default::default()
+    });
     match prepare_file_from_tokens(
         owner,
         interned_path,
         invalid_path_syntax,
-        &file_path,
-        &HeaderParseOptions::default(),
+        &options,
         &mut string_table,
         0,
         0,
@@ -363,7 +388,7 @@ fn private_dependency_clause_propagates_path_lookup_infrastructure_failure() {
 #[test]
 fn public_dependency_clause_propagates_path_lookup_infrastructure_failure() {
     expect_prepare_infrastructure(
-        prepare_tampered_path_clause("export:\n    @core/math sin\n;\n", "src/@page.moth"),
+        prepare_tampered_path_clause("export:\n    @core/math sin\n;\n", "src/@mod.moth"),
         "public dependency clause",
     );
 }
@@ -372,7 +397,7 @@ fn public_dependency_clause_propagates_path_lookup_infrastructure_failure() {
 fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let interned_path = path_fork
         .try_intern_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
@@ -412,7 +437,6 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
             owner,
             interned_path,
             other_path_syntax,
-            &file_path,
             &HeaderParseOptions::default(),
             &mut string_table,
             0,
@@ -427,7 +451,7 @@ fn file_preparation_reports_wrong_table_path_lookup_as_infrastructure() {
     );
 }
 
-fn prepare_active_root_with_role(
+pub(crate) fn prepare_active_root_with_role(
     source: &str,
     file_path: &Path,
     active_root_role: ModuleRootRole,
@@ -436,15 +460,15 @@ fn prepare_active_root_with_role(
     path_fork: &mut PathInternerFork,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let options = HeaderParseOptions {
-        entry_file_id: None,
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role,
+        selected_file: Some((
+            SourceId::COMPILATION_ROOT,
+            FileRole::ActiveApiOnlyModuleRoot(active_root_role),
+        )),
+        ..Default::default()
     };
     let style_directives = StyleDirectiveRegistry::built_ins();
     let context = HeaderTestPrepareContext {
         source_id: SourceId::COMPILATION_ROOT,
-        entry_file_path: file_path,
         options: &options,
         style_directives: &style_directives,
     };
@@ -507,7 +531,7 @@ fn prepare_and_bind_headers_result(
 pub(crate) fn parse_single_file_headers(source: &str) -> BoundModuleHeaders {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let (output, mut span_builder) = prepare_single_file_with_fork(
         source,
         &file_path,
@@ -533,7 +557,7 @@ fn parse_single_file_headers_with_warnings(
 ) -> (BoundModuleHeaders, CompactDiagnosticBagForTest) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let (mut output, mut span_builder) = prepare_single_file_with_fork(
         source,
         &file_path,
@@ -562,7 +586,7 @@ pub(crate) fn parse_single_file_headers_with_table(
 ) -> (BoundModuleHeaders, StringTable) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let (output, mut span_builder) = prepare_single_file_with_fork(
         source,
         &file_path,
@@ -590,15 +614,45 @@ fn parse_single_file_headers_with_entry(
     file_path: &str,
     entry_file_path: &str,
 ) -> HeaderTestOutcome {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from(file_path);
     let entry_file_path = PathBuf::from(entry_file_path);
+    let options = crate::compiler_frontend::tests::parse_support::fixture_file_role(
+        &file_path,
+        &entry_file_path,
+    )
+    .map_or_else(HeaderParseOptions::default, |role| HeaderParseOptions {
+        selected_file: Some((SourceId::COMPILATION_ROOT, role)),
+        ..Default::default()
+    });
+    parse_single_file_headers_with_options(source, &file_path, options)
+}
+
+/// Prepare one file as a foreign module root reached by a flattened synthetic unit.
+fn parse_single_file_headers_with_reached_role(
+    source: &str,
+    file_path: &str,
+    reached_role: FileRole,
+) -> HeaderTestOutcome {
+    let file_path = PathBuf::from(file_path);
+    let options = HeaderParseOptions {
+        root_file_ids: ModuleRootFiles::default(),
+        selected_file: None,
+        reached_root_roles: &[(SourceId::COMPILATION_ROOT, reached_role)],
+    };
+    parse_single_file_headers_with_options(source, &file_path, options)
+}
+
+fn parse_single_file_headers_with_options(
+    source: &str,
+    file_path: &Path,
+    options: HeaderParseOptions<'_>,
+) -> HeaderTestOutcome {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
     let external_package_registry = ExternalPackageRegistry::new();
-    let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let interned_path = path_fork
-        .try_intern_filesystem_path(&file_path, &mut string_table)
+        .try_intern_filesystem_path(file_path, &mut string_table)
         .expect("test path should be UTF-8");
     let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = tokenize(
@@ -618,7 +672,6 @@ fn parse_single_file_headers_with_entry(
         owner,
         interned_path,
         path_syntax,
-        &entry_file_path,
         &options,
         &mut string_table,
         0,
@@ -634,7 +687,6 @@ fn parse_single_file_headers_with_entry(
         })) => {
             return HeaderTestOutcome::Diagnostics(HeaderTestDiagnostics {
                 diagnostics: diagnostic_view_for_test(diagnostic),
-                string_table,
             });
         }
         Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
@@ -654,7 +706,6 @@ fn parse_single_file_headers_with_entry(
         Ok(headers) => HeaderTestOutcome::Headers(headers),
         Err(diagnostics) => HeaderTestOutcome::Diagnostics(HeaderTestDiagnostics {
             diagnostics: compact_bag_for_test(diagnostics, None),
-            string_table,
         }),
     }
 }
@@ -794,7 +845,7 @@ fn compile_time_constant_headers_are_parsed() {
 fn prepare_source_contract_syntax(source: &str) -> Result<PreparedHeaderSyntax, DiagnosticBag> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let (output, _) = prepare_single_file_with_fork(
         source,
         &file_path,
@@ -819,8 +870,8 @@ fn prepare_source_contract_syntax(source: &str) -> Result<PreparedHeaderSyntax, 
 fn malformed_nested_decorator_wrapper_constant_initializer_reports_eof_delimiter_error() {
     let result = parse_single_file_headers_with_entry(
         "broken #= [$before = [:<tr>]:\n<table>\n    [$before = [:<td>]:[$slot]]\n</table>\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
 
     assert!(
@@ -910,7 +961,6 @@ pub(crate) fn parse_multi_file_headers(
     let style_directives = StyleDirectiveRegistry::built_ins();
     let prepare_context = HeaderTestPrepareContext {
         source_id: SourceId::COMPILATION_ROOT,
-        entry_file_path: &entry_file_path,
         options: &options,
         style_directives: &style_directives,
     };
@@ -922,12 +972,22 @@ pub(crate) fn parse_multi_file_headers(
 
     for (source, path_str) in sources {
         let file_path = PathBuf::from(path_str);
+        let source_id = SourceId::from_index(span_builders.len());
+        let options = crate::compiler_frontend::tests::parse_support::fixture_file_role(
+            &file_path,
+            &entry_file_path,
+        )
+        .map_or_else(HeaderParseOptions::default, |role| HeaderParseOptions {
+            selected_file: Some((source_id, role)),
+            ..Default::default()
+        });
         let mut span_builder = ExtendedSpanBuilder::new();
         let output = prepare_test_source_file(
             source,
             &file_path,
             &HeaderTestPrepareContext {
-                source_id: SourceId::from_index(span_builders.len()),
+                source_id,
+                options: &options,
                 ..prepare_context
             },
             &mut string_table,
@@ -988,7 +1048,6 @@ fn parse_multi_file_headers_with_path(
     let style_directives = StyleDirectiveRegistry::built_ins();
     let prepare_context = HeaderTestPrepareContext {
         source_id: SourceId::COMPILATION_ROOT,
-        entry_file_path: &entry_file_path,
         options: &options,
         style_directives: &style_directives,
     };
@@ -1002,12 +1061,22 @@ fn parse_multi_file_headers_with_path(
 
     for (source, path_str) in sources {
         let file_path = PathBuf::from(path_str);
+        let source_id = SourceId::from_index(span_builders.len());
+        let options = crate::compiler_frontend::tests::parse_support::fixture_file_role(
+            &file_path,
+            &entry_file_path,
+        )
+        .map_or_else(HeaderParseOptions::default, |role| HeaderParseOptions {
+            selected_file: Some((source_id, role)),
+            ..Default::default()
+        });
         let mut span_builder = ExtendedSpanBuilder::new();
         match prepare_test_source_file(
             source,
             &file_path,
             &HeaderTestPrepareContext {
-                source_id: SourceId::from_index(span_builders.len()),
+                source_id,
+                options: &options,
                 ..prepare_context
             },
             &mut string_table,
@@ -1068,8 +1137,10 @@ fn empty_void_function_def(name: &str) -> ExternalFunctionDef {
     ExternalFunctionDef {
         name: name.to_owned(),
         parameters: Vec::new(),
-        returns: external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
-        error_return_type: None,
+        return_contract: external_returns(
+            external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
+            None,
+        ),
         const_eval: None,
         lowerings: ExternalFunctionLowerings::default(),
     }
@@ -1128,12 +1199,11 @@ fn registry_with_prelude_type_symbol(name: &'static str) -> ExternalPackageRegis
 fn assert_generic_dependency_name_collision(source: &str) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let context = HeaderTestPrepareContext {
         source_id: SourceId::COMPILATION_ROOT,
-        entry_file_path: &file_path,
         options: &options,
         style_directives: &style_directives,
     };

@@ -40,7 +40,7 @@ use crate::compiler_frontend::semantic_identity::{
     StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{
-    SourceDatabase, SourceDatabaseBuilder, SourceDatabaseError, SourceId,
+    SourceDatabase, SourceDatabaseBuilder, SourceDatabaseError, SourceId, SourceKind,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
@@ -48,6 +48,8 @@ use crate::compiler_frontend::symbols::path_interner::{PathInternerBuilder, Path
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use crate::builder_surface::BuilderSurface;
+use crate::builder_surface::SourceFileKind;
+use crate::builder_surface::definition::TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
 use crate::projects::settings::Config;
 
 use std::sync::Arc;
@@ -89,7 +91,7 @@ pub(super) struct ModuleBoundaryPublication<'a> {
     pub materialisations: &'a mut ProviderMaterialisationRegistry,
     pub resource_inputs: &'a mut ResourceInputRegistry,
     pub module_id: ModuleId,
-    pub expected_origin: &'a StableModuleOriginIdentity,
+    pub expected_normal_origin: Option<&'a StableModuleOriginIdentity>,
     pub expected_support_origin: Option<&'a StableModuleOriginIdentity>,
     pub artifact: CompiledModuleArtifact,
     pub generated_delta: GeneratedFunctionDelta,
@@ -112,7 +114,7 @@ pub(super) fn publish_module_and_generated(
         materialisations,
         resource_inputs,
         module_id,
-        expected_origin,
+        expected_normal_origin,
         expected_support_origin,
         artifact,
         generated_delta,
@@ -124,7 +126,7 @@ pub(super) fn publish_module_and_generated(
     let module_publication = modules.preflight_success(
         module_id,
         &artifact,
-        expected_origin,
+        expected_normal_origin,
         expected_support_origin,
     )?;
     let generated_publication = generated.preflight(&generated_delta)?;
@@ -157,7 +159,7 @@ pub(super) fn publish_compiled_module(
     materialisations: &mut ProviderMaterialisationRegistry,
     resource_inputs: &mut ResourceInputRegistry,
     module_id: ModuleId,
-    expected_origin: &StableModuleOriginIdentity,
+    expected_normal_origin: Option<&StableModuleOriginIdentity>,
     expected_support_origin: Option<&StableModuleOriginIdentity>,
     compiled: ModuleSemanticResult,
     mut warnings: DiagnosticBag,
@@ -212,8 +214,8 @@ pub(super) fn publish_compiled_module(
         resource_source_associations,
         string_table: _,
         path_fork: _,
-        public_interface,
-        support_public_interface,
+        normal_interface,
+        support_interface,
     } = compiled;
     if !path_remap.is_identity() {
         module.remap_path_ids(&path_remap);
@@ -276,12 +278,12 @@ pub(super) fn publish_compiled_module(
         materialisations,
         resource_inputs,
         module_id,
-        expected_origin,
+        expected_normal_origin,
         expected_support_origin,
         artifact: CompiledModuleArtifact {
             module,
-            interface: public_interface,
-            support_interface: support_public_interface,
+            normal_interface,
+            support_interface,
         },
         generated_delta,
         resource_source_associations,
@@ -717,6 +719,56 @@ pub(crate) fn build_module_package_dependency_index(
     dependencies
 }
 
+fn inventory_contains_moth_template(inventory: &SourcePackageModuleInventory) -> bool {
+    inventory.source_files.sources().iter().any(|slot| {
+        matches!(
+            slot.kind,
+            Some(SourceKind::Compiler(SourceFileKind::MothTemplate))
+        )
+    })
+}
+
+/// Adds the compiler-owned ordering edge from template-bearing packages to the prelude package.
+///
+/// WHAT: a source package that contains at least one `.mtf` source depends on the official
+///       `@html` package before its module boundary can bind the flat helper prelude.
+/// WHY: authored package edges alone do not order the prelude package; without this edge a
+///      package such as `@docs` can publish before `@html`, and prelude interface lookup then
+///      fails even though the builder registered the official package.
+///
+/// The prelude package itself is never given a self edge. A `.mtf` authored inside `@html` is not
+/// part of any first-party package set; the canonical prelude lookup reports it as an unavailable
+/// prelude provider instead of inventing a self-dependency cycle.
+pub(crate) fn add_template_prelude_ordering_dependencies(
+    package_prefixes: &[String],
+    contains_moth_template: &[bool],
+    dependencies: &mut [Vec<String>],
+) {
+    debug_assert_eq!(package_prefixes.len(), contains_moth_template.len());
+    debug_assert_eq!(package_prefixes.len(), dependencies.len());
+    if !package_prefixes
+        .iter()
+        .any(|prefix| prefix == TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX)
+    {
+        return;
+    }
+    for ((prefix, has_template), dependencies) in package_prefixes
+        .iter()
+        .zip(contains_moth_template)
+        .zip(dependencies)
+    {
+        if !has_template || prefix == TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX {
+            continue;
+        }
+        if !dependencies
+            .iter()
+            .any(|dependency| dependency == TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX)
+        {
+            dependencies.push(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX.to_owned());
+        }
+    }
+}
+
 fn order_source_package_inventories(
     inventories: Vec<SourcePackageModuleInventory>,
 ) -> Result<Vec<SourcePackageModuleInventory>, BoundaryPremergeFailure> {
@@ -727,7 +779,7 @@ fn order_source_package_inventories(
     // Only canonical source-package dependencies participate in package ordering. Check-only
     // bindings are transient semantic inputs and must not add package graph edges or make a
     // package appear cyclic; their jobs run after all canonical facades have published.
-    let dependency_prefixes = inventories
+    let mut dependency_prefixes = inventories
         .iter()
         .map(|inventory| {
             let mut dependencies = inventory
@@ -741,6 +793,15 @@ fn order_source_package_inventories(
             dependencies
         })
         .collect::<Vec<_>>();
+    let contains_moth_template = inventories
+        .iter()
+        .map(inventory_contains_moth_template)
+        .collect::<Vec<_>>();
+    add_template_prelude_ordering_dependencies(
+        &package_prefixes,
+        &contains_moth_template,
+        &mut dependency_prefixes,
+    );
 
     let order = match order_packages_by_dependency(&package_prefixes, &dependency_prefixes) {
         Ok(order) => order,
@@ -1590,7 +1651,7 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
                 &mut external_imports,
                 directory_dependency_resolution,
                 &mut resource_inputs,
-                mode.requires_normal_entry(),
+                mode.requires_entry(),
                 mode.includes_check_only(),
                 &mut selected_source_texts,
                 string_table,

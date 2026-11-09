@@ -15,7 +15,6 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::expressions::expression_types::{
     FallibleExpressionHandling, FallibleHandling,
 };
-use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
@@ -85,6 +84,93 @@ fn assert_invalid_receiver_call(source: &str, expected_reason_key: &'static str)
 // --------------------------
 //  Signature parsing
 // --------------------------
+
+// -----------------------------
+//  Never return contract syntax
+// -----------------------------
+
+#[test]
+fn never_return_contract_rejects_combined_return_syntax() {
+    for source in [
+        "f || -> !, I32:\n;\n",
+        "f || -> ! !:\n;\n",
+        "f || -> !!:\n;\n",
+        "f || -> !?:\n;\n",
+        "f || -> ! Error!:\n;\n",
+        "f || -> ! I32:\n;\n",
+        "f || -> String, !:\n;\n",
+        "f || -> Error!, !:\n;\n",
+    ] {
+        assert_function_diagnostic(
+            source,
+            "MOTH-RULE-0062",
+            Some("invalid_function_signature.never_cannot_combine"),
+        );
+    }
+}
+
+#[test]
+fn never_return_contract_requires_a_function_body_colon() {
+    assert_function_diagnostic(
+        "f || -> !\n;\n",
+        "MOTH-RULE-0062",
+        Some("invalid_function_signature.missing_colon_after_returns"),
+    );
+}
+
+#[test]
+fn bare_never_is_rejected_in_parameter_position() {
+    assert_function_diagnostic(
+        "f |value !| -> I32:\n    return 1\n;\n",
+        "MOTH-SYNTAX-0014",
+        Some("invalid_type_annotation.expected_type_annotation"),
+    );
+}
+
+#[test]
+fn bare_never_is_rejected_in_struct_field_position() {
+    assert_function_diagnostic(
+        "Point = |\n    value !,\n|\n",
+        "MOTH-SYNTAX-0014",
+        Some("invalid_type_annotation.expected_type_annotation"),
+    );
+}
+
+#[test]
+fn bare_never_is_rejected_in_alias_position() {
+    assert_function_diagnostic(
+        "Alias as !\n",
+        "MOTH-SYNTAX-0014",
+        Some("invalid_type_annotation.expected_type_annotation"),
+    );
+}
+
+#[test]
+fn bare_never_is_rejected_in_collection_type_position() {
+    // A growable collection's leading slot is capacity syntax, so a bare `!` there is rejected
+    // as a capacity-only shorthand rather than a type annotation.
+    assert_function_diagnostic(
+        "f || -> {!}:\n;\n",
+        "MOTH-SYNTAX-0016",
+        Some("invalid_collection_type.shorthand_capacity_not_allowed"),
+    );
+
+    // A map value slot reaches ordinary type parsing and keeps the expected type diagnostic.
+    assert_function_diagnostic(
+        "f || -> {String = !}:\n;\n",
+        "MOTH-SYNTAX-0014",
+        Some("invalid_type_annotation.expected_type_annotation"),
+    );
+}
+
+#[test]
+fn none_return_annotation_keeps_its_invalid_type_rule() {
+    assert_function_diagnostic(
+        "f || -> None:\n;\n",
+        "MOTH-SYNTAX-0014",
+        Some("invalid_type_annotation.none_not_allowed"),
+    );
+}
 
 #[test]
 fn generic_declarations_in_executable_bodies_require_module_top_level() {
@@ -368,12 +454,15 @@ fn parses_function_parameters_and_return_types() {
             .map(|id| string_table.resolve(id)),
         Some("right")
     );
-    assert_eq!(signature.returns.len(), 1);
     assert_eq!(
-        signature.returns[0].type_id,
-        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
+        signature.return_contract.expect_ordinary().success().len(),
+        1
     );
-    assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
+    assert_eq!(
+        signature.return_contract.expect_ordinary().success()[0],
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
+    assert!(!signature.return_contract.expect_ordinary().is_fallible());
 }
 
 #[test]
@@ -383,24 +472,27 @@ fn parses_final_error_return_slot_in_function_signature() {
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
 
-    assert_eq!(signature.returns.len(), 2);
     assert_eq!(
-        signature.returns[0].type_id,
-        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
+        signature.return_contract.expect_ordinary().success().len(),
+        1
     );
-    assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
+    assert_eq!(
+        signature.return_contract.expect_ordinary().success()[0],
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
     assert!(
         matches!(
             ast.type_environment.get(
-                signature.returns[1]
-                    .type_id
+                signature
+                    .return_contract
+                    .expect_ordinary()
+                    .error()
                     .expect("Error return type should be resolved")
             ),
             Some(TypeDefinition::Struct(_))
         ),
         "builtin Error should resolve to a struct type"
     );
-    assert_eq!(signature.returns[1].channel, ReturnChannel::Error);
 }
 
 #[test]
@@ -410,16 +502,20 @@ fn parses_optional_final_error_return_slot() {
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
 
-    assert_eq!(signature.returns.len(), 2);
+    assert_eq!(
+        signature.return_contract.expect_ordinary().success().len(),
+        1
+    );
     assert_eq!(
         ast.type_environment.option_inner_type(
-            signature.returns[1]
-                .type_id
+            signature
+                .return_contract
+                .expect_ordinary()
+                .error()
                 .expect("optional error return should be resolved")
         ),
         Some(ast.type_environment.builtins().string)
     );
-    assert_eq!(signature.returns[1].channel, ReturnChannel::Error);
 }
 
 #[test]
@@ -988,8 +1084,8 @@ fn resolves_named_struct_type_in_function_returns() {
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "clone");
     assert_eq!(
-        signature.returns[0].type_id,
-        Some(signature.parameters[0].type_id),
+        signature.return_contract.expect_ordinary().success()[0],
+        signature.parameters[0].type_id,
         "the named return should resolve to the parameter's semantic type"
     );
     assert!(matches!(
@@ -1694,12 +1790,15 @@ fn parses_valid_single_return_without_trailing_comma() {
         parse_single_file_ast("compute |x I32| -> I32:\n    return 42\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
-    assert_eq!(signature.returns.len(), 1);
     assert_eq!(
-        signature.returns[0].type_id,
-        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
+        signature.return_contract.expect_ordinary().success().len(),
+        1
     );
-    assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
+    assert_eq!(
+        signature.return_contract.expect_ordinary().success()[0],
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
+    assert!(!signature.return_contract.expect_ordinary().is_fallible());
 }
 
 #[test]
@@ -1708,17 +1807,19 @@ fn parses_valid_multiple_returns_without_trailing_comma() {
         parse_single_file_ast("compute |x I32| -> I32, String:\n    return 42, \"result\"\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
-    assert_eq!(signature.returns.len(), 2);
     assert_eq!(
-        signature.returns[0].type_id,
-        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
+        signature.return_contract.expect_ordinary().success().len(),
+        2
     );
-    assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
     assert_eq!(
-        signature.returns[1].type_id,
-        Some(ast.type_environment.builtins().string)
+        signature.return_contract.expect_ordinary().success()[0],
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     );
-    assert_eq!(signature.returns[1].channel, ReturnChannel::Success);
+    assert_eq!(
+        signature.return_contract.expect_ordinary().success()[1],
+        ast.type_environment.builtins().string
+    );
+    assert!(!signature.return_contract.expect_ordinary().is_fallible());
 }
 
 #[test]

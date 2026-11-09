@@ -1,15 +1,17 @@
 //! Stage 0 durable module identity and structural topology.
 //!
-//! WHAT: owns the dense `ModuleId`, `ModuleIdentityRecord`, deterministic assignment table,
-//! structural ancestry and the filename-to-root-role classifier produced by the one Stage 0
-//! source-tree traversal, and derives frontend module-root lookup tables from those identities.
-//! A structural module is one rooted canonical directory. It may carry one normal `@*.moth` root,
-//! one support `+*.moth` root, or both. Helper files receive one role-neutral shared origin; each
-//! present root receives its own role-qualified surface origin.
+//! WHAT: owns the dense `ModuleId`, `ModuleIdentityRecord`, deterministic assignment table and
+//! structural ancestry produced by the one Stage 0 source-tree traversal, and derives frontend
+//! module-root lookup tables from those identities. The filename-to-root-role classifier lives
+//! in `compiler_frontend::source_packages::root_file`.
+//! A structural module is one rooted canonical directory. It may carry one normal `@mod.moth`
+//! root, one support `@package.moth` root, one entry `@entry.moth` root, or any combination.
+//! Helper files receive one role-neutral shared origin; each present root receives its own
+//! role-qualified surface origin.
 //! The cross-stage portable value types — `StablePackageIdentity`,
-//! `StableModuleOriginIdentity` and `ModuleRootRole` — are compiler-semantic identity owned by
-//! [`crate::compiler_frontend::semantic_identity`]; this module imports them so Stage 0 stays
-//! the assignment and table owner while identity values remain build-independent.
+//! `StableModuleOriginIdentity`, `ModuleRootFiles` and `ModuleRootRole` — are compiler-semantic
+//! identity owned by [`crate::compiler_frontend::semantic_identity`]; this module imports them so
+//! Stage 0 stays the assignment and table owner while identity values remain build-independent.
 //! WHY: durable identity and topology are build-system-owned data. A structural module is the
 //! scheduling and ownership unit, not one root file. Keep the dense `ModuleId` per rooted
 //! directory and derive the role-qualified origins without inventing parallel module records.
@@ -17,10 +19,7 @@
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::semantic_identity::{
-    ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
-};
-use crate::compiler_frontend::source_packages::root_file::{
-    file_name_is_normal_module_root_file, file_name_is_support_root_file,
+    ModuleRootFiles, ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 
 use rustc_hash::FxHashMap;
@@ -31,8 +30,8 @@ use std::path::{Path, PathBuf};
 ///
 /// `ModuleId` is the build-local index assigned by sorting canonical logical module paths, so
 /// it is independent of traversal completion order and cosmetic root filename suffixes
-/// (`@mod.moth` and `@page.moth` in the same directory collapse to one structural module whose
-/// identity comes from the directory, not the filename).
+/// (every present root in one directory collapses to one structural module whose identity
+/// comes from the directory, not the filename).
 ///
 /// It is deliberately not the persistent semantic identity: its numeric value is a build-local
 /// table slot that may cross stages inside that build boundary but must not identify a module
@@ -50,45 +49,16 @@ impl ModuleId {
     }
 }
 
-/// The root surface implied by a canonical root filename, or `None` for non-root files.
-pub(crate) fn module_root_role_for_file_name(file_name: &str) -> Option<ModuleRootRole> {
-    if file_name_is_normal_module_root_file(file_name) {
-        Some(ModuleRootRole::Normal)
-    } else if file_name_is_support_root_file(file_name) {
-        Some(ModuleRootRole::Support)
-    } else {
-        None
-    }
-}
-
-/// The public-surface role for a directory with the given root surfaces.
-///
-/// A support root is the external surface when present; otherwise the normal root is public.
-/// Callers must pass a directory that owns at least one root file. This is the single
-/// surface-selection rule shared by package-boundary discovery, prepared root projection and
-/// compiled package validation.
-pub(crate) fn public_surface_role(has_normal_root: bool, has_support_root: bool) -> ModuleRootRole {
-    debug_assert!(
-        has_normal_root || has_support_root,
-        "a structural module must own at least one root file"
-    );
-    if has_support_root {
-        ModuleRootRole::Support
-    } else {
-        ModuleRootRole::Normal
-    }
-}
-
-/// One structural module root directory with its durable identity and optional root surfaces.
+/// One structural module root directory with its durable identity and fixed root inventory.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ModuleIdentityRecord {
     root_directory: PathBuf,
     logical_module_path: PathBuf,
-    normal_root_file: Option<PathBuf>,
-    support_root_file: Option<PathBuf>,
+    root_files: ModuleRootFiles<PathBuf>,
     shared_origin: StableModuleOriginIdentity,
-    normal_origin: Option<StableModuleOriginIdentity>,
-    support_origin: Option<StableModuleOriginIdentity>,
+    /// Role-qualified origins for the present API and entry roots. The preparation anchor is the
+    /// normal, support, then entry origin in that order.
+    surface_origins: ModuleRootFiles<StableModuleOriginIdentity>,
 }
 
 impl ModuleIdentityRecord {
@@ -99,90 +69,118 @@ impl ModuleIdentityRecord {
     /// `InfrastructureFailure` if the logical path has an invalid component.
     pub(crate) fn new(
         root_directory: PathBuf,
-        normal_root_file: Option<PathBuf>,
-        support_root_file: Option<PathBuf>,
+        root_files: ModuleRootFiles<PathBuf>,
         logical_module_path: PathBuf,
         package: &StablePackageIdentity,
     ) -> Result<Self, InfrastructureFailure> {
+        debug_assert!(
+            !root_files.is_empty(),
+            "a structural module must own at least one root file"
+        );
         let shared_origin = StableModuleOriginIdentity::from_relative_logical_path(
             package.clone(),
             &logical_module_path,
             ModuleRootRole::Shared,
         )?;
-        let normal_origin = normal_root_file.as_ref().map(|_| {
-            StableModuleOriginIdentity::from_relative_logical_path(
-                package.clone(),
-                &logical_module_path,
-                ModuleRootRole::Normal,
-            )
-        });
-        let support_origin = support_root_file.as_ref().map(|_| {
-            StableModuleOriginIdentity::from_relative_logical_path(
-                package.clone(),
-                &logical_module_path,
-                ModuleRootRole::Support,
-            )
-        });
-        let normal_origin = normal_origin.transpose()?;
-        let support_origin = support_origin.transpose()?;
+        let normal_origin = Self::surface_origin_for(
+            &root_files,
+            ModuleRootRole::Normal,
+            package,
+            &logical_module_path,
+        )?;
+        let support_origin = Self::surface_origin_for(
+            &root_files,
+            ModuleRootRole::Support,
+            package,
+            &logical_module_path,
+        )?;
+        let entry_origin = Self::surface_origin_for(
+            &root_files,
+            ModuleRootRole::Entry,
+            package,
+            &logical_module_path,
+        )?;
         Ok(Self {
             root_directory,
             logical_module_path,
-            normal_root_file,
-            support_root_file,
+            root_files,
             shared_origin,
-            normal_origin,
-            support_origin,
+            surface_origins: ModuleRootFiles::new(normal_origin, support_origin, entry_origin),
         })
+    }
+
+    fn surface_origin_for(
+        root_files: &ModuleRootFiles<PathBuf>,
+        role: ModuleRootRole,
+        package: &StablePackageIdentity,
+        logical_module_path: &Path,
+    ) -> Result<Option<StableModuleOriginIdentity>, InfrastructureFailure> {
+        if root_files.get(role).is_none() {
+            return Ok(None);
+        }
+        StableModuleOriginIdentity::from_relative_logical_path(
+            package.clone(),
+            logical_module_path,
+            role,
+        )
+        .map(Some)
     }
 
     pub(crate) fn root_directory(&self) -> &Path {
         &self.root_directory
     }
 
+    pub(crate) fn root_files(&self) -> &ModuleRootFiles<PathBuf> {
+        &self.root_files
+    }
+
     pub(crate) fn normal_root_file(&self) -> Option<&Path> {
-        self.normal_root_file.as_deref()
+        self.root_file(ModuleRootRole::Normal)
     }
 
     pub(crate) fn support_root_file(&self) -> Option<&Path> {
-        self.support_root_file.as_deref()
+        self.root_file(ModuleRootRole::Support)
+    }
+
+    pub(crate) fn entry_root_file(&self) -> Option<&Path> {
+        self.root_file(ModuleRootRole::Entry)
+    }
+
+    /// The canonical root file for one present role.
+    pub(crate) fn root_file(&self, role: ModuleRootRole) -> Option<&Path> {
+        self.root_files.get(role).map(PathBuf::as_path)
     }
 
     pub(crate) fn has_normal_root(&self) -> bool {
-        self.normal_root_file.is_some()
+        self.normal_root_file().is_some()
     }
 
+    #[cfg(test)]
     pub(crate) fn has_support_root(&self) -> bool {
-        self.support_root_file.is_some()
+        self.support_root_file().is_some()
     }
 
-    /// The role of the package-facing public surface.
-    pub(crate) fn public_surface_role(&self) -> ModuleRootRole {
-        public_surface_role(self.has_normal_root(), self.has_support_root())
+    pub(crate) fn has_entry_root(&self) -> bool {
+        self.entry_root_file().is_some()
+    }
+
+    /// The role of the package-facing public surface, when this module owns an API facade.
+    pub(crate) fn public_surface_role(&self) -> Option<ModuleRootRole> {
+        self.root_files.public_surface_role()
     }
 
     /// The canonical package-facing public-surface root file.
-    pub(crate) fn public_root_file(&self) -> &Path {
-        self.root_file_for_surface(self.public_surface_role())
-            .expect("the selected public surface must own a root file")
+    pub(crate) fn public_root_file(&self) -> Option<&Path> {
+        self.public_surface_role()
+            .and_then(|role| self.root_file(role))
     }
 
-    /// The canonical root file for one explicit surface.
-    pub(crate) fn root_file_for_surface(&self, role: ModuleRootRole) -> Option<&Path> {
-        match role {
-            ModuleRootRole::Normal => self.normal_root_file(),
-            ModuleRootRole::Support => self.support_root_file(),
-            ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => None,
-        }
-    }
-
-    /// The primary surface role for consumers that need one representative surface.
+    /// The structural role of the preparation anchor root.
+    #[cfg(test)]
     pub(crate) fn role(&self) -> ModuleRootRole {
-        if self.has_normal_root() {
-            ModuleRootRole::Normal
-        } else {
-            ModuleRootRole::Support
-        }
+        self.root_files
+            .anchor_role()
+            .expect("a structural module has at least one root")
     }
 
     /// The role-qualified origin for one present surface.
@@ -190,11 +188,12 @@ impl ModuleIdentityRecord {
         &self,
         role: ModuleRootRole,
     ) -> Option<&StableModuleOriginIdentity> {
-        match role {
-            ModuleRootRole::Normal => self.normal_origin.as_ref(),
-            ModuleRootRole::Support => self.support_origin.as_ref(),
-            ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => None,
-        }
+        self.surface_origins.get(role)
+    }
+
+    /// The complete role-keyed surface-origin inventory.
+    pub(crate) fn surface_origins(&self) -> &ModuleRootFiles<StableModuleOriginIdentity> {
+        &self.surface_origins
     }
 
     /// The role-neutral origin used by helper files and as the structural module identity.
@@ -202,12 +201,11 @@ impl ModuleIdentityRecord {
         &self.shared_origin
     }
 
-    /// The primary role-qualified origin for consumers that need one representative surface.
+    /// The origin of the selected preparation anchor: normal, support, then entry.
     pub(crate) fn stable_origin(&self) -> &StableModuleOriginIdentity {
-        self.normal_origin
-            .as_ref()
-            .or(self.support_origin.as_ref())
-            .expect("a structural module has at least one surface origin")
+        self.surface_origins
+            .preparation_anchor()
+            .expect("a structural module has at least one root origin")
     }
 }
 
@@ -255,37 +253,19 @@ impl ModuleIdentityTable {
         }
     }
 
-    /// Derive the normal-root lookup table used by synthetic and normal-only resolution.
-    pub(crate) fn derive_module_root_table(&self) -> ModuleRootTable {
-        let normal_records = self
-            .records
-            .iter()
-            .filter_map(|record| {
-                record.normal_root_file.as_ref().map(|root_file| {
-                    ModuleRootRecord::from_surfaces(
-                        record.root_directory.clone(),
-                        Some(root_file.clone()),
-                        None,
-                    )
-                })
-            })
-            .collect();
-        ModuleRootTable::from_records(normal_records)
-    }
-
     /// Derive the complete root table for semantic compilation inside one package boundary.
     ///
-    /// A paired directory contributes its normal root here. The support root is selected through
-    /// structural surface metadata, not through a second same-directory lookup entry.
+    /// A paired directory contributes every present root here. The support and entry roots are
+    /// selected through structural surface metadata, not through a second same-directory lookup
+    /// entry.
     pub(crate) fn derive_compilation_root_table(&self) -> ModuleRootTable {
         let records = self
             .records
             .iter()
             .map(|record| {
-                ModuleRootRecord::from_surfaces(
+                ModuleRootRecord::from_roots(
                     record.root_directory.clone(),
-                    record.normal_root_file.clone(),
-                    record.support_root_file.clone(),
+                    record.root_files.clone(),
                 )
             })
             .collect();

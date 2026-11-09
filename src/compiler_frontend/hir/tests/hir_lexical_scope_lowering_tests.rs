@@ -8,6 +8,7 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::hir::blocks::HirLocal;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::source::SourceSpan;
@@ -102,7 +103,10 @@ fn compiler_generated_scope_lowers_through_child_region_and_rejoins_parent() {
     let start_function = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![lexical_scope, after_declaration],
     );

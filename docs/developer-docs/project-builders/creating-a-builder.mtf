@@ -65,7 +65,6 @@ The example package has no output-relative resource strings.
                     HostPackage::new("@platform")
                         .function(moth::host_binding!(has_prefix)),
                 )
-                .moth_templates()
                 .markdown()
                 .finish()
         }

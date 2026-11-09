@@ -1,0 +1,3 @@
+stop || -> !:
+    assert(false, "stop")
+;

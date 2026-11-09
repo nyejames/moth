@@ -17,9 +17,7 @@ use super::scope_context::{ReceiverMethodCatalog, ReceiverMethodEntry};
 use crate::compiler_frontend::ast::ResolvedTraitSourceFact;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot,
-};
+use crate::compiler_frontend::ast::statements::functions::{FunctionParameter, FunctionSignature};
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAlias,
 };
@@ -34,11 +32,13 @@ use crate::compiler_frontend::datatypes::ids::{
     GenericParameterListId, NominalTypeId, TypeId, builtin_type_ids,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderExportMode, HeaderKind,
 };
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -130,15 +130,14 @@ fn resolved_free_signature(int_type_id: TypeId) -> ResolvedFunctionSignature {
         binding_span: None,
         contract: crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
     };
-    let return_slot = ReturnSlot {
-        type_id: Some(int_type_id),
-        channel: ReturnChannel::Success,
-    };
     ResolvedFunctionSignature {
         receiver: None,
         signature: FunctionSignature {
             parameters: vec![parameter],
-            returns: vec![return_slot],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [int_type_id],
+                None,
+            )),
         },
     }
 }
@@ -154,7 +153,7 @@ fn receiver_signature(int_type_id: TypeId) -> FunctionSignature {
     };
     FunctionSignature {
         parameters: vec![parameter],
-        returns: vec![],
+        return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots([], None)),
     }
 }
 
@@ -272,7 +271,7 @@ fn retains_every_public_root_category_in_sorted_header_order() {
         header(
             struct_kind(),
             struct_path.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -280,7 +279,7 @@ fn retains_every_public_root_category_in_sorted_header_order() {
         header(
             function_kind(),
             func_path.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -288,7 +287,7 @@ fn retains_every_public_root_category_in_sorted_header_order() {
         header(
             choice_kind(),
             choice_path.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -296,7 +295,7 @@ fn retains_every_public_root_category_in_sorted_header_order() {
         header(
             alias_kind(),
             alias_path.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -304,7 +303,7 @@ fn retains_every_public_root_category_in_sorted_header_order() {
         header(
             constant_kind(),
             const_path.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -358,8 +357,14 @@ fn retains_every_public_root_category_in_sorted_header_order() {
     };
     assert_eq!(signature.parameters.len(), 1);
     assert_eq!(signature.parameters[0].type_id, int_type_id);
-    assert_eq!(signature.returns.len(), 1);
-    assert_eq!(signature.returns[0].type_id, Some(int_type_id));
+    assert_eq!(
+        signature.return_contract.expect_ordinary().success().len(),
+        1
+    );
+    assert_eq!(
+        signature.return_contract.expect_ordinary().success()[0],
+        int_type_id
+    );
 
     assert_eq!(table.roots[2].path, choice_path);
     assert!(matches!(
@@ -397,7 +402,7 @@ fn excludes_imported_root_private_and_non_declaration_headers() {
         header(
             struct_kind(),
             imported_struct.to_owned(),
-            FileRole::ImportedModuleRoot,
+            FileRole::Normal,
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -405,7 +410,7 @@ fn excludes_imported_root_private_and_non_declaration_headers() {
         header(
             function_kind(),
             private_func.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Private,
             &mut string_table,
             &mut path_fork,
@@ -413,7 +418,7 @@ fn excludes_imported_root_private_and_non_declaration_headers() {
         header(
             function_kind(),
             public_func.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -421,7 +426,7 @@ fn excludes_imported_root_private_and_non_declaration_headers() {
         header(
             HeaderKind::StartFunction,
             start_path.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -501,7 +506,7 @@ fn retains_private_receiver_methods_for_public_nominal_receivers_in_order_indepe
         header(
             function_kind(),
             public_method_path.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Private,
             &mut string_table,
             &mut path_fork,
@@ -509,7 +514,7 @@ fn retains_private_receiver_methods_for_public_nominal_receivers_in_order_indepe
         header(
             function_kind(),
             private_method_path.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Private,
             &mut string_table,
             &mut path_fork,
@@ -517,7 +522,7 @@ fn retains_private_receiver_methods_for_public_nominal_receivers_in_order_indepe
         header(
             struct_kind(),
             public_struct.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -525,7 +530,7 @@ fn retains_private_receiver_methods_for_public_nominal_receivers_in_order_indepe
         header(
             struct_kind(),
             private_struct.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Private,
             &mut string_table,
             &mut path_fork,
@@ -626,7 +631,7 @@ fn missing_alias_entry_is_internal_error() {
     let alias_header = header(
         alias_kind(),
         alias_path.to_owned(),
-        FileRole::ActiveModuleRoot,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
         HeaderExportMode::Public,
         &mut string_table,
         &mut path_fork,
@@ -669,7 +674,7 @@ fn missing_resolved_function_signature_is_internal_error() {
     let headers = vec![header(
         function_kind(),
         func_path.to_owned(),
-        FileRole::ActiveModuleRoot,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
         HeaderExportMode::Public,
         &mut string_table,
         &mut path_fork,
@@ -706,7 +711,7 @@ fn missing_nominal_type_id_is_internal_error() {
     let headers = vec![header(
         struct_kind(),
         struct_path.to_owned(),
-        FileRole::ActiveModuleRoot,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
         HeaderExportMode::Public,
         &mut string_table,
         &mut path_fork,
@@ -743,7 +748,7 @@ fn missing_resolved_constant_is_internal_error() {
     let headers = vec![header(
         constant_kind(),
         const_path.to_owned(),
-        FileRole::ActiveModuleRoot,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
         HeaderExportMode::Public,
         &mut string_table,
         &mut path_fork,
@@ -785,7 +790,7 @@ fn missing_receiver_catalog_entry_is_internal_error() {
         header(
             struct_kind(),
             public_struct.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -793,7 +798,7 @@ fn missing_receiver_catalog_entry_is_internal_error() {
         header(
             function_kind(),
             method_path.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Private,
             &mut string_table,
             &mut path_fork,
@@ -859,7 +864,7 @@ fn missing_active_root_function_signature_in_method_pass_is_internal_error() {
         header(
             function_kind(),
             imported_func.to_owned(),
-            FileRole::ImportedModuleRoot,
+            FileRole::Normal,
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -867,7 +872,7 @@ fn missing_active_root_function_signature_in_method_pass_is_internal_error() {
         header(
             HeaderKind::StartFunction,
             start_path.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -875,7 +880,7 @@ fn missing_active_root_function_signature_in_method_pass_is_internal_error() {
         header(
             struct_kind(),
             public_struct.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -883,7 +888,7 @@ fn missing_active_root_function_signature_in_method_pass_is_internal_error() {
         header(
             function_kind(),
             method_path.to_owned(),
-            FileRole::ActiveModuleRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Private,
             &mut string_table,
             &mut path_fork,
@@ -997,7 +1002,7 @@ fn retains_source_trait_fact_for_generic_struct_bound() {
     let headers = vec![header(
         struct_kind(),
         struct_path.to_owned(),
-        FileRole::ActiveModuleRoot,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
         HeaderExportMode::Public,
         &mut string_table,
         &mut path_fork,
@@ -1063,7 +1068,7 @@ fn retains_core_trait_fact_for_generic_struct_bound() {
     let headers = vec![header(
         struct_kind(),
         struct_path.to_owned(),
-        FileRole::ActiveModuleRoot,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
         HeaderExportMode::Public,
         &mut string_table,
         &mut path_fork,
@@ -1126,7 +1131,7 @@ fn missing_trait_definition_for_bound_is_infrastructure_failure() {
     let headers = vec![header(
         struct_kind(),
         struct_path.to_owned(),
-        FileRole::ActiveModuleRoot,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
         HeaderExportMode::Public,
         &mut string_table,
         &mut path_fork,
@@ -1175,7 +1180,7 @@ fn missing_resolved_struct_fields_is_internal_error() {
     let headers = vec![header(
         struct_kind(),
         struct_path.to_owned(),
-        FileRole::ActiveModuleRoot,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
         HeaderExportMode::Public,
         &mut string_table,
         &mut path_fork,

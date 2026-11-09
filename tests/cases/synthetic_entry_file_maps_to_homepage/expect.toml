@@ -1,0 +1,11 @@
+entry = "@entry.moth"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["single entry"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["single entry"]

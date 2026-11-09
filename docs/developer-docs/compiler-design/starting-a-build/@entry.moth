@@ -1,0 +1,22 @@
+@starting-a-build content as reference_content
+@styles navbar, section, theme_css, sidebar, init_docs_sidebar
+@diagrams css as diagrams_css
+
+#[$in title:["03. Starting a build"]]
+#[$in description:["How command selection and project config prepare a Moth build."]]
+#[$in head:<style>[theme_css] [diagrams_css]</style>]
+
+#[navbar]
+#[sidebar]
+init_docs_sidebar()!
+
+#[section, $md:
+    A build chooses its command, builder and folded project values before any page source enters the compiler.
+]
+
+#[section, reference_content]
+
+#[section, $md:
+    @../ (Compiler design) / @../moth-design-choices (Previous) / @../project-graphs-and-modules (Next)
+]
+

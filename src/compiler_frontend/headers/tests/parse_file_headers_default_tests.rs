@@ -25,7 +25,7 @@ fn missing_default_value_after_assign_points_at_member_boundary() {
 
     for (source, boundary) in cases {
         let result =
-            parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
+            parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
         let errors =
             expect_header_error(result, "an authored `=` with no value should be rejected");
         let diagnostic = errors
@@ -63,8 +63,8 @@ fn missing_default_value_after_assign_points_at_member_boundary() {
 fn special_member_default_reasons_win_over_missing_default_value() {
     let trait_requirement = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |This, value I32 =|\n;\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     let trait_errors = expect_header_error(
         trait_requirement,
@@ -80,8 +80,8 @@ fn special_member_default_reasons_win_over_missing_default_value() {
 
     let choice = parse_single_file_headers_with_entry(
         "Response ::\n    Err |\n        message String =|,\n    Success,\n;\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     let choice_errors =
         expect_header_error(choice, "choice payload field defaults must be rejected");

@@ -1,0 +1,19 @@
+STOPPABLE must:
+    stop |This| -> !
+;
+
+-- The template is valid on its own: it diverges through the bound requirement.
+abort type T is STOPPABLE |value T| -> !:
+    value.stop()
+;
+
+Thing = |
+    code I32,
+|
+
+-- abort of Thing dispatches back here, so this proof depends on itself.
+stop |this Thing| -> !:
+    abort(this)
+;
+
+Thing must STOPPABLE

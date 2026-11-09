@@ -13,7 +13,9 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
 };
-use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
+use crate::compiler_frontend::ast::expressions::parse_expression::{
+    ParsedStatementExpression, create_statement_expression,
+};
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
@@ -175,6 +177,12 @@ fn rejects_discarded_fallible_success(expression: ExpressionView<'_>) -> Option<
     None
 }
 
+/// One validated statement-position outcome.
+enum StatementExpressionOutcome {
+    Value(ExprId),
+    NeverCall(Box<crate::compiler_frontend::ast::statements::never_call::NeverCall>),
+}
+
 /// Parses an expression and validates that it is valid in statement position.
 ///
 /// WHAT: statement positions own their complete fragment, so an unresolvable numeric origin
@@ -193,7 +201,7 @@ fn parse_and_validate_statement_expression(
     const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<ExprId, ExpressionParseError> {
+) -> Result<StatementExpressionOutcome, ExpressionParseError> {
     let mut inferred = ExpectedType::Infer;
     let mut cast_target_context = CastTargetContext::None;
     let input = ExpressionParseInput::ordinary(
@@ -212,14 +220,20 @@ fn parse_and_validate_statement_expression(
         false,
     )
     .with_numeric_deferral_owner();
-    let expression = create_expression_with_trailing_newline_policy(input)?;
-    validate_statement_expression(
-        expression_builder.view_owned(expression)?,
-        context,
-        token_stream,
-        string_table,
-    )?;
-    Ok(expression.id())
+    match create_statement_expression(input)? {
+        ParsedStatementExpression::Value(expression) => {
+            validate_statement_expression(
+                expression_builder.view_owned(expression)?,
+                context,
+                token_stream,
+                string_table,
+            )?;
+            Ok(StatementExpressionOutcome::Value(expression.id()))
+        }
+        ParsedStatementExpression::NeverCall(never_call) => {
+            Ok(StatementExpressionOutcome::NeverCall(never_call))
+        }
+    }
 }
 
 /// Apply the statement-position rules to one parsed expression.
@@ -294,10 +308,19 @@ pub(crate) fn push_statement_expression(
         string_table,
         path_fork,
     ) {
-        Ok(expression) => {
+        Ok(StatementExpressionOutcome::Value(expression)) => {
             let span = expression_builder.view(expression)?.span();
             draft.push_node(AstNode {
                 kind: NodeKind::ExpressionStatement(expression),
+                span,
+                scope: context.scope,
+            });
+            Ok(())
+        }
+        Ok(StatementExpressionOutcome::NeverCall(never_call)) => {
+            let span = never_call.span;
+            draft.push_node(AstNode {
+                kind: NodeKind::NeverCall(never_call),
                 span,
                 scope: context.scope,
             });

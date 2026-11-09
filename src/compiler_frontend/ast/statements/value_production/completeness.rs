@@ -1,51 +1,30 @@
-//! All-path value-production exit analysis and `then` group traversal.
+//! Value-production completeness and reachable `then` traversal.
 //!
-//! WHAT: summarises whether a statement sequence can fall through, produce values
-//! or terminate. Reachable traversal feeds inference and completeness. Authored
-//! traversal visits every `ThenValue` group, including groups after a terminal
-//! statement, so receiving validation and coercion still apply to dead groups.
-//! WHY: value-producing `if`, match and catch share one completeness contract.
-//! Mixed produce/terminate paths are complete; any real fallthrough is not. Dead
-//! values must not constrain an inferred type, so inference keeps reachable-only traversal.
+//! WHAT: validates that value-producing `if`, match and catch bodies leave every reachable path
+//! through an accepted exit, and traverses only the `then` groups that remain reachable.
+//! WHY: value-producing blocks share one completeness contract. Producing values, returning,
+//! diverging and leaving through `break` or `continue` targeting an enclosing loop are complete;
+//! a nested loop consumes its own exits, so it cannot complete the branch on its own. Any real
+//! fallthrough is rejected. Dead values must not constrain an inferred type, so inference keeps
+//! reachable-only traversal.
 //!
-//! This module does not own missing-`else` syntax checks.
+//! Exit facts belong to
+//! [`crate::compiler_frontend::ast::statements::control_flow_exits`]. This module owns the
+//! value-production policy: which exits are acceptable at a value branch and the required
+//! at-least-one-producing-path rule. It does not own missing-`else` syntax checks.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
-use crate::compiler_frontend::ast::const_values::{ConstValuePayload, ConstValueStore};
+use crate::compiler_frontend::ast::const_values::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression_store::{
-    AstExpressionBuilder, ExprId, ExpressionOperationView,
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+use crate::compiler_frontend::ast::statements::control_flow_exits::{
+    ControlFlowExitScratch, ControlFlowExitSummary, analyze_control_flow_exits_in_scratch,
 };
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
-use crate::compiler_frontend::ast::statements::value_production::types::{
-    BranchExitSummary, ProducedValues,
-};
+use crate::compiler_frontend::ast::statements::value_production::types::ProducedValues;
 use crate::compiler_frontend::compiler_messages::InvalidControlFlowStatementReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow;
 use crate::compiler_frontend::source::SourceSpan;
-
-/// Analyses a body into independent fallthrough, produce and terminate facts.
-///
-/// WHAT: walks statements in order and only sequences the next statement onto
-/// paths that still fall through.
-/// WHY: nested `if`/`match` can produce on one path and terminate on another;
-/// later statements must not run on those exited paths.
-pub fn analyze_branch_exits(
-    body: &[AstNode],
-    expressions: &AstExpressionBuilder,
-    constants: &ConstValueStore,
-) -> BranchExitSummary {
-    let mut summary = BranchExitSummary::FALLS_THROUGH;
-
-    for statement in body {
-        summary = summary.then_sequence(statement_exits(statement, expressions, constants));
-        if !summary.can_fall_through {
-            break;
-        }
-    }
-
-    summary
-}
 
 /// Validates every value-match arm and optional default against the shared contract.
 pub fn validate_value_match_completeness(
@@ -55,10 +34,16 @@ pub fn validate_value_match_completeness(
     expressions: &AstExpressionBuilder,
     constants: &ConstValueStore,
 ) -> Result<(), ExpressionParseError> {
-    let mut combined: Option<BranchExitSummary> = None;
+    let mut combined: Option<ControlFlowExitSummary> = None;
+    let mut scratch = ControlFlowExitScratch::default();
 
     for arm in arms {
-        let arm_exits = analyze_branch_exits(&arm.body, expressions, constants);
+        let arm_exits = analyze_control_flow_exits_in_scratch(
+            &arm.body,
+            expressions.store(),
+            constants,
+            &mut scratch,
+        );
         reject_fallthrough(arm_exits, span)?;
         combined = Some(match combined {
             Some(existing) => existing.union(arm_exits),
@@ -67,7 +52,12 @@ pub fn validate_value_match_completeness(
     }
 
     if let Some(default_body) = default {
-        let default_exits = analyze_branch_exits(default_body, expressions, constants);
+        let default_exits = analyze_control_flow_exits_in_scratch(
+            default_body,
+            expressions.store(),
+            constants,
+            &mut scratch,
+        );
         reject_fallthrough(default_exits, span)?;
         combined = Some(match combined {
             Some(existing) => existing.union(default_exits),
@@ -79,7 +69,7 @@ pub fn validate_value_match_completeness(
         return Err(no_producing_path(span));
     };
 
-    if combined.produces_value {
+    if combined.has_producing_path() {
         Ok(())
     } else {
         Err(no_producing_path(span))
@@ -93,6 +83,22 @@ pub fn visit_reachable_then_values<E>(
     expressions: &AstExpressionBuilder,
     constants: &ConstValueStore,
 ) -> Result<(), E> {
+    visit_reachable_then_values_in_scratch(
+        body,
+        visitor,
+        expressions,
+        constants,
+        &mut ControlFlowExitScratch::default(),
+    )
+}
+
+fn visit_reachable_then_values_in_scratch<E>(
+    body: &[AstNode],
+    visitor: &mut impl FnMut(&ProducedValues) -> Result<(), E>,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
+    scratch: &mut ControlFlowExitScratch,
+) -> Result<(), E> {
     let mut reachable = true;
 
     for statement in body {
@@ -100,8 +106,14 @@ pub fn visit_reachable_then_values<E>(
             break;
         }
 
-        visit_statement_then_values(statement, visitor, expressions, constants)?;
-        reachable = statement_exits(statement, expressions, constants).can_fall_through;
+        visit_statement_then_values(statement, visitor, expressions, constants, scratch)?;
+        reachable = analyze_control_flow_exits_in_scratch(
+            std::slice::from_ref(statement),
+            expressions.store(),
+            constants,
+            scratch,
+        )
+        .can_fall_through;
     }
 
     Ok(())
@@ -154,91 +166,40 @@ pub fn visit_authored_then_values_mut<E>(
     Ok(())
 }
 
-fn statement_exits(
-    statement: &AstNode,
-    expressions: &AstExpressionBuilder,
-    constants: &ConstValueStore,
-) -> BranchExitSummary {
-    match &statement.kind {
-        NodeKind::ThenValue(_) => BranchExitSummary::PRODUCES,
-
-        NodeKind::Return(_) | NodeKind::ReturnError(_) => BranchExitSummary::TERMINATES,
-
-        NodeKind::If(_, then_body, Some(else_body), _) => analyze_branch_exits(
-            then_body,
-            expressions,
-            constants,
-        )
-        .union(analyze_branch_exits(else_body, expressions, constants)),
-
-        NodeKind::If(_, then_body, None, _) => {
-            analyze_branch_exits(then_body, expressions, constants)
-                .union(BranchExitSummary::FALLS_THROUGH)
-        }
-
-        NodeKind::Match {
-            arms,
-            default: maybe_default_body,
-            ..
-        } => match_exits(arms, maybe_default_body.as_deref(), expressions, constants),
-
-        NodeKind::LexicalScope { body } => analyze_branch_exits(body, expressions, constants),
-
-        NodeKind::Assert { condition, .. }
-            if assert_condition_is_statically_false(*condition, expressions, constants) =>
-        {
-            BranchExitSummary::TERMINATES
-        }
-
-        // Loops, break, continue and other compounds stay conservative.
-        _ => BranchExitSummary::FALLS_THROUGH,
-    }
-}
-
-fn match_exits(
-    arms: &[MatchArm],
-    default_body: Option<&[AstNode]>,
-    expressions: &AstExpressionBuilder,
-    constants: &ConstValueStore,
-) -> BranchExitSummary {
-    let mut combined: Option<BranchExitSummary> = None;
-
-    for arm in arms {
-        let arm_exits = analyze_branch_exits(&arm.body, expressions, constants);
-        combined = Some(match combined {
-            Some(existing) => existing.union(arm_exits),
-            None => arm_exits,
-        });
-    }
-
-    if let Some(default_body) = default_body {
-        let default_exits = analyze_branch_exits(default_body, expressions, constants);
-        combined = Some(match combined {
-            Some(existing) => existing.union(default_exits),
-            None => default_exits,
-        });
-    }
-
-    combined.unwrap_or(BranchExitSummary::FALLS_THROUGH)
-}
-
 fn visit_statement_then_values<E>(
     statement: &AstNode,
     visitor: &mut impl FnMut(&ProducedValues) -> Result<(), E>,
     expressions: &AstExpressionBuilder,
     constants: &ConstValueStore,
+    scratch: &mut ControlFlowExitScratch,
 ) -> Result<(), E> {
     match &statement.kind {
         NodeKind::ThenValue(produced_values) => visitor(produced_values),
 
         NodeKind::If(_, then_body, Some(else_body), _) => {
-            visit_reachable_then_values(then_body, visitor, expressions, constants)?;
-            visit_reachable_then_values(else_body, visitor, expressions, constants)
+            visit_reachable_then_values_in_scratch(
+                then_body,
+                visitor,
+                expressions,
+                constants,
+                scratch,
+            )?;
+            visit_reachable_then_values_in_scratch(
+                else_body,
+                visitor,
+                expressions,
+                constants,
+                scratch,
+            )
         }
 
-        NodeKind::If(_, then_body, None, _) => {
-            visit_reachable_then_values(then_body, visitor, expressions, constants)
-        }
+        NodeKind::If(_, then_body, None, _) => visit_reachable_then_values_in_scratch(
+            then_body,
+            visitor,
+            expressions,
+            constants,
+            scratch,
+        ),
 
         NodeKind::Match {
             arms,
@@ -246,16 +207,28 @@ fn visit_statement_then_values<E>(
             ..
         } => {
             for arm in arms {
-                visit_reachable_then_values(&arm.body, visitor, expressions, constants)?;
+                visit_reachable_then_values_in_scratch(
+                    &arm.body,
+                    visitor,
+                    expressions,
+                    constants,
+                    scratch,
+                )?;
             }
             if let Some(default_body) = maybe_default_body {
-                visit_reachable_then_values(default_body, visitor, expressions, constants)?;
+                visit_reachable_then_values_in_scratch(
+                    default_body,
+                    visitor,
+                    expressions,
+                    constants,
+                    scratch,
+                )?;
             }
             Ok(())
         }
 
         NodeKind::LexicalScope { body } => {
-            visit_reachable_then_values(body, visitor, expressions, constants)
+            visit_reachable_then_values_in_scratch(body, visitor, expressions, constants, scratch)
         }
 
         _ => Ok(()),
@@ -263,14 +236,14 @@ fn visit_statement_then_values<E>(
 }
 
 pub(crate) fn validate_closed_branch_pair(
-    then_exits: BranchExitSummary,
-    else_exits: BranchExitSummary,
+    then_exits: ControlFlowExitSummary,
+    else_exits: ControlFlowExitSummary,
     span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
     reject_fallthrough(then_exits, span)?;
     reject_fallthrough(else_exits, span)?;
 
-    if then_exits.produces_value || else_exits.produces_value {
+    if then_exits.has_producing_path() || else_exits.has_producing_path() {
         Ok(())
     } else {
         Err(no_producing_path(span))
@@ -278,17 +251,17 @@ pub(crate) fn validate_closed_branch_pair(
 }
 
 fn reject_fallthrough(
-    exits: BranchExitSummary,
+    exits: ControlFlowExitSummary,
     span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
-    if exits.can_fall_through {
+    if exits.is_value_producing_branch_complete() {
+        Ok(())
+    } else {
         Err(choices_control_flow::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ValueIfBranchFallsThrough,
             span,
         )
         .into())
-    } else {
-        Ok(())
     }
 }
 
@@ -298,23 +271,4 @@ fn no_producing_path(span: Option<SourceSpan>) -> ExpressionParseError {
         span,
     )
     .into()
-}
-
-/// Detects whether an assert condition is statically known to be `false`.
-///
-/// WHAT: checks only source-level/lowered literal `false`.
-/// WHY: branch completeness deliberately recognizes only literal false assertions
-///      and must stay aligned with HIR's direct assertion-failure lowering.
-fn assert_condition_is_statically_false(
-    condition: ExprId,
-    expressions: &AstExpressionBuilder,
-    constants: &ConstValueStore,
-) -> bool {
-    expressions.view(condition).is_ok_and(|view| {
-        matches!(
-            view.operation(),
-            ExpressionOperationView::Constant(id)
-                if matches!(constants.payload(id), Some(ConstValuePayload::Bool(false)))
-        )
-    })
 }

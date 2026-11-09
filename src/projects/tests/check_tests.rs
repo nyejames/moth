@@ -241,7 +241,7 @@ fn check_reports_missing_config_input_from_unselected_source() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
-    fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write page source");
+    fs::write(source_root.join("@entry.moth"), "value = 1\n").expect("should write page source");
     fs::write(
         source_root.join("orphan.moth"),
         "required_value #Config of Bool\n",
@@ -273,7 +273,7 @@ fn check_rejects_unselected_runtime_template_as_non_root_source() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
-    fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write page source");
+    fs::write(source_root.join("@entry.moth"), "value = 1\n").expect("should write page source");
     fs::write(source_root.join("helper.moth"), "[\"hello\"]\n")
         .expect("should write non-root source");
 
@@ -302,7 +302,7 @@ fn check_compiles_unselected_same_module_source_closure() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
-    fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write page source");
+    fs::write(source_root.join("@entry.moth"), "value = 1\n").expect("should write page source");
     fs::write(
         source_root.join("orphan.moth"),
         "@helper identity\nconsume |value I32| -> I32:\n    return identity(value)\n;\n",
@@ -372,7 +372,7 @@ fn config_ast_timers_use_dedicated_identities() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config file");
-    fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write source file");
+    fs::write(source_root.join("@entry.moth"), "value = 1\n").expect("should write source file");
 
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
     let outcome = execute_check(
@@ -428,9 +428,9 @@ fn check_retains_source_package_warning() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
+    fs::write(src.join("@entry.moth"), "value = 1\n").expect("should write project root");
     fs::write(
-        package.join("+package.moth"),
+        package.join("@package.moth"),
         "export:\n    run || -> I32:\n        value ~= \"hello\"\n        result ~= \"unset\"\n\n        if value is:\n            \"one\" => ~result = \"one\"\n            \"one\" => ~result = \"one\"\n            else => ~result = \"other\"\n        ;\n        return 1\n    ;\n;\n",
     )
     .expect("should write warning package root");
@@ -506,9 +506,35 @@ result I32 = choose_generic(1)
         Some(
             root.canonicalize()
                 .expect("project root should canonicalize")
-                .join("@page.moth")
+                .join("@entry.moth")
                 .as_path()
         )
+    );
+}
+
+#[test]
+fn check_accepts_a_directory_with_only_an_api_facade() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::write(root.join("config.moth"), DEFAULT_PAGE_CONFIG).expect("should write project config");
+    fs::write(root.join("@mod.moth"), "export:\n    answer #= 42\n;\n")
+        .expect("should write the API facade");
+
+    let completion = run_check_command(
+        root.to_str().expect("temporary path should be valid UTF-8"),
+        &BuildConfigInputSet::new(),
+        &test_project_builder(),
+        |report| {
+            assert_eq!(
+                report.error_count, 0,
+                "a zero-entry facade must check cleanly"
+            );
+            assert_eq!(report.warning_count, 0);
+        },
+    );
+    assert_eq!(
+        completion.status,
+        crate::projects::ProjectCommandStatus::Success
     );
 }
 
@@ -574,7 +600,7 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
             "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"dev\",\n    release_output = \"release\",\n)\n",
         )
         .expect("should write config");
-        fs::write(root.join("@page.moth"), "#[:<h1>Check</h1>]\n").expect("should write source");
+        fs::write(root.join("@entry.moth"), "#[:<h1>Check</h1>]\n").expect("should write source");
 
         let outcome = execute_check(
             root.to_str()
@@ -597,14 +623,14 @@ fn check_rejects_symlinked_directory_output_roots_before_frontend_work() {
 /// Stable source-facing identity for one frontend diagnostic.
 type DiagnosticIdentityRow = (&'static str, Option<&'static str>, String, i32);
 
-/// Create a directory project whose `src/@page.moth` holds `source`.
+/// Create a directory project whose `src/@entry.moth` holds `source`.
 fn write_page_project(_prefix: &str, source: &str) -> (tempfile::TempDir, PathBuf) {
     let temp = tempfile::tempdir().expect("should create temp dir");
     let root = temp.path().to_path_buf();
     let src = root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(root.join("config.moth"), DEFAULT_PAGE_CONFIG).expect("should write config");
-    fs::write(src.join("@page.moth"), source).expect("should write @page.moth source");
+    fs::write(src.join("@entry.moth"), source).expect("should write @entry.moth source");
     (temp, root)
 }
 
@@ -733,7 +759,7 @@ if value is:
         .collect();
     assert!(
         remaining.iter().any(|name| name == "config.moth")
-            && remaining.iter().any(|name| name == "@page.moth"),
+            && remaining.iter().any(|name| name == "@entry.moth"),
         "check should leave the authored config and source tree, got {remaining:?}"
     );
     let check_warning_identity = diagnostic_identity_sequence(
@@ -748,9 +774,9 @@ if value is:
     );
 
     let expected_warning_identity = vec![
-        ("MOTH-RULE-0022", None, "@page.moth".to_owned(), 6),
-        ("MOTH-RULE-0022", None, "@page.moth".to_owned(), 7),
-        ("MOTH-RULE-0022", None, "@page.moth".to_owned(), 8),
+        ("MOTH-RULE-0022", None, "@entry.moth".to_owned(), 6),
+        ("MOTH-RULE-0022", None, "@entry.moth".to_owned(), 7),
+        ("MOTH-RULE-0022", None, "@entry.moth".to_owned(), 8),
     ];
     assert_eq!(
         check_warning_identity, expected_warning_identity,
@@ -816,7 +842,7 @@ increment(count)
     let expected_error_identity = vec![(
         "MOTH-RULE-0054",
         Some("invalid_call_shape.mutable_access_required"),
-        "@page.moth".to_owned(),
+        "@entry.moth".to_owned(),
         6,
     )];
     assert_eq!(
@@ -1168,15 +1194,27 @@ fn run_stack_budgeted_rejection_test(
 /// together with the warning count.
 fn check_source_on_budgeted_thread(source: String) -> (Vec<String>, usize) {
     let temp = tempfile::tempdir().expect("should create temp dir");
-    let entry_file = temp.path().join("main.moth");
-    fs::write(&entry_file, source).expect("should write source file");
+    // The exported-root stack fixture needs an API facade role, which only a directory project
+    // assigns by root filename; runtime-only stack fixtures are ordinary selected files. The
+    // source shape is the only channel the child re-execution has.
+    let check_target = if source.contains("\nexport:\n") {
+        let root = temp.path().to_path_buf();
+        fs::write(root.join("config.moth"), DEFAULT_PAGE_CONFIG)
+            .expect("should write project config");
+        fs::write(root.join("@mod.moth"), source).expect("should write API facade");
+        root
+    } else {
+        let entry_file = temp.path().join("main.moth");
+        fs::write(&entry_file, source).expect("should write source file");
+        entry_file
+    };
 
     let worker = std::thread::Builder::new()
         .name("stack-budgeted-check".to_owned())
         .stack_size(WINDOWS_MAIN_THREAD_STACK_BYTES)
         .spawn(move || {
             let outcome = execute_check(
-                entry_file
+                check_target
                     .to_str()
                     .expect("temp file path should be valid UTF-8 for this test"),
                 &BuildConfigInputSet::new(),

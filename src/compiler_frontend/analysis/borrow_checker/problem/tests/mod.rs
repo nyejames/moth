@@ -14,13 +14,14 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp, ValueKind};
-use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionReturnContract};
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{
     BlockId as HirBlockId, FunctionId, HirNodeId, HirValueId, LocalId, RegionId,
@@ -49,6 +50,11 @@ use fixtures::{
     same_statement_access_order,
 };
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use rustc_hash::FxHashMap;
+
+use crate::compiler_frontend::analysis::borrow_checker::last_use::{
+    FutureUseStatus, LastUseAnalysis, LastUseLocation, LastUseSubject, LastUseWitness,
+};
 
 #[test]
 fn borrow_problem_copy_fixture_validates_and_keeps_source_and_result_origins_distinct() {
@@ -241,6 +247,23 @@ fn borrow_problem_rejects_terminator_edges_that_disagree_with_the_cfg() {
     let error = BorrowProblem::new(parts).expect_err("terminator edges must match the CFG");
 
     assert!(error.message.contains("do not match its outgoing edges"));
+}
+
+#[test]
+fn borrow_problem_rejects_never_call_with_an_outgoing_edge() {
+    let mut parts = branch_join();
+    parts.events[4].kind = EventKind::Terminator {
+        kind: TerminatorEventKind::NeverCall,
+    };
+
+    let error =
+        BorrowProblem::new(parts).expect_err("a NeverCall block cannot have a normal successor");
+
+    assert!(
+        error.message.contains("do not match its outgoing edges"),
+        "unexpected NeverCall successor error: {}",
+        error.message
+    );
 }
 
 #[test]
@@ -585,8 +608,10 @@ fn borrow_problem_hir_extractor_reads_the_returned_value_before_scope_exit() {
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: vec![local],
-        returns: Box::new([builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+            None,
+        )),
     };
     let problem = from_hir(&module, &function, None, None).expect("returning HIR should extract");
 
@@ -943,8 +968,10 @@ fn borrow_problem_hir_extractor_seeds_parameter_origins() {
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: vec![local],
-        returns: Box::new([builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+            None,
+        )),
     };
     let problem = from_hir(&module, &function, None, None).expect("parameter HIR should extract");
 
@@ -1476,7 +1503,7 @@ fn borrow_problem_hir_extractor_uses_conservative_generated_fallback_without_sum
                 "main".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            "@page.moth".to_owned(),
+            "@entry.moth".to_owned(),
             ModulePrivateExecutableCategory::GenericFunction,
             "identity".to_owned(),
             None,
@@ -1733,7 +1760,11 @@ fn borrow_problem_hir_extractor_preserves_native_map_get_alias_and_error_provena
     );
     let mut function = function_for(HirBlockId(0));
     function.params = vec![map_local];
-    function.error_return = Some(error_type);
+    function
+        .return_contract
+        .ordinary_mut()
+        .expect("fixture function is ordinary")
+        .set_error(Some(error_type));
     let problem = from_hir(&module, &function, None, None)
         .expect("native map Get should normalize without a public call summary");
     let effects = problem
@@ -1842,8 +1873,15 @@ fn borrow_problem_hir_extractor_preserves_invoke_edge_definitions_and_return_cha
         expressions,
     );
     let mut function = function_for(HirBlockId(0));
-    function.returns = Box::new([builtin_type_ids::fixed_scalar(FixedScalar::I32); 2]);
-    function.error_return = Some(error_type);
+    function.return_contract = HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+        [builtin_type_ids::fixed_scalar(FixedScalar::I32); 2],
+        None,
+    ));
+    function
+        .return_contract
+        .ordinary_mut()
+        .expect("fixture function is ordinary")
+        .set_error(Some(error_type));
     let mut summaries = rustc_hash::FxHashMap::default();
     summaries.insert(
         FunctionId(9),
@@ -2234,8 +2272,10 @@ fn hir_structural_string_return_fixture(value_kind: ValueKind) -> (HirModule, Hi
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: Vec::new(),
-        returns: Box::new([builtin_type_ids::STRING]),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [builtin_type_ids::STRING],
+            None,
+        )),
     };
     (module, function)
 }
@@ -2317,8 +2357,10 @@ fn hir_literal_fixture() -> (HirModule, HirFunction) {
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: vec![],
-        returns: Box::new([builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+            None,
+        )),
     };
     (module, function)
 }
@@ -2426,8 +2468,10 @@ fn function_for(entry: HirBlockId) -> HirFunction {
         id: FunctionId(0),
         entry,
         params: vec![],
-        returns: Box::new([builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            [builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+            None,
+        )),
     }
 }
 
@@ -2679,4 +2723,117 @@ fn two_argument_call_parts() -> super::BorrowProblemParts {
         ],
         ..super::BorrowProblemParts::default()
     }
+}
+
+#[test]
+fn borrow_problem_never_call_ends_argument_liveness_at_the_terminator() {
+    let (module, function) = hir_never_call_fixture();
+    let target = FunctionId(1);
+    let mut summaries = FxHashMap::default();
+    summaries.insert(
+        target,
+        PublicCallSummary {
+            parameters: vec![PublicCallParameterSummary {
+                access: PublicCallParameterAccess::Shared,
+                mutation: PublicCallMutationEffect::NoWrite,
+                transfer_effect: PublicCallTransferEffect::MayConsume,
+            }],
+            return_alias: FunctionReturnAliasSummary::Fresh,
+            escapes_builtin_failure: false,
+        },
+    );
+    let problem =
+        from_hir(&module, &function, Some(&summaries), None).expect("NeverCall HIR should extract");
+
+    assert!(
+        problem.control_flow().edges.is_empty(),
+        "a terminating call contributes no edge"
+    );
+    assert_eq!(
+        problem.control_flow().exits.as_ref(),
+        [problem.control_flow().entry]
+    );
+    let (argument_event, argument_place) = problem
+        .events()
+        .iter()
+        .find_map(|event| match &event.kind {
+            EventKind::CallArgument { argument, .. } => Some((event.id, argument.place)),
+            _ => None,
+        })
+        .expect("the terminating call should retain its granular argument");
+    assert!(matches!(
+        &problem
+            .events()
+            .last()
+            .expect("events must not be empty")
+            .kind,
+        EventKind::Terminator {
+            kind: TerminatorEventKind::NeverCall,
+        }
+    ));
+
+    let analysis = LastUseAnalysis::from_problem(&problem)
+        .expect("the terminating-call problem should analyze");
+    let result = analysis
+        .query(
+            LastUseSubject::Place(argument_place),
+            LastUseLocation::after_event(
+                argument_event,
+                problem.events()[argument_event.index()].point,
+            ),
+        )
+        .expect("last-use query should succeed");
+    assert_eq!(
+        result.status,
+        FutureUseStatus::NoFutureUse,
+        "liveness must end at the terminating call"
+    );
+    assert!(matches!(
+        result.witness,
+        LastUseWitness::NoFutureUse { explored_exits }
+            if explored_exits.as_ref() == [problem.control_flow().entry]
+    ));
+}
+
+fn hir_never_call_fixture() -> (HirModule, HirFunction) {
+    let region = RegionId(0);
+    let parameter = LocalId(0);
+    let fatal = FunctionId(1);
+    let mut expressions = HirExpressionStore::default();
+    let argument = hir_expression(
+        &mut expressions,
+        HirExpressionKind::Load(HirPlace::local(parameter)),
+        builtin_type_ids::STRING,
+        ValueKind::Place,
+        region,
+    );
+    let args = expressions
+        .append_values(&[argument], None)
+        .expect("NeverCall argument range should fit");
+    let module = module_with_block(
+        HirBlock {
+            id: HirBlockId(0),
+            region,
+            locals: vec![HirLocal {
+                id: parameter,
+                ty: builtin_type_ids::STRING,
+                mutable: false,
+                region,
+                span: None,
+            }],
+            statements: Vec::new(),
+            terminator: HirTerminator::NeverCall {
+                target: CallTarget::Local(fatal),
+                args,
+            },
+        },
+        expressions,
+    );
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: HirBlockId(0),
+        params: vec![parameter],
+        return_contract: HirFunctionReturnContract::Never,
+    };
+    (module, function)
 }

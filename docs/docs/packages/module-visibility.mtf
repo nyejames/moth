@@ -1,4 +1,4 @@
-Module visibility controls which declarations cross a module boundary. Normal declarations are private to their module. The `export:` block marks what other modules can see.
+Module visibility controls which declarations cross a module boundary. Ordinary declarations are private to their module. An `export:` block in `@mod.moth` or `@package.moth` marks what other modules can see.
 
 ### Same-module internal visibility
 
@@ -7,13 +7,13 @@ Files within the same module can bind each other's declarations directly through
 Given this topology:
 
 [codeblock, $code("text"):
-    @site.moth
+    @entry.moth
     components/
-    ├── @api.moth
+    ├── @mod.moth
     └── utils.moth
 ]
 
-`utils.moth` and `@api.moth` belong to the same `components` child module. Same-module dependency clauses can see private declarations.
+`utils.moth` and `@mod.moth` belong to the same `components` child module. Same-module dependency clauses can see ordinary helper declarations.
 
 Internal helper:
 
@@ -29,7 +29,7 @@ Internal helper:
 Child root:
 
 [codeblock, $code("moth"):
-    -- components/@api.moth
+    -- components/@mod.moth
     @utils internal_value, internal_fn
 
     export:
@@ -37,20 +37,35 @@ Child root:
     ;
 ]
 
-Same-module dependency clauses bypass the public-surface boundary. The declaring file sees all declarations in the target file.
+Same-module dependency clauses bypass the public-surface boundary. The declaring file sees helper declarations in the target file.
+
+### Root-local declarations
+
+A declaration authored directly in a root file belongs to that root only. It is not a shared module declaration:
+
+- another root file cannot bind it
+- ordinary helper files cannot bind it
+- another root cannot re-export it
+- naming a root file in a dependency path is rejected
+
+The rejection reports the root-local declaration as a related site.
+
+Helper declarations remain shared, prepared once with one origin. Each root binds them through ordinary dependency clauses. Same-spelling declarations in disjoint roots stay independent unless a bound shared helper already owns that name.
 
 ### Cross-module public boundary
 
-A different module can only access declarations marked public by the module root's `export:` block. Cross-module dependency clauses cannot bypass the public API.
+A different module can only access declarations marked public by the applicable facade. Cross-module dependency clauses cannot bypass the public API.
 
 [codeblock, $code("moth"):
-    -- @site.moth
+    -- @entry.moth
     @components internal_value
 ]
 
-The parent module sees only the `components` child module's `export:` surface. It cannot bypass that boundary with `@components/utils internal_value`. The `@components/utils` path cannot bypass the child facade.
+The parent module sees only the `components` child module's `@mod.moth` surface. It cannot bypass that boundary with `@components/utils internal_value`. The `@components/utils` path cannot bypass the child facade.
 
-Without the root export block, the cross-module dependency clause is rejected with `MOTH-IMPORT-0011`.
+`@mod.moth` publishes the normal surface. `@package.moth` publishes the scoped support surface. An entry-only child publishes no importable surface, so a normal dependency that requests one receives a missing-surface diagnostic. Resolution never falls back from one facade to another.
+
+Without a matching export block, the cross-module dependency clause is rejected with `MOTH-IMPORT-0011`.
 
 Implicit numeric failure stays module-local unless a declared error contract
 delivers it. Private functions without an error slot may infer and propagate
@@ -62,19 +77,19 @@ implementation later shares a backend with the caller. See
 
 ### Normal modules are not source packages
 
-An `@*.moth` normal module is not a source package. Use `+package.moth` when the example intends to teach a scoped package. See @#project-local-packages (Project-local packages) for the support-package contract.
+An `@mod.moth` normal module is not a source package. Use `@package.moth` when the example teaches a scoped package. See @#project-local-packages (Project-local packages) for the support-package contract.
 
 ### Root-private declarations
 
-Declarations in the module root file outside the `export:` block are private to the root. They are not available to other modules even through the public surface.
+Declarations in a root file outside its `export:` block are private to that root. They are not available to other modules even through the public surface.
 
 ### Direct root dependency rejection
 
-Direct dependency clauses on normal module-root files are rejected. Depend on the module through its directory path, not through the root filename.
+Direct dependency clauses on `@mod.moth`, `@package.moth`, `@entry.moth` and `config.moth` are rejected. Depend on the module through its directory path, not through the root filename.
 
 ### Runtime top-level bindings are not bindable
 
-Runtime top-level bindings are entry-body code. They are not bindable declarations. Only compile-time constants, functions, structs, choices, type aliases and traits are bindable.
+Runtime top-level bindings are entry-body code in `@entry.moth`. They are not bindable declarations. Only compile-time constants, functions, structs, choices, type aliases and traits are bindable.
 
 ### Receiver method visibility
 
@@ -88,10 +103,7 @@ Circular dependency clauses between files in the same module are accepted when t
 
 There is no way to bypass the module public-surface boundary by choosing a different dependency path. All cross-module dependency clauses go through the same resolution and visibility check.
 
-`export:` is the implemented public marker. A later `$export` migration is accepted
-direction, but block support remains undecided; `export:` and `$export` will not be
-permanent alternatives.
-
+`export:` is the implemented public marker. A later `$export` migration is accepted direction, but block support remains undecided. The future spelling stays restricted to `@mod.moth` and `@package.moth` and will not leave both forms as permanent alternatives.
 
 ### Concepts related to module visibility
 

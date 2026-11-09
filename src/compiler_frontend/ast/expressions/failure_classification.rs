@@ -1588,6 +1588,29 @@ fn classify_nodes(
             NodeKind::Break | NodeKind::Continue if !state.classifies_exits() => None,
             NodeKind::Return(_) => Some(EnclosingExitEffect::FunctionReturn(node.span)),
             NodeKind::ReturnError(_) => Some(EnclosingExitEffect::ErrorReturn(node.span)),
+            // The call itself has no enclosing exit effect, but evaluating its receiver and
+            // arguments can still contribute failures or exits.
+            NodeKind::NeverCall(call) => {
+                let mut effect = match call.receiver {
+                    Some(receiver) => classify_expression(
+                        state.expression_builder.view(receiver)?,
+                        template_ir_store,
+                        state,
+                    )?,
+                    None => None,
+                };
+                for argument in &call.arguments {
+                    if effect.is_some() {
+                        break;
+                    }
+                    effect = classify_expression(
+                        state.expression_builder.view(argument.value)?,
+                        template_ir_store,
+                        state,
+                    )?;
+                }
+                effect
+            }
             // A loop-local control transfer cannot escape the assertion message's enclosing
             // function. Valid ASTs only contain these nodes under an owning loop.
             NodeKind::Break if state.loop_depth > 0 => None,

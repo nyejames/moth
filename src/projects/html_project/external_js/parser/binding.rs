@@ -12,7 +12,7 @@ use super::export_scanner::{
 };
 use super::parsed_js_module::{
     JsDeclarationKind, JsDiagnosticKind, JsParserDiagnostic, JsSourceSpan, ParsedJsConstant,
-    ParsedJsFunction, ParsedJsModule, ParsedOpaqueType, ParsedRuntimeImport,
+    ParsedJsFunction, ParsedJsModule, ParsedOpaqueType, ParsedReturnClause, ParsedRuntimeImport,
 };
 use super::signature_parser::{SignatureParseInput, parse_signature};
 use crate::compiler_frontend::compiler_messages::{
@@ -378,14 +378,16 @@ fn validate_function_signature_types(
         );
     }
 
-    for return_type in &function.signature.returns {
-        validate_type_name(
-            &return_type.type_name,
-            &function.moth_name,
-            &function.annotation_span,
-            opaque_names,
-            diagnostics,
-        );
+    if let ParsedReturnClause::Returns { returns, .. } = &function.signature.return_clause {
+        for return_type in returns {
+            validate_type_name(
+                &return_type.type_name,
+                &function.moth_name,
+                &function.annotation_span,
+                opaque_names,
+                diagnostics,
+            );
+        }
     }
 }
 

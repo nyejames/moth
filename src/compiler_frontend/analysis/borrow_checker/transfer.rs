@@ -168,6 +168,23 @@ pub(super) fn transfer_block(
                 )?;
             }
         }
+        HirTerminator::NeverCall { args, .. } => {
+            // Evaluated arguments keep their aggregate ownership and optional-transfer effects
+            // before the call diverges, exactly like an ordinary call's arguments.
+            let terminator_order = layout.terminator_order_or_unknown(block.id);
+            let location = context.diagnostics.terminator_error_span(block.id);
+            for value in context.expressions.values(*args) {
+                transfer_aggregate_expression_ownership(
+                    layout,
+                    state,
+                    *value,
+                    block.id,
+                    terminator_order,
+                    location,
+                    &mut aggregate_context,
+                )?;
+            }
+        }
         _ => {}
     }
 

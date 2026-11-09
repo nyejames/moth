@@ -131,7 +131,7 @@ fn entry_report() -> Value {
         "category": "entry_error",
         "code": 0,
         "message": "startup returned an Error",
-        "source": {"file": "pages/@page.moth", "line": 12, "column": 3},
+        "source": {"file": "pages/@entry.moth", "line": 12, "column": 3},
     })
 }
 
@@ -383,14 +383,14 @@ fn runtime_report_wire_shapes_require_objects_and_literal_category_strings() {
     let server = ReportServer::new("/");
     let positional_report = json!([
         7, "index.html", "page_1-A", "entry_error", 0, "returned Error",
-        {"file": "pages/@page.moth", "line": 12, "column": 3},
+        {"file": "pages/@entry.moth", "line": 12, "column": 3},
     ]);
     assert_status(
         &server.post("/__moth/runtime-report", &positional_report),
         400,
     );
     let mut report = entry_report();
-    report["source"] = json!(["pages/@page.moth", 12, 3]);
+    report["source"] = json!(["pages/@entry.moth", 12, 3]);
     assert_status(&server.post("/__moth/runtime-report", &report), 400);
     for category in ["entry_error", "assertion", "startup_fault"] {
         report = entry_report();

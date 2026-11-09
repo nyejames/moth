@@ -22,7 +22,7 @@ use super::parse_expression_dispatch::{
 use super::parse_expression_input::RouteArgumentContext;
 use super::source_function_calls::{SourceCallableMemberInput, parse_source_callable_member};
 use super::struct_instance::{StructConstructorParseInput, parse_struct_constructor_expression};
-use crate::compiler_frontend::ast::ast_nodes::{DeclarationShell, DeclarationValue};
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
@@ -45,9 +45,10 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, InvalidAssignmentTargetReason, InvalidCallShapeReason,
     InvalidTemplateSlotReason, NameNamespace, TypeUsedAsValueReason,
 };
+use crate::compiler_frontend::external_packages::{ExternalConstantDef, ExternalFunctionDef};
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -172,311 +173,21 @@ pub(super) fn parse_identifier_or_call(
             )
             .into());
         };
-        if let Some(route_context) = route_argument_context
-            && (token_stream.peek_next_tag() != Some(TokenTag::DOUBLE_COLON)
-                || !route_context
-                    .matches_output_type(declaration.type_id, type_interner.environment())
-                || !context.is_source_choice_declaration(
-                    declaration,
-                    expression_builder,
-                    const_values,
-                )?)
-        {
-            return Err(calls_data::invalid_call_shape(
-                InvalidCallShapeReason::RouteArgumentNotDirect,
-                None,
-                Some(token_stream.current_span()),
-            )
-            .into());
-        }
-
-        // Template slot inserts are only legal inside template bodies, constant
-        // initializers, or constant headers.
-        if let Some(initializer) = declaration.value.initializer()
-            && let ExpressionOperationView::Template(template_value) =
-                expression_builder.view(initializer)?.operation()
-        {
-            let is_slot_insert = context
-                .template_ir_store
-                .borrow()
-                .get_template(template_value.tir_reference.root)
-                .map(|template_ir| matches!(template_ir.kind, TemplateType::SlotInsert(_)))
-                .ok_or_else(|| {
-                    InfrastructureFailure::internal(
-                        CompilerStage::AstConstruction,
-                        "Identifier template reference pointed at a missing same-store template.",
-                    )
-                })?;
-            if is_slot_insert
-                && !matches!(
-                    context.kind,
-                    ContextKind::Template | ContextKind::Constant | ContextKind::ConstantHeader
-                )
-            {
-                return Err(templates::invalid_template_slot(
-                    InvalidTemplateSlotReason::InsertOutsideParentSlot,
-                    None,
-                    None,
-                    Some(token_stream.current_span()),
-                )
-                .into());
-            }
-        }
-
-        // Const records are field-access-only in runtime contexts.
-        if declaration
-            .value
-            .is_const_record_value(expression_builder)?
-            && token_stream.peek_next_tag() != Some(TokenTag::DOT)
-            && !context.kind.is_constant_context()
-        {
-            return Err(names_declarations::const_record_used_as_value(
-                identifier,
-                Some(token_stream.current_span()),
-            )
-            .into());
-        }
-
-        // Struct constructors are parsed before constant-reference checks.
-        // This keeps `x #= MyStruct(...)` on the constructor path so const
-        // record coercion can validate field values instead of rejecting the
-        // struct symbol itself as a non-constant reference.
-        if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS)
-            && let Some(struct_constructor) = context.source_struct_constructor(
-                declaration,
-                type_interner.environment(),
-                expression_builder,
-                const_values,
-            )?
-        {
-            match parse_struct_constructor_expression(
-                token_stream,
-                StructConstructorParseInput {
-                    struct_path: &struct_constructor.struct_path,
-                    struct_name: identifier,
-                    fields: struct_constructor.fields,
-                    struct_value_mode: struct_constructor.struct_value_mode,
-                    type_id: struct_constructor.type_id,
-                },
-                context,
-                type_interner,
-                expression_builder,
-                const_values,
-                path_fork,
-                string_table,
-            )? {
-                ParsedConstructorExpression::Value(struct_instance) => {
-                    push_expression_operand(
-                        token_stream,
-                        context,
-                        type_interner,
-                        expression_builder,
-                        const_values,
-                        string_table,
-                        expression,
-                        allow_boundary_catch,
-                        struct_instance,
-                        path_fork,
-                    )?;
-                }
-                // A constructor whose numeric-dependent arguments were retained takes its
-                // authored operand position as one pending item; the enclosing fragment either
-                // completes where it was parsed or defers to the body root with this item in
-                // place, so the constructor resumes exactly once at its original position.
-                ParsedConstructorExpression::RetainedOperand(item) => expression.push(item),
-            }
-
-            return Ok(());
-        }
-
-        // Only an immediate `::` or following symbol begins a choice constructor. A newline or
-        // comment after the type name belongs to the existing separator diagnostic path.
-        if context.is_source_choice_declaration(declaration, expression_builder, const_values)?
-            && matches!(
-                token_stream.peek_next_tag(),
-                Some(TokenTag::DOUBLE_COLON | TokenTag::SYMBOL)
-            )
-        {
-            match parse_choice_construct(
-                token_stream,
-                declaration,
-                context,
-                type_interner,
-                expression_builder,
-                const_values,
-                path_fork,
-                string_table,
-                route_argument_context,
-            )? {
-                ParsedConstructorExpression::Value(choice_value) => {
-                    push_expression_operand(
-                        token_stream,
-                        context,
-                        type_interner,
-                        expression_builder,
-                        const_values,
-                        string_table,
-                        expression,
-                        allow_boundary_catch,
-                        choice_value,
-                        path_fork,
-                    )?;
-                }
-                // A payload constructor whose numeric-dependent arguments were retained takes
-                // its authored operand position as one pending item and resumes once at the root.
-                ParsedConstructorExpression::RetainedOperand(item) => expression.push(item),
-            }
-
-            return Ok(());
-        }
-
-        if token_stream.peek_next_tag() == Some(TokenTag::DOUBLE_COLON) {
-            return Err(names_declarations::namespace_misuse(
-                identifier,
-                NameNamespace::Type,
-                NameNamespace::Value,
-                Some(token_stream.current_span()),
-            )
-            .into());
-        }
-
-        // Type declarations live in the type namespace. Constructor and variant syntax above are
-        // the only expression-position routes that may start from a nominal type name.
-        if matches!(
-            declaration.value,
-            DeclarationValue::Shell(
-                DeclarationShell::Struct | DeclarationShell::Choice | DeclarationShell::TypeAlias
-            )
-        ) {
-            // Generic `of` applications are type annotations. The type-application parser lives
-            // on DeclarationCursor and yields ParsedTypeRef, not TypeId, so this expression
-            // producer keeps the nominal name and a distinguishing reason rather than re-parsing.
-            // Type aliases are not stored in `generic_declarations_by_path`; a concrete alias
-            // followed by `of` stays a bare type-as-value mistake.
-            let reason = if token_stream.peek_next_tag() == Some(TokenTag::OF) {
-                match context
-                    .generic_declarations_by_path
-                    .as_ref()
-                    .and_then(|declarations| declarations.get(&declaration.id))
-                {
-                    Some(GenericDeclarationKind::Struct) => {
-                        TypeUsedAsValueReason::GenericStructApplication
-                    }
-                    Some(GenericDeclarationKind::Choice) => {
-                        TypeUsedAsValueReason::GenericChoiceApplication
-                    }
-                    Some(GenericDeclarationKind::Function) | None => {
-                        TypeUsedAsValueReason::BareTypeName
-                    }
-                }
-            } else {
-                TypeUsedAsValueReason::BareTypeName
-            };
-            return Err(names_declarations::type_used_as_value_row(
-                identifier,
-                NameNamespace::Value,
-                NameNamespace::Type,
-                reason,
-                Some(token_stream.current_span()),
-            )
-            .into());
-        }
-
-        // Constant contexts reject non-constant local references. The unresolved
-        // constant placeholder exemption is checked before TIR preparation so
-        // placeholders that have not been folded yet are not rejected prematurely.
-        // Template constness comes from preparation's exact effective view so composed
-        // templates retain their module-local reference and overlays.
-        if context.kind.is_constant_context()
-            && !context.is_unresolved_constant_placeholder(declaration)
-        {
-            let is_compile_time_constant = match declaration.value.initializer() {
-                Some(initializer) => expression_builder
-                    .view(initializer)?
-                    .const_value_kind_with_template_classifier(const_values, &mut |template| {
-                        classify_template_from_effective_tir(
-                            template,
-                            &context.template_ir_store,
-                            expression_builder,
-                            const_values,
-                            Some(context.external_package_registry.as_ref()),
-                        )
-                    })?
-                    .is_compile_time_value(),
-                // Imported constants carry their folded value instead of an initializer.
-                None => context.is_explicit_compile_time_constant(declaration),
-            };
-
-            if !is_compile_time_constant {
-                return Err(ExpressionParseError::NonConstantReferenceInConstant(
-                    choices_control_flow::compile_time_evaluation_error(
-                        CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
-                        Some(identifier),
-                        Some(token_stream.current_span()),
-                    ),
-                ));
-            }
-        }
-
-        match context.source_callable_signature(declaration) {
-            Some(signature) => {
-                let generic_template = context.lookup_generic_function_template(&declaration.id);
-                let call_span = Some(token_stream.current_span());
-                let expression_is_boundary_leading = stream_is_boundary_leading(expression);
-
-                parse_source_callable_member(SourceCallableMemberInput {
-                    token_stream,
-                    function_path: &declaration.id,
-                    signature,
-                    generic_template,
-                    visible_name: identifier,
-                    call_span,
-                    context,
-                    expression,
-                    expression_is_boundary_leading,
-                    allow_boundary_catch,
-                    expected_result_evidence_allowed,
-                    type_interner,
-                    expression_builder,
-                    const_values,
-                    string_table,
-                    path_fork,
-                })?;
-
-                return Ok(());
-            }
-
-            None => {
-                let reference_span = Some(token_stream.current_span());
-                let reference_expression = reference_expression_from_declaration(
-                    declaration,
-                    context,
-                    type_interner,
-                    expression_builder,
-                    const_values,
-                    string_table,
-                    reference_span,
-                )?;
-                token_stream.advance();
-
-                push_expression_operand_with_span(
-                    token_stream,
-                    context,
-                    type_interner,
-                    expression_builder,
-                    const_values,
-                    string_table,
-                    expression,
-                    allow_boundary_catch,
-                    ExpressionOperandInput {
-                        operand: reference_expression,
-                        wrapper_span: reference_span,
-                    },
-                    path_fork,
-                )?;
-                return Ok(()); // Will have moved onto the next token already
-            }
-        }
+        return lower_resolved_declaration_expression(
+            identifier,
+            declaration,
+            token_stream,
+            context,
+            type_interner,
+            expression_builder,
+            const_values,
+            expression,
+            allow_boundary_catch,
+            expected_result_evidence_allowed,
+            route_argument_context,
+            string_table,
+            path_fork,
+        );
     }
 
     // ------------------------------------
@@ -515,42 +226,19 @@ pub(super) fn parse_identifier_or_call(
     //  External constant
     // ------------------------------------
     if let Some((_const_id, const_def)) = context.lookup_visible_external_constant(identifier) {
-        let span = Some(token_stream.current_span());
-        token_stream.advance();
-
-        if context.kind.is_constant_context() && !const_def.value.is_scalar() {
-            return Err(choices_control_flow::compile_time_evaluation_error(
-                CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext,
-                Some(identifier),
-                span,
-            )
-            .into());
-        }
-
-        let value_mode = ValueMode::ImmutableOwned;
-        let const_expr = project_external_constant(
+        return lower_external_constant_expression(
             const_def,
             identifier,
-            span,
-            value_mode,
-            string_table,
-            expression_builder,
-            const_values,
-        )?;
-
-        push_expression_operand(
             token_stream,
             context,
             type_interner,
             expression_builder,
             const_values,
-            string_table,
             expression,
             allow_boundary_catch,
-            const_expr,
+            string_table,
             path_fork,
-        )?;
-        return Ok(());
+        );
     }
 
     // ------------------------------------
@@ -559,55 +247,19 @@ pub(super) fn parse_identifier_or_call(
     if let Some((function_id, host_function_definition)) =
         context.lookup_visible_external_function(identifier)
     {
-        let call_span = Some(token_stream.current_span());
-        // Host-call argument parsing starts at the opening parenthesis; lookup leaves the cursor
-        // on the identifier itself.
-        token_stream.advance();
-
-        let parsed_call =
-            parse_external_function_call_expression(ExternalFunctionCallParseInput {
-                token_stream,
-                external_function_id: function_id,
-                external_function: host_function_definition,
-                call_span,
-                context,
-                value_required: true,
-                allow_boundary_catch: allow_boundary_catch
-                    && expression.is_empty()
-                    && fallible_catch_allowed_in_context(context),
-                warnings: None,
-                type_interner,
-                expression_builder,
-                const_values,
-                string_table,
-                path_fork,
-            })?;
-
-        match parsed_call {
-            ParsedFunctionCallExpression::Value(function_call_expression) => {
-                push_expression_operand(
-                    token_stream,
-                    context,
-                    type_interner,
-                    expression_builder,
-                    const_values,
-                    string_table,
-                    expression,
-                    allow_boundary_catch,
-                    function_call_expression,
-                    path_fork,
-                )?;
-            }
-            // A call whose numeric-dependent arguments were retained takes its authored operand
-            // position as one pending item; the enclosing fragment either completes where it was
-            // parsed or defers to the body root with this item in place, so the call resumes
-            // exactly once at its original position.
-            ParsedFunctionCallExpression::RetainedOperand(item) => {
-                expression.push(item);
-            }
-        }
-
-        return Ok(());
+        return lower_external_function_expression(
+            function_id,
+            host_function_definition,
+            token_stream,
+            context,
+            type_interner,
+            expression_builder,
+            const_values,
+            expression,
+            allow_boundary_catch,
+            string_table,
+            path_fork,
+        );
     }
 
     // Receiver methods cannot be called as free functions.
@@ -661,6 +313,474 @@ pub(super) fn parse_identifier_or_call(
     Err(context
         .unknown_unqualified_value_name(identifier, token_stream.current_span())
         .into())
+}
+
+/// Lowers one visible external constant as an ordinary value expression.
+///
+/// WHAT: applies the constant-context scalar rule, projects the registered value and pushes the
+///       operand.
+/// WHY: an expression-qualified reference selects the same registered symbol without a visible
+///      name, so the authored name lookup and the qualified lookup must share one lowering.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "external constant lowering keeps the token stream, scope, builders, value store, catch policy, string table, and path fork as separate parser borrows"
+)]
+pub(super) fn lower_external_constant_expression(
+    constant_definition: &ExternalConstantDef,
+    identifier: StringId,
+    token_stream: &mut AstCursor<'_>,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    expression: &mut Vec<ExpressionRpnItem>,
+    allow_boundary_catch: bool,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> Result<(), ExpressionParseError> {
+    let span = Some(token_stream.current_span());
+    token_stream.advance();
+
+    if context.kind.is_constant_context() && !constant_definition.value.is_scalar() {
+        return Err(choices_control_flow::compile_time_evaluation_error(
+            CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext,
+            Some(identifier),
+            span,
+        )
+        .into());
+    }
+
+    let const_expr = project_external_constant(
+        constant_definition,
+        identifier,
+        span,
+        ValueMode::ImmutableOwned,
+        string_table,
+        expression_builder,
+        const_values,
+    )?;
+
+    push_expression_operand(
+        token_stream,
+        context,
+        type_interner,
+        expression_builder,
+        const_values,
+        string_table,
+        expression,
+        allow_boundary_catch,
+        const_expr,
+        path_fork,
+    )
+}
+
+/// Lowers one visible external function call expression.
+///
+/// WHAT: advances past the authored symbol, parses the call through the shared host-call parser,
+///       and emits its value, terminating or retained operand shape.
+/// WHY: qualified external selections call the same registered function as an authored name, so
+///       both routes must share one argument, contract and failure path.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "external call lowering keeps the token stream, scope, builders, value store, catch policy, string table, and path fork as separate parser borrows"
+)]
+pub(super) fn lower_external_function_expression(
+    function_id: crate::compiler_frontend::external_packages::ExternalFunctionId,
+    function_definition: &ExternalFunctionDef,
+    token_stream: &mut AstCursor<'_>,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    expression: &mut Vec<ExpressionRpnItem>,
+    allow_boundary_catch: bool,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> Result<(), ExpressionParseError> {
+    let call_span = Some(token_stream.current_span());
+    // Host-call argument parsing starts at the opening parenthesis; the cursor sits on the
+    // authored symbol itself.
+    token_stream.advance();
+
+    let parsed_call = parse_external_function_call_expression(ExternalFunctionCallParseInput {
+        token_stream,
+        external_function_id: function_id,
+        external_function: function_definition,
+        call_span,
+        context,
+        value_required: true,
+        allow_boundary_catch: allow_boundary_catch
+            && expression.is_empty()
+            && fallible_catch_allowed_in_context(context),
+        warnings: None,
+        type_interner,
+        expression_builder,
+        const_values,
+        string_table,
+        path_fork,
+    })?;
+
+    match parsed_call {
+        ParsedFunctionCallExpression::Value(function_call_expression) => {
+            push_expression_operand(
+                token_stream,
+                context,
+                type_interner,
+                expression_builder,
+                const_values,
+                string_table,
+                expression,
+                allow_boundary_catch,
+                function_call_expression,
+                path_fork,
+            )?;
+        }
+        // A Never external occupies one operand position until its consumer checks placement.
+        ParsedFunctionCallExpression::Terminating(never_call) => {
+            expression.push(ExpressionRpnItem::NeverCall(never_call));
+        }
+        // A call whose numeric-dependent arguments were retained takes its authored operand
+        // position as one pending item; the enclosing fragment either completes where it was
+        // parsed or defers to the body root with this item in place, so the call resumes
+        // exactly once at its original position.
+        ParsedFunctionCallExpression::RetainedOperand(item) => {
+            expression.push(item);
+        }
+    }
+
+    Ok(())
+}
+
+/// Apply the ordinary identifier-expression rules to an already-resolved declaration.
+///
+/// WHAT: lowers a declaration reference, constant record, struct or choice constructor, and
+///       callable call exactly as an unqualified name would.
+/// WHY: expression-qualified references must produce the same semantic declaration, value and
+///      diagnostics as an ordinary reference while never publishing a local name. Both callers
+///      route through this one owner instead of drifting apart.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the resolved declaration keeps the token stream, scope, interner, builders, value mode, and path fork as separate parser borrows"
+)]
+pub(super) fn lower_resolved_declaration_expression(
+    identifier: StringId,
+    declaration: &Declaration,
+    token_stream: &mut AstCursor<'_>,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    expression: &mut Vec<ExpressionRpnItem>,
+    allow_boundary_catch: bool,
+    expected_result_evidence_allowed: bool,
+    route_argument_context: Option<RouteArgumentContext>,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> Result<(), ExpressionParseError> {
+    if let Some(route_context) = route_argument_context
+        && (token_stream.peek_next_tag() != Some(TokenTag::DOUBLE_COLON)
+            || !route_context.matches_output_type(declaration.type_id, type_interner.environment())
+            || !context.is_source_choice_declaration(
+                declaration,
+                expression_builder,
+                const_values,
+            )?)
+    {
+        return Err(calls_data::invalid_call_shape(
+            InvalidCallShapeReason::RouteArgumentNotDirect,
+            None,
+            Some(token_stream.current_span()),
+        )
+        .into());
+    }
+
+    // Template slot inserts are only legal inside template bodies, constant
+    // initializers, or constant headers.
+    if let Some(initializer) = declaration.value.initializer()
+        && let ExpressionOperationView::Template(template_value) =
+            expression_builder.view(initializer)?.operation()
+    {
+        let is_slot_insert = context
+            .template_ir_store
+            .borrow()
+            .get_template(template_value.tir_reference.root)
+            .map(|template_ir| matches!(template_ir.kind, TemplateType::SlotInsert(_)))
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::AstConstruction,
+                    "Identifier template reference pointed at a missing same-store template.",
+                )
+            })?;
+        if is_slot_insert
+            && !matches!(
+                context.kind,
+                ContextKind::Template | ContextKind::Constant | ContextKind::ConstantHeader
+            )
+        {
+            return Err(templates::invalid_template_slot(
+                InvalidTemplateSlotReason::InsertOutsideParentSlot,
+                None,
+                None,
+                Some(token_stream.current_span()),
+            )
+            .into());
+        }
+    }
+
+    // Const records are field-access-only in runtime contexts.
+    if declaration
+        .value
+        .is_const_record_value(expression_builder)?
+        && token_stream.peek_next_tag() != Some(TokenTag::DOT)
+        && !context.kind.is_constant_context()
+    {
+        return Err(names_declarations::const_record_used_as_value(
+            identifier,
+            Some(token_stream.current_span()),
+        )
+        .into());
+    }
+
+    // Struct constructors are parsed before constant-reference checks.
+    // This keeps `x #= MyStruct(...)` on the constructor path so const
+    // record coercion can validate field values instead of rejecting the
+    // struct symbol itself as a non-constant reference.
+    if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS)
+        && let Some(struct_constructor) = context.source_struct_constructor(
+            declaration,
+            type_interner.environment(),
+            expression_builder,
+            const_values,
+        )?
+    {
+        match parse_struct_constructor_expression(
+            token_stream,
+            StructConstructorParseInput {
+                struct_path: &struct_constructor.struct_path,
+                struct_name: identifier,
+                fields: struct_constructor.fields,
+                struct_value_mode: struct_constructor.struct_value_mode,
+                type_id: struct_constructor.type_id,
+            },
+            context,
+            type_interner,
+            expression_builder,
+            const_values,
+            path_fork,
+            string_table,
+        )? {
+            ParsedConstructorExpression::Value(struct_instance) => {
+                push_expression_operand(
+                    token_stream,
+                    context,
+                    type_interner,
+                    expression_builder,
+                    const_values,
+                    string_table,
+                    expression,
+                    allow_boundary_catch,
+                    struct_instance,
+                    path_fork,
+                )?;
+            }
+            // A constructor whose numeric-dependent arguments were retained takes its
+            // authored operand position as one pending item; the enclosing fragment either
+            // completes where it was parsed or defers to the body root with this item in
+            // place, so the constructor resumes exactly once at its original position.
+            ParsedConstructorExpression::RetainedOperand(item) => expression.push(item),
+        }
+
+        return Ok(());
+    }
+
+    // Only an immediate `::` or following symbol begins a choice constructor. A newline or
+    // comment after the type name belongs to the existing separator diagnostic path.
+    if context.is_source_choice_declaration(declaration, expression_builder, const_values)?
+        && matches!(
+            token_stream.peek_next_tag(),
+            Some(TokenTag::DOUBLE_COLON | TokenTag::SYMBOL)
+        )
+    {
+        match parse_choice_construct(
+            token_stream,
+            declaration,
+            context,
+            type_interner,
+            expression_builder,
+            const_values,
+            path_fork,
+            string_table,
+            route_argument_context,
+        )? {
+            ParsedConstructorExpression::Value(choice_value) => {
+                push_expression_operand(
+                    token_stream,
+                    context,
+                    type_interner,
+                    expression_builder,
+                    const_values,
+                    string_table,
+                    expression,
+                    allow_boundary_catch,
+                    choice_value,
+                    path_fork,
+                )?;
+            }
+            // A payload constructor whose numeric-dependent arguments were retained takes
+            // its authored operand position as one pending item and resumes once at the root.
+            ParsedConstructorExpression::RetainedOperand(item) => expression.push(item),
+        }
+
+        return Ok(());
+    }
+
+    if token_stream.peek_next_tag() == Some(TokenTag::DOUBLE_COLON) {
+        return Err(names_declarations::namespace_misuse(
+            identifier,
+            NameNamespace::Type,
+            NameNamespace::Value,
+            Some(token_stream.current_span()),
+        )
+        .into());
+    }
+
+    // Type declarations live in the type namespace. Constructor and variant syntax above are
+    // the only expression-position routes that may start from a nominal type name.
+    if matches!(
+        declaration.value,
+        DeclarationValue::Shell(
+            DeclarationShell::Struct | DeclarationShell::Choice | DeclarationShell::TypeAlias
+        )
+    ) {
+        // Generic `of` applications are type annotations. The type-application parser lives
+        // on DeclarationCursor and yields ParsedTypeRef, not TypeId, so this expression
+        // producer keeps the nominal name and a distinguishing reason rather than re-parsing.
+        // Type aliases are not stored in `generic_declarations_by_path`; a concrete alias
+        // followed by `of` stays a bare type-as-value mistake.
+        let reason = if token_stream.peek_next_tag() == Some(TokenTag::OF) {
+            match context
+                .generic_declarations_by_path
+                .as_ref()
+                .and_then(|declarations| declarations.get(&declaration.id))
+            {
+                Some(GenericDeclarationKind::Struct) => {
+                    TypeUsedAsValueReason::GenericStructApplication
+                }
+                Some(GenericDeclarationKind::Choice) => {
+                    TypeUsedAsValueReason::GenericChoiceApplication
+                }
+                Some(GenericDeclarationKind::Function) | None => {
+                    TypeUsedAsValueReason::BareTypeName
+                }
+            }
+        } else {
+            TypeUsedAsValueReason::BareTypeName
+        };
+        return Err(names_declarations::type_used_as_value_row(
+            identifier,
+            NameNamespace::Value,
+            NameNamespace::Type,
+            reason,
+            Some(token_stream.current_span()),
+        )
+        .into());
+    }
+
+    // Constant contexts reject non-constant local references. The unresolved
+    // constant placeholder exemption is checked before TIR preparation so
+    // placeholders that have not been folded yet are not rejected prematurely.
+    // Template constness comes from preparation's exact effective view so composed
+    // templates retain their module-local reference and overlays.
+    if context.kind.is_constant_context()
+        && !context.is_unresolved_constant_placeholder(declaration)
+    {
+        let is_compile_time_constant = match declaration.value.initializer() {
+            Some(initializer) => expression_builder
+                .view(initializer)?
+                .const_value_kind_with_template_classifier(const_values, &mut |template| {
+                    classify_template_from_effective_tir(
+                        template,
+                        &context.template_ir_store,
+                        expression_builder,
+                        const_values,
+                        Some(context.external_package_registry.as_ref()),
+                    )
+                })?
+                .is_compile_time_value(),
+            // Imported constants carry their folded value instead of an initializer.
+            None => context.is_explicit_compile_time_constant(declaration),
+        };
+
+        if !is_compile_time_constant {
+            return Err(ExpressionParseError::NonConstantReferenceInConstant(
+                choices_control_flow::compile_time_evaluation_error(
+                    CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
+                    Some(identifier),
+                    Some(token_stream.current_span()),
+                ),
+            ));
+        }
+    }
+
+    match context.source_callable_signature(declaration) {
+        Some(signature) => {
+            let generic_template = context.lookup_generic_function_template(&declaration.id);
+            let call_span = Some(token_stream.current_span());
+            let expression_is_boundary_leading = stream_is_boundary_leading(expression);
+
+            parse_source_callable_member(SourceCallableMemberInput {
+                token_stream,
+                function_path: &declaration.id,
+                signature,
+                generic_template,
+                visible_name: identifier,
+                call_span,
+                context,
+                expression,
+                expression_is_boundary_leading,
+                allow_boundary_catch,
+                expected_result_evidence_allowed,
+                type_interner,
+                expression_builder,
+                const_values,
+                string_table,
+                path_fork,
+            })?;
+
+            Ok(())
+        }
+
+        None => {
+            let reference_span = Some(token_stream.current_span());
+            let reference_expression = reference_expression_from_declaration(
+                declaration,
+                context,
+                type_interner,
+                expression_builder,
+                const_values,
+                string_table,
+                reference_span,
+            )?;
+            token_stream.advance();
+
+            push_expression_operand_with_span(
+                token_stream,
+                context,
+                type_interner,
+                expression_builder,
+                const_values,
+                string_table,
+                expression,
+                allow_boundary_catch,
+                ExpressionOperandInput {
+                    operand: reference_expression,
+                    wrapper_span: reference_span,
+                },
+                path_fork,
+            )?;
+            Ok(()) // Will have moved onto the next token already
+        }
+    }
 }
 
 /// Parse a `this` reference inside a receiver method body.

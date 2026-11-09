@@ -1,0 +1,3 @@
+remote_halt || -> !:
+    assert(false, "remote halted")
+;

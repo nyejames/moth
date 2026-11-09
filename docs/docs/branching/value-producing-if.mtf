@@ -80,12 +80,42 @@ A value-producing block is invalid directly inside:
 ### Completeness
 
 - A value-producing `if` requires `else`.
-- Every reachable branch must produce the required values or terminate.
-- Mixed producing and terminating paths are complete.
+- Every reachable branch must produce the required values or leave the value-producing block.
+- Returning, diverging and `break` or `continue` targeting an enclosing loop all leave the block.
+- A loop nested inside a branch consumes its own `break` and `continue`, so they cannot complete the branch. The branch must still produce, exit or diverge after the loop.
+- Mixed producing and exiting paths are complete.
 - A real fallthrough path is rejected.
 - At least one reachable branch must produce values.
 - Every producing path must match the receiver's arity.
 - Produced values must be compatible with the receiver's types.
+
+### Diverging branches
+
+A standalone Never call may complete a block-form branch because that branch
+diverges rather than producing a value:
+
+[codeblock, $code("moth"):
+    fatal |message String| -> !:
+        assert(false, message)
+    ;
+
+    name = if ready:
+        then "Priya"
+    else
+        fatal("name unavailable")
+    ;
+]
+
+The Never call does not produce `String` and no coercion occurs. The inline
+form is invalid because it places the call in a value slot:
+
+[codeblock, $code("moth"):
+    -- Invalid: Never call in an inline value slot
+    name = if ready then "Priya" else fatal("name unavailable")
+]
+
+A value-producing block still needs at least one reachable producing path.
+An all-diverging producer keeps the existing no-producing-path diagnostic.
 
 ### Compile-time-known value conditions
 

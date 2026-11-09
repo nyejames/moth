@@ -61,50 +61,123 @@ use crate::compiler_frontend::utilities::token_scan::ExpressionBoundaryDepth;
 // WHY: callers parsing comma-separated lists outside parentheses (for example
 //      fallback/return lists) must preserve line boundaries between statements.
 pub(crate) fn create_expression_with_trailing_newline_policy(
-    mut input: ExpressionParseInput<'_, '_, '_>,
+    input: ExpressionParseInput<'_, '_, '_>,
 ) -> Result<OwnedExpr, ExpressionParseError> {
+    match create_parsed_expression(input, false)? {
+        ParsedStatementExpression::Value(value) => Ok(value),
+        ParsedStatementExpression::NeverCall(never_call) => {
+            Err(never_call.used_as_value_diagnostic().into())
+        }
+    }
+}
+
+/// One statement-position expression: a value, or a terminating Never call.
+///
+/// WHAT: separates the two legal statement outcomes before evaluation.
+/// WHY: a Never call has no value and must never enter the expression store. Only the statement
+///      owner may lift it into `NodeKind::NeverCall`; every value owner rejects it at evaluation.
+pub(crate) enum ParsedStatementExpression {
+    Value(OwnedExpr),
+    NeverCall(Box<crate::compiler_frontend::ast::statements::never_call::NeverCall>),
+}
+
+/// Parse one statement-position expression with the standalone Never-call rule.
+///
+/// WHAT: collects the authored fragment and accepts exactly one resolved Never call as a
+///       terminating statement; every other fragment follows the ordinary value pipeline.
+/// WHY: statement position is the only context where a Never call is legal, so the acceptance
+///      decision belongs at this entry rather than inside the shared value evaluator.
+pub(crate) fn create_statement_expression(
+    input: ExpressionParseInput<'_, '_, '_>,
+) -> Result<ParsedStatementExpression, ExpressionParseError> {
+    create_parsed_expression(input, true)
+}
+
+/// Parses one expression fragment and finishes it as a value or a statement Never call.
+///
+/// WHAT: the one body behind both expression entries. `statement_position` enables the
+///       standalone Never-call outcome and closes its operands' typed-error boundary.
+/// WHY: the value and statement entries share fragment collection, numeric deferral, the
+///      trailing-newline policy and the pending typed-error re-dispatch. A second copy would
+///      silently diverge whenever an input field or parser flag is added.
+fn create_parsed_expression(
+    mut input: ExpressionParseInput<'_, '_, '_>,
+    statement_position: bool,
+) -> Result<ParsedStatementExpression, ExpressionParseError> {
     if !input.scope_context.defer_typed_error_validation {
         let deferred_context = input
             .scope_context
             .new_pending_typed_error_expression_context();
-        let mut deferred_input = ExpressionParseInput::new(
-            ExpressionParseResources {
-                token_stream: input.token_stream,
-                scope_context: &deferred_context,
-                type_interner: input.type_interner,
-                expression_builder: &mut *input.expression_builder,
-                const_values: &mut *input.const_values,
-                expected_type: input.expected_type,
-                cast_target_context: input.cast_target_context,
-                value_mode: input.value_mode,
-                string_table: input.string_table,
-                path_fork: input.path_fork,
-            },
-            input.trailing_policy,
-        );
-        deferred_input.stop_at_named_entry = input.stop_at_named_entry;
-        deferred_input.retain_pending_numeric_fragment = input.retain_pending_numeric_fragment;
-        deferred_input.numeric_deferral_owner = input.numeric_deferral_owner;
-        deferred_input.route_argument_context = input.route_argument_context;
-        deferred_input.mismatch_context = input.mismatch_context;
-        let expression = create_expression_with_trailing_newline_policy(deferred_input)?;
-        validate_completed_typed_errors(input.expression_builder.view_owned(expression)?)?;
-        return Ok(expression);
+        let deferred_input = pending_typed_error_input(&mut input, &deferred_context);
+        return match create_parsed_expression(deferred_input, statement_position)? {
+            ParsedStatementExpression::Value(expression) => {
+                validate_completed_typed_errors(input.expression_builder.view_owned(expression)?)?;
+                Ok(ParsedStatementExpression::Value(expression))
+            }
+            ParsedStatementExpression::NeverCall(never_call) => {
+                never_call.validate_typed_errors(input.expression_builder)?;
+                Ok(ParsedStatementExpression::NeverCall(never_call))
+            }
+        };
     }
 
     // Keep the authored terminator until recovery has selected its expression.
     let skip_trailing_newlines = input.trailing_policy.skip_trailing_newlines;
     input.trailing_policy.skip_trailing_newlines = false;
-    let fragment = match collect_expression_fragment(&mut input)? {
+    let mut nodes = match collect_expression_fragment(&mut input)? {
         ExpressionFragment::Value(value) => {
             if skip_trailing_newlines {
                 input.token_stream.skip_newlines();
             }
-            return Ok(value);
+            return Ok(ParsedStatementExpression::Value(value));
         }
         ExpressionFragment::Nodes(nodes) => nodes,
     };
-    finish_collected_fragment(input, fragment, skip_trailing_newlines)
+
+    if statement_position && matches!(nodes.as_slice(), [ExpressionRpnItem::NeverCall(_)]) {
+        let Some(ExpressionRpnItem::NeverCall(never_call)) = nodes.pop() else {
+            unreachable!("the fragment is exactly one Never call");
+        };
+        if skip_trailing_newlines {
+            input.token_stream.skip_newlines();
+        }
+        return Ok(ParsedStatementExpression::NeverCall(never_call));
+    }
+
+    finish_collected_fragment(input, nodes, skip_trailing_newlines)
+        .map(ParsedStatementExpression::Value)
+}
+
+/// Reborrows one expression entry's resources under the pending typed-error context.
+///
+/// WHAT: builds the deferred input and carries every parser flag across the re-dispatch.
+/// WHY: all expression entries need the same reborrow; copying it per entry lets a newly added
+///      input field silently diverge.
+fn pending_typed_error_input<'a, 'env, 'tokens>(
+    input: &'a mut ExpressionParseInput<'_, 'env, 'tokens>,
+    deferred_context: &'a ScopeContext,
+) -> ExpressionParseInput<'a, 'env, 'tokens> {
+    let mut deferred_input = ExpressionParseInput::new(
+        ExpressionParseResources {
+            token_stream: &mut *input.token_stream,
+            scope_context: deferred_context,
+            type_interner: &mut *input.type_interner,
+            expression_builder: &mut *input.expression_builder,
+            const_values: &mut *input.const_values,
+            expected_type: &mut *input.expected_type,
+            cast_target_context: &mut *input.cast_target_context,
+            value_mode: input.value_mode,
+            string_table: &mut *input.string_table,
+            path_fork: &mut *input.path_fork,
+        },
+        input.trailing_policy,
+    );
+    deferred_input.stop_at_named_entry = input.stop_at_named_entry;
+    deferred_input.numeric_deferral_owner = input.numeric_deferral_owner;
+    deferred_input.retain_pending_numeric_fragment = input.retain_pending_numeric_fragment;
+    deferred_input.route_argument_context = input.route_argument_context;
+    deferred_input.mismatch_context = input.mismatch_context;
+    deferred_input
 }
 
 fn finish_collected_fragment(
@@ -236,7 +309,7 @@ pub(crate) fn create_expression_until_with_seed(
 }
 
 fn create_expression_until_with_seeded_items(
-    input: ExpressionParseInput<'_, '_, '_>,
+    mut input: ExpressionParseInput<'_, '_, '_>,
     stop_tokens: &[TokenTag],
     seed_items: Vec<ExpressionRpnItem>,
 ) -> Result<OwnedExpr, ExpressionParseError> {
@@ -244,28 +317,7 @@ fn create_expression_until_with_seeded_items(
         let deferred_context = input
             .scope_context
             .new_pending_typed_error_expression_context();
-        let deferred_input = ExpressionParseInput::new(
-            ExpressionParseResources {
-                token_stream: input.token_stream,
-                scope_context: &deferred_context,
-                type_interner: input.type_interner,
-                expression_builder: &mut *input.expression_builder,
-                const_values: &mut *input.const_values,
-                expected_type: input.expected_type,
-                cast_target_context: input.cast_target_context,
-                value_mode: input.value_mode,
-                string_table: input.string_table,
-                path_fork: input.path_fork,
-            },
-            input.trailing_policy,
-        );
-        // Flag state travels explicitly: the deferred input starts clean.
-        let mut deferred_input = deferred_input;
-        deferred_input.stop_at_named_entry = input.stop_at_named_entry;
-        deferred_input.numeric_deferral_owner = input.numeric_deferral_owner;
-        deferred_input.retain_pending_numeric_fragment = input.retain_pending_numeric_fragment;
-        deferred_input.route_argument_context = input.route_argument_context;
-        deferred_input.mismatch_context = input.mismatch_context;
+        let deferred_input = pending_typed_error_input(&mut input, &deferred_context);
         let expression = create_expression_until_with_seeded_items_inner(
             deferred_input,
             stop_tokens,
@@ -615,7 +667,7 @@ fn retain_pending_fragment_catch(
 /// suffix parse.
 enum FragmentSuccess {
     Known(Vec<TypeId>),
-    /// One concrete slot of a generic call, kept inline.
+    /// One concrete success slot, kept inline.
     Single(TypeId),
     /// A generic call whose slot types all resolve at completion, at its declared arity.
     Pending {
@@ -684,8 +736,16 @@ fn terminal_call_success(
     call: RetainedTerminalCall<'_>,
     scope_context: &ScopeContext,
 ) -> FragmentSuccess {
-    if let Some(types) = call.success_return_type_ids() {
-        return FragmentSuccess::Known(types);
+    // A Never call declares no receiving contract. Its value-position use is rejected by the
+    // completed expression owner, so this site must not fabricate a zero-slot contract for it.
+    if call.is_never() {
+        return FragmentSuccess::Unresolved;
+    }
+    if let Some(types) = call.success_types() {
+        return match types {
+            [type_id] => FragmentSuccess::Single(*type_id),
+            types => FragmentSuccess::Known(types.to_vec()),
+        };
     }
     match call.generic_success_slots(scope_context) {
         GenericSuccessSlots::Single(type_id) => FragmentSuccess::Single(type_id),

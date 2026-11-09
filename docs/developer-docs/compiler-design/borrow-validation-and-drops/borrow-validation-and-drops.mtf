@@ -14,12 +14,12 @@ Moth's access rule in plain form:
 
 Two overlapping exclusive accesses conflict for the same reason as the mixed case. Neither writer can rely on what it just wrote.
 
-[diagram:
+[@diagrams diagram:
     [$in label: Which overlaps are allowed]
     [$in caption: The rule only bites when two accesses overlap in time on places that can touch the same storage. Disjoint places never conflict, no matter how alarming the code looks.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Allowed]
             [$in title: Shared with shared]
@@ -27,10 +27,10 @@ Two overlapping exclusive accesses conflict for the same reason as the mixed cas
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Also allowed]
-                [lane:
-                [detail:
+                [@diagrams lane:
+                [@diagrams detail:
                     [$in href: ./]
                     Any accesses at all on places that cannot overlap the same storage
                 ]
@@ -39,8 +39,8 @@ Two overlapping exclusive accesses conflict for the same reason as the mixed cas
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Rejected]
             [$in title: Shared with exclusive]
@@ -48,8 +48,8 @@ Two overlapping exclusive accesses conflict for the same reason as the mixed cas
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Rejected]
             [$in title: Exclusive with exclusive]
@@ -145,12 +145,12 @@ Assignment through a mutable alias writes through to the referent. It must not s
 
 ## Handoff to lifetime validation
 
-[diagram:
+[@diagrams diagram:
     [$in label: Three owners, one chain of proof]
     [$in caption: Each owner answers one question and hands the answer on. No stage revisits a decision an earlier one already made, which is what keeps the guarantee the same on every backend.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Proves access]
             [$in title: Borrow validation]
@@ -158,8 +158,8 @@ Assignment through a mutable alias writes through to the referent. It must not s
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../memory-management-and-gc/]
             [$in eyebrow: Proves topology]
             [$in title: Lifetime and retained-edge analysis]
@@ -167,8 +167,8 @@ Assignment through a mutable alias writes through to the referent. It must not s
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../memory-management-and-gc/]
             [$in eyebrow: Chooses]
             [$in title: The memory planner]
@@ -176,8 +176,8 @@ Assignment through a mutable alias writes through to the referent. It must not s
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../backend-lowering/]
             [$in eyebrow: Encodes]
             [$in title: Backend lowering]

@@ -9,25 +9,16 @@
 //! discover both kinds of input.
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
-use crate::compiler_frontend::symbols::string_interning::StringId;
-use crate::projects::settings::Config;
+use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticBag, InvalidConfigReason, PreparedFailure,
+};
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 use std::path::Path;
-
-/// Build an invalid-config diagnostic tied to a specific config key.
-pub(super) fn config_diagnostic(
-    config: &Config,
-    key: &str,
-    reason: InvalidConfigReason,
-    strings: &mut DiagnosticStringBuilder<'_>,
-) -> DiagnosticDraft {
-    let key_id = strings.intern(key);
-    project_config::invalid_config_reason(Some(key_id), reason, config.setting_span(key))
-}
 
 /// Build an invalid-project-structure diagnostic for path or generated infrastructure.
 ///
@@ -40,6 +31,30 @@ pub(super) fn project_structure_diagnostic(reason: InvalidConfigReason) -> Diagn
 /// Intern a path spelling for diagnostic payloads.
 pub(super) fn path_id(path: &Path, strings: &mut DiagnosticStringBuilder<'_>) -> StringId {
     strings.get_or_intern(path.display().to_string())
+}
+
+/// Reject one authored root filename outside the closed vocabulary.
+///
+/// WHY: directory traversal, non-regular entries and synthetic single-file selection all enforce
+/// the same fixed root-name policy, so the diagnosed batch is constructed once.
+pub(super) fn invalid_module_root_file_name_error(
+    directory: &Path,
+    file_name: &str,
+    string_table: &mut StringTable,
+) -> PreparedFailure {
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+    let reason = InvalidConfigReason::InvalidModuleRootFileName {
+        file_name: diagnostic_strings.intern(file_name),
+        directory: path_id(directory, &mut diagnostic_strings),
+    };
+    let diagnostic = project_structure_diagnostic(reason);
+    let table = string_table.take_for_handoff();
+    PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
+        DiagnosticBag::from(diagnostic),
+        table,
+        None,
+        None,
+    ))
 }
 
 /// Build an infrastructure error for a filesystem name that cannot be represented as UTF-8.

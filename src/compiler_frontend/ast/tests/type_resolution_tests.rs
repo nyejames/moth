@@ -986,7 +986,7 @@ Buffer = |
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let buffer_name = string_table.intern("Buffer");
     let buffer_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test path fits");
     let buffer_path = path_fork
         .try_intern_child(buffer_path, buffer_name)
@@ -1313,7 +1313,7 @@ make || -> {capacity I32}:
 
     let make_name = string_table.intern("make");
     let make_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test path fits");
     let make_path = path_fork
         .try_intern_child(make_path, make_name)
@@ -1326,9 +1326,7 @@ make || -> {capacity I32}:
             _ => None,
         })
         .expect("make signature should be registered");
-    let return_type_id = signature.returns[0]
-        .type_id
-        .expect("return slot should have a TypeId");
+    let return_type_id = signature.return_contract.expect_ordinary().success()[0];
 
     assert_eq!(
         ast.type_environment
@@ -1338,13 +1336,48 @@ make || -> {capacity I32}:
     );
 }
 
+#[test]
+fn never_return_contract_resolves_without_a_return_type_id() {
+    let source = r#"
+fatal || -> !:
+    assert(false, "unreachable")
+;
+"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+
+    let fatal_name = string_table.intern("fatal");
+    let page_path_id = path_fork
+        .try_intern_portable_path("@entry.moth", &mut string_table)
+        .expect("test path fits");
+    let fatal_path = path_fork
+        .try_intern_child(page_path_id, fatal_name)
+        .expect("test path fits");
+    let signature = ast
+        .nodes
+        .iter()
+        .find_map(|node| match &node.kind {
+            NodeKind::Function(path, signature, _) if *path == fatal_path => Some(signature),
+            _ => None,
+        })
+        .expect("the Never function signature should be registered");
+
+    assert!(
+        signature.return_contract.is_never(),
+        "`-> !` must resolve to the Never contract variant"
+    );
+    assert!(
+        signature.return_contract.ordinary().is_none(),
+        "Never must never be projected onto empty ordinary slots"
+    );
+}
+
 fn page_path(
     name: &str,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> PathId {
     let scope = path_fork
-        .try_intern_portable_path("@page.moth", string_table)
+        .try_intern_portable_path("@entry.moth", string_table)
         .expect("test path fits");
     path_fork
         .try_intern_child(scope, string_table.intern(name))
@@ -1469,9 +1502,7 @@ use_maps |scores StringScores, direct {Bool = {String = I32}}| -> {Char = String
         builtins.bool,
         scores_type_id,
     );
-    let return_type_id = signature.returns[0]
-        .type_id
-        .expect("map return should have a TypeId");
+    let return_type_id = signature.return_contract.expect_ordinary().success()[0];
     assert_map_shape(&ast, return_type_id, builtins.char, scores_type_id);
 
     let payload_type_id = nominal_type_id(&ast, &mut string_table, &mut path_fork, "Payload");

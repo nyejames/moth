@@ -161,15 +161,15 @@ fn indexed_discovery_keeps_authored_kind_when_canonical_extension_disagrees() {
 
 #[test]
 fn stage0_source_ids_keep_module_origin_order_when_flat_portable_path_disagrees() {
-    // WHY: a flat portable key sorts `a-b/@b.moth` before `a/@a.moth` because '-' precedes '/'.
+    // WHY: a flat portable key sorts `a-b/@mod.moth` before `a/@mod.moth` because '-' precedes '/'.
     // Assigned SourceIds must follow module-origin order instead: module `a` before module `a-b`.
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
     let source_root = root.join("src");
     fs::create_dir_all(source_root.join("a")).expect("should create module a");
     fs::create_dir_all(source_root.join("a-b")).expect("should create module a-b");
-    fs::write(source_root.join("a/@a.moth"), "value #= 1\n").expect("should write module a root");
-    fs::write(source_root.join("a-b/@b.moth"), "value #= 1\n")
+    fs::write(source_root.join("a/@mod.moth"), "value #= 1\n").expect("should write module a root");
+    fs::write(source_root.join("a-b/@mod.moth"), "value #= 1\n")
         .expect("should write module a-b root");
 
     let config = Config::new(source_root.clone());
@@ -213,7 +213,7 @@ fn stage0_source_ids_keep_module_origin_order_when_flat_portable_path_disagrees(
 
     assert_eq!(
         assigned_logical_paths,
-        vec!["a/@a.moth", "a-b/@b.moth"],
+        vec!["a/@mod.moth", "a-b/@mod.moth"],
         "indexed registration must assign SourceIds in Stage 0 module-origin order"
     );
     assert_ne!(
@@ -315,7 +315,7 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
             input_files,
             &mut span_view,
             &entry_file_path,
-            None,
+            &crate::compiler_frontend::paths::module_roots::ModuleRootTable::empty(),
             local_string_table,
             source_files.fork_path_interner(),
             source_byte_count,
@@ -329,7 +329,7 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
             input_files,
             &mut span_view,
             &entry_file_path,
-            None,
+            &crate::compiler_frontend::paths::module_roots::ModuleRootTable::empty(),
             local_string_table,
             source_files.fork_path_interner(),
             source_byte_count,

@@ -6,6 +6,7 @@
 //!
 //! Module boundaries:
 //! - `ids.rs` — compact type identifiers and canonical keys.
+//! - `callable_returns.rs` — compact ordinary callable return contracts.
 //! - `environment.rs` — `TypeEnvironment` owns all type definitions and interning.
 //! - `definitions.rs` — type definition shapes stored in the environment.
 //! - `numeric_scalar.rs` — the canonical numeric scalar vocabulary (fixed scalars and exact `Dec`).
@@ -23,6 +24,7 @@
 //! Backend layout, ABI, drop strategy, and runtime representation do NOT belong here.
 //! Type compatibility POLICY does NOT belong here (see `type_coercion`).
 
+pub mod callable_returns;
 pub mod definitions;
 pub mod display;
 pub mod environment;
@@ -37,7 +39,8 @@ pub(crate) mod numeric_scalar;
 pub mod parsed;
 pub mod queries;
 
-// Re-exports for convenience.
+// Re-export for convenience; `SuccessSlots` stays private to the shape owner.
+pub use callable_returns::{CallableReturnShape, FunctionReturnContract};
 pub use ids::*;
 
 use crate::compiler_frontend::external_packages::ExternalTypeId;

@@ -118,7 +118,7 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), entry_source).expect("should write entry");
+    fs::write(src.join("@entry.moth"), entry_source).expect("should write entry");
     fs::write(src.join("docs/intro.moth"), intro_source).expect("should write intro");
     fs::write(src.join("docs/guides/ownership.moth"), ownership_source)
         .expect("should write ownership");

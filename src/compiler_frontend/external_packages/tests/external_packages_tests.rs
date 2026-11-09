@@ -12,14 +12,30 @@ use crate::compiler_frontend::external_packages::{
     ExternalConstantDef, ExternalConstantId, ExternalConstantRawValue, ExternalConstantValue,
     ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings, ExternalHirReturnAlias,
     ExternalJsLowering, ExternalPackageRegistry, ExternalParameter, ExternalRegistrationError,
-    ExternalReturnAlias, ExternalReturnSlot, ExternalSignatureType, ExternalSymbolCategory,
-    ExternalSymbolId, ExternalSymbolPath, ExternalTypeDef, ExternalTypeId,
-    IO_INPUT_EXTERNAL_TYPE_ID, TextConstEvalOp, external_success_returns,
+    ExternalReturnAlias, ExternalReturnSlot, ExternalReturnsMut, ExternalReturnsView,
+    ExternalSignatureType, ExternalSymbolCategory, ExternalSymbolId, ExternalSymbolPath,
+    ExternalTypeDef, ExternalTypeId, IO_INPUT_EXTERNAL_TYPE_ID, TextConstEvalOp,
+    external_success_returns,
 };
+use crate::compiler_frontend::external_packages::{external_never, external_returns};
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+fn ordinary_returns(function: &ExternalFunctionDef) -> ExternalReturnsView<'_> {
+    function
+        .return_contract
+        .ordinary()
+        .expect("test external function has an ordinary return contract")
+}
+
+fn ordinary_returns_mut(function: &mut ExternalFunctionDef) -> ExternalReturnsMut<'_> {
+    function
+        .return_contract
+        .ordinary_mut()
+        .expect("test external function has an ordinary return contract")
+}
 
 fn import_path(
     components: &[&str],
@@ -50,35 +66,37 @@ fn return_slots_preserve_alias_metadata() {
                 access_kind: ExternalAccessKind::Shared,
             },
         ],
-        returns: vec![ExternalReturnSlot::alias_args(
-            ExternalAbiType::Utf8Str,
-            vec![1],
-        )],
-        error_return_type: None,
+        return_contract: external_returns(
+            vec![ExternalReturnSlot::alias_args(
+                ExternalAbiType::Utf8Str,
+                vec![1],
+            )],
+            None,
+        ),
         const_eval: None,
         lowerings: ExternalFunctionLowerings::default(),
     };
 
-    let returns = &host_function.returns;
-    assert_eq!(returns.len(), 1);
+    let returns = ordinary_returns(&host_function);
+    assert_eq!(returns.success.len(), 1);
     assert_eq!(
-        returns[0].value_type,
+        returns.success[0].value_type,
         ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)
     );
     assert!(matches!(
-        &returns[0].alias,
+        &returns.success[0].alias,
         ExternalReturnAlias::AliasArgs(parameter_indices) if parameter_indices == &[1usize]
     ));
     assert_eq!(
         host_function.hir_return_alias(),
         ExternalHirReturnAlias::AliasArgs(&[1]),
     );
-    host_function.error_return_type = Some(ExternalSignatureType::BuiltinError);
+    *ordinary_returns_mut(&mut host_function).error = Some(ExternalSignatureType::BuiltinError);
     assert_eq!(
         host_function.hir_return_alias(),
         ExternalHirReturnAlias::AliasArgs(&[1]),
     );
-    host_function.returns.extend([
+    ordinary_returns_mut(&mut host_function).success.extend([
         ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
         ExternalReturnSlot::alias_args(ExternalAbiType::Utf8Str, vec![0, 1]),
     ]);
@@ -87,10 +105,10 @@ fn return_slots_preserve_alias_metadata() {
         ExternalHirReturnAlias::Unknown,
     );
     assert_eq!(
-        host_function.returns[2].alias,
+        ordinary_returns(&host_function).success[2].alias,
         ExternalReturnAlias::AliasArgs(vec![0, 1]),
     );
-    host_function.returns = vec![
+    *ordinary_returns_mut(&mut host_function).success = vec![
         ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
         ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
     ];
@@ -98,12 +116,12 @@ fn return_slots_preserve_alias_metadata() {
         host_function.hir_return_alias(),
         ExternalHirReturnAlias::Unknown,
     );
-    host_function.returns.truncate(1);
+    ordinary_returns_mut(&mut host_function).success.truncate(1);
     assert_eq!(
         host_function.hir_return_alias(),
         ExternalHirReturnAlias::Fresh,
     );
-    host_function.returns.clear();
+    ordinary_returns_mut(&mut host_function).success.clear();
     assert_eq!(
         host_function.hir_return_alias(),
         ExternalHirReturnAlias::Fresh,
@@ -117,8 +135,10 @@ fn register_function_rejects_duplicates() {
         .register_function(ExternalFunctionDef {
             name: "test_func".to_owned(),
             parameters: Vec::new(),
-            returns: external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
-            error_return_type: None,
+            return_contract: external_returns(
+                external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
+                None,
+            ),
             const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
@@ -127,8 +147,10 @@ fn register_function_rejects_duplicates() {
     let result = registry.register_function(ExternalFunctionDef {
         name: "test_func".to_owned(),
         parameters: Vec::new(),
-        returns: external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
-        error_return_type: None,
+        return_contract: external_returns(
+            external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
+            None,
+        ),
         const_eval: None,
         lowerings: ExternalFunctionLowerings::default(),
     });
@@ -280,8 +302,10 @@ fn const_eval_registration_requires_trusted_core_origin_and_exact_signature() {
                     access_kind: ExternalAccessKind::Shared,
                 },
             ],
-            returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Bool)],
-            error_return_type: None,
+            return_contract: external_returns(
+                vec![ExternalReturnSlot::fresh(ExternalAbiType::Bool)],
+                None,
+            ),
             const_eval: Some(ExternalConstEvalOp::Text(TextConstEvalOp::Contains)),
             lowerings: ExternalFunctionLowerings::default(),
         };
@@ -292,16 +316,19 @@ fn const_eval_registration_requires_trusted_core_origin_and_exact_signature() {
                 function.parameters[0].access_kind = ExternalAccessKind::Mutable;
             }
             SignatureChange::AliasArgsSlot => {
-                function.returns = vec![ExternalReturnSlot::alias_args(
-                    ExternalAbiType::Bool,
-                    vec![0],
-                )];
+                *ordinary_returns_mut(&mut function).success =
+                    vec![ExternalReturnSlot::alias_args(
+                        ExternalAbiType::Bool,
+                        vec![0],
+                    )];
             }
             SignatureChange::ErrorSlot => {
-                function.error_return_type = Some(ExternalSignatureType::BuiltinError);
+                *ordinary_returns_mut(&mut function).error =
+                    Some(ExternalSignatureType::BuiltinError);
             }
             SignatureChange::WrongReturnType => {
-                function.returns = vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)];
+                *ordinary_returns_mut(&mut function).success =
+                    vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)];
             }
             SignatureChange::WrongParameterCount => {
                 function.parameters.truncate(1);
@@ -312,25 +339,25 @@ fn const_eval_registration_requires_trusted_core_origin_and_exact_signature() {
                 ));
             }
             SignatureChange::OptionalReturn => {
-                function.returns =
+                *ordinary_returns_mut(&mut function).success =
                     vec![ExternalReturnSlot::fresh(ExternalSignatureType::Optional(
                         Box::new(ExternalSignatureType::Abi(ExternalAbiType::Bool)),
                     ))];
             }
             SignatureChange::NestedOptionalReturn => {
-                function.returns = vec![ExternalReturnSlot::fresh(
+                *ordinary_returns_mut(&mut function).success = vec![ExternalReturnSlot::fresh(
                     ExternalSignatureType::Optional(Box::new(ExternalSignatureType::Optional(
                         Box::new(ExternalSignatureType::Abi(ExternalAbiType::Bool)),
                     ))),
                 )];
             }
             SignatureChange::ExtraReturnSlot => {
-                function
-                    .returns
+                ordinary_returns_mut(&mut function)
+                    .success
                     .push(ExternalReturnSlot::fresh(ExternalAbiType::Bool));
             }
             SignatureChange::MissingReturnSlot => {
-                function.returns.clear();
+                ordinary_returns_mut(&mut function).success.clear();
             }
         }
 
@@ -474,8 +501,7 @@ fn register_function_rejects_slots_without_a_moth_value() {
         ExternalFunctionDef {
             name: "invalid".to_owned(),
             parameters,
-            returns,
-            error_return_type: None,
+            return_contract: external_returns(returns, None),
             const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         }
@@ -559,11 +585,12 @@ fn collection_helpers_keep_receiver_parameter_access_modes() {
             push.parameters[1].language_type,
             ExternalSignatureType::Abi(ExternalAbiType::Inferred)
         );
+        let returns = ordinary_returns(push);
         assert_eq!(
-            push.returns,
+            returns.success,
             external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh)
         );
-        assert!(push.error_return_type.is_none());
+        assert!(returns.error.is_none());
         assert!(push.lowerings.wasm.is_none());
     }
 
@@ -791,8 +818,10 @@ fn empty_void_function(name: &str) -> ExternalFunctionDef {
     ExternalFunctionDef {
         name: name.to_owned(),
         parameters: Vec::new(),
-        returns: external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
-        error_return_type: None,
+        return_contract: external_returns(
+            external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
+            None,
+        ),
         const_eval: None,
         lowerings: ExternalFunctionLowerings::default(),
     }
@@ -1487,7 +1516,7 @@ fn core_numeric_package_signatures_use_exact_fixed_scalars() {
         .resolve_package_function("@core/math", "sin")
         .expect("core math function should be registered");
     assert_eq!(sin.parameters[0].language_type, fixed_f64);
-    assert_eq!(sin.returns[0].value_type, fixed_f64);
+    assert_eq!(ordinary_returns(sin).success[0].value_type, fixed_f64);
     let (_, pi) = registry
         .resolve_package_constant("@core/math", "PI")
         .expect("core math constant should be registered");
@@ -1502,24 +1531,36 @@ fn core_numeric_package_signatures_use_exact_fixed_scalars() {
             .iter()
             .all(|parameter| parameter.language_type == fixed_i32)
     );
-    assert_eq!(random_int.returns[0].value_type, fixed_i32);
+    assert_eq!(
+        ordinary_returns(random_int).success[0].value_type,
+        fixed_i32
+    );
 
     let (_, text_length) = registry
         .resolve_package_function("@core/text", "length")
         .expect("core text length function should be registered");
-    assert_eq!(text_length.returns[0].value_type, fixed_i32);
+    assert_eq!(
+        ordinary_returns(text_length).success[0].value_type,
+        fixed_i32
+    );
     let collection_length = registry
         .get_function_by_id(ExternalFunctionId::CollectionLength)
         .expect("core collection length function should be registered");
-    assert_eq!(collection_length.returns[0].value_type, fixed_i32);
+    assert_eq!(
+        ordinary_returns(collection_length).success[0].value_type,
+        fixed_i32
+    );
     let pointer_x = registry
         .get_function_by_id(ExternalFunctionId::IoInputPointerX)
         .expect("core pointer_x function should be registered");
-    assert_eq!(pointer_x.returns[0].value_type, fixed_f64);
+    assert_eq!(ordinary_returns(pointer_x).success[0].value_type, fixed_f64);
     let (_, as_seconds) = registry
         .resolve_package_function("@core/time", "as_seconds")
         .expect("core time function should be registered");
-    assert_eq!(as_seconds.returns[0].value_type, fixed_f64);
+    assert_eq!(
+        ordinary_returns(as_seconds).success[0].value_type,
+        fixed_f64
+    );
 }
 
 #[test]
@@ -1647,15 +1688,16 @@ fn core_io_console_functions_return_void() {
         let function = registry
             .get_function_by_id(function_id)
             .expect("console function should be registered");
+        let returns = ordinary_returns(function);
         assert!(
-            function.returns.is_empty(),
+            returns.success.is_empty(),
             "{} should return no slots because Void maps to zero returns, got {}",
             function_id.name(),
-            function.returns.len()
+            returns.success.len()
         );
         assert!(
-            function.error_return_type.is_none(),
-            "{} should not have an error return type",
+            returns.error.is_none(),
+            "{} should have no error slot",
             function_id.name()
         );
     }
@@ -1900,15 +1942,13 @@ fn core_io_input_new_is_fallible_input_return() {
         .expect("input.new should be registered");
 
     assert!(new_function.parameters.is_empty());
-    assert_eq!(new_function.returns.len(), 1);
+    let returns = ordinary_returns(new_function);
+    assert_eq!(returns.success.len(), 1);
     assert_eq!(
-        new_function.returns[0].value_type,
+        returns.success[0].value_type,
         ExternalSignatureType::External(IO_INPUT_EXTERNAL_TYPE_ID)
     );
-    assert_eq!(
-        new_function.error_return_type,
-        Some(ExternalSignatureType::BuiltinError)
-    );
+    assert_eq!(returns.error, Some(&ExternalSignatureType::BuiltinError));
 }
 
 /// Verifies that `input.last_key_pressed` returns `String?` using the canonical option shape.
@@ -1922,14 +1962,38 @@ fn core_io_input_last_key_pressed_returns_optional_string() {
         .get_function_by_id(ExternalFunctionId::IoInputLastKeyPressed)
         .expect("input.last_key_pressed should be registered");
 
-    assert_eq!(last_key.returns.len(), 1);
+    let returns = ordinary_returns(last_key);
+    assert_eq!(returns.success.len(), 1);
     assert_eq!(
-        last_key.returns[0].value_type,
+        returns.success[0].value_type,
         ExternalSignatureType::Optional(Box::new(ExternalSignatureType::Abi(
             ExternalAbiType::Utf8Str,
         )))
     );
-    assert!(last_key.error_return_type.is_none());
+    assert!(returns.error.is_none());
+}
+
+/// Verifies that an external function with no success slots stays ordinary completion.
+///
+/// WHAT: an ordinary empty success/error contract is distinct from an explicit `-> !` contract.
+/// WHY: external Never is provider metadata, not inferred from zero results, so a void binding
+///      must never become a terminating contract by accident.
+#[test]
+fn zero_success_external_contract_remains_ordinary_completion() {
+    let ordinary = external_returns(Vec::new(), None);
+    assert!(!ordinary.is_never());
+    let returns = ordinary
+        .ordinary()
+        .expect("zero success slots remain an ordinary contract");
+    assert!(returns.success.is_empty());
+    assert!(returns.error.is_none());
+
+    let never = external_never();
+    assert!(never.is_never());
+    assert!(
+        never.ordinary().is_none(),
+        "an explicit Never binding owns no ordinary completion channels"
+    );
 }
 
 /// Verifies that every package registered through `register_package` always carries

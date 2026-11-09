@@ -1,0 +1,4 @@
+-- An ordinary typed implementation may diverge without gaining a Never contract.
+future_value || -> String:
+    assert(false, "future value")
+;

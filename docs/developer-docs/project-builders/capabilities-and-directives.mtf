@@ -29,8 +29,8 @@ duplicate names and invalid value domains are errors. Optionality and omission
 are separate rules rather than an instruction to deep-merge records.
 
 `game` names a builder-owned configuration contract. This helper doesn't add
-arbitrary fields to the compiler-owned `$project` signature or reinstate a
-separate configuration expression language. Configuration stays a
+arbitrary fields to the compiler-owned `project` record or reinstate a separate
+configuration expression language. Configuration stays a
 self-contained compile-time source. It doesn't run host functions, import
 application modules or perform runtime requests.
 
@@ -141,9 +141,10 @@ only for behaviour that belongs at the formatting boundary.
 
 ### Select source adapters and external providers
 
-`moth_templates` and `markdown` enable compiler-known source adapters. An `.mtf`
-file contributes its const-required content through normal module compilation.
-A `.md` file contributes rendered content. Registering a filename extension
+`markdown` enables the compiler-known plain Markdown source adapter. An `.mtf`
+file contributes its const-required content through normal module compilation
+when the selected builder provides the standard HTML source package set. A
+`.md` file contributes rendered content. Registering a filename extension
 doesn't add a new Moth declaration grammar.
 
 Use `external_import_provider` for a foreign file format that supplies a typed

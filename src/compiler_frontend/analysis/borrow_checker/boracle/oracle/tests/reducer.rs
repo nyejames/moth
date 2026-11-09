@@ -561,13 +561,14 @@ fn boracle_fixture_skeleton_renders_every_normalized_variant() {
         "EventKind::LoanKill { loan: LoanId::new(3), reason: KillReason::UnreachableContinuation }",
         "EventKind::LoanKill { loan: LoanId::new(4), reason: KillReason::Explicit }",
         "EventKind::Terminator { kind: TerminatorEventKind::Jump { target: BlockId::new(8), arguments: vec![].into_boxed_slice() } }",
-        "EventKind::Terminator { kind: TerminatorEventKind::Branch { targets: vec![BlockId::new(1), BlockId::new(2), BlockId::new(3), BlockId::new(4), BlockId::new(5), BlockId::new(6), BlockId::new(7), BlockId::new(8)].into_boxed_slice() } }",
+        "EventKind::Terminator { kind: TerminatorEventKind::Branch { targets: vec![BlockId::new(1), BlockId::new(2), BlockId::new(3), BlockId::new(4), BlockId::new(5), BlockId::new(6), BlockId::new(7), BlockId::new(8), BlockId::new(9)].into_boxed_slice() } }",
         "EventKind::Terminator { kind: TerminatorEventKind::Return }",
         "EventKind::Terminator { kind: TerminatorEventKind::ReturnError }",
         "EventKind::Terminator { kind: TerminatorEventKind::Break { target: BlockId::new(8) } }",
         "EventKind::Terminator { kind: TerminatorEventKind::Continue { target: BlockId::new(8) } }",
         "EventKind::Terminator { kind: TerminatorEventKind::RuntimeFailure }",
         "EventKind::Terminator { kind: TerminatorEventKind::AssertFailure }",
+        "EventKind::Terminator { kind: TerminatorEventKind::NeverCall }",
     ] {
         assert!(
             skeleton.contains(expected),
@@ -1248,7 +1249,7 @@ fn renderer_coverage_problem() -> BorrowProblem {
         &mut events,
         EventKind::Terminator {
             kind: TerminatorEventKind::Branch {
-                targets: (1..=8).map(BlockId::new).collect(),
+                targets: (1..=9).map(BlockId::new).collect(),
             },
         },
     );
@@ -1278,6 +1279,7 @@ fn renderer_coverage_problem() -> BorrowProblem {
         (BlockId::new(6), TerminatorEventKind::RuntimeFailure),
         (BlockId::new(7), TerminatorEventKind::AssertFailure),
         (BlockId::new(8), TerminatorEventKind::Return),
+        (BlockId::new(9), TerminatorEventKind::NeverCall),
     ];
     let mut terminal_rows = Vec::new();
     for (index, (block, kind)) in terminal_specs.into_iter().enumerate() {
@@ -1312,7 +1314,7 @@ fn renderer_coverage_problem() -> BorrowProblem {
             .iter()
             .map(|(block, event_id, point)| CfgBlock::new(*block, *point, *point, vec![*event_id])),
     );
-    let mut edges = (1..=8)
+    let mut edges = (1..=9)
         .map(|target| CfgEdge::new(BlockId::new(0), BlockId::new(target)))
         .collect::<Vec<_>>();
     edges.extend(
@@ -1332,6 +1334,7 @@ fn renderer_coverage_problem() -> BorrowProblem {
             BlockId::new(6),
             BlockId::new(7),
             BlockId::new(8),
+            BlockId::new(9),
         ],
         places,
         origins,

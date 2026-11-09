@@ -1,5 +1,0 @@
-export:
-    @intro content as intro_content
-
-    greeting #= "moth_template_same_directory_root_constant visible"
-;

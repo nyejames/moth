@@ -110,7 +110,7 @@ current backend and coverage status.
 - The same choice variant can't be matched more than once.
 - Payload exhaustiveness is tag-level. One valid payload capture arm covers every value of that variant.
 - A statement match may use bodyless `else =>`.
-- A value-producing match must produce the required values on every selected path.
+- A value-producing match must produce the required values on every selected path or leave the value-producing block through a return, divergence or an enclosing-loop exit.
 
 ### Single-predicate value matches
 

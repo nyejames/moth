@@ -33,6 +33,8 @@ Generic parameters follow the declaration name after `type`. Multiple parameters
 - Generic parameters do not create type values.
 - Generic declarations are resolved before HIR.
 - Implicit failure follows the closed module boundary: an exported generic without an error slot must handle it locally, while a private generic propagates it within the same module. See @../errors (Errors).
+- A generic function may declare `-> !`. The contract is exact after
+  specialisation, like any other callable.
 
 ### Multiple parameters
 

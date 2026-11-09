@@ -78,8 +78,8 @@ Read these from the active worktree before changing package code:
 - `docs/build-system-design.md`, especially selected builder capabilities, package classification,
   Core and Builder package availability, exact semantic compatibility and external JavaScript emission
 - `docs/docs/packages/` and the canonical numeric/cast/Error references
-- `docs/docs/progress/@page.moth`
-- `docs/docs/progress/packages-and-builders/@page.moth`
+- `docs/docs/progress/@entry.moth`
+- `docs/docs/progress/packages-and-builders/@entry.moth`
 - `docs/developer-docs/style-guide/style-guide.mtf`
 - `docs/developer-docs/style-guide/testing.mtf`
 - `docs/developer-docs/style-guide/validation.mtf`
@@ -484,7 +484,7 @@ plan.
 ### Documentation and tracking closeout
 
 - update canonical package docs for accepted behaviour
-- update `docs/docs/progress/packages-and-builders/@page.moth`
+- update `docs/docs/progress/packages-and-builders/@entry.moth`
 - update the compiler progress matrix only for compiler or backend status
 - update this tracker
 - retain useful blockers and next extensions in the living package plan
@@ -841,9 +841,8 @@ runtime asset reachability checks and failure coverage for unavailable handles o
 snapshot input contract. Portable snapshot additions and the ordered event investigation follow as
 separate phases.
 
-Queued `io.set_title` is accepted Core IO design whose implementation belongs to the HTML page
-directive work. Config and HTML entry cutover remain prerequisites for that call's host-capability
-path. Do not treat it as delivered by this phase.
+Queued `io.set_title` is accepted Core IO design whose implementation belongs to the runtime title
+plan. Do not treat it as delivered by this phase.
 
 Mandatory closeout for every accepted IO implementation phase: full phase gate plus rich console,
 input, lifecycle and recovery coverage appropriate to that phase.

@@ -29,9 +29,7 @@ use crate::compiler_frontend::ast::module_ast::scope_context::{
     ContextKind, EnclosingCallableContract, EnclosingCallableOwner, ScopeContext,
 };
 use crate::compiler_frontend::ast::statements::body_dispatch::ParsedBody;
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot,
-};
+use crate::compiler_frontend::ast::statements::functions::{FunctionParameter, FunctionSignature};
 use crate::compiler_frontend::ast::templates::create_template_node::PreparedTemplateConstruction;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{SlotKey, Template, TemplateType};
@@ -66,6 +64,7 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
 use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::headers::SyntheticContentPayload;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
@@ -87,12 +86,22 @@ fn enclosing_callable_contract(
     signature: &FunctionSignature,
     owner: EnclosingCallableOwner,
 ) -> Rc<EnclosingCallableContract> {
-    let authored_success_slot_count = signature.success_return_slot_count();
+    // A Never callable promises no success or error return to its own body. Body validation
+    // proves divergence separately; here the expected return slots are genuinely empty.
+    let (success_types, authored_success_slot_count, error_type) = match &signature.return_contract
+    {
+        FunctionReturnContract::Returns(returns) => (
+            returns.success().to_vec(),
+            returns.success().len(),
+            returns.error(),
+        ),
+        FunctionReturnContract::Never => (Vec::new(), 0, None),
+    };
     Rc::new(EnclosingCallableContract {
         owner,
-        success_types: signature.success_return_type_ids(),
+        success_types,
         authored_success_slot_count,
-        error_type: signature.error_return_type_id(),
+        error_type,
         parameter_contracts: signature
             .parameters
             .iter()
@@ -1366,16 +1375,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             .intern_collection(builtin_string_type_id, None);
         let start_signature = FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                ReturnSlot {
-                    type_id: Some(start_return_type_id),
-                    channel: ReturnChannel::Success,
-                },
-                ReturnSlot {
-                    type_id: Some(error_type),
-                    channel: ReturnChannel::Error,
-                },
-            ],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [start_return_type_id],
+                Some(error_type),
+            )),
         };
         // Root initializers infer their own success types. The fragment collection
         // is an implicit HIR return, not a receiving expectation for those values.

@@ -34,7 +34,7 @@ fn requester_template_contract_slots_use_nonidentity_generated_domain_remap() {
             "main".to_owned(),
             ModuleRootRole::Normal,
         ),
-        "@page.moth".to_owned(),
+        "@entry.moth".to_owned(),
         ModulePrivateExecutableCategory::GenericFunction,
         "probe".to_owned(),
         None,
@@ -78,7 +78,7 @@ fn requester_template_contract_slots_use_nonidentity_generated_domain_remap() {
         string_table: &mut string_table,
         path_fork: &mut path_fork,
         entry_dir,
-        root_role: ModuleRootRole::Support,
+        synthesizes_entry_start: false,
         build_profile: requester.build_profile,
         file_value_resolution: None,
         config_resolution: None,
@@ -179,21 +179,39 @@ fn requester_template_contract_slots_use_nonidentity_generated_domain_remap() {
                 .expect("generated parameter should have a local type handle")
         })
         .collect::<Vec<_>>();
-    assert_eq!(contract.returns, slots);
-    assert_eq!(contract.error_return, Some(slots[1]));
+    assert_eq!(
+        contract.return_contract.expect_ordinary().success(),
+        slots.as_slice()
+    );
+    assert_eq!(
+        contract.return_contract.expect_ordinary().error(),
+        Some(slots[1])
+    );
     for (generated_slot, requester_slot) in contract
-        .returns
+        .return_contract
+        .expect_ordinary()
+        .success()
         .iter()
-        .zip(requester_template.signature.success_return_type_ids())
+        .zip(
+            requester_template
+                .signature
+                .return_contract
+                .expect_ordinary()
+                .success(),
+        )
     {
         assert_ne!(
-            *generated_slot, requester_slot,
+            *generated_slot, *requester_slot,
             "fixture must remap every success slot"
         );
     }
     assert_ne!(
-        contract.error_return,
-        requester_template.signature.error_return_type_id(),
+        contract.return_contract.expect_ordinary().error(),
+        requester_template
+            .signature
+            .return_contract
+            .expect_ordinary()
+            .error(),
         "fixture must remap the error slot",
     );
     let default = installed.signature.parameters[2]

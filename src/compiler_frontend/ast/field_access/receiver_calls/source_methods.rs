@@ -36,7 +36,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
     FallibleExpressionHandling, FallibleHandling,
 };
 use crate::compiler_frontend::ast::expressions::function_calls::{
-    CallFinishContext, finish_function_call_expression,
+    CallFinishContext, finish_function_call_expression, reject_never_call_continuation,
 };
 use crate::compiler_frontend::ast::field_access::parse_chain::expression_from_postfix_node;
 use crate::compiler_frontend::ast::field_access::receiver_access::{
@@ -52,8 +52,8 @@ use crate::compiler_frontend::ast::generic_functions::{
     verify_completed_error_return, verify_retained_propagation_error,
 };
 use crate::compiler_frontend::ast::numeric_construction::{
-    DeferredCall, DeferredCallArgument, DeferredCallHandling, DeferredExpressionCompletion,
-    DeferredExpressionServices,
+    CallCompletion, CompletedExpression, DeferredCall, DeferredCallArgument, DeferredCallHandling,
+    DeferredExpressionCompletion, DeferredExpressionServices,
 };
 use crate::compiler_frontend::ast::numeric_known_shape::KnownShapeId;
 use crate::compiler_frontend::ast::receiver_methods::ReceiverMethodEntry;
@@ -62,6 +62,7 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
     parse_fragment_handling_suffix,
 };
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::ast::statements::never_call::{NeverCall, NeverCallTarget};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -69,6 +70,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_da
 use crate::compiler_frontend::compiler_messages::{
     InvalidReceiverCallReason, ValueReceiverContext,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -398,9 +400,28 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         },
     )?;
 
-    let method_call_expression = if let Some(error_return_type_id) =
-        call_signature.error_return_type_id()
-    {
+    // A Never method has no value. The statement owner lifts this outcome into `NeverCall`;
+    // every value owner rejects it at the shared evaluation choke point.
+    let Some(call_returns) = call_signature.return_contract.ordinary() else {
+        reject_never_call_continuation(token_stream, member_name, member_span)?;
+        if !scope_context.generic_template_validation
+            && let Some(request) = generic_request.clone()
+        {
+            scope_context.record_generic_function_instantiation_request(request);
+        }
+        return Ok(ParsedReceiverMethodCall::Terminating(Box::new(NeverCall {
+            target: NeverCallTarget::Source(method_path),
+            receiver: Some(receiver_expression.id()),
+            arguments: args
+                .into_iter()
+                .map(|argument| argument.map_value(OwnedExpr::id))
+                .collect(),
+            name: member_name,
+            span: member_span,
+        })));
+    };
+
+    let method_call_expression = if let Some(error_return_type_id) = call_returns.error() {
         // Typed methods use the established handled-call shape, with their receiver in slot zero.
         // A raw MethodCall inside a carrier would bypass HIR's explicit error-channel call lowering.
         let receiver_span = expression_builder.view_owned(receiver_expression)?.span();
@@ -426,7 +447,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
             full_arguments
                 .push(argument.with_parameter_slot(ParameterSlot::new(parameter_slot.index() + 1)));
         }
-        let result_type_ids = call_signature.success_return_type_ids();
+        let result_type_ids = call_returns.success().to_vec();
         let value_required = !result_type_ids.is_empty();
         finish_function_call_expression(
             HandledFallibleCall {
@@ -451,7 +472,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         )?
     } else {
         let result_type_ids = receiver_result_type_ids_for_call(
-            call_signature.success_return_type_ids(),
+            call_returns.success().to_vec(),
             token_stream,
             type_interner,
         )?;
@@ -679,6 +700,20 @@ impl DeferredReceiverCall {
         }
     }
 
+    /// Whether this retained call's declared contract completes as a value or terminates.
+    ///
+    /// WHAT: reads the declared signature's contract, which a generic method's template states
+    ///       exactly before its instance completes.
+    /// WHY: the Never decision belongs to the callee's contract, not to an outer marker, so
+    ///      completion and value-position rejection read one fact.
+    pub(crate) fn completion(&self) -> CallCompletion {
+        if self.declared_signature().return_contract.is_never() {
+            CallCompletion::Never
+        } else {
+            CallCompletion::Value
+        }
+    }
+
     /// The declared callee signature, read without completing the call.
     ///
     /// WHAT: a concrete record's resolved signature, or a generic record's template signature,
@@ -693,9 +728,13 @@ impl DeferredReceiverCall {
     }
 
     /// The exact single success type of a concrete record. A generic record has no exact type
-    /// until its instance completes, so it reports none here.
+    /// until its instance completes, and a Never contract has no success slot at all, so both
+    /// report none here.
     pub(crate) fn single_success_return_type_id(&self) -> Option<TypeId> {
-        self.concrete_signature()?.single_success_return_type_id()
+        self.concrete_signature()?
+            .return_contract
+            .ordinary()?
+            .single_success_slot()
     }
 
     /// The ordered result shapes of a generic-method record; `None` for a concrete record.
@@ -711,7 +750,8 @@ impl DeferredReceiverCall {
         match &self.callee {
             DeferredReceiverCallee::Generic(generic) => generic.error_return,
             DeferredReceiverCallee::Concrete(signature) => signature
-                .error_return_type_id()
+                .return_contract
+                .error_slot()
                 .map(GenericErrorReturn::Concrete),
         }
     }
@@ -764,7 +804,40 @@ fn retain_numeric_receiver_call(
     } = input;
 
     let signature = source_method.signature();
-    let success_result_type_ids = signature.success_return_type_ids();
+    let Some(returns) = signature.return_contract.ordinary() else {
+        // Arguments still depend on numeric completion, but the call has no success or error
+        // channel. The record's declared signature makes completion hand the rebuilt call back
+        // as a terminating statement payload.
+        reject_never_call_continuation(token_stream, member_name, member_span)?;
+        let receiver_expression = receiver_hidden_call_argument(
+            receiver_node,
+            source_method.receiver_mutable(),
+            member_span,
+            expression_builder,
+        )?
+        .value
+        .id();
+        let signature = match source_method {
+            SourceReceiverMethodTarget::Declared(method) => method.signature.clone(),
+            SourceReceiverMethodTarget::TraitSurface(method) => method.signature.clone(),
+        };
+        let call = retained_receiver_call_record(
+            source_method.method_path(),
+            member_name,
+            signature,
+            Some(expectations),
+            receiver_expression,
+            source_method.receiver_mutable(),
+            authored_marker_span,
+            arguments,
+            member_span,
+            None,
+            DeferredCallHandling::Unhandled,
+        );
+        return Ok(retained_receiver_call_operand(call, member_span));
+    };
+
+    let success_result_type_ids = returns.success();
     let value_required = !success_result_type_ids.is_empty();
 
     // The resolved private-failure-lane fact of this call site: it is the method's own authored
@@ -793,10 +866,8 @@ fn retain_numeric_receiver_call(
                     type_interner,
                     expression_builder,
                     const_values,
-                    FallibleSuccessContract::Known(success_result_type_ids.as_slice()),
-                    signature
-                        .error_return_type_id()
-                        .map(GenericErrorReturn::Concrete),
+                    FallibleSuccessContract::Known(success_result_type_ids),
+                    returns.error().map(GenericErrorReturn::Concrete),
                     private_failure_lane,
                     value_required,
                     member_span,
@@ -834,9 +905,8 @@ fn retain_numeric_receiver_call(
     .id();
 
     // A fallible method owns its error channel: only the plain call carries the private lane.
-    let private_failure_candidate = (private_failure_lane
-        && signature.error_return_type_id().is_none())
-    .then(|| source_method.method_path());
+    let private_failure_candidate =
+        (private_failure_lane && returns.error().is_none()).then(|| source_method.method_path());
     let method_path = source_method.method_path();
     let receiver_mutable = source_method.receiver_mutable();
     let signature = match source_method {
@@ -920,13 +990,14 @@ pub(crate) fn complete_deferred_receiver_call<
 >(
     deferred: DeferredReceiverCall,
     session: &mut S,
-) -> Result<OwnedExpr, ExpressionParseError> {
+    completion: CallCompletion,
+) -> Result<CompletedExpression, ExpressionParseError> {
     // A generic method's ticket was reserved at the authored site, whether declared-owner or
     // concrete. Any failure before publication must release that slot so the ordered ledger never
     // keeps a pending request.
     let ticket = deferred.reserved_ledger_ticket();
-    match complete_reserved_receiver_call(deferred, session) {
-        Ok(expression) => Ok(expression),
+    match complete_reserved_receiver_call(deferred, session, completion) {
+        Ok(completed) => Ok(completed),
         Err(error) => {
             if let Some(ticket) = ticket {
                 session
@@ -949,7 +1020,8 @@ pub(crate) fn complete_deferred_receiver_call<
 fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> + ?Sized>(
     deferred: DeferredReceiverCall,
     session: &mut S,
-) -> Result<OwnedExpr, ExpressionParseError> {
+    completion: CallCompletion,
+) -> Result<CompletedExpression, ExpressionParseError> {
     let DeferredReceiverCall {
         method_path,
         method_name,
@@ -1022,7 +1094,9 @@ fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> +
                     string_table: &mut *string_table,
                     path_fork: &mut *path_fork,
                 })?;
-            let completed_error = instantiation.signature.error_return_type_id();
+            // A Never instance has no error channel, and `error_slot` reports exactly that without
+            // projecting the contract onto an ordinary shape.
+            let completed_error = instantiation.signature.return_contract.error_slot();
             verify_completed_error_return(error_return, completed_error, context, type_interner)?;
             if matches!(error_return, Some(GenericErrorReturn::Retained(_))) {
                 verify_retained_propagation_error(
@@ -1077,23 +1151,47 @@ fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> +
         },
     )?;
 
-    let expression = receiver_call_expression(
-        receiver_expression,
-        method_path,
-        &signature,
-        args,
-        receiver_mutable,
-        authored_marker_span,
-        call_span,
-        private_failure_candidate,
-        authored_handling,
-        expression_builder,
-    )?;
+    let completed = if completion == CallCompletion::Never {
+        // A terminating method has no success or error slot, so the receiver stays separate and
+        // the declared-parameter arguments keep their authored order. This mirrors the plain
+        // non-fallible method call shape, without building an expression that has no value.
+        CompletedExpression::NeverCall(Box::new(NeverCall {
+            target: NeverCallTarget::Source(method_path),
+            receiver: Some(receiver_expression.id()),
+            arguments: args
+                .into_iter()
+                .map(|argument| argument.map_value(OwnedExpr::id))
+                .collect(),
+            name: method_name,
+            span: call_span,
+        }))
+    } else {
+        // The terminating branch above owns every Never contract; a value completion here is
+        // therefore ordinary by construction.
+        let returns = signature.return_contract.ordinary().unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "a retained Never receiver call completed through the value constructor"
+            )
+        });
+        CompletedExpression::Value(receiver_call_expression(
+            receiver_expression,
+            method_path,
+            returns,
+            args,
+            receiver_mutable,
+            authored_marker_span,
+            call_span,
+            private_failure_candidate,
+            authored_handling,
+            expression_builder,
+        )?)
+    };
     // The reserved slot publishes only after every fallible completion step has succeeded.
     if let Some(ReservedGenericRequest { ticket, request }) = publication {
         context.publish_pending_generic_request(ticket, request)?;
     }
-    Ok(expression)
+    Ok(completed)
 }
 
 /// Builds one completed receiver method call from its resolved callee and completed arguments.
@@ -1109,7 +1207,7 @@ fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> +
 fn receiver_call_expression(
     receiver_expression: OwnedExpr,
     method_path: PathId,
-    signature: &FunctionSignature,
+    returns: &CallableReturnShape,
     args: Vec<CallArgument<OwnedExpr>>,
     receiver_mutable: bool,
     authored_marker_span: Option<SourceSpan>,
@@ -1118,8 +1216,8 @@ fn receiver_call_expression(
     authored_handling: DeferredCallHandling,
     expression_builder: &mut AstExpressionBuilder,
 ) -> Result<OwnedExpr, ExpressionParseError> {
-    let result_type_ids = signature.success_return_type_ids();
-    let Some(error_return_type_id) = signature.error_return_type_id() else {
+    let result_type_ids = returns.success().to_vec();
+    let Some(error_return_type_id) = returns.error() else {
         // Every receiver call here was resolved at its site without a `!`, so the success types are
         // the declared ones and the plain method call is the completed shape.
         let expression = expression_builder.method_call_with_typed_arguments(

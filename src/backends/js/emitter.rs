@@ -350,12 +350,15 @@ impl<'hir> JsEmitter<'hir> {
         functions: &[&'hir HirFunction],
     ) -> Result<bool, InfrastructureFailure> {
         for function in functions {
-            if function
-                .returns
-                .iter()
-                .chain(function.error_return.iter())
-                .any(|ty| self.type_environment.is_map_type(*ty))
-            {
+            let returns_a_map = function.return_contract.ordinary().is_some_and(|returns| {
+                returns
+                    .success()
+                    .iter()
+                    .copied()
+                    .chain(returns.error())
+                    .any(|ty| self.type_environment.is_map_type(ty))
+            });
+            if returns_a_map {
                 return Ok(true);
             }
 
@@ -526,6 +529,13 @@ impl<'hir> JsEmitter<'hir> {
 
             HirTerminator::AssertFailure { message, .. } => self.expression_uses_maps(*message),
 
+            HirTerminator::NeverCall { args, .. } => self
+                .hir
+                .expressions
+                .values(*args)
+                .iter()
+                .any(|value| self.expression_uses_maps(*value)),
+
             HirTerminator::Jump { .. }
             | HirTerminator::Break { .. }
             | HirTerminator::Continue { .. }
@@ -680,6 +690,11 @@ fn collect_terminator_cast_policies(
         }
         HirTerminator::AssertFailure { message, .. } => {
             collect_expression_cast_policies(hir, *message, policies)
+        }
+        HirTerminator::NeverCall { args, .. } => {
+            for value in hir.expressions.values(*args) {
+                collect_expression_cast_policies(hir, *value, policies);
+            }
         }
         HirTerminator::Jump { .. }
         | HirTerminator::Break { .. }

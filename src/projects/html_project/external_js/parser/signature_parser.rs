@@ -12,8 +12,8 @@
 //! - Does not validate that receiver types were declared with `@moth.opaque`.
 
 use super::parsed_js_module::{
-    JsDiagnosticKind, JsParserDiagnostic, JsSourceSpan, ParsedParameter, ParsedReturnType,
-    ParsedSignature,
+    JsDiagnosticKind, JsParserDiagnostic, JsSourceSpan, ParsedParameter, ParsedReturnClause,
+    ParsedReturnType, ParsedSignature,
 };
 
 /// Input to the signature parser.
@@ -79,13 +79,10 @@ impl SignatureScanner {
 
         self.skip_whitespace();
 
-        let mut returns = Vec::new();
-        let mut has_error_return = false;
+        let mut return_clause = ParsedReturnClause::default();
 
         if self.consume_arrow() {
-            let return_result = self.parse_returns();
-            returns = return_result.returns;
-            has_error_return = return_result.has_error;
+            return_clause = self.parse_returns();
         }
 
         self.skip_whitespace();
@@ -99,8 +96,7 @@ impl SignatureScanner {
         SignatureParseResult {
             signature: ParsedSignature {
                 parameters,
-                returns,
-                has_error_return,
+                return_clause,
                 has_unsupported_generic_parameters,
             },
             diagnostics: std::mem::take(&mut self.diagnostics),
@@ -111,8 +107,7 @@ impl SignatureScanner {
         SignatureParseResult {
             signature: ParsedSignature {
                 parameters: Vec::new(),
-                returns: Vec::new(),
-                has_error_return: false,
+                return_clause: ParsedReturnClause::default(),
                 has_unsupported_generic_parameters: false,
             },
             diagnostics: self.diagnostics.clone(),
@@ -319,7 +314,28 @@ impl SignatureScanner {
     //  Return types
     // ------------------------
 
-    fn parse_returns(&mut self) -> ReturnParseResult {
+    fn parse_returns(&mut self) -> ParsedReturnClause {
+        self.skip_whitespace();
+
+        // An explicit whole-contract `-> !` has no success slot and no error slot. It must be
+        // the entire return clause: a following success type, `Error!`, comma or suffix would
+        // mix contract forms.
+        if self.consume_char('!') {
+            self.skip_whitespace();
+            if !self.is_at_end() {
+                self.emit_diagnostic(
+                    "`-> !` is a whole return contract and cannot be combined with success returns, `Error!` or return aliases.",
+                    JsDiagnosticKind::MixedNeverReturnContract,
+                );
+                // Recovery: consume the remaining clause so unrelated trailing-syntax errors do
+                // not mask the contract-shape diagnostic.
+                while !self.is_at_end() {
+                    self.advance();
+                }
+            }
+            return ParsedReturnClause::Never;
+        }
+
         let mut returns = Vec::new();
         let mut has_error = false;
         loop {
@@ -386,7 +402,27 @@ impl SignatureScanner {
             );
         }
 
-        ReturnParseResult { returns, has_error }
+        // `-> !` is a whole return contract, so a `!` after ordinary success returns (for
+        // example `-> I32, !`) mixes contract forms exactly like leading `!` followed by return
+        // syntax. Report the dedicated contract-shape diagnostic instead of the generic
+        // trailing-syntax failure.
+        self.skip_whitespace();
+        if self.consume_char('!') {
+            self.emit_diagnostic(
+                "`-> !` is a whole return contract and cannot be combined with success returns, `Error!` or return aliases.",
+                JsDiagnosticKind::MixedNeverReturnContract,
+            );
+            // Recovery: consume the remaining clause so unrelated trailing-syntax errors do
+            // not mask the contract-shape diagnostic.
+            while !self.is_at_end() {
+                self.advance();
+            }
+        }
+
+        ParsedReturnClause::Returns {
+            returns,
+            has_error_return: has_error,
+        }
     }
 
     // ------------------------
@@ -512,9 +548,4 @@ impl SignatureScanner {
             kind,
         });
     }
-}
-
-struct ReturnParseResult {
-    returns: Vec<ParsedReturnType>,
-    has_error: bool,
 }

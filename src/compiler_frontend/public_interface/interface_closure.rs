@@ -9,11 +9,12 @@
 //! declaration/evidence work queue, so it never scans every provider for each selected fact.
 
 use super::model::{
-    ConcreteCallSummaryRecord, LocalPublicInterface, PublicChoiceSemantics,
-    PublicDeclarationRecord, PublicDeclarationSemantics, PublicEvidenceRecord,
-    PublicFunctionCategory, PublicFunctionSemantics, PublicGenericParameterSurface,
-    PublicInterfaceDraft, PublicReceiverMethodCategory, PublicReceiverMethodSemantics,
-    PublicSemanticInterface, PublicStructSemantics, PublicTraitSemantics,
+    ConcreteCallSummaryRecord, LocalPublicInterface, PublicCallableReturnContract,
+    PublicChoiceSemantics, PublicDeclarationRecord, PublicDeclarationSemantics,
+    PublicEvidenceRecord, PublicFunctionCategory, PublicFunctionSemantics,
+    PublicGenericParameterSurface, PublicInterfaceDraft, PublicReceiverMethodCategory,
+    PublicReceiverMethodSemantics, PublicSemanticInterface, PublicStructSemantics,
+    PublicTraitSemantics,
 };
 use super::{ProviderInterfaceId, SourceProviderDependencySet};
 use crate::compiler_frontend::canonical_type_identity::{
@@ -452,11 +453,14 @@ impl ClosureWork {
                 self.enqueue_folded_value(default);
             }
         }
-        for return_slot in &function.returns {
-            self.enqueue_type(&return_slot.type_identity);
-        }
-        if let Some(error_return) = &function.error_return {
-            self.enqueue_type(error_return);
+        if let PublicCallableReturnContract::Returns { success, error } = &function.return_contract
+        {
+            for return_slot in success {
+                self.enqueue_type(&return_slot.type_identity);
+            }
+            if let Some(error_return) = error {
+                self.enqueue_type(error_return);
+            }
         }
         if let PublicFunctionCategory::GenericTemplate(template) = &function.category {
             self.enqueue_generic_parameters(&template.generic_parameters);
@@ -497,11 +501,13 @@ impl ClosureWork {
                 self.enqueue_folded_value(default);
             }
         }
-        for return_slot in &method.returns {
-            self.enqueue_type(&return_slot.type_identity);
-        }
-        if let Some(error_return) = &method.error_return {
-            self.enqueue_type(error_return);
+        if let PublicCallableReturnContract::Returns { success, error } = &method.return_contract {
+            for return_slot in success {
+                self.enqueue_type(&return_slot.type_identity);
+            }
+            if let Some(error_return) = error {
+                self.enqueue_type(error_return);
+            }
         }
         if let PublicReceiverMethodCategory::GenericTemplate(descriptor) = &method.category {
             self.enqueue_generic_parameters(&descriptor.generic_parameters);

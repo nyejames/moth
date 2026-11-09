@@ -290,8 +290,8 @@ impl EntryFixture {
         )
         .expect("should write directory config");
         // The existing runtime harness owns index.html plus root page.js/page.wasm.
-        // @page is the single-file homepage convention; selection still dispatches by file path.
-        let root_source = source_root.join("@page.moth");
+        // @entry.moth is the authored root spelling; selection still dispatches by file path.
+        let root_source = source_root.join("@entry.moth");
         fs::write(&root_source, source).expect("should write authored root");
         let entry = if directory_entry {
             source_root
@@ -408,9 +408,29 @@ fn start_function(module: &Module) -> Option<&HirFunction> {
 fn assert_start_result(module: &Module, fallible: bool) {
     let start = start_function(module).expect("successful frontend should contain entry start");
     let types = &module.executable.type_environment;
-    assert_eq!(start.error_return.is_some(), fallible);
-    assert_eq!(start.returns.len(), 1);
-    let success_type = start.returns[0];
+    assert_eq!(
+        start
+            .return_contract
+            .ordinary()
+            .expect("start fixture is ordinary")
+            .error()
+            .is_some(),
+        fallible
+    );
+    assert_eq!(
+        start
+            .return_contract
+            .ordinary()
+            .expect("start fixture is ordinary")
+            .success()
+            .len(),
+        1
+    );
+    let success_type = start
+        .return_contract
+        .ordinary()
+        .expect("start fixture is ordinary")
+        .success()[0];
     assert_eq!(
         types.collection_element_type(success_type),
         Some(builtin_type_ids::STRING)
@@ -466,7 +486,7 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for (entry_mode, directory_entry, ordinary_page_entry) in [
         ("directory", true, false),
-        ("selected @page.moth", false, false),
+        ("selected @entry.moth", false, false),
         ("selected page.moth", false, true),
     ] {
         let mut fixture = EntryFixture::new(
@@ -529,12 +549,11 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
         assert!(
             html_package
                 .boundary
-                .successful_module_views()
-                .any(|module| module
-                    .metadata
-                    .entry_point
-                    .ends_with("packages/html/@mod.moth")),
-            "the HTML package root must remain in its own compilation boundary"
+                .successful_artefacts_in_module_id_order()
+                .any(|artefact| {
+                    artefact.module.metadata.entry.is_none() && artefact.normal_interface.is_some()
+                }),
+            "the HTML package facade must remain in its own compilation boundary"
         );
         let source_root = fs::canonicalize(fixture.directory.path().join("src"))
             .expect("source root should canonicalize");
@@ -572,9 +591,9 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
             project_sources.iter().any(|slot| slot
                 .canonical_os_path
                 .as_deref()
-                .is_some_and(|path| path.ends_with("@page.moth"))),
+                .is_some_and(|path| path.ends_with("@entry.moth"))),
             !ordinary_page_entry || directory_entry,
-            "{entry_mode}: an unselected @page.moth stays outside ordinary-file discovery"
+            "{entry_mode}: an unselected @entry.moth stays outside ordinary-file discovery"
         );
 
         let built = fixture.build(&[]);
@@ -618,9 +637,10 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
 #[test]
 fn synthetic_single_file_moth_template_uses_implicit_html_package() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    for (entry_mode, ordinary_page_entry) in
-        [("selected @page.moth", false), ("selected page.moth", true)]
-    {
+    for (entry_mode, ordinary_page_entry) in [
+        ("selected @entry.moth", false),
+        ("selected page.moth", true),
+    ] {
         let mut fixture = EntryFixture::new(
             "intro #= @docs/intro.mtf\n\
              #[$html: [intro]]\n",
@@ -715,9 +735,10 @@ fn synthetic_entry_modes_reject_registered_package_namespace_collisions() {
         ("Html.moth", "p #String = \"case-only local html\"\n"),
     ];
 
-    // A direct @page entry and an ordinary selected filename both use bounded synthetic discovery.
+    // A direct @entry.moth selection and an ordinary selected filename both use bounded
+    // synthetic discovery.
     for (entry_mode, directory_entry, ordinary_page_entry) in [
-        ("selected @page.moth", false, false),
+        ("selected @entry.moth", false, false),
         ("selected page.moth", false, true),
         ("directory", true, false),
     ] {
@@ -747,7 +768,7 @@ fn synthetic_entry_modes_reject_registered_package_namespace_collisions() {
     let binding_clause = "@core/math PI";
     let binding_dependency_path = "@core/math";
     for (entry_mode, directory_entry, ordinary_page_entry) in [
-        ("selected @page.moth", false, false),
+        ("selected @entry.moth", false, false),
         ("selected page.moth", false, true),
         ("directory", true, false),
     ] {
@@ -777,12 +798,12 @@ fn synthetic_entry_modes_reject_registered_package_namespace_collisions() {
 fn synthetic_entry_modes_reject_child_local_package_namespace_collisions() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let child_clause = "@html p";
-    for (entry_mode, directory_entry) in [("selected @page.moth", false), ("directory", true)] {
+    for (entry_mode, directory_entry) in [("selected @entry.moth", false), ("directory", true)] {
         let fixture = EntryFixture::new("@child label\n[:[label]]\n", directory_entry);
         let child_directory = fixture.directory.path().join("src/child");
         fs::create_dir(&child_directory).expect("should create child module directory");
         fs::write(
-            child_directory.join("@child.moth"),
+            child_directory.join("@mod.moth"),
             format!("{child_clause}\nexport:\n    label #String = \"child\"\n;\n"),
         )
         .expect("should write child module dependency");
@@ -1198,34 +1219,148 @@ fn synthetic_start_api_support_and_package_facade_have_no_start() {
     let fixture = EntryFixture::new("@support label\n[:[label]]\n", true);
     fs::create_dir(fixture.directory.path().join("src/support")).expect("should create support");
     fs::create_dir(fixture.directory.path().join("src/api")).expect("should create API module");
+    fs::create_dir(fixture.directory.path().join("src/triple"))
+        .expect("should create triple-root module");
     for (path, source) in [
         (
-            "src/support/+package.moth",
+            "src/support/@package.moth",
             "export:\n    label #= \"support\"\n;\n",
         ),
         ("src/api/@mod.moth", "export:\n    label #= \"api\"\n;\n"),
-        ("+package.moth", "export:\n    label #= \"facade\"\n;\n"),
+        ("@package.moth", "export:\n    label #= \"facade\"\n;\n"),
+        (
+            "src/triple/@mod.moth",
+            "export:\n    label #= \"triple normal\"\n;\n",
+        ),
+        (
+            "src/triple/@package.moth",
+            "export:\n    label #= \"triple support\"\n;\n",
+        ),
+        (
+            "src/triple/@entry.moth",
+            "#[$in title: \"triple metadata\"]\n",
+        ),
     ] {
         fs::write(fixture.directory.path().join(path), source).expect("should write API root");
     }
-    let frontend = fixture.frontend();
-    for relative_path in ["src/support/+package.moth", "+package.moth"] {
-        let module = frontend
-            .successful_module_views()
-            .find(|module| module.metadata.entry_point.ends_with(relative_path))
-            .expect("each API-only root must be compiled");
+    let frontend = fixture.html_frontend();
+    let artefacts = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .collect::<Vec<_>>();
+    let support_roots = artefacts
+        .iter()
+        .filter(|artefact| {
+            artefact.support_interface.is_some() && artefact.module.metadata.entry.is_none()
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        !support_roots.is_empty(),
+        "the authored support root must be compiled"
+    );
+    for artefact in support_roots {
         assert!(
-            start_function(module).is_none(),
-            "{relative_path} must not synthesize start"
+            start_function(&artefact.module).is_none(),
+            "an API-only support root must not synthesize start"
+        );
+        assert!(
+            artefact.module.metadata.entry.is_none(),
+            "an API-only support root must not carry entry metadata"
         );
     }
 
-    // Declarations alone do not change a Normal root's semantic role or activate it.
-    let normal_api = frontend
-        .successful_module_views()
-        .find(|module| module.metadata.entry_point.ends_with("src/api/@mod.moth"))
+    // Declarations alone do not change a legacy combined Normal root's semantic role; the
+    // Phase 3 bridge keeps its dormant start until the filename cutover.
+    let normal_api = artefacts
+        .iter()
+        .find(|artefact| {
+            artefact
+                .normal_interface
+                .as_ref()
+                .is_some_and(|interface| interface.module_origin.logical_module_path() == "api")
+        })
+        .map(|artefact| &artefact.module)
         .expect("declaration-only Normal root must be compiled");
-    assert_start_result(normal_api, false);
+    assert!(
+        start_function(normal_api).is_none(),
+        "an API-only normal root must not synthesize start"
+    );
+    assert!(
+        normal_api.metadata.entry.is_none(),
+        "an API-only normal root must not carry entry metadata"
+    );
+
+    // A triple-root module keeps its metadata-only entry start and both API facades.
+    let triple = artefacts
+        .iter()
+        .find(|artefact| {
+            artefact
+                .module
+                .metadata
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with("triple/@entry.moth"))
+        })
+        .expect("the triple-root module must compile its entry");
+    assert!(
+        start_function(&triple.module).is_some(),
+        "the triple-root entry must own a compiler-owned start"
+    );
+    assert!(
+        triple.normal_interface.is_some(),
+        "the triple-root module must publish its normal facade"
+    );
+    assert!(
+        triple.support_interface.is_some(),
+        "the triple-root module must publish its support facade"
+    );
+    let triple_entry = triple
+        .module
+        .metadata
+        .entry
+        .as_ref()
+        .expect("the triple-root module carries entry metadata");
+    assert_eq!(
+        triple_entry.const_top_level_fragments.len(),
+        1,
+        "the metadata-only entry carries exactly its const builder fragment"
+    );
+}
+
+#[test]
+fn synthetic_selected_api_facade_runtime_and_fragments_are_rejected() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let mut fixture = EntryFixture::new("@child value\n[: selected [value]]\n", false);
+    // A selected API facade cannot carry runtime statements or fragments. Directory projects
+    // reject an entryless facade directory before file selection; this covers explicit selection.
+    let selected_root = fixture.root_source.with_file_name("@mod.moth");
+    fs::rename(&fixture.root_source, &selected_root).expect("should rename the selected root");
+    fixture.root_source = selected_root.clone();
+    fixture.entry = selected_root;
+    let child = fixture.directory.path().join("src/child");
+    fs::create_dir(&child).expect("should create the reached child module");
+    fs::write(
+        child.join("@mod.moth"),
+        "export:\n    value #= \"child\"\n;\n\
+         io.line(\"discarded runtime\")\n\
+         [: discarded fragment]\n",
+    )
+    .expect("should write the child facade");
+
+    let result = fixture.build_result(&[]);
+    let reports = match result {
+        Ok(CompilationOutcome::Diagnosed(reports)) => reports,
+        Ok(CompilationOutcome::Success { .. }) => {
+            panic!("API facade runtime must be rejected in the final vocabulary")
+        }
+        Err(errors) => panic!("API facade runtime must not fail infrastructure: {errors:?}"),
+    };
+    assert!(
+        reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .any(|(_, view)| { view.descriptor().code == "MOTH-RULE-0023" }),
+        "the facade runtime statement must diagnose as invalid top-level runtime"
+    );
 }
 
 #[test]
@@ -1234,26 +1369,41 @@ fn synthetic_start_failing_imported_provider_remains_dormant() {
     let fixture = EntryFixture::new("@provider label\n[:[label]]\n", true);
     fs::create_dir(fixture.directory.path().join("src/provider")).expect("should create provider");
     fs::write(
-        fixture.directory.path().join("src/provider/@mod.moth"),
-        "export:\n    label #= \"consumer-only\"\n;\n\
-         load || -> String, Error!:\n    return! Error(\"provider-error\")\n;\n\
-         io.line(\"provider-ran\")\n\
-         value = load()!\n[:[value]]\n",
+        fixture.directory.path().join("src/provider/impl.moth"),
+        "load || -> String, Error!:\n    return! Error(\"provider-error\")\n;\n",
     )
-    .expect("should write failing provider root");
+    .expect("should write failing provider helper");
+    fs::write(
+        fixture.directory.path().join("src/provider/@mod.moth"),
+        "@impl load\n\nexport:\n    label #= \"consumer-only\"\n;\n",
+    )
+    .expect("should write provider facade");
+    fs::write(
+        fixture.directory.path().join("src/provider/@entry.moth"),
+        "@impl load\nio.line(\"provider-ran\")\nvalue = load()!\n[:[value]]\n",
+    )
+    .expect("should write dormant provider entry");
     let frontend = fixture.frontend();
     let consumer = frontend
         .successful_module_views()
         .find(|module| {
-            module.metadata.entry_point
-                == fs::canonicalize(&fixture.root_source).expect("root must exist")
+            module.metadata.entry.as_ref().is_some_and(|entry| {
+                entry.entry_point
+                    == fs::canonicalize(&fixture.root_source).expect("root must exist")
+            })
         })
         .expect("consumer must compile");
     assert_start_result(consumer, false);
     let provider = frontend
         .successful_module_views()
-        .find(|module| module.metadata.entry_point.ends_with("provider/@mod.moth"))
-        .expect("provider must compile its dormant body");
+        .find(|module| {
+            module
+                .metadata
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with("provider/@entry.moth"))
+        })
+        .expect("the provider entry must compile as its own page, not into the consumer start");
     assert_start_result(provider, true);
 
     let mut expectation = output_expectation("consumer-only");
@@ -1288,7 +1438,7 @@ fn synthetic_start_expected_entry_code_from_linked_source_dependency_passes() {
         fs::create_dir(fixture.directory.path().join("src/support"))
             .expect("should create source dependency");
         fs::write(
-            fixture.directory.path().join("src/support/+package.moth"),
+            fixture.directory.path().join("src/support/@package.moth"),
             format!(
                 "export:\n\
                      load || -> String, Error!:\n\

@@ -1,0 +1,22 @@
+@borrow-validation-and-drops content as reference_content
+@styles navbar, section, theme_css, sidebar, init_docs_sidebar
+@diagrams css as diagrams_css
+
+#[$in title:["13. Borrow validation and drops"]]
+#[$in description:["How Moth analyses HIR for safe access and inferred ownership."]]
+#[$in head:<style>[theme_css] [diagrams_css]</style>]
+
+#[navbar]
+#[sidebar]
+init_docs_sidebar()!
+
+#[section, $md:
+    Data-flow over HIR enforces shared and exclusive access, infers moves and publishes solver-independent facts beside unchanged HIR. The advisory drop candidates it also records are current scaffolding, not the final cleanup authority.
+]
+
+#[section, reference_content]
+
+#[section, $md:
+    @../ (Compiler design) / @../memory-management-and-gc (Previous) / @../module-artefacts-and-reuse (Next)
+]
+

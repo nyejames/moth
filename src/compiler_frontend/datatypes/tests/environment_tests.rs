@@ -1,5 +1,6 @@
 //! Unit tests for `TypeEnvironment`.
 
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     FunctionParameterDefinition, FunctionTypeDefinition, StructTypeDefinition, TypeDefinition,
@@ -153,8 +154,7 @@ fn function_result_slots_intern_deterministically() {
     let string = env.builtins().string;
     let key = FunctionTypeKey {
         parameters: Box::new([]),
-        returns: Box::new([int, string]),
-        error_return: Some(string),
+        return_contract: (CallableReturnShape::from_slots([int, string], Some(string))).into(),
     };
     let first = env.intern_function(key.clone());
     let second = env.intern_function(key);
@@ -262,8 +262,7 @@ fn display_renders_single_success_fallible_function_signature() {
 
     let result = env.intern_function(FunctionTypeKey {
         parameters: Box::new([]),
-        returns: Box::new([int]),
-        error_return: Some(error_type),
+        return_contract: (CallableReturnShape::from_slots([int], Some(error_type))).into(),
     });
 
     assert_eq!(
@@ -282,8 +281,7 @@ fn display_renders_multi_success_fallible_function_signature() {
 
     let result = env.intern_function(FunctionTypeKey {
         parameters: Box::new([]),
-        returns: Box::new([int, string]),
-        error_return: Some(error_type),
+        return_contract: (CallableReturnShape::from_slots([int, string], Some(error_type))).into(),
     });
 
     assert_eq!(
@@ -300,8 +298,7 @@ fn display_renders_error_only_function_signature() {
 
     let result = env.intern_function(FunctionTypeKey {
         parameters: Box::new([]),
-        returns: Box::new([]),
-        error_return: Some(error_type),
+        return_contract: (CallableReturnShape::from_slots([], Some(error_type))).into(),
     });
 
     assert_eq!(
@@ -320,8 +317,7 @@ fn display_renders_function_error_return_slot() {
 
     let function = env.intern_function(FunctionTypeKey {
         parameters: Box::new([int]),
-        returns: Box::new([string]),
-        error_return: Some(error_type),
+        return_contract: (CallableReturnShape::from_slots([string], Some(error_type))).into(),
     });
 
     assert_eq!(
@@ -923,8 +919,8 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
         }]
         .into_boxed_slice(),
-        returns: vec![env.builtins().string].into_boxed_slice(),
-        error_return: None,
+        return_contract: (CallableReturnShape::from_slots(vec![env.builtins().string], None))
+            .into(),
     });
 
     let mut merged_table = StringTable::new();
@@ -1284,8 +1280,7 @@ fn runtime_equality_query_rejects_unsupported_non_choice_types() {
     );
     let function_type_id = env.intern_function(FunctionTypeKey {
         parameters: Box::new([]),
-        returns: Box::new([]),
-        error_return: None,
+        return_contract: (CallableReturnShape::from_slots([], None)).into(),
     });
     let external_type_id = env.intern_external(ExternalTypeId(42));
 
@@ -1357,8 +1352,7 @@ fn runtime_equality_query_rejects_choice_payloads_when_fields_do_not() {
     let path = test_path(&mut path_builder, &mut table, "Response");
     let function_type_id = env.intern_function(FunctionTypeKey {
         parameters: Box::new([]),
-        returns: Box::new([]),
-        error_return: None,
+        return_contract: (CallableReturnShape::from_slots([], None)).into(),
     });
 
     let (_, choice_type_id) = env.register_nominal_choice(ChoiceTypeDefinition {

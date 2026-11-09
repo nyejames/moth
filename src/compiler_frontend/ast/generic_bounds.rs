@@ -121,12 +121,14 @@ fn validate_type_recursive(
                 validate_type_recursive(parameter.type_id, None, span, context, visited)?;
             }
 
-            for return_type in &definition.returns {
-                validate_type_recursive(*return_type, None, span, context, visited)?;
-            }
+            if let Some(returns) = definition.return_contract.ordinary() {
+                for return_type in returns.success() {
+                    validate_type_recursive(*return_type, None, span, context, visited)?;
+                }
 
-            if let Some(error_type) = definition.error_return {
-                validate_type_recursive(error_type, None, span, context, visited)?;
+                if let Some(error_type) = returns.error() {
+                    validate_type_recursive(error_type, None, span, context, visited)?;
+                }
             }
         }
 

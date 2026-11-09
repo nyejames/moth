@@ -24,6 +24,21 @@ its body while that condition remains `true`.
 - `break` exits the nearest active loop.
 - `continue` skips the rest of the current body and starts the next condition check.
 
+### Divergence proof
+
+A conditional loop whose condition has normalised to compile-time `true` and
+which has no reachable `break` targeting that loop diverges. Falling through
+the body or executing `continue` starts another iteration. A reachable `break`
+targeting the loop makes the post-loop continuation reachable. A nested loop
+consumes its own `break` and `continue`. A nested-loop `break` does not make
+an outer true loop escapable. Return and divergence pass outward.
+
+Collection and range loops stay conservatively non-divergent because their
+iteration count is finite or may be zero.
+
+This proof uses the ordinary folded Bool authority. It does not inspect a
+runtime condition to decide that the loop stays true forever.
+
 ### Header classification
 
 A top-level `to` marker makes the header a range loop.

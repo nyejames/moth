@@ -1,0 +1,12 @@
+ready #= true
+message = @settings site_name
+number = @math square(12)
+background = @settings palette.background
+selected = if ready then @settings site_name else "Fallback"
+
+render || -> String:
+    return [: qe-a name=[@settings site_name] square=[@math square(12)] background=[@settings palette.background] nested=[: [@settings site_name] ] ]
+;
+
+io.line(render())
+io.line([: qe-a bindings name=[message] number=[number] background=[background] conditional=[selected] selected=[selected] ])

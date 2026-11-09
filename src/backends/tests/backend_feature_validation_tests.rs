@@ -7,8 +7,11 @@
 use crate::backends::backend_feature_validation::{
     BackendFeatureValidationInput,
     validate_hir_backend_feature_support as validate_hir_backend_feature_support_with_builder,
+    validate_hir_linked_function_targets,
 };
-use crate::backends::external_package_validation::BackendTarget;
+use crate::backends::external_package_validation::{
+    BackendTarget, validate_hir_external_package_support,
+};
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::canonical_type_identity::{
@@ -22,6 +25,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::test_support::{
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, DiagnosticDraft, UnsupportedBackendFeatureReason,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     StructTypeDefinition,
@@ -30,13 +34,16 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::external_packages::CallTarget;
+use crate::compiler_frontend::external_packages::{
+    CallTarget, ExternalFunctionDef, ExternalFunctionLowerings, ExternalPackageRegistry,
+    external_never,
+};
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirValueRange};
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
 };
-use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionReturnContract};
 use crate::compiler_frontend::hir::ids::{
     BlockId, FunctionId, HirNodeId, HirValueId, LocalId, RegionId,
 };
@@ -1497,8 +1504,10 @@ fn wasm_feature_validation_rejects_fallible_control_flow_with_authored_span_and_
     let mut branch_module = hir_module_with_expressions(
         FunctionId(0),
         vec![HirFunction {
-            returns: vec![builtin_type_ids::STRING].into_boxed_slice(),
-            error_return: Some(custom_error_type),
+            return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                vec![builtin_type_ids::STRING],
+                Some(custom_error_type),
+            )),
             ..function(FunctionId(0), BlockId(0))
         }],
         vec![
@@ -1569,7 +1578,9 @@ fn wasm_feature_validation_rejects_fallible_control_flow_with_authored_span_and_
         let mut module = hir_module_with_expressions(
             FunctionId(0),
             vec![HirFunction {
-                error_return: Some(custom_error_type),
+                return_contract: HirFunctionReturnContract::Returns(
+                    CallableReturnShape::from_slots([], Some(custom_error_type)),
+                ),
                 ..function(FunctionId(0), BlockId(0))
             }],
             vec![block(BlockId(0), vec![], terminator)],
@@ -1616,12 +1627,18 @@ fn wasm_feature_validation_keeps_spanless_fallible_sites_and_ignores_unreachable
         FunctionId(0),
         vec![
             HirFunction {
-                error_return: Some(custom_error_type),
+                return_contract: HirFunctionReturnContract::Returns(
+                    CallableReturnShape::from_slots([], Some(custom_error_type)),
+                ),
                 ..function(FunctionId(0), BlockId(0))
             },
             HirFunction {
-                returns: vec![builtin_type_ids::STRING].into_boxed_slice(),
-                error_return: Some(error_type),
+                return_contract: HirFunctionReturnContract::Returns(
+                    CallableReturnShape::from_slots(
+                        vec![builtin_type_ids::STRING],
+                        Some(error_type),
+                    ),
+                ),
                 ..function(FunctionId(1), BlockId(1))
             },
         ],
@@ -1688,7 +1705,9 @@ fn wasm_feature_validation_keeps_spanless_fallible_sites_and_ignores_unreachable
         vec![
             function(FunctionId(0), BlockId(0)),
             HirFunction {
-                error_return: Some(error_type),
+                return_contract: HirFunctionReturnContract::Returns(
+                    CallableReturnShape::from_slots([], Some(error_type)),
+                ),
                 ..function(FunctionId(1), BlockId(1))
             },
         ],
@@ -1742,8 +1761,10 @@ fn wasm_feature_validation_preserves_numeric_and_cast_precedence_over_fallible_f
     let numeric_module = hir_module_with_expressions(
         FunctionId(0),
         vec![HirFunction {
-            returns: vec![numeric_result_type].into_boxed_slice(),
-            error_return: Some(error_type),
+            return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                vec![numeric_result_type],
+                Some(error_type),
+            )),
             ..function(FunctionId(0), BlockId(0))
         }],
         blocks,
@@ -1778,8 +1799,10 @@ fn wasm_feature_validation_preserves_numeric_and_cast_precedence_over_fallible_f
     let fallible_cast_module = hir_module_with_expressions(
         FunctionId(0),
         vec![HirFunction {
-            returns: vec![cast_result_type].into_boxed_slice(),
-            error_return: Some(error_type),
+            return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                vec![cast_result_type],
+                Some(error_type),
+            )),
             ..function(FunctionId(0), BlockId(0))
         }],
         blocks,
@@ -1868,7 +1891,9 @@ fn backend_feature_validation_allows_ordered_native_call_results() {
             vec![
                 function(FunctionId(0), BlockId(0)),
                 HirFunction {
-                    returns: slot_types[..count].to_vec().into_boxed_slice(),
+                    return_contract: HirFunctionReturnContract::Returns(
+                        CallableReturnShape::from_slots(slot_types[..count].to_vec(), None),
+                    ),
                     ..function(FunctionId(1), BlockId(1))
                 },
             ],
@@ -2600,6 +2625,304 @@ fn wasm_feature_validation_ignores_unreachable_runtime_assertion_messages() {
     );
 }
 
+#[test]
+fn wasm_feature_validation_accepts_never_call_without_a_result_type() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let expressions = test_expression_store();
+    let module = hir_module_with_expressions(
+        FunctionId(0),
+        vec![
+            function(FunctionId(0), BlockId(0)),
+            HirFunction {
+                return_contract: HirFunctionReturnContract::Never,
+                ..function(FunctionId(1), BlockId(1))
+            },
+        ],
+        vec![
+            block(
+                BlockId(0),
+                vec![],
+                HirTerminator::NeverCall {
+                    target: CallTarget::Local(FunctionId(1)),
+                    args: HirValueRange::empty(),
+                },
+            ),
+            block(
+                BlockId(1),
+                vec![],
+                HirTerminator::RuntimeFailure {
+                    message: "halted".to_owned(),
+                    cause: None,
+                },
+            ),
+        ],
+        expressions,
+    );
+
+    let reachability = test_reachability(&module);
+    let result = validate_hir_backend_feature_support(
+        BackendFeatureValidationInput {
+            hir: &module,
+            reachability: &reachability,
+            target: BackendTarget::Wasm,
+            type_environment: Some(&type_environment),
+        },
+        &mut string_table,
+    );
+    assert!(
+        result.is_ok(),
+        "Wasm must not reject Never merely because the call has no result type: {result:?}"
+    );
+}
+
+#[test]
+fn wasm_feature_validation_keeps_never_call_argument_diagnostics_at_the_authored_value() {
+    let mut string_table = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let generic_type = type_environment.intern_generic_instance(
+        NominalTypeId(0),
+        vec![builtin_type_ids::STRING].into_boxed_slice(),
+    );
+    let authored_span = test_source_span(11);
+    let mut expressions = test_expression_store();
+    let value = typed_expression(&mut expressions, generic_type, Some(authored_span));
+    let module = hir_module_with_expressions(
+        FunctionId(0),
+        vec![
+            function(FunctionId(0), BlockId(0)),
+            HirFunction {
+                return_contract: HirFunctionReturnContract::Never,
+                ..function(FunctionId(1), BlockId(1))
+            },
+        ],
+        vec![
+            block(
+                BlockId(0),
+                vec![],
+                HirTerminator::NeverCall {
+                    target: CallTarget::Local(FunctionId(1)),
+                    args: append_values(&mut expressions, &[value]),
+                },
+            ),
+            block(
+                BlockId(1),
+                vec![],
+                HirTerminator::RuntimeFailure {
+                    message: "halted".to_owned(),
+                    cause: None,
+                },
+            ),
+        ],
+        expressions,
+    );
+
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        "Wasm should inspect NeverCall arguments like ordinary calls",
+    );
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::GenericRuntimeValues,
+    );
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(authored_span),
+        "unsupported NeverCall argument diagnostics must stay at the authored value"
+    );
+}
+
+#[test]
+fn wasm_feature_validation_keeps_never_call_cross_module_diagnostics_at_the_authored_call() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let expressions = test_expression_store();
+    let authored_span = test_source_span(13);
+    let origin = crate::compiler_frontend::semantic_identity::OriginFunctionId::new_free(
+        crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity::from_portable_path(
+            crate::compiler_frontend::semantic_identity::StablePackageIdentity::project_local(
+                "never-cross",
+            ),
+            "".to_owned(),
+            crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
+        ),
+        "remote".to_owned(),
+    );
+    let mut module = hir_module_with_expressions(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![],
+            HirTerminator::NeverCall {
+                target: CallTarget::CrossModule(origin),
+                args: HirValueRange::empty(),
+            },
+        )],
+        expressions,
+    );
+    module
+        .side_table
+        .map_terminator_span(BlockId(0), authored_span);
+
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        "Wasm should inspect NeverCall targets like ordinary calls",
+    );
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::CrossModuleCalls,
+    );
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(authored_span),
+        "unsupported NeverCall target diagnostics must stay at the authored call"
+    );
+}
+
+#[test]
+fn wasm_feature_validation_rejects_never_call_to_a_linked_target_at_the_authored_call() {
+    let mut string_table = StringTable::new();
+    let expressions = test_expression_store();
+    let authored_span = test_source_span(19);
+    let origin =
+        crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity::from_portable_path(
+            crate::compiler_frontend::semantic_identity::StablePackageIdentity::project_local(
+                "never-linked",
+            ),
+            "".to_owned(),
+            crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
+        );
+    let private = crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity::new(
+        origin,
+        "provider.moth".to_owned(),
+        crate::compiler_frontend::semantic_identity::ModulePrivateExecutableCategory::FreeFunction,
+        "halt".to_owned(),
+        None,
+    );
+    let mut module = hir_module_with_expressions(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![],
+            HirTerminator::NeverCall {
+                target: CallTarget::ModulePrivate(private),
+                args: HirValueRange::empty(),
+            },
+        )],
+        expressions,
+    );
+    module
+        .side_table
+        .map_terminator_span(BlockId(0), authored_span);
+    let reachability = test_reachability(&module);
+
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
+    let error = validate_hir_linked_function_targets(
+        BackendFeatureValidationInput {
+            hir: &module,
+            reachability: &reachability,
+            target: BackendTarget::Wasm,
+            type_environment: None,
+        },
+        &mut diagnostic_strings,
+    )
+    .expect_err("Wasm cannot lower a linked Never-call target");
+    let diagnostic = compact_backend_diagnostic(error);
+
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::LinkedFunctionTargets,
+    );
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(authored_span),
+        "linked Never-call target diagnostics must stay at the authored call"
+    );
+}
+
+#[test]
+fn wasm_feature_validation_rejects_host_never_call_at_the_authored_call() {
+    let mut string_table = StringTable::new();
+    let expressions = test_expression_store();
+    let authored_span = test_source_span(23);
+    let mut registry = ExternalPackageRegistry::new();
+    let external = registry
+        .register_function(ExternalFunctionDef {
+            name: "exit_now".to_owned(),
+            parameters: vec![],
+            return_contract: external_never(),
+            const_eval: None,
+            lowerings: ExternalFunctionLowerings::default(),
+        })
+        .expect("host Never function should register");
+    let mut module = hir_module_with_expressions(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![],
+            HirTerminator::NeverCall {
+                target: CallTarget::Local(FunctionId(0)),
+                args: HirValueRange::empty(),
+            },
+        )],
+        expressions,
+    );
+    module
+        .side_table
+        .map_terminator_span(BlockId(0), authored_span);
+    let block = module
+        .blocks
+        .iter_mut()
+        .find(|block| block.id == BlockId(0))
+        .expect("the terminating block should resolve");
+    let HirTerminator::NeverCall { target, .. } = &mut block.terminator else {
+        unreachable!("the fixture terminator is a NeverCall")
+    };
+    *target = CallTarget::External(external);
+    let reachability = test_reachability(&module);
+    assert_eq!(
+        reachability.reachable_external_calls.len(),
+        1,
+        "reachability should record the host Never call as an ordinary call site"
+    );
+    assert_eq!(
+        reachability.reachable_external_calls[0].span,
+        Some(authored_span),
+        "the host Never call site should retain the terminator span"
+    );
+
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
+    let error = validate_hir_external_package_support(
+        &reachability,
+        &registry,
+        BackendTarget::Wasm,
+        &mut diagnostic_strings,
+    )
+    .expect_err("Wasm has no lowerable host Never function");
+    let diagnostic = compact_backend_diagnostic(error);
+    let compact = diagnostic
+        .compact
+        .first()
+        .expect("unsupported external diagnostic should be compacted");
+
+    assert_eq!(compact.descriptor().code, "MOTH-RULE-0058");
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(authored_span),
+        "unsupported host Never-call diagnostics must stay at the authored call"
+    );
+}
+
 struct BackendFeatureDiagnostic {
     compact: CompactDiagnosticBagForTest,
     primary_span: Option<SourceSpan>,
@@ -2823,12 +3146,10 @@ fn function_with_signature(
         id,
         entry,
         params,
-        returns: if return_type == builtin_type_ids::NONE {
-            Box::new([])
-        } else {
-            vec![return_type].into_boxed_slice()
-        },
-        error_return: None,
+        return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+            (return_type != builtin_type_ids::NONE).then_some(return_type),
+            None,
+        )),
     }
 }
 
@@ -3369,8 +3690,10 @@ fn module_with_result_channels(
     let mut module = hir_module_with_expressions(
         FunctionId(0),
         vec![HirFunction {
-            returns: returns.to_vec().into_boxed_slice(),
-            error_return: Some(error_return),
+            return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                returns.to_vec(),
+                Some(error_return),
+            )),
             ..function(FunctionId(0), BlockId(0))
         }],
         vec![block(

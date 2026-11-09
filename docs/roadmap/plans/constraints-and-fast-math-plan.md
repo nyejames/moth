@@ -26,7 +26,7 @@ Consume these merged capabilities, without rebuilding them:
 - Compact typed semantic expressions, dense HIR, native success/error result channels and the bounded Wiring foundation.
 - Exact numeric identities and I32/F64 defaults, D15's equal-type preservation and smallest mixed domains, per-operation F16 completion and bounded body-local numeric-origin inference.
 - Shared directive recognition, retained attachment syntax and argument validation.
-- Explicit root purposes, `$entry` and runtime title capability.
+- Fixed root roles, presence-based entry selection and direct entry builder-slot metadata.
 - Existing implicit-failure inference, expression catch, public summaries, generic convergence and trusted Core constant evaluation where advertised.
 
 The roadmap owns sequencing. Name prerequisite capabilities rather than linking temporary prerequisite plans. Establish a fresh baseline and isolated branch/worktree at activation. Keep that revision and raw measurements in working notes, not this queued status block.
@@ -281,11 +281,11 @@ Reverify locators at activation. The preceding compiler foundation deliberately 
 | Runtime lowering | `src/backends/js/`, `src/backends/wasm/` and backend feature validation |
 | Core Math | `src/builder_surface/core_packages/math.rs`, package reference and living package plan |
 | Source contract | Create `docs/docs/directives/constraints.mtf` with a compact Basic companion, integrated into the directive page |
-| Developer backend contract | Create `docs/developer-docs/numeric-backend-contract/numeric-backend-contract.mtf` and its `@page.moth`, with a compact routing `overview.mtf` only if needed |
+| Developer backend contract | Create `docs/developer-docs/numeric-backend-contract/numeric-backend-contract.mtf` and its `@entry.moth`, with a compact routing `overview.mtf` only if needed |
 | Architecture | `docs/compiler-design-overview.md` and relevant capability/interface sections of `docs/build-system-design.md` |
 | Navigation | Developer/language overview, developer page navigation and `index.md` |
 
-Publish section 3's complete operation matrix, invariant rules, optimiser obligations and backend exceptions in the developer contract. The page must be reachable from developer navigation and numeric/constraint references, not merely exist as an orphan file. Topic content owns the contract, `@page.moth` owns presentation and overview files remain routing rather than page imports.
+Publish section 3's complete operation matrix, invariant rules, optimiser obligations and backend exceptions in the developer contract. The page must be reachable from developer navigation and numeric/constraint references, not merely exist as an orphan file. Topic content owns the contract, `@entry.moth` owns presentation and overview files remain routing rather than page imports.
 
 Update the canonical unsuffixed numeric operators/checked-arithmetic, casts, ranges, errors/runtime termination, assertions, functions/returns, public API, receiver/generic, module/package visibility and re-export references where their rules change. Update the directive reference, cheatsheet and relevant Basic teaching. Explain with compact valid examples, including wrapping integer infallibility and finite-float rejection.
 

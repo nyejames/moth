@@ -26,6 +26,7 @@ use super::parse_expression_literals::{
 use super::parse_expression_places::{
     ParsedCopyPlace, parse_copy_place_expression, parse_mutable_receiver_expression,
 };
+use super::parse_expression_qualified_references::try_parse_qualified_reference_primary;
 use super::parse_expression_templates::parse_template_expression;
 use crate::compiler_frontend::ast::const_values::ConstValueStore;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -460,6 +461,12 @@ pub(super) fn push_expression_operand_with_span(
     // can) or defers to the body root with this item in place, so the call resumes exactly once.
     let expression_after_postfix = match expression_after_postfix {
         ParsedPostfixExpression::Value(value) => value,
+        // A Never method call has no value: it occupies one operand position so the statement
+        // owner can lift it into `NeverCall`, while every value owner rejects it at evaluation.
+        ParsedPostfixExpression::Terminating(never_call) => {
+            expression.push(ExpressionRpnItem::NeverCall(never_call));
+            return Ok(());
+        }
         ParsedPostfixExpression::RetainedOperand(item) => {
             expression.push(item);
             return Ok(());
@@ -779,6 +786,24 @@ fn dispatch_non_group_expression_token(
                     "path token had no validated syntax row",
                 )
             })?;
+            // A prepared expression-qualified occurrence consumes its path and selected symbol
+            // here. Every other value-position path keeps the ordinary file-value lane.
+            if try_parse_qualified_reference_primary(
+                path_syntax,
+                token_stream,
+                context,
+                type_interner,
+                expression_builder,
+                const_values,
+                state.expression,
+                state.allow_boundary_catch,
+                state.allow_expected_result_evidence,
+                state.route_argument_context,
+                string_table,
+                path_fork,
+            )? {
+                return Ok(ExpressionTokenStep::Continue);
+            }
             let operand = resolve_file_value(
                 path_syntax,
                 token_stream,
@@ -1975,7 +2000,8 @@ fn group_content_facts(
             | ExpressionRpnItem::PendingNumericBinding { .. }
             | ExpressionRpnItem::PendingNumericCall { .. }
             | ExpressionRpnItem::PendingNumericCast { .. }
-            | ExpressionRpnItem::PendingNumericExpression { .. } => {
+            | ExpressionRpnItem::PendingNumericExpression { .. }
+            | ExpressionRpnItem::NeverCall(_) => {
                 facts.operands += 1;
                 facts.first_operand = Some(index);
             }

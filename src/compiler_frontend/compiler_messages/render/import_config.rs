@@ -18,9 +18,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::names_de
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidCompileTimePathView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidDependencyClauseView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
-    DependencyNamespaceUsedAsValueView, HtmlSingleFileRouteNameEmptyView, InvalidConfigView,
-    NamespaceTypeValueMisuseView, NestedDependencyTraversalView, ProjectEntryExtensionRequiredView,
-    decode_invalid_config,
+    DependencyNamespaceUsedAsValueView, InvalidConfigView, NamespaceTypeValueMisuseView,
+    NestedDependencyTraversalView, ProjectEntryExtensionRequiredView, decode_invalid_config,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidPathView;
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
@@ -198,16 +197,12 @@ pub(crate) fn invalid_config_message(
             string_table.resolve(*value),
             string_table.resolve(*expected)
         ),
-        InvalidConfigReason::MissingHtmlHomepage { entry_root } => format!(
-            "HTML project builds require an artifact-producing normal module root in the selected project directory '{}'.",
-            string_table.resolve(*entry_root),
-        ),
         InvalidConfigReason::DuplicateHtmlOutputPath {
             output_path,
             entry_point,
             existing_entry_point,
         } => format!(
-            "HTML builder produced duplicate output path '{}'. Entry '{}' conflicts with already-mapped entry '{}'. Ensure each '@*.moth' entry maps to a unique page output.",
+            "HTML builder produced duplicate output path '{}'. Entry '{}' conflicts with already-mapped entry '{}'. Ensure each `@entry.moth` module maps to a unique page output.",
             string_table.resolve(*output_path),
             string_table.resolve(*entry_point),
             string_table.resolve(*existing_entry_point),
@@ -250,46 +245,14 @@ pub(crate) fn invalid_config_message(
             string_table.resolve(*prefix),
         ),
         InvalidConfigReason::SourcePackageMissingRoot { prefix, root } => format!(
-            "Source-backed package '@{}' at '{}' is missing a direct-child normal module root file. Every source-backed package must contain exactly one non-empty filename matching '@*.moth'.",
+            "Source-backed package '@{}' at '{}' is missing an API facade root file. Every source-backed package must contain '@mod.moth' or '@package.moth'; '@entry.moth' alone publishes no importable surface.",
             string_table.resolve(*prefix),
             string_table.resolve(*root),
         ),
-        InvalidConfigReason::SourcePackageMultipleRoots {
-            prefix,
-            root,
-            candidates,
-        } => {
-            let candidates = candidates
-                .iter()
-                .map(|candidate| format!("'{}'", string_table.resolve(*candidate)))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!(
-                "Source-backed package '@{}' at '{}' has multiple direct-child normal module root files: {}. Every source-backed package must contain exactly one non-empty filename matching '@*.moth'.",
-                string_table.resolve(*prefix),
-                string_table.resolve(*root),
-                candidates,
-            )
-        }
         InvalidConfigReason::NoRootModuleEntries { entry_root } => format!(
-            "No root module entries were found under '{}'. Expected at least one '@*.moth' file in the selected project directory.",
+            "No executable entry root was found under '{}'. Expected at least one '@entry.moth' file in the selected project tree. Use `moth check` to validate projects that contain only API facade roots.",
             string_table.resolve(*entry_root),
         ),
-        InvalidConfigReason::MultipleModuleRootFiles {
-            directory,
-            candidates,
-        } => {
-            let candidates = candidates
-                .iter()
-                .map(|candidate| format!("'{}'", string_table.resolve(*candidate)))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!(
-                "Module directory '{}' contains conflicting module root files: {}. A module directory may contain at most one non-config '@*.moth' normal root and one non-config '+*.moth' support root, and every root must resolve to a distinct physical source file.",
-                string_table.resolve(*directory),
-                candidates,
-            )
-        }
         InvalidConfigReason::AliasedModuleRootFiles {
             first_root,
             second_root,
@@ -315,7 +278,7 @@ pub(crate) fn invalid_config_message(
             directory,
             target,
         } => format!(
-            "Module root marker '{}' in directory '{}' is not a regular source file (resolved to '{}'). Every '@*.moth' or '+*.moth' root must be a regular file, not a directory or other filesystem entry.",
+            "Module root marker '{}' in directory '{}' is not a regular source file (resolved to '{}'). Every '@mod.moth', '@package.moth' or '@entry.moth' root must be a regular file, not a directory or other filesystem entry.",
             string_table.resolve(*root_file),
             string_table.resolve(*directory),
             string_table.resolve(*target),
@@ -330,19 +293,14 @@ pub(crate) fn invalid_config_message(
             string_table.resolve(*folder_name),
             string_table.resolve(*directory),
         ),
-        InvalidConfigReason::LegacyModuleRootFileName {
+        InvalidConfigReason::InvalidModuleRootFileName {
             file_name,
             directory,
-        } => {
-            let name = string_table.resolve(*file_name);
-            let replacement = name.replacen('#', "@", 1);
-            format!(
-                "Legacy module root filename '{}' found in '{}'. The '#' prefix has been replaced with '@'. Rename it to '{}'.",
-                name,
-                string_table.resolve(*directory),
-                replacement,
-            )
-        }
+        } => format!(
+            "Invalid module root filename '{}' in '{}'. A `.moth` filename that starts with '@', '+' or '#' must be one of the three accepted root files: '@mod.moth', '@package.moth' or '@entry.moth'. Root filenames are case-sensitive. 'config.moth' is the separate build-only config file.",
+            string_table.resolve(*file_name),
+            string_table.resolve(*directory),
+        ),
         InvalidConfigReason::InvalidOutputFolder { folder, reason } => {
             invalid_output_folder_message(key_label, *folder, *reason, string_table)
         }
@@ -383,20 +341,6 @@ pub(crate) fn render_invalid_config(
         .expect("invalid config row stores every string required by its reason code");
     RenderedPayload {
         message: invalid_config_message(key, &reason, context.string_table),
-        guidance: Vec::new(),
-    }
-}
-
-pub(crate) fn render_html_single_file_route_name_empty(
-    _diagnostic: &DiagnosticView<'_>,
-    facts: &HtmlSingleFileRouteNameEmptyView,
-    context: DiagnosticRenderContext<'_>,
-) -> RenderedPayload {
-    RenderedPayload {
-        message: format!(
-            "HTML single-file entry '{}' has a stem that becomes empty after stripping the cosmetic '@' prefix; Moth routes require a non-empty route name.",
-            context.string_table.resolve(facts.entry_path)
-        ),
         guidance: Vec::new(),
     }
 }
@@ -654,7 +598,7 @@ pub(crate) fn invalid_path_message(path_kind: PathKind) -> &'static str {
         PathKind::LeadingAtInPathComponent => {
             "The leading '@' starts a dependency path and is not part of the module name.\n\
              Depend on the module directory, for example `@pages`.\n\
-             Normal module-root filenames such as `@page.moth` are not referenced directly."
+             Module-root filenames (`@mod.moth`, `@package.moth`, `@entry.moth`) are not referenced directly."
         }
     }
 }
@@ -831,7 +775,7 @@ pub(crate) fn invalid_source_file_entry_message(
     let extension = context.string_table.resolve(extension);
     format!(
         "Entry file `{path_text}` uses the `.{extension}` source-file kind, but source assets cannot be compiled as page or module entries.\n\
-         Depend on this file from a `.moth` entry file using extensionless dependency syntax, or use a `.moth`/`@page.moth` file as the build entry.",
+         Depend on this file from a `.moth` entry file using extensionless dependency syntax, or select a `.moth` entry file such as `@entry.moth` as the build entry.",
     )
 }
 
@@ -935,6 +879,9 @@ pub(crate) fn invalid_external_module_message(
         ),
         InvalidExternalModuleReason::ParserDiagnostic { parser_detail } => {
             string_table.resolve(*parser_detail).to_owned()
+        }
+        InvalidExternalModuleReason::MixedNeverReturnContract => {
+            "`-> !` is a whole return contract and cannot be combined with success returns, `Error!` or return aliases.".to_owned()
         }
         InvalidExternalModuleReason::PathContainsPackageSeparator => {
             "Its path contains `#`, which Moth package paths reserve. Rename the file.".to_owned()
@@ -1162,9 +1109,6 @@ pub(crate) fn invalid_dependency_clause_message(
         }
         InvalidDependencyClauseReason::DuplicateSelectionLocalName => {
             "A dependency clause cannot bind two selections to the same local name. Rename or alias one selection."
-        }
-        InvalidDependencyClauseReason::LegacyBraceSelections => {
-            "Dependency selections no longer use braces. Write selected names directly after the path, separated by commas."
         }
         InvalidDependencyClauseReason::MissingSelectionAfterComma => {
             "A dependency-clause comma must be followed by another selected name. Remove the comma to end the clause, or add the promised selection. Trailing commas are not allowed."

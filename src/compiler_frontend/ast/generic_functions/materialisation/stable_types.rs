@@ -122,9 +122,40 @@ pub(super) struct StableGenericParameter {
 #[derive(Clone)]
 pub(super) struct StableFunctionSignature {
     pub(super) parameters: Box<[StableFunctionParameter]>,
-    pub(super) returns: Box<[MaterialisationTypeBlueprint]>,
-    pub(super) error_return: Option<MaterialisationTypeBlueprint>,
+    pub(super) return_contract: StableFunctionReturnContract,
 }
+
+/// Frozen whole return contract of one materialised function signature.
+///
+/// WHAT: either the ordinary success/error blueprints or a declared Never contract.
+/// WHY: a generated concrete function must retain the template's exact contract; flattening
+///      Never into an empty ordinary shape would let a non-returning instance be called as a
+///      value after materialisation.
+#[derive(Clone)]
+pub(super) enum StableFunctionReturnContract {
+    Returns(StableReturns),
+    Never,
+}
+
+impl StableFunctionReturnContract {
+    pub(super) fn ordinary(&self) -> Option<&StableReturns> {
+        match self {
+            Self::Returns(returns) => Some(returns),
+            Self::Never => None,
+        }
+    }
+}
+
+/// Frozen ordinary success and error blueprints inside a whole return contract.
+///
+/// WHAT: the ordered success blueprints and the independent error blueprint. Stored locally
+/// because the slot type is a materialisation blueprint, not a shared `TypeId`.
+#[derive(Clone)]
+pub(super) struct StableReturns {
+    pub(super) success: Box<[MaterialisationTypeBlueprint]>,
+    pub(super) error: Option<MaterialisationTypeBlueprint>,
+}
+
 #[derive(Clone)]
 pub(super) enum StableParameterContract {
     Value,
@@ -951,6 +982,9 @@ pub(super) fn generated_file_value_resolution_services(
     module_resources: Rc<RefCell<ModuleResourceTable>>,
     module_origin: Option<StableModuleOriginIdentity>,
     stage0_resolution_facts: Arc<Stage0ResolutionFacts>,
+    qualified_reference_targets: Arc<
+        crate::compiler_frontend::headers::binding_environment::QualifiedReferenceTargets,
+    >,
 ) -> Rc<FileValueResolutionServices> {
     let frozen_identity_handle = module_origin
         .as_ref()
@@ -959,6 +993,7 @@ pub(super) fn generated_file_value_resolution_services(
     Rc::new(FileValueResolutionServices {
         stage0_resolution_facts: Some(stage0_resolution_facts),
         module_resources,
+        qualified_reference_targets,
         module_origin,
         public_source_trait_origins: Arc::default(),
         frozen_identity_handle,

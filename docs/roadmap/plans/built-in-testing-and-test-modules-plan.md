@@ -37,24 +37,24 @@ Example:
 ```text
 project/
   config.moth
-  +package.moth                   # Optional external package facade
+  @package.moth                   # Optional external package facade
   tests/
-    +shared.moth                  # Optional test export root: @tests
+    @package.moth                 # Optional test support facade: @tests
     package_tests.moth
   src/
     parser/
-      @parser.moth                # Normal production module: @parser
+      @mod.moth                   # Normal production module: @parser
       lexer.moth
       tests/
-        +helpers.moth             # Optional test export root: @parser/tests
+        @package.moth             # Optional test support facade: @parser/tests
         lexer_tests.moth
       expressions/
-        @expressions.moth         # Child module: @parser/expressions
+        @mod.moth                 # Child module: @parser/expressions
         tests/
-          expression_tests.moth   # No + root required
+          expression_tests.moth   # No test support facade required
 ```
 
-Every recognised `tests/` is one test semantic/visibility unit, including when it has no `+` file. A `+*.moth` in that directory is its optional export facade/root, not an additional test module. Enforce at most one test-root `+` file and reuse normal file identity and duplicate-root diagnostics. Without a `+` file, local tests and private helpers still compile, but that test module has no public test-support interface.
+Every recognised `tests/` is one test semantic/visibility unit, including when it has no `@package.moth`. An `@package.moth` in that directory is its optional test-only support facade, not an additional test module and not a production facade. Enforce the fixed filename identity and normal case-variant, symlink-alias and duplicate-root diagnostics; a reserved test root accepts only `@package.moth` as its support facade, and authored `@mod.moth` or `@entry.moth` in that directory are rejected rather than treated as normal or entry roots. Without a `@package.moth`, local tests and private helpers still compile, but that test module has no public test-support interface. A test support facade is selected only by test-specific tooling: ordinary production compilation excludes it and it never acquires normal production visibility.
 
 Test files must be selected only by test-specific tooling. Their ordinary declarations, helper types, constants, imports and generated functions are test-only, including without a `$test` annotation. No top-level executable work, implicit `start`, pages or runtime fragments in a test root. Neither helper discovery nor compilation runs a test.
 
@@ -64,22 +64,22 @@ The previously queued idea of `$test` as a purpose directive selecting normal-ro
 
 ## 2. Test support package identity and exports
 
-Test-module export roots reuse the ordinary `+` support-package implementation and the delivered compiler-owned `$export` machinery. The `+` filename suffix remains cosmetic. The test package identity is the canonical owning production module path followed by `/tests`, with the project-root identity `@tests`.
+Test-module support facades reuse the ordinary `@package.moth` support-package implementation and the delivered compiler-owned `$export` machinery under test-only source classification. `@package.moth` is the sole recognised test support facade; do not retain or accept a `+` test facade. The fixed filename declares the support-facade role; package identity still comes from the reserved `tests/` directory position: the canonical owning production module path followed by `/tests`, with the project-root identity `@tests`.
 
 - Project test root: `@tests`.
 - Parser test root: `@parser/tests`.
 - Parser expressions test root: `@parser/expressions/tests`.
 
-An export root uses exactly the same final `$export` form as normal Moth modules. Any authorised exportable declaration category is eligible under the ordinary public-surface checks. Do not add `$test_helper`, `$test_export` or special implicit exports.
+A test support facade uses exactly the same final `$export` form as normal Moth modules. Any authorised exportable declaration category is eligible under the ordinary public-surface checks. Do not add `$test_helper`, `$test_export` or special implicit exports.
 
 Visibility follows the *downward scoped support-package direction* across the owning production module hierarchy:
 
 - `@tests` exports are visible to all test modules inside the same project/package compilation boundary.
 - `@parser/tests` exports are visible to tests belonging to `@parser` and its descendant normal modules.
 - Tests belonging to unrelated sibling modules or ancestor production modules cannot bind `@parser/tests`.
-- A test module may use its own private declarations under normal same-module source visibility, even if it has no export root.
+- A test module may use its own private declarations under normal same-module source visibility, even if it has no test support facade.
 - Test dependencies are explicit. No helpers are injected into every test source.
-- Test packages cannot be consumed by ordinary production modules, the external project facade, or another separately compiled dependency's project graph.
+- Test packages cannot be consumed by ordinary production modules, the external project facade, or another separately compiled dependency's project graph. A test support facade never gains normal production visibility: its `@package.moth` filename is classified in the test lane, not as the owning directory's production support facade, even when the logical owner has a production root of the same role.
 
 The paths above are logical test-package identities resolved by the compiler. They do not authorise ordinary physical parent-path imports, private traversal across unrelated production modules, nearest-name fallback or global namespace shadowing. Apply normal canonical name/case collision diagnostics in the relevant test visibility scope.
 
@@ -146,7 +146,7 @@ Enhanced comparison reporting and a test-only nonfatal `check` operation are can
 
 Resolve the following only after their actual compiler/export/host prerequisites are delivered. Record the decisions in canonical documentation before implementing the dependent slice.
 
-1. **`$export` attachment and test root syntax.** Consume the final regular export contract. Confirm whether an optional `+` file acts as the test module root directly or as a compiler-created root facade sharing the same semantic identity. It must never create two overlapping modules in one `tests/` directory.
+1. **`$export` attachment and test root syntax.** Consume the final regular export contract. Confirm whether the test-only `@package.moth` acts as the test module root directly or as a compiler-created root facade sharing the same semantic identity. It must never create two overlapping modules in one `tests/` directory, must never be admitted as an ordinary production support facade, and no `+` test root spelling is retained.
 2. **Owning-module private test view implementation.** Preserve the accepted one-owner exception without adding descendant, ancestor or sibling private access. Choose the minimal producer-owned view for that owner's private functions, types and summaries, and specify generic materialisation and diagnostics without publishing private declarations to ordinary consumers.
 3. **Test call signatures.** Specify zero-argument/zero-success entry policy, whether built-in `Error!` is allowed, handling of custom typed errors, generic entries, methods and any future fixture/context parameter.
 4. **Test imports and source selection.** Finalise exact resolution of `@module_path/tests`, how ordinary clauses bind local test files, treatment of nested organisational directories, duplicate names, symbolic links, project boundaries and optional root facades.
@@ -169,12 +169,12 @@ These gates do not reopen the accepted directory structure, one-way dependency d
 
 - [ ] Reserve legal `tests/` positions and namespace identities with exact collision diagnostics.
 - [ ] Build test-only root/source inventory without adding test source to production graphs or regular check-only orphan units.
-- [ ] Ensure a `tests/` without `+` still owns runnable test sources.
+- [ ] Ensure a `tests/` without `@package.moth` still owns runnable test sources.
 - [ ] Validate no top-level test runtime work or page activation.
 
 ### Slice 2: Exports, imports and private test view
 
-- [ ] Reuse ordinary `+` and `$export` machinery for optional test support roots and interfaces.
+- [ ] Reuse ordinary `@package.moth` and `$export` machinery for optional test support roots and interfaces.
 - [ ] Bind `@tests` and scoped `@module_path/tests` through the normal import syntax and restricted test visibility domain.
 - [ ] Supply owning-module private access only in the test compilation context.
 - [ ] Reject production-to-test imports, unrelated sibling test imports, illegal re-exports, collisions and provider cycles.
@@ -206,12 +206,12 @@ These gates do not reopen the accepted directory structure, one-way dependency d
 
 Exercise real directory projects and complete compiler/build services, with focused stage-local tests only for hidden invariants:
 
-- A valid project with only local `tests/` and no `+` root; all `$test` entries discovered, helpers not independently executed.
+- A valid project with only local `tests/` and no test support facade; all `$test` entries discovered, helpers not independently executed.
 - A project-root `@tests` support facade visible to multiple child test modules; a scoped `@parser/tests` facade visible to parser descendants but not parser siblings or ancestors.
-- Non-exported helper use within one test module, explicit export binding across permitted scopes, normal `$export` type/re-export validation and cosmetic `+` filename changes preserving package identity.
+- Non-exported helper use within one test module, explicit export binding across permitted scopes, normal `$export` type/re-export validation and test-only `@package.moth` classification preserving package identity while never acquiring production visibility.
 - An owning-module test binds its owner's private functions, types and constants without `$export` and without changing the production interface. The same test may bind a direct child module's public interface but not the child's private declarations. Parent, sibling and unrelated private imports fail. Project-root tests cannot access arbitrary private internals.
 - A regular build before/after introducing tests is semantically and artefact-identical; tests cannot repair production name errors or add production dependencies, traits, resources or runtime requirements.
-- Reserved `tests` name conflicts, duplicate `+` roots, case-only path collisions, invalid nested placement, symlink escape, ambiguous module aliases and deterministic diagnostics.
+- Reserved `tests` name conflicts, case-variant or symlink-aliased test support roots, case-only path collisions, invalid nested placement, symlink escape, ambiguous module aliases and deterministic diagnostics.
 - Test-only provider cycles rejected; dependency package tests invisible to the importing project's test namespace.
 - Valid/invalid `$test` signatures and placement, compile errors in helpers, test source location preservation and source-order-independent discovery.
 - Fatal assertion failure stops only that test execution; typed returned errors, runtime traps and host/infrastructure failures remain distinguishable; timeouts always bound the test.

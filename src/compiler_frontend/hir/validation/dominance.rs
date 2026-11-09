@@ -262,6 +262,11 @@ impl HirValidator<'_> {
                     expression(*value)?;
                 }
             }
+            HirTerminator::NeverCall { args, .. } => {
+                for value in self.module.expressions.values(*args) {
+                    expression(*value)?;
+                }
+            }
             HirTerminator::ReturnError(value)
             | HirTerminator::AssertFailure { message: value, .. } => expression(*value)?,
             HirTerminator::RuntimeFailure {

@@ -34,6 +34,12 @@ pub(crate) enum TerminatorEventKind {
     },
     RuntimeFailure,
     AssertFailure,
+    /// A declared `-> !` call whose arguments and call effect precede this terminal event.
+    ///
+    /// WHAT: ends the block without a successor or result.
+    /// WHY: divergence is not a normal function return and must stay distinguishable from
+    ///      ordinary zero-success completion in the normalized problem.
+    NeverCall,
 }
 
 /// One value captured from the predecessor and installed as a new edge definition.

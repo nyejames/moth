@@ -27,6 +27,7 @@ use crate::compiler_frontend::traits::ids::TraitId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
+use super::callable_returns::FunctionReturnContract;
 use super::definitions::{
     BuiltinTypeDefinition, ChoiceTypeDefinition, ChoiceVariantDefinition,
     ChoiceVariantPayloadDefinition, ConstructedTypeDefinition, ExternalTypeDefinition,
@@ -245,8 +246,7 @@ enum TypeSubstitutionSource {
     },
     Function {
         parameters: Box<[TypeId]>,
-        returns: Box<[TypeId]>,
-        error_return: Option<TypeId>,
+        return_contract: FunctionReturnContract,
     },
     GenericInstance {
         base: NominalTypeId,
@@ -748,8 +748,7 @@ impl TypeEnvironment {
 
                 TypeSubstitutionSource::Function {
                     parameters,
-                    returns: function.returns.clone(),
-                    error_return: function.error_return,
+                    return_contract: function.return_contract.clone(),
                 }
             }
 
@@ -777,9 +776,8 @@ impl TypeEnvironment {
 
             TypeSubstitutionSource::Function {
                 parameters,
-                returns,
-                error_return,
-            } => self.substitute_function_type(&parameters, &returns, error_return, mapping),
+                return_contract,
+            } => self.substitute_function_type(&parameters, &return_contract, mapping),
 
             TypeSubstitutionSource::GenericInstance { base, arguments } => {
                 self.substitute_generic_instance_type(base, &arguments, mapping)
@@ -809,8 +807,7 @@ impl TypeEnvironment {
     fn substitute_function_type(
         &mut self,
         parameters: &[TypeId],
-        returns: &[TypeId],
-        error_return: Option<TypeId>,
+        return_contract: &FunctionReturnContract,
         mapping: &FxHashMap<GenericParameterId, TypeId>,
     ) -> TypeId {
         let substituted_parameters: Box<[TypeId]> = parameters
@@ -818,18 +815,12 @@ impl TypeEnvironment {
             .map(|parameter_type_id| self.substitute_type_id(*parameter_type_id, mapping))
             .collect();
 
-        let substituted_returns: Box<[TypeId]> = returns
-            .iter()
-            .map(|return_type_id| self.substitute_type_id(*return_type_id, mapping))
-            .collect();
-
-        let substituted_error =
-            error_return.map(|error_type_id| self.substitute_type_id(error_type_id, mapping));
+        let substituted_return_contract = return_contract
+            .map_type_ids(|return_type_id| self.substitute_type_id(return_type_id, mapping));
 
         self.intern_function(FunctionTypeKey {
             parameters: substituted_parameters,
-            returns: substituted_returns,
-            error_return: substituted_error,
+            return_contract: substituted_return_contract,
         })
     }
 
@@ -993,8 +984,7 @@ impl TypeEnvironment {
 
         let id = self.insert_definition(TypeDefinition::Function(FunctionTypeDefinition {
             parameters,
-            returns: key.returns.clone(),
-            error_return: key.error_return,
+            return_contract: key.return_contract.clone(),
         }));
 
         self.function_ids.insert(key, id);
@@ -1514,13 +1504,15 @@ impl TypeEnvironment {
                     .parameters
                     .iter()
                     .any(|parameter| self.contains_generic_parameter(parameter.type_id))
-                    || function
-                        .returns
-                        .iter()
-                        .any(|returned| self.contains_generic_parameter(*returned))
-                    || function
-                        .error_return
-                        .is_some_and(|error| self.contains_generic_parameter(error))
+                    || function.return_contract.ordinary().is_some_and(|returns| {
+                        returns
+                            .success()
+                            .iter()
+                            .any(|returned| self.contains_generic_parameter(*returned))
+                            || returns
+                                .error()
+                                .is_some_and(|error| self.contains_generic_parameter(error))
+                    })
             }
             _ => false,
         }
@@ -1552,11 +1544,13 @@ impl TypeEnvironment {
                 for parameter in function.parameters.iter() {
                     self.collect_generic_parameters(parameter.type_id, out);
                 }
-                for returned in function.returns.iter() {
-                    self.collect_generic_parameters(*returned, out);
-                }
-                if let Some(error) = function.error_return {
-                    self.collect_generic_parameters(error, out);
+                if let Some(returns) = function.return_contract.ordinary() {
+                    for returned in returns.success() {
+                        self.collect_generic_parameters(*returned, out);
+                    }
+                    if let Some(error) = returns.error() {
+                        self.collect_generic_parameters(error, out);
+                    }
                 }
             }
             _ => {}
@@ -2169,11 +2163,7 @@ impl TypeEnvironment {
             (
                 Some(TypeDefinition::Function(template_function)),
                 Some(TypeDefinition::Function(concrete_function)),
-            ) if template_function.parameters.len() == concrete_function.parameters.len()
-                && template_function.returns.len() == concrete_function.returns.len()
-                && template_function.error_return.is_some()
-                    == concrete_function.error_return.is_some() =>
-            {
+            ) if template_function.parameters.len() == concrete_function.parameters.len() => {
                 for (template_parameter, concrete_parameter) in template_function
                     .parameters
                     .iter()
@@ -2187,28 +2177,40 @@ impl TypeEnvironment {
                         return Ok(false);
                     }
                 }
-                for (template_return, concrete_return) in template_function
-                    .returns
-                    .iter()
-                    .zip(concrete_function.returns.iter())
-                {
-                    if !self.collect_type_parameter_bindings_inner(
-                        *template_return,
-                        *concrete_return,
-                        staged,
-                    )? {
-                        return Ok(false);
+                match (
+                    template_function.return_contract.ordinary(),
+                    concrete_function.return_contract.ordinary(),
+                ) {
+                    (Some(template_returns), Some(concrete_returns))
+                        if template_returns.success().len() == concrete_returns.success().len()
+                            && template_returns.is_fallible() == concrete_returns.is_fallible() =>
+                    {
+                        for (template_return, concrete_return) in template_returns
+                            .success()
+                            .iter()
+                            .zip(concrete_returns.success())
+                        {
+                            if !self.collect_type_parameter_bindings_inner(
+                                *template_return,
+                                *concrete_return,
+                                staged,
+                            )? {
+                                return Ok(false);
+                            }
+                        }
+                        if let (Some(template_error), Some(concrete_error)) =
+                            (template_returns.error(), concrete_returns.error())
+                            && !self.collect_type_parameter_bindings_inner(
+                                template_error,
+                                concrete_error,
+                                staged,
+                            )?
+                        {
+                            return Ok(false);
+                        }
                     }
-                }
-                if let (Some(template_error), Some(concrete_error)) = (
-                    template_function.error_return,
-                    concrete_function.error_return,
-                ) && !self.collect_type_parameter_bindings_inner(
-                    template_error,
-                    concrete_error,
-                    staged,
-                )? {
-                    return Ok(false);
+                    (None, None) => {}
+                    _ => return Ok(false),
                 }
 
                 true

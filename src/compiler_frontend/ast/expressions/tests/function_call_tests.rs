@@ -94,7 +94,7 @@ fn parse_owned_args_with_receiving_context(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test path fits");
     let tokens = tokenize(
         source,
@@ -159,7 +159,7 @@ fn parse_args_with_parameter_names(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
     let tokens = tokenize(
@@ -263,7 +263,7 @@ fn parse_args_diagnostic(source: &str) -> DiagnosticDraft {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
     let tokens = tokenize(
@@ -548,7 +548,7 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
     let tokens = tokenize(

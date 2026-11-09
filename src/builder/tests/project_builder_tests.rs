@@ -117,12 +117,12 @@ fn project_temp_dir() -> tempfile::TempDir {
     tempfile::tempdir().expect("should create project directory")
 }
 
-/// Writes a project whose `src/@page.moth` holds `page_source`.
+/// Writes a project whose `src/@entry.moth` holds `page_source`.
 fn write_project(project_root: &Path, page_source: &str) {
     let src = project_root.to_path_buf();
     fs::create_dir_all(&src).expect("should create src");
     fs::write(project_root.join("config.moth"), CONFIG_SOURCE).expect("should write config");
-    fs::write(src.join("@page.moth"), page_source).expect("should write @page.moth source");
+    fs::write(src.join("@entry.moth"), page_source).expect("should write @entry.moth source");
 }
 
 #[test]
@@ -183,7 +183,7 @@ fn source_diagnostics_return_compilation_error_without_building() {
         error
             .messages()
             .iter()
-            .any(|message| { message.split('|').nth(2) == Some("@page.moth") }),
+            .any(|message| { message.split('|').nth(2) == Some("@entry.moth") }),
         "diagnosed source must retain its authored path"
     );
     assert!(
@@ -211,8 +211,8 @@ fn diagnosed_build_exposes_module_allowance_stop_through_public_sdk() {
         MODULE_LIMIT_CONFIG_SOURCE,
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), TWO_FAILING_BODIES_PAGE_SOURCE)
-        .expect("should write @page.moth source");
+    fs::write(src.join("@entry.moth"), TWO_FAILING_BODIES_PAGE_SOURCE)
+        .expect("should write @entry.moth source");
     let builder = RecordingBuilder::new(BuildBehaviour::Succeed);
 
     let error = build_project(&builder, BuildRequest::new(temp_dir.path()))
@@ -224,7 +224,7 @@ fn diagnosed_build_exposes_module_allowance_stop_through_public_sdk() {
         1,
         "module allowance one retains exactly one primary error"
     );
-    assert_eq!(error.messages()[0].split('|').nth(2), Some("@page.moth"));
+    assert_eq!(error.messages()[0].split('|').nth(2), Some("@entry.moth"));
     assert!(
         error
             .discovery_stops()
@@ -287,7 +287,7 @@ fn warnings_are_returned_as_rendered_lines() {
     assert!(
         built.warnings().iter().all(|warning| {
             warning.starts_with("W|MOTH-RULE-0022|")
-                && warning.split('|').nth(2) == Some("@page.moth")
+                && warning.split('|').nth(2) == Some("@entry.moth")
         }),
         "frozen warnings must retain their stable code and authored source path"
     );

@@ -264,6 +264,26 @@ pub enum ImportPublicSurfaceType {
     ModuleRoot,
 }
 
+/// Why a declaration authored in one root file cannot be resolved from another source file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RootLocalDeclarationRole {
+    /// The declaration is authored in `@mod.moth`, the normal API facade.
+    NormalFacade,
+    /// The declaration is authored in `@package.moth`, the support API facade.
+    SupportFacade,
+    /// The declaration is authored in `@entry.moth`, the start-bearing entry root.
+    EntryRoot,
+}
+
+/// Why an authored `export:` clause is rejected for its file role.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ExportOutsideModuleRootReason {
+    /// The file is an ordinary helper, a config bootstrap, or a root that owns no export surface.
+    NoExportSurface,
+    /// `@entry.moth` owns start and runtime and has no export surface at all.
+    EntryRoot,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DiagnosticPlace {
     Local(StringId),
@@ -438,9 +458,6 @@ pub enum InvalidConfigReason {
         value: StringId,
         expected: StringId,
     },
-    MissingHtmlHomepage {
-        entry_root: StringId,
-    },
     DuplicateHtmlOutputPath {
         output_path: StringId,
         entry_point: StringId,
@@ -469,17 +486,8 @@ pub enum InvalidConfigReason {
         prefix: StringId,
         root: StringId,
     },
-    SourcePackageMultipleRoots {
-        prefix: StringId,
-        root: StringId,
-        candidates: Vec<StringId>,
-    },
     NoRootModuleEntries {
         entry_root: StringId,
-    },
-    MultipleModuleRootFiles {
-        directory: StringId,
-        candidates: Vec<StringId>,
     },
     AliasedModuleRootFiles {
         first_root: StringId,
@@ -491,11 +499,12 @@ pub enum InvalidConfigReason {
         claiming_directory: StringId,
         target: StringId,
     },
-    /// A reserved `@*.moth` or `+*.moth` root marker names a directory or other non-file entry.
+    /// A canonical root filename names a directory or other non-file entry.
     ///
     /// The diagnostic keeps the authored marker, its containing directory and the canonical
     /// target so the malformed filesystem structure is visible without falling back to a
-    /// missing-root error.
+    /// missing-root error. Retired marker spellings are rejected earlier with
+    /// [`InvalidConfigReason::InvalidModuleRootFileName`].
     ModuleRootFileNotRegularFile {
         root_file: StringId,
         directory: StringId,
@@ -508,7 +517,13 @@ pub enum InvalidConfigReason {
         folder_name: StringId,
         directory: StringId,
     },
-    LegacyModuleRootFileName {
+    /// An authored `.moth` filename uses a special marker outside the accepted root vocabulary.
+    ///
+    /// The closed vocabulary is `@mod.moth`, `@package.moth` and `@entry.moth`; `config.moth`
+    /// remains the one build-only special source name. Every other `@*.moth`, `+*.moth` and
+    /// `#*.moth` marker is a structure error that names the file and lists the three accepted
+    /// root files. The renderer never infers a replacement role from the filename.
+    InvalidModuleRootFileName {
         file_name: StringId,
         directory: StringId,
     },
@@ -575,6 +590,8 @@ pub enum InvalidExternalModuleReason {
     ParserDiagnostic {
         parser_detail: StringId,
     },
+    /// An external signature combines the whole Never contract with other return syntax.
+    MixedNeverReturnContract,
     NonUtf8Source {
         utf8_detail: StringId,
     },
@@ -700,8 +717,8 @@ pub enum PathKind {
     ///
     /// WHAT: the first `@` introduces the dependency path. A second `@` in
     ///       any component (such as `@@pages` or `@helper/@home`) is not a valid module name.
-    /// WHY: normal module-root filenames such as `@page.moth` are cosmetic filesystem markers,
-    ///      not dependency names. The module's dependency identity comes from its directory.
+    /// WHY: module-root filenames such as `@entry.moth` are fixed structural markers, not
+    ///      dependency names. The module's dependency identity comes from its directory.
     LeadingAtInPathComponent,
 }
 
@@ -721,7 +738,6 @@ pub enum InvalidDependencyClauseReason {
     ExpectedAliasName,
     DuplicateSelectionName,
     DuplicateSelectionLocalName,
-    LegacyBraceSelections,
     MissingSelectionAfterComma,
     MissingCommaBetweenSelections,
     NamespaceAliasWithSelections,
@@ -740,11 +756,6 @@ pub enum InvalidDependencyClauseReason {
     ///       name was parsed as another selection. The diagnostic points at that name with a
     ///       secondary label on the continuation comma.
     ContinuationEnteredStatement,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum LegacyDependencyClauseReason {
-    ImportKeyword,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1120,6 +1131,7 @@ pub enum InvalidFunctionSignatureReason {
     MultipleErrorReturnSlots,
     ErrorSlotNotLast,
     GenericWhereConstraintsUnsupported,
+    NeverCannotCombine { found: DiagnosticToken },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1245,7 +1257,6 @@ pub enum InvalidTraitIncompatibilityReason {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidTraitConformanceReason {
-    ImportedModuleRoot,
     AliasTarget,
     NonCanonicalTarget,
     NonlocalSourceTarget,
@@ -1295,6 +1306,9 @@ pub enum InvalidTraitConformanceReason {
     ReturnChannelMismatch {
         requirement_name: StringId,
         return_index: usize,
+    },
+    ReturnContractMismatch {
+        requirement_name: StringId,
     },
     InferredFailureInInfallibleCast {
         requirement_name: StringId,
@@ -1528,6 +1542,9 @@ pub enum InvalidFallibleHandlingReason {
     UnhandledBuiltinFailureInExportedFunction {
         witness: Box<BuiltinFailureWitness>,
     },
+    UnhandledBuiltinFailureInNeverFunction {
+        witness: Box<BuiltinFailureWitness>,
+    },
 }
 
 /// Boundary-inward evidence for one escaping built-in failure.
@@ -1575,6 +1592,10 @@ impl InvalidFallibleHandlingReason {
 
             InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction { .. } => {
                 "This exported function has no error slot but implicit built-in failure may escape. Recover locally with catch or declare a final Error! return slot."
+            }
+
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInNeverFunction { .. } => {
+                "Implicit built-in failure cannot escape a `-> !` function. Recover locally with catch."
             }
 
             InvalidFallibleHandlingReason::CatchOutsideBoundary => {
@@ -1921,6 +1942,21 @@ pub enum InvalidCallShapeReason {
         parameter_index: usize,
         binding_name: Option<StringId>,
     },
+
+    /// A call whose contract is `-> !` appeared where a value is required.
+    ///
+    /// WHAT: names a Never call in a declaration, return, argument, condition, operator,
+    ///       constructor, collection, map, template, cast or assertion position.
+    /// WHY: a Never call has no success value, so every value context must report the same
+    /// targeted placement mistake instead of treating the call as an empty result.
+    NeverCallUsedAsValue,
+
+    /// A Never call was followed by postfix `!`, `?`, `catch` or member access.
+    ///
+    /// WHAT: names handling or continuation syntax authored after a call that never returns.
+    /// WHY: there is no success, error, optional or receiver value to handle, so the syntax has no
+    /// meaning and the call must stay a standalone terminating statement.
+    NeverCallHandled,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1943,6 +1979,27 @@ pub enum InvalidReturnShapeReason {
     MissingReturnBangValue,
 
     FunctionMayFallThrough,
+
+    /// A body declared `-> !` can complete normally on a reachable active path.
+    NeverBodyMayCompleteNormally,
+
+    /// A body declared `-> !` has a reachable active path that returns to its caller.
+    NeverBodyReturnsToCaller,
+
+    /// An unannotated function body diverges on every reachable active path.
+    ///
+    /// WHAT: the omitted return contract states an ordinary completion the body never reaches.
+    /// WHY: the author must choose the permanent `-> !` contract or the ordinary type this
+    ///      temporary implementation will produce, so the omission cannot silently become Never.
+    UnannotatedFunctionAlwaysDiverges,
+
+    /// A `-> !` proof depends on its own unvalidated Never-call group.
+    ///
+    /// WHAT: names a self-edge or strongly connected group whose divergence proof needs the
+    ///       contracts inside that same group.
+    /// WHY: accepting the cycle would validate each callable against an unproven peer. The source
+    ///      must make one member's divergence independent of the cycle before the group is valid.
+    NeverProofDependsOnCycle,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

@@ -278,8 +278,8 @@ The diagnostic lane rules above apply to every local error boundary.
 
 This section covers codebase doc comments and small requested documentation edits. For substantial documentation work, follow the task's dedicated writing guidance and the surrounding source.
 
-- `@page.moth` owns website title, introduction, navigation, composition and layout.
-- `overview.mtf` owns compact routing and contract reference and must not be imported by `@page.moth`.
+- `@entry.moth` owns website title, introduction, navigation, composition and layout.
+- `overview.mtf` owns compact routing and contract reference and must not be imported by `@entry.moth`.
 - Topic-named `.mtf` files own detailed design content, remain useful when read directly and may be imported by website pages. Pages should make subjects easy to explore while compact references reach the contract quickly.
 
 For small edits:

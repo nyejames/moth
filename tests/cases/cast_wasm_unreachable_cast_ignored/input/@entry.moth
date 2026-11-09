@@ -1,0 +1,6 @@
+@impl compare
+
+comparison = compare(128)
+assert(comparison is true)
+
+[: wasm unreachable cast ignored]

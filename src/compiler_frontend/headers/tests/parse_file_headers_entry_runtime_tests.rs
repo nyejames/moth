@@ -30,7 +30,6 @@ fn entry_runtime_fragment_count_reflects_runtime_template_count() {
         headers.entry_runtime_fragment_count, 1,
         "one runtime top-level template should yield runtime fragment count of 1"
     );
-    assert!(headers.has_non_trivial_root_body);
 }
 
 #[test]
@@ -56,13 +55,13 @@ fn entry_runtime_fragment_count_ignores_assigned_templates() {
 
 #[test]
 fn entry_runtime_fragment_count_is_zero_when_parsed_as_non_entry_file() {
-    // An imported root with only declarations reports runtime fragment count 0.
-    // WHY: only the active module root contributes runtime fragments.
+    // An ordinary source file with only declarations reports runtime fragment count 0.
+    // WHY: only the start-bearing root contributes runtime fragments.
     let headers = expect_header_success(
         parse_single_file_headers_with_entry(
             "f || -> I32:\n    1\n;\n",
             "src/lib.moth",
-            "src/@page.moth",
+            "src/@entry.moth",
         ),
         "headers should parse",
     );
@@ -200,7 +199,11 @@ fn start_function_retains_segmented_source_runs_in_order_with_eof() {
 
     let duplicate_source = format!("{source_text}Status :: Other,;\n");
     let errors = expect_header_error(
-        parse_single_file_headers_with_entry(&duplicate_source, "src/@page.moth", "src/@page.moth"),
+        parse_single_file_headers_with_entry(
+            &duplicate_source,
+            "src/@entry.moth",
+            "src/@entry.moth",
+        ),
         "a real duplicate after the closed expressions must still be rejected",
     );
     let duplicate_span = source_span_for(&duplicate_source, "Status", 3);

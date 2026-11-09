@@ -6,7 +6,7 @@
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId};
 use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, OriginFunctionId,
@@ -166,12 +166,57 @@ impl HirFunctionOriginLookup {
     }
 }
 
+/// Whole HIR callable return contract.
+///
+/// WHAT: states whether the callable completes normally with ordinary success/error slots or
+///       never returns to its caller.
+/// WHY: `Never` is not an empty ordinary return shape. Keeping the variant explicit stops
+///      lowering, validation and backends from treating a non-returning function as a function
+///      with zero success slots, and keeps the private failure lane from installing an error
+///      channel on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HirFunctionReturnContract {
+    Returns(CallableReturnShape),
+    Never,
+}
+
+impl HirFunctionReturnContract {
+    /// Wrap one ordinary success-slot and error-channel shape.
+    pub(crate) fn returns(shape: CallableReturnShape) -> Self {
+        Self::Returns(shape)
+    }
+
+    /// Whether the function never returns to its caller.
+    pub fn is_never(&self) -> bool {
+        matches!(self, Self::Never)
+    }
+
+    /// The ordinary shape, or `None` when the function declares Never.
+    ///
+    /// WHAT: never maps Never onto empty slots.
+    /// WHY: callers that own a success or error channel must decide explicitly what a Never
+    ///      contract means at their boundary.
+    pub fn ordinary(&self) -> Option<&CallableReturnShape> {
+        match self {
+            Self::Returns(shape) => Some(shape),
+            Self::Never => None,
+        }
+    }
+
+    /// Mutable access to the ordinary shape, or `None` when the function declares Never.
+    pub(crate) fn ordinary_mut(&mut self) -> Option<&mut CallableReturnShape> {
+        match self {
+            Self::Returns(shape) => Some(shape),
+            Self::Never => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct HirFunction {
     pub id: FunctionId,
     pub entry: BlockId,
     /// Locals defined by entering this function under its call ABI contract.
     pub params: Vec<LocalId>,
-    pub returns: Box<[TypeId]>,
-    pub error_return: Option<TypeId>,
+    pub return_contract: HirFunctionReturnContract,
 }

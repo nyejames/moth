@@ -25,6 +25,7 @@ mod ordering_hints;
 pub(crate) mod parse_file_headers;
 pub(crate) mod plain_markdown_prepare;
 mod public_exports;
+pub(crate) mod qualified_references;
 mod start_capture;
 mod symbol_collection;
 pub(crate) mod synthetic_content_header;

@@ -38,11 +38,13 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, InvalidTemplateStructureReason, TypeMismatchContext,
 };
+use crate::compiler_frontend::datatypes::FunctionReturnContract;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
-    FunctionSignatureSyntax, ReturnChannelSyntax, ReturnSlotSyntax, SignatureMemberSyntax,
+    FunctionReturnContractSyntax, FunctionSignatureSyntax, ReturnChannelSyntax, ReturnSlotSyntax,
+    SignatureMemberSyntax,
 };
 use crate::compiler_frontend::declaration_syntax::type_syntax::ParsedParameterContractSyntax;
 use crate::compiler_frontend::source::SourceSpan;
@@ -67,27 +69,12 @@ struct SignatureTypeResolutionFailure {
     failure_kind: TypeResolutionFailureKind,
 }
 
-/// Whether a return slot carries success-channel or error-channel values.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReturnChannel {
-    Success,
-    Error,
-}
-
-/// Signature return slot before its authored type annotation is resolved.
+/// One signature return before its authored type annotation is resolved.
 pub(crate) struct UnresolvedReturnSlot {
     pub(crate) type_id: Option<TypeId>,
     /// Authored syntax is needed only while the containing signature is resolved.
     pub(crate) type_syntax: Option<ParsedTypeRef>,
-    pub(crate) channel: ReturnChannel,
-}
-
-/// Resolved signature return slot with canonical identity and channel.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ReturnSlot {
-    /// Canonical `TypeId` for this return slot when the contract is complete.
-    pub type_id: Option<TypeId>,
-    pub channel: ReturnChannel,
+    pub(crate) channel: ReturnChannelSyntax,
 }
 
 /// Callable parameter facts retained only until its authored annotation is resolved.
@@ -169,17 +156,28 @@ pub struct FunctionParameter {
     pub contract: ParameterContract,
 }
 
+/// Short-lived return contract shell that owns parsed annotations until type resolution finishes.
+///
+/// WHAT: mirrors the authored `Returns | Never` split while the ordinary slots still carry
+///       unresolved annotations.
+/// WHY: resolution must decide Never before attempting to resolve any return type, so the
+///      intermediate layer cannot be a bare slot vector.
+pub(crate) enum UnresolvedFunctionReturnContract {
+    Returns(Vec<UnresolvedReturnSlot>),
+    Never,
+}
+
 /// Short-lived signature shell that owns parsed annotations until type resolution finishes.
 pub(crate) struct UnresolvedFunctionSignature {
     pub(crate) parameters: Vec<UnresolvedFunctionParameter>,
-    pub(crate) returns: Vec<UnresolvedReturnSlot>,
+    pub(crate) return_contract: UnresolvedFunctionReturnContract,
 }
 
 /// Resolved callable contract containing canonical types but no authored type syntax.
 #[derive(Clone, Debug, Default)]
 pub struct FunctionSignature {
     pub parameters: Vec<FunctionParameter>,
-    pub returns: Vec<ReturnSlot>,
+    pub return_contract: FunctionReturnContract,
 }
 
 impl FunctionParameter {
@@ -217,12 +215,10 @@ impl FunctionParameter {
     }
 }
 
-/// Transient consumer-local signature facts, with ordered success slots separate from the error.
+/// Transient consumer-local signature facts, with the shared ordinary return contract.
 pub(crate) struct MaterialisedFunctionSignature {
     pub(crate) signature: FunctionSignature,
     pub(crate) function_type_id: TypeId,
-    pub(crate) success_return_type_ids: Vec<TypeId>,
-    pub(crate) error_return_type_id: Option<TypeId>,
 }
 
 #[derive(Clone, Copy)]
@@ -240,63 +236,6 @@ pub(crate) enum SignatureDefaultMode {
     KeepAuthored,
     /// Parse and fold the default now to `DeclarationValue::Default`.
     FoldNow,
-}
-
-impl FunctionSignature {
-    /// Canonical TypeIds for success-channel return slots.
-    /// Only meaningful after type resolution.
-    pub fn success_return_type_ids(&self) -> Vec<TypeId> {
-        self.returns
-            .iter()
-            .filter(|slot| slot.channel == ReturnChannel::Success)
-            .filter_map(|slot| slot.type_id)
-            .collect()
-    }
-    /// Iterates over resolved success-channel types without materialising a temporary vector.
-    pub(crate) fn success_return_type_ids_iter(&self) -> impl Iterator<Item = TypeId> + '_ {
-        self.returns
-            .iter()
-            .filter(|slot| slot.channel == ReturnChannel::Success)
-            .filter_map(|slot| slot.type_id)
-    }
-
-    /// Canonical TypeId for exactly one success-channel return slot, if it is resolved.
-    ///
-    /// WHAT: projects one slot directly from the borrowed signature without allocating a result
-    ///       list.
-    /// WHY: callers that only need a scalar result shape must distinguish it from zero or multiple
-    ///      success slots without treating an unresolved type as semantic information.
-    pub(crate) fn single_success_return_type_id(&self) -> Option<TypeId> {
-        let mut success_slots = self
-            .returns
-            .iter()
-            .filter(|slot| slot.channel == ReturnChannel::Success);
-        let slot = success_slots.next()?;
-        if success_slots.next().is_some() {
-            return None;
-        }
-        slot.type_id
-    }
-
-    /// The number of success-channel return slots, counted without allocating a type list.
-    ///
-    /// WHAT: counts declared slots, whether or not their types are resolved yet.
-    /// WHY: an authored `!` needs only whether a value is declared, so a count avoids a Vec.
-    pub(crate) fn success_return_slot_count(&self) -> usize {
-        self.returns
-            .iter()
-            .filter(|slot| slot.channel == ReturnChannel::Success)
-            .count()
-    }
-
-    /// Canonical TypeId for the error return slot, if any.
-    /// Only meaningful after type resolution.
-    pub fn error_return_type_id(&self) -> Option<TypeId> {
-        self.returns
-            .iter()
-            .find(|slot| slot.channel == ReturnChannel::Error)
-            .and_then(|slot| slot.type_id)
-    }
 }
 
 /// Build a signature from retained syntax under the caller's type-resolution policy.
@@ -343,21 +282,27 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
         });
     }
 
-    let mut returns = Vec::with_capacity(syntax.returns.len());
-    for return_slot in &syntax.returns {
-        returns.push(return_slot_from_syntax(
-            return_slot,
-            expression_context,
-            type_interner,
-            const_values,
-            string_table,
-            fallback_policy,
-        )?);
-    }
+    let return_contract = match &syntax.return_contract {
+        FunctionReturnContractSyntax::Returns(return_slots) => {
+            let mut returns = Vec::with_capacity(return_slots.len());
+            for return_slot in return_slots {
+                returns.push(return_slot_from_syntax(
+                    return_slot,
+                    expression_context,
+                    type_interner,
+                    const_values,
+                    string_table,
+                    fallback_policy,
+                )?);
+            }
+            UnresolvedFunctionReturnContract::Returns(returns)
+        }
+        FunctionReturnContractSyntax::Never => UnresolvedFunctionReturnContract::Never,
+    };
 
     Ok(UnresolvedFunctionSignature {
         parameters,
-        returns,
+        return_contract,
     })
 }
 
@@ -370,11 +315,6 @@ fn return_slot_from_syntax(
     string_table: &mut StringTable,
     fallback_policy: SignatureTypeFallbackPolicy,
 ) -> SignatureResult<UnresolvedReturnSlot> {
-    let channel = match return_slot.channel {
-        ReturnChannelSyntax::Success => ReturnChannel::Success,
-        ReturnChannelSyntax::Error => ReturnChannel::Error,
-    };
-
     let resolved = resolve_signature_type_annotation(
         &return_slot.value.type_annotation,
         return_slot.value.span,
@@ -402,7 +342,7 @@ fn return_slot_from_syntax(
     Ok(UnresolvedReturnSlot {
         type_id,
         type_syntax: Some(return_slot.value.type_annotation.clone()),
-        channel,
+        channel: return_slot.channel,
     })
 }
 

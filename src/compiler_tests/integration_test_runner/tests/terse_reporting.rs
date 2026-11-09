@@ -45,7 +45,7 @@ fn success_case(case_id: &str, backend_id: BackendId) -> TestCaseSpec {
         contract: None,
         role: None,
         backend_id,
-        entry_path: PathBuf::from("input/@page.moth"),
+        entry_path: PathBuf::from("input/@entry.moth"),
         flags: Vec::new(),
         expected: ExpectedOutcome::Success(SuccessExpectation {
             warnings: WarningExpectation::Forbid,
@@ -68,7 +68,7 @@ fn expected_failure_case(case_id: &str, backend_id: BackendId) -> TestCaseSpec {
         contract: None,
         role: None,
         backend_id,
-        entry_path: PathBuf::from("input/@page.moth"),
+        entry_path: PathBuf::from("input/@entry.moth"),
         flags: Vec::new(),
         expected: ExpectedOutcome::Failure(FailureExpectation {
             warnings: WarningExpectation::Forbid,
@@ -174,7 +174,7 @@ fn terse_frozen_warning_uses_donor_context_after_terminal_finalization() {
     fs::create_dir_all(&project_root).expect("should create project source root");
     fs::create_dir_all(&package_root).expect("should create package source root");
 
-    let project_path = project_root.join("@project.moth");
+    let project_path = project_root.join("project.moth");
     let package_path = package_root.join("@package.moth");
     let project_text = "project_snapshot = 1\n";
     let package_text = "package_snapshot = 1\n";
@@ -278,7 +278,7 @@ fn terse_frozen_warning_uses_donor_context_after_terminal_finalization() {
         "warning should render the donor package path: {warning_line}"
     );
     assert!(
-        !warning_line.contains("@project.moth"),
+        !warning_line.contains("project.moth"),
         "warning must not render the requester project path: {warning_line}"
     );
 }

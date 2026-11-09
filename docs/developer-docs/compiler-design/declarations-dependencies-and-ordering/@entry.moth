@@ -1,0 +1,22 @@
+@declarations-dependencies-and-ordering content as reference_content
+@styles navbar, section, theme_css, sidebar, init_docs_sidebar
+@diagrams css as diagrams_css
+
+#[$in title:["06. Declarations, dependencies and ordering"]]
+#[$in description:["How retained syntax becomes bound visibility and ordered declarations."]]
+#[$in head:<style>[theme_css] [diagrams_css]</style>]
+
+#[navbar]
+#[sidebar]
+init_docs_sidebar()!
+
+#[section, $md:
+    Prepared shells, bound dependencies and local declaration order give each module its top-level silhouette before bodies type-check.
+]
+
+#[section, reference_content]
+
+#[section, $md:
+    @../ (Compiler design) / @../tokenization (Previous) / @../ast-semantics-and-types (Next)
+]
+

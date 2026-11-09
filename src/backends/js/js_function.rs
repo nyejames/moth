@@ -102,7 +102,10 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     pub(crate) fn function_is_fallible(&self, function: &HirFunction) -> bool {
-        function.error_return.is_some()
+        function
+            .return_contract
+            .ordinary()
+            .is_some_and(|returns| returns.is_fallible())
     }
 
     fn emit_parameter_binding_setup(
@@ -277,6 +280,11 @@ impl<'hir> JsEmitter<'hir> {
                 message,
                 message_evaluation,
             } => self.emit_assert_failure_terminator(*message, *message_evaluation),
+
+            HirTerminator::NeverCall { target, args } => {
+                self.emit_never_call_terminator(target, *args)?;
+                Ok(())
+            }
 
             HirTerminator::Break { .. } | HirTerminator::Continue { .. } => {
                 Err(InfrastructureFailure::internal(
@@ -513,6 +521,11 @@ impl<'hir> JsEmitter<'hir> {
                 Ok(BranchTermination::Terminated)
             }
 
+            HirTerminator::NeverCall { target, args } => {
+                self.emit_never_call_terminator(target, *args)?;
+                Ok(BranchTermination::Terminated)
+            }
+
             _ => Err(InfrastructureFailure::internal(
                 CompilerStage::BackendLowering,
                 "JavaScript backend: structured lowering encountered unsupported branch terminator",
@@ -590,6 +603,7 @@ impl<'hir> JsEmitter<'hir> {
             HirTerminator::Return(_)
             | HirTerminator::ReturnError(_)
             | HirTerminator::RuntimeFailure { .. }
+            | HirTerminator::NeverCall { .. }
             | HirTerminator::AssertFailure { .. } => Ok(BranchTermination::Terminated),
 
             // Unreachable: `validate_blocks` rejects `Uninitialized` blocks before lowering.

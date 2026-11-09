@@ -1,8 +1,8 @@
 //! Shared value-production infrastructure for local value-producing blocks.
 //!
-//! WHAT: owns `then` value parsing, active value targets, all-path exit summaries
-//! and reachable produced-value traversal shared by catch handlers and value-producing
-//! control flow.
+//! WHAT: owns `then` value parsing, active value targets and reachable produced-value
+//! traversal shared by catch handlers and value-producing control flow. All-path exit facts
+//! come from `ast/statements/control_flow_exits.rs`.
 //! WHY: fallback parsing and terminal-only enforcement are shared by catch and value
 //!      blocks, so value-block syntax does not duplicate the same arity, coercion and
 //!      completeness logic.
@@ -20,7 +20,6 @@ pub(crate) mod parse_values;
 pub(crate) mod receiver;
 pub(crate) mod types;
 
-pub(crate) use completeness::analyze_branch_exits;
 pub(crate) use multi_bind::try_parse_multi_bind_value_block;
 pub(crate) use parse_values::{
     complete_retained_then_value, is_missing_produced_value_boundary,

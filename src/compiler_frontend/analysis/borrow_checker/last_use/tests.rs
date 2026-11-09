@@ -86,6 +86,79 @@ fn last_use_ignores_an_unreachable_use() {
     ));
 }
 
+#[test]
+fn last_use_never_call_exit_ends_liveness_without_a_successor() {
+    let problem = never_call_problem();
+    let analysis =
+        LastUseAnalysis::from_problem(&problem).expect("NeverCall problem should analyze");
+    let before_call = analysis
+        .query(
+            LastUseSubject::Place(PlaceId::new(0)),
+            LastUseLocation::at_point(PointId::new(0)),
+        )
+        .expect("before-call query should succeed");
+    assert_eq!(before_call.status, FutureUseStatus::MustBeUsed);
+    let after_call = analysis
+        .query(
+            LastUseSubject::Place(PlaceId::new(0)),
+            LastUseLocation::after_event(EventId::new(0), PointId::new(1)),
+        )
+        .expect("after-call query should succeed");
+    assert_eq!(
+        after_call.status,
+        FutureUseStatus::NoFutureUse,
+        "liveness ends at the terminating call"
+    );
+    assert!(matches!(
+        after_call.witness,
+        LastUseWitness::NoFutureUse { explored_exits }
+            if explored_exits.as_ref() == [BlockId::new(0)]
+    ));
+}
+
+fn never_call_problem() -> BorrowProblem {
+    problem(
+        vec![
+            ProgramPoint::new(PointId::new(0), BlockId::new(0), 0),
+            ProgramPoint::new(PointId::new(1), BlockId::new(0), 1),
+            ProgramPoint::new(PointId::new(2), BlockId::new(0), 2),
+        ],
+        vec![CfgBlock::new(
+            BlockId::new(0),
+            PointId::new(0),
+            PointId::new(2),
+            vec![EventId::new(0), EventId::new(1)],
+        )],
+        vec![],
+        vec![BlockId::new(0)],
+        vec![
+            Event::new(
+                EventId::new(0),
+                PointId::new(1),
+                EventKind::Access {
+                    use_id: UseId::new(0),
+                },
+                EventSource::none(),
+            ),
+            Event::new(
+                EventId::new(1),
+                PointId::new(2),
+                EventKind::Terminator {
+                    kind: TerminatorEventKind::NeverCall,
+                },
+                EventSource::none(),
+            ),
+        ],
+        vec![Use {
+            id: UseId::new(0),
+            point: PointId::new(1),
+            place: PlaceId::new(0),
+            kind: UseKind::Read,
+            definition: false,
+        }],
+    )
+}
+
 fn single_use_problem() -> BorrowProblem {
     problem(
         vec![
@@ -281,6 +354,7 @@ fn ensure_terminal_events(parts: &mut BorrowProblemParts) {
                             | TerminatorEventKind::ReturnError
                             | TerminatorEventKind::RuntimeFailure
                             | TerminatorEventKind::AssertFailure
+                            | TerminatorEventKind::NeverCall
                     }
                 )
             });

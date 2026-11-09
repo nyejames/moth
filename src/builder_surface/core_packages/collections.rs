@@ -1,6 +1,7 @@
 //! `@core/collections` package registration.
 
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     COLLECTION_GET_HOST_NAME, COLLECTION_LENGTH_HOST_NAME, COLLECTION_PUSH_FIXED_HOST_NAME,
     COLLECTION_PUSH_GROWABLE_HOST_NAME, COLLECTION_REMOVE_HOST_NAME, COLLECTION_SET_HOST_NAME,
@@ -40,11 +41,10 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                         access_kind: ExternalAccessKind::Shared,
                     },
                 ],
-                returns: external_success_returns(
-                    ExternalAbiType::Void,
-                    ExternalReturnAlias::Fresh,
+                return_contract: external_returns(
+                    external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
+                    None,
                 ),
-                error_return_type: None,
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
@@ -78,11 +78,10 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                         access_kind: ExternalAccessKind::Shared,
                     },
                 ],
-                returns: external_success_returns(
-                    ExternalAbiType::Void,
-                    ExternalReturnAlias::Fresh,
+                return_contract: external_returns(
+                    external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
+                    None,
                 ),
-                error_return_type: None,
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
@@ -110,11 +109,10 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                         access_kind: ExternalAccessKind::Shared,
                     },
                 ],
-                returns: external_success_returns(
-                    ExternalAbiType::Void,
-                    ExternalReturnAlias::Fresh,
+                return_contract: external_returns(
+                    external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
+                    None,
                 ),
-                error_return_type: None,
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
@@ -142,11 +140,10 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                         access_kind: ExternalAccessKind::Shared,
                     },
                 ],
-                returns: external_success_returns(
-                    ExternalAbiType::Void,
-                    ExternalReturnAlias::Fresh,
+                return_contract: external_returns(
+                    external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
+                    None,
                 ),
-                error_return_type: None,
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
@@ -176,11 +173,10 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                         access_kind: ExternalAccessKind::Shared,
                     },
                 ],
-                returns: external_success_returns(
-                    ExternalAbiType::Void,
-                    ExternalReturnAlias::Fresh,
+                return_contract: external_returns(
+                    external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
+                    None,
                 ),
-                error_return_type: None,
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
@@ -204,11 +200,13 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                         access_kind: ExternalAccessKind::Shared,
                     },
                 ],
-                returns: external_success_returns(
-                    ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
-                    ExternalReturnAlias::Fresh,
+                return_contract: external_returns(
+                    external_success_returns(
+                        ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
+                        ExternalReturnAlias::Fresh,
+                    ),
+                    None,
                 ),
-                error_return_type: None,
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(

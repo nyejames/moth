@@ -13,6 +13,7 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::UseOfUninitializedLocalView;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::ids::HirNodeId;
 use crate::compiler_frontend::hir::places::HirPlace;
@@ -68,7 +69,10 @@ fn if_branch_local_alias_does_not_escape_merge() {
     let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -201,7 +205,10 @@ fn match_arm_local_alias_does_not_escape_merge() {
     let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -279,7 +286,10 @@ fn while_body_local_alias_does_not_escape_exit() {
     let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -370,7 +380,10 @@ fn dead_local_access_reports_borrow_error() {
     let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(

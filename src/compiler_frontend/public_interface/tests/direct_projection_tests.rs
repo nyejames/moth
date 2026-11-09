@@ -13,7 +13,8 @@
 //! beside the module rather than an end-to-end case.
 
 use super::super::{
-    CallableSeed, CallableSeedKind, DirectExportSeed, PublicDeclarationSemantics,
+    CallableSeed, CallableSeedKind, DirectExportSeed, PublicCallableReturnContract,
+    PublicDeclarationSemantics, PublicFunctionCategory, PublicFunctionSemantics,
     PublicInterfaceDraftBuilder, PublicInterfaceDraftBuilderInput, PublicReceiverMethodCategory,
     receiver_method_semantics_from_seed,
 };
@@ -26,6 +27,9 @@ use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::const_eval::{
     ConstantFoldOutcome, FoldRequirement, FoldServices,
 };
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowAnalysis;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
@@ -161,7 +165,7 @@ fn constant_root(
 fn empty_signature() -> FunctionSignature {
     FunctionSignature {
         parameters: vec![],
-        returns: vec![],
+        return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots([], None)),
     }
 }
 
@@ -508,7 +512,7 @@ fn builder_attaches_receiver_methods_to_struct_record() {
     let method_fn_path = path("render", &mut string_table, &mut path_fork);
     let signature = FunctionSignature {
         parameters: vec![],
-        returns: vec![],
+        return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots([], None)),
     };
     let entry = receiver_entry(
         method_fn_path,
@@ -591,6 +595,168 @@ fn builder_attaches_receiver_methods_to_struct_record() {
 }
 
 #[test]
+fn projects_never_function_and_receiver_method_contracts() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut env = TypeEnvironment::new();
+
+    let (_, struct_type_id) = register_struct(
+        &mut env,
+        &mut string_table,
+        "Counter",
+        empty_fields(),
+        None,
+        &mut path_fork,
+    );
+
+    let never_signature = || FunctionSignature {
+        parameters: vec![],
+        return_contract: FunctionReturnContract::Never,
+    };
+
+    let function_root = function_root("stop", never_signature(), &mut string_table, &mut path_fork);
+    let receiver_path = path("Counter", &mut string_table, &mut path_fork);
+    let method_fn_path = path("halt", &mut string_table, &mut path_fork);
+    let entry = receiver_entry(
+        method_fn_path,
+        ReceiverKey::Struct(receiver_path),
+        never_signature(),
+    );
+    let struct_root = struct_root(
+        "Counter",
+        struct_type_id,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    );
+
+    let root_table = ResolvedPublicTypeRootTable {
+        roots: vec![function_root, struct_root],
+        receiver_methods: vec![entry.clone()],
+        trait_source_facts: FxHashMap::default(),
+    };
+
+    let bindings = vec![
+        ExportBinding::new(
+            module_origin(),
+            "Counter".to_owned(),
+            OriginDeclarationId::Type(struct_origin("Counter")),
+        ),
+        ExportBinding::new(
+            module_origin(),
+            "stop".to_owned(),
+            OriginDeclarationId::Function(free_function_origin("stop")),
+        ),
+    ];
+    let nominal_origins = nominal_origins_map(
+        vec![("Counter", struct_origin("Counter"))],
+        &mut string_table,
+        &mut path_fork,
+    );
+    let export_seed = DirectExportSeed::new(module_origin(), bindings, nominal_origins.clone());
+
+    let mut catalog = ReceiverMethodCatalog::default();
+    catalog.by_function_path.insert(method_fn_path, entry);
+
+    let projection_input = AstPublicInterfaceProjectionInput {
+        root_table,
+        trait_roots: vec![],
+        trait_environment: Some(std::rc::Rc::new(TraitEnvironment::new())),
+        trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
+    };
+
+    let registry = ExternalPackageRegistry::new();
+    let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
+        path_fork: &path_fork,
+        export_seed,
+        public_interface_projection_input: projection_input,
+        public_source_nominal_type_origins: &nominal_origins,
+        public_source_trait_origins: &FxHashMap::default(),
+        type_environment: &env,
+        external_registry: &registry,
+        string_table: &string_table,
+        generic_function_templates: &FxHashMap::default(),
+        const_values: &ConstValueStore::default(),
+        module_resources: None,
+    })
+    .build()
+    .expect("draft with Never function and method builds")
+    .draft;
+
+    let function_record = draft
+        .declarations
+        .iter()
+        .find(|record| record.origin == OriginDeclarationId::Function(free_function_origin("stop")))
+        .expect("Never function declaration exists");
+    let PublicDeclarationSemantics::Function(semantics) = &function_record.semantics else {
+        panic!("Never function projects function semantics");
+    };
+    assert_eq!(
+        semantics.return_contract,
+        PublicCallableReturnContract::Never
+    );
+
+    let struct_record = draft
+        .declarations
+        .iter()
+        .find(|record| matches!(record.semantics, PublicDeclarationSemantics::Struct(_)))
+        .expect("struct declaration exists");
+    let PublicDeclarationSemantics::Struct(semantics) = &struct_record.semantics else {
+        panic!("struct projects struct semantics");
+    };
+    assert_eq!(semantics.receiver_methods.len(), 1);
+    assert_eq!(
+        semantics.receiver_methods[0].return_contract,
+        PublicCallableReturnContract::Never
+    );
+}
+
+/// Verifies that the Never variant changes public-callable semantic identity.
+///
+/// WHAT: an explicit Never callable and an ordinary zero-success callable are unequal and hash
+///       differently in the public semantic record.
+/// WHY: the public-interface fingerprint consumes these canonical records, so changing a
+///      callable between the two contracts must change its fingerprint.
+#[test]
+fn never_contract_changes_public_semantic_identity() {
+    let never = PublicCallableReturnContract::Never;
+    let ordinary = PublicCallableReturnContract::Returns {
+        success: Vec::new(),
+        error: None,
+    };
+
+    assert_ne!(
+        never, ordinary,
+        "Never and ordinary no-value contracts are distinct public semantics"
+    );
+
+    let mut never_hash = DefaultHasher::new();
+    never.hash(&mut never_hash);
+    let mut ordinary_hash = DefaultHasher::new();
+    ordinary.hash(&mut ordinary_hash);
+    assert_ne!(
+        never_hash.finish(),
+        ordinary_hash.finish(),
+        "the public fingerprint domain must distinguish the two contracts"
+    );
+
+    let never_semantics = PublicFunctionSemantics {
+        category: PublicFunctionCategory::ConcreteLocal,
+        parameters: Vec::new(),
+        return_contract: never,
+    };
+    let ordinary_semantics = PublicFunctionSemantics {
+        category: PublicFunctionCategory::ConcreteLocal,
+        parameters: Vec::new(),
+        return_contract: ordinary,
+    };
+    assert_ne!(
+        never_semantics, ordinary_semantics,
+        "public function semantics are not equal when only the return contract changes"
+    );
+}
+
+#[test]
 fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir_origin_seed() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -627,7 +793,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
     };
     let method_signature = FunctionSignature {
         parameters: vec![receiver],
-        returns: vec![],
+        return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots([], None)),
     };
     let mut entry = receiver_entry(
         method_fn_path,
@@ -930,22 +1096,19 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
         field_declaration_no_default("subject", string_id, &mut string_table, &mut path_fork),
     ];
 
-    let signature = FunctionSignature {
-        parameters: parameters
-            .into_iter()
-            .map(|declaration| {
-                crate::compiler_frontend::ast::statements::functions::FunctionParameter {
-                    id: declaration.id,
-                    type_id: declaration.type_id,
-                    value_mode: declaration.value_mode,
-                    default: declaration.value.default(),
-                    binding_span: declaration.binding_span,
-                    contract: crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
-                }
-            })
-            .collect(),
-        returns: vec![],
-    };
+    let signature = FunctionSignature { parameters: parameters
+        .into_iter()
+        .map(|declaration| {
+            crate::compiler_frontend::ast::statements::functions::FunctionParameter {
+                id: declaration.id,
+                type_id: declaration.type_id,
+                value_mode: declaration.value_mode,
+                default: declaration.value.default(),
+                binding_span: declaration.binding_span,
+                contract: crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
+            }
+        })
+        .collect(), return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots([], None)),  };
 
     let root = function_root("render", signature, &mut string_table, &mut path_fork);
     let root_table = ResolvedPublicTypeRootTable {
@@ -1303,7 +1466,7 @@ fn receiver_method_retains_folded_parameter_defaults() {
                     crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
             },
         ],
-        returns: vec![],
+        return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots([], None)),
     };
 
     let entry = receiver_entry(

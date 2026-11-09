@@ -55,9 +55,7 @@ use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::semantic_identity::{
-    ModuleRootRole, OriginTraitId, StableModuleOriginIdentity,
-};
+use crate::compiler_frontend::semantic_identity::{OriginTraitId, StableModuleOriginIdentity};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceDatabaseError, SourceId,
 };
@@ -137,15 +135,14 @@ impl<'a> CompilerFrontend<'a> {
 
 /// Shared immutable inputs used while one source file is prepared against a local string table.
 ///
-/// WHAT: collects the frontend-owned registries and entry-file identity needed by tokenization and
-/// header parsing.
+/// WHAT: collects the frontend-owned registries and header-parse options needed by tokenization
+/// and header parsing.
 /// WHY: parallel file preparation passes this context by shared reference to Rayon workers without
 /// giving them mutable access to the module-global string table.
 pub(crate) struct FrontendFilePrepareContext<'a> {
     pub(crate) source_files: &'a SourceDatabase,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
-    pub(crate) entry_file_path: &'a Path,
-    pub(crate) options: &'a HeaderParseOptions,
+    pub(crate) options: &'a HeaderParseOptions<'a>,
 }
 
 /// Borrowed per-file source payload for frontend preparation.
@@ -185,14 +182,17 @@ pub(crate) struct FrontendFilePrepareInput<'a> {
 
 /// Everything `headers_to_ast` needs to build one module's AST.
 ///
-/// WHAT: the sorted header set, entry identity, build profile, arena estimate and the Stage 0
-///       file-value facts AST interprets for value-position paths.
+/// WHAT: the sorted header set, the preparation-anchor path, build profile, arena estimate and
+///       the Stage 0 file-value facts AST interprets for value-position paths.
 /// WHY: the stage outgrew a readable positional list once Stage 0 resolution joined it, and a
 ///      named group keeps every call site self-describing instead of eight bare positions.
 pub(crate) struct AstBuildRequest<'a> {
     pub(crate) sorted: SortedHeaders,
-    pub(crate) entry_file_path: &'a Path,
-    pub(crate) root_role: ModuleRootRole,
+    /// The module's preparation-anchor path. It locates the AST entry directory and carries no
+    /// entry/start authority.
+    pub(crate) module_anchor_path: &'a Path,
+    /// Whether preparation synthesized the compiler-owned entry `start` body.
+    pub(crate) synthesizes_entry_start: bool,
     pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
     pub(crate) resolved_file_references: ResolvedFileReferenceTable,
@@ -460,7 +460,6 @@ impl CompilerFrontend<'static> {
                     owner,
                     source_file,
                     path_syntax,
-                    context.entry_file_path,
                     context.options,
                     local_string_table,
                     local_path_fork,
@@ -500,7 +499,6 @@ impl CompilerFrontend<'static> {
                     local_path_fork,
                     &mut span_builder,
                 )
-                .map_err(FileFrontendPrepareFailure::Infrastructure)
             }
         })();
         SourcePreparationDelta {
@@ -544,8 +542,8 @@ impl<'a> CompilerFrontend<'a> {
     ) -> Result<AstBuildResult, PreparedFailure> {
         let AstBuildRequest {
             sorted,
-            entry_file_path,
-            root_role,
+            module_anchor_path,
+            synthesizes_entry_start,
             build_profile,
             capacity_estimate,
             resolved_file_references,
@@ -555,13 +553,13 @@ impl<'a> CompilerFrontend<'a> {
             builder_root_slots,
         } = request;
 
-        let entry_dir = match self.source_files.get_by_canonical_path(entry_file_path) {
+        let entry_dir = match self.source_files.get_by_canonical_path(module_anchor_path) {
             Some(identity) => identity.logical_path,
             None => {
                 let error = InfrastructureFailure::internal(
                     CompilerStage::SourceLoading,
                     format!(
-                        "entry file {entry_file_path:?} was not registered before AST construction"
+                        "module anchor {module_anchor_path:?} was not registered before AST construction"
                     ),
                 );
                 return Err(PreparedFailure::Infrastructure(error.into()));
@@ -578,6 +576,9 @@ impl<'a> CompilerFrontend<'a> {
                 Arc::clone(self.source_files),
             ))),
             module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
+            qualified_reference_targets: Arc::clone(
+                &sorted.binding_environment.qualified_reference_targets,
+            ),
             module_origin,
             public_source_trait_origins,
             frozen_identity_handle,
@@ -603,7 +604,7 @@ impl<'a> CompilerFrontend<'a> {
                 style_directives: self.style_directives,
                 string_table: &mut self.string_table,
                 path_fork: &mut self.path_fork,
-                root_role,
+                synthesizes_entry_start,
                 entry_dir,
                 build_profile,
                 file_value_resolution,

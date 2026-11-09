@@ -22,6 +22,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::finish_prepared_batch;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::expressions::{
@@ -108,7 +109,9 @@ fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
                 false,
                 None,
             )],
-            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
+            return_contract: FunctionReturnContract::Returns(fresh_success_returns(vec![
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ])),
         },
         vec![node(
             NodeKind::Match {
@@ -146,7 +149,10 @@ fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
     );
@@ -210,7 +216,9 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
                 false,
                 None,
             )],
-            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
+            return_contract: FunctionReturnContract::Returns(fresh_success_returns(vec![
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ])),
         },
         vec![node(
             NodeKind::Match {
@@ -260,7 +268,10 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
     );
@@ -369,7 +380,10 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
                 false,
                 None,
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![match_node],
     );
@@ -456,7 +470,10 @@ fn lowers_and_validates_fixed_scalar_match_pattern() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(value_name, u8_type, false, None)],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![match_node],
     );
@@ -552,7 +569,10 @@ fn lowers_and_validates_fixed_scalar_option_literal_pattern() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![param_with_type_id(maybe_name, option_u8_type, false, None)],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![match_node],
     );
@@ -646,7 +666,10 @@ fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
                 false,
                 None,
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![match_node],
     );
@@ -720,7 +743,10 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
                 false,
                 None,
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(
             NodeKind::Match {
@@ -796,7 +822,10 @@ fn match_rejects_non_literal_pattern_expressions() {
                 false,
                 None,
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(
             NodeKind::Match {
@@ -857,7 +886,10 @@ fn break_outside_loop_reports_hir_transformation_error() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Break, None)],
     );
@@ -893,7 +925,10 @@ fn continue_outside_loop_reports_hir_transformation_error() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Continue, None)],
     );
@@ -929,7 +964,10 @@ fn top_level_return_reports_hir_transformation_error() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
     );
@@ -968,7 +1006,10 @@ fn unit_implicit_return_lowers_to_return_terminator() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
     );
@@ -1009,7 +1050,10 @@ fn side_table_maps_statement_and_terminator_spans() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -1079,7 +1123,10 @@ fn lowers_relational_pattern_to_hir_relational() {
                 false,
                 None,
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![match_node],
     );
@@ -1176,7 +1223,10 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
                 false,
                 None,
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![match_node],
     );
@@ -1291,7 +1341,10 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
                 false,
                 None,
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![match_node],
     );
@@ -1417,7 +1470,10 @@ fn lowers_option_present_capture_to_payload_assignment() {
                 false,
                 None,
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![match_node],
     );

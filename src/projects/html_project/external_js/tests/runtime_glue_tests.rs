@@ -3,7 +3,9 @@
 use super::import_map::build_import_map_html;
 use super::paths::relative_url_path;
 use super::runtime_modules::emit_build_runtime_modules;
-use super::source::{generate_fallible_wrapper, generate_infallible_wrapper};
+use super::source::{
+    generate_fallible_wrapper, generate_infallible_wrapper, generate_never_wrapper,
+};
 use super::*;
 use crate::build_system::build::FileKind;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
@@ -12,6 +14,7 @@ use crate::compiler_frontend::external_packages::{
     ExternalJsLowering, ExternalPackageId, ExternalPackageRegistry, ExternalReturnSlot,
     ExternalSignatureType, ExternalTypeId,
 };
+use crate::compiler_frontend::external_packages::{external_never, external_returns};
 use crate::compiler_frontend::module_compilation::Module;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExternalRuntimeEmissionPlan;
@@ -65,7 +68,7 @@ fn relative_url_path_shared_prefix() {
 #[test]
 fn generate_module_glue_returns_empty_when_no_external_exports() {
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     let referenced = HashSet::new();
     let registry = ExternalPackageRegistry::new();
 
@@ -87,7 +90,7 @@ fn generate_module_glue_returns_empty_when_no_external_exports() {
 #[test]
 fn generate_module_glue_empty_when_export_registered_but_not_referenced() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
@@ -123,7 +126,7 @@ fn generate_module_glue_empty_when_export_registered_but_not_referenced() {
 #[test]
 fn generate_module_glue_rejects_unknown_functions_in_deterministic_order() {
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     let first_function_id = ExternalFunctionId::Synthetic(404);
     let second_function_id = ExternalFunctionId::Synthetic(405);
     let registry = ExternalPackageRegistry::new();
@@ -147,7 +150,7 @@ fn generate_module_glue_rejects_unknown_functions_in_deterministic_order() {
         for detail in [
             "HTML JS glue preparation",
             "validated runtime metadata is inconsistent",
-            "@page.moth",
+            "@entry.moth",
             "Synthetic(404)",
             "no definition in the supplied registry",
         ] {
@@ -164,7 +167,7 @@ fn generate_module_glue_rejects_unknown_functions_in_deterministic_order() {
 #[test]
 fn generate_module_glue_rejects_missing_js_lowering_but_accepts_nonmodule_lowerings() {
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
 
     for lowering in [
         None,
@@ -179,8 +182,7 @@ fn generate_module_glue_rejects_missing_js_lowering_but_accepts_nonmodule_loweri
             .register_function(ExternalFunctionDef {
                 name: "get_value".to_owned(),
                 parameters: Vec::new(),
-                returns: Vec::new(),
-                error_return_type: None,
+                return_contract: external_returns(Vec::new(), None),
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: lowering,
@@ -203,7 +205,7 @@ fn generate_module_glue_rejects_missing_js_lowering_but_accepts_nonmodule_loweri
             for detail in [
                 "HTML JS glue preparation",
                 "validated runtime metadata is inconsistent",
-                "@page.moth",
+                "@entry.moth",
                 "get_value",
                 "@test/default",
                 "no applicable JavaScript lowering",
@@ -227,7 +229,7 @@ fn generate_module_glue_rejects_missing_js_lowering_but_accepts_nonmodule_loweri
 #[test]
 fn generate_module_glue_rejects_incomplete_selected_runtime_metadata() {
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     let (mut registry, function_id, package_id) =
         create_registry_with_export("get_value", "getValue");
     let other_package_id = registry
@@ -280,7 +282,7 @@ fn generate_module_glue_rejects_incomplete_selected_runtime_metadata() {
         for detail in [
             "HTML JS glue preparation",
             "validated runtime metadata is inconsistent",
-            "@page.moth",
+            "@entry.moth",
             "get_value",
             "getValue",
             "test/pkg",
@@ -304,7 +306,7 @@ fn generate_module_glue_rejects_incomplete_selected_runtime_metadata() {
 #[test]
 fn generate_module_glue_emits_glue_file_for_referenced_export() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
@@ -357,7 +359,7 @@ fn generate_module_glue_emits_glue_file_for_referenced_export() {
 #[test]
 fn generate_module_glue_nested_html_output_path() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
@@ -394,7 +396,7 @@ fn generate_module_glue_nested_html_output_path() {
 #[test]
 fn generate_module_glue_asset_import_relative_to_glue_module() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
@@ -476,6 +478,116 @@ assert.throws(() => __moth_glue_{suffix}(), /Invalid result wrapper/);
     }
 
     run_generated_node_script(&script);
+}
+
+#[test]
+fn never_wrapper_calls_once_then_throws_when_the_export_returns() {
+    let wrapper = generate_never_wrapper("__moth_glue_never", "returnsValue", &[])
+        .expect("Never wrapper generation should succeed");
+    assert!(
+        wrapper.contains("returnsValue();"),
+        "the Never wrapper must emit the raw export call: {wrapper}"
+    );
+    assert!(
+        wrapper.contains(&format!(
+            "throw new Error({});",
+            crate::backends::js::escape_js_string(crate::backends::js::NEVER_RETURNED_MESSAGE)
+        )),
+        "the Never wrapper must throw the compiler-owned contract error: {wrapper}"
+    );
+    assert!(
+        !wrapper.contains("return "),
+        "a Never wrapper must not produce a source-visible return value: {wrapper}"
+    );
+
+    let script = format!(
+        r#"import assert from "node:assert/strict";
+let calls = 0;
+function returnsValue() {{
+    calls += 1;
+    return 7;
+}}
+{wrapper}
+assert.throws(() => __moth_glue_never(), (error) => {{
+    assert.equal(error instanceof Error, true);
+    assert.equal(error.message, {message:?});
+    return true;
+}});
+assert.equal(calls, 1);
+"#,
+        message = crate::backends::js::NEVER_RETURNED_MESSAGE,
+    );
+    run_generated_node_script(&script);
+}
+
+#[test]
+fn generate_module_glue_projects_never_external_exports() {
+    let mut string_table = StringTable::new();
+    let mut module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
+    module.link_facts.external_import_candidates.push(
+        crate::compiler_frontend::module_compilation::ModuleExternalImport {
+            package_id: ExternalPackageId(0),
+            runtime_asset: Some(js_runtime_asset_import(
+                Path::new("lib.js"),
+                PathBuf::from("/project/lib.js"),
+            )),
+            required_runtime_imports: Vec::new(),
+        },
+    );
+
+    let mut registry = ExternalPackageRegistry::new();
+    let package_id = registry
+        .register_package(
+            "@test/pkg",
+            crate::builder_surface::PackageOrigin::ProjectLocal,
+        )
+        .unwrap();
+    let function_id = ExternalFunctionId::Synthetic(42);
+    registry
+        .register_function_in_package(
+            package_id,
+            function_id,
+            ExternalFunctionDef {
+                name: "halt".to_owned(),
+                parameters: Vec::new(),
+                return_contract: external_never(),
+                const_eval: None,
+                lowerings: ExternalFunctionLowerings {
+                    js: Some(ExternalJsLowering::ExternalModuleExport {
+                        export_name: "halt".to_owned(),
+                    }),
+                    wasm: None,
+                },
+            },
+        )
+        .unwrap();
+    module.link_facts.external_import_candidates[0].package_id = package_id;
+    let referenced = HashSet::from([function_id]);
+
+    let result = generate_module_glue(
+        &module,
+        &module.link_facts.external_import_candidates,
+        &referenced,
+        &registry,
+        &PathBuf::from("index.html"),
+        false,
+    )
+    .expect("Never external export glue should succeed");
+    let FileKind::Js(source) = result.glue_output_files[0].file_kind() else {
+        panic!("glue file must be JS");
+    };
+    assert!(
+        source.contains("halt as __moth_external_fn42"),
+        "Never exports must keep their external-module import: {source}"
+    );
+    assert!(
+        source.contains("throw new Error("),
+        "Never export glue must throw if the raw export returns: {source}"
+    );
+    assert!(
+        !source.contains("return __moth_external_fn42"),
+        "Never export glue must not produce a result: {source}"
+    );
 }
 
 /// Executes one fallible wrapper per build mode against the full foreign-error
@@ -1397,7 +1509,7 @@ fn build_import_map_html_deduplicates_by_specifier() {
 
 fn create_module_with_runtime_requirement() -> Module {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
@@ -1436,10 +1548,12 @@ fn create_registry_with_export(
             ExternalFunctionDef {
                 name: name.to_owned(),
                 parameters: Vec::new(),
-                returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Fixed(
-                    FixedScalar::I32,
-                ))],
-                error_return_type: None,
+                return_contract: external_returns(
+                    vec![ExternalReturnSlot::fresh(ExternalAbiType::Fixed(
+                        FixedScalar::I32,
+                    ))],
+                    None,
+                ),
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::ExternalModuleExport {

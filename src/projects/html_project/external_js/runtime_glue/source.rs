@@ -6,7 +6,8 @@
 //!      to Moth's internal conventions.
 
 use crate::backends::js::{
-    JsNumericCarrier, builtin_error_code_js_field_name, builtin_error_message_js_field_name,
+    JsNumericCarrier, NEVER_RETURNED_MESSAGE, builtin_error_code_js_field_name,
+    builtin_error_message_js_field_name, escape_js_string,
     external_module_export_glue_function_name,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -15,7 +16,9 @@ use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalPackageId, ExternalSignatureType,
 };
-use crate::projects::html_project::external_js::runtime_glue::exports::ReferencedExport;
+use crate::projects::html_project::external_js::runtime_glue::exports::{
+    ReferencedExport, ReferencedExportReturn,
+};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
 use std::collections::HashMap;
@@ -77,25 +80,59 @@ pub(super) fn generate_glue_module_source(
         let wrapper_name = external_module_export_glue_function_name(export.function_id);
         source.push('\n');
 
-        if export.is_fallible {
-            source.push_str(&generate_fallible_wrapper(
+        match &export.return_contract {
+            ReferencedExportReturn::Never => source.push_str(&generate_never_wrapper(
+                &wrapper_name,
+                &export.raw_import_name,
+                &export.parameter_types,
+            )?),
+            ReferencedExportReturn::Returns {
+                return_types,
+                is_fallible: true,
+            } => source.push_str(&generate_fallible_wrapper(
                 &wrapper_name,
                 &export.raw_import_name,
                 release_build,
                 &export.parameter_types,
-                &export.return_types,
-            )?);
-        } else {
-            source.push_str(&generate_infallible_wrapper(
+                return_types,
+            )?),
+            ReferencedExportReturn::Returns {
+                return_types,
+                is_fallible: false,
+            } => source.push_str(&generate_infallible_wrapper(
                 &wrapper_name,
                 &export.raw_import_name,
                 &export.parameter_types,
-                &export.return_types,
-            )?);
+                return_types,
+            )?),
         }
     }
 
     Ok(source)
+}
+
+/// Generates a wrapper for an explicit whole-contract `-> !` external export.
+///
+/// WHAT: calls the raw export exactly once in ordinary argument order, then throws the
+///       compiler-owned violated-contract error if it returns.
+/// WHY: the wrapper is the foreign boundary for the contract. A provider implementation that
+///      returns must fail loudly instead of exposing a foreign success value or reaching code
+///      the Moth frontend proved unreachable.
+pub(super) fn generate_never_wrapper(
+    wrapper_name: &str,
+    export_name: &str,
+    parameter_types: &[ExternalSignatureType],
+) -> Result<String, InfrastructureFailure> {
+    validate_supported_signature(wrapper_name, parameter_types, &[])?;
+    let arguments = prepare_call_arguments(parameter_types);
+
+    Ok(format!(
+        "export function {wrapper_name}({}) {{\n{}    {export_name}({});\n    throw new Error({});\n}}",
+        arguments.parameters,
+        arguments.prelude,
+        arguments.arguments,
+        escape_js_string(NEVER_RETURNED_MESSAGE),
+    ))
 }
 
 /// Generates an infallible wrapper and adapts the raw export to its registered signature.

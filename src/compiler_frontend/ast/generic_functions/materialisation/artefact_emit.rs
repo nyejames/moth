@@ -10,9 +10,10 @@ use super::semantic_closure::{StableSemanticClosure, install_private_semantic_cl
 use super::sidecar_build::{GeneratedSidecarRequest, emit_materialised_sidecar};
 use super::stable_types::{
     GeneratedFoldedValueMaterialiser, GeneratedValueMaterialisationServices,
-    GenericTemplateArtefact, MaterialisationNominalSource, StableFunctionSignature,
-    StableFunctionTarget, StableParameterContract, const_store_error_into_prepared_failure,
-    generated_file_value_resolution_services, import_canonical_folded_value,
+    GenericTemplateArtefact, MaterialisationNominalSource, StableFunctionReturnContract,
+    StableFunctionSignature, StableFunctionTarget, StableParameterContract,
+    const_store_error_into_prepared_failure, generated_file_value_resolution_services,
+    import_canonical_folded_value,
 };
 use super::{MaterialisedGenericAst, ModuleMaterialisationInput};
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
@@ -28,7 +29,6 @@ use crate::compiler_frontend::ast::module_ast::environment::{
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodEntry;
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionParameter, FunctionSignature, MaterialisedFunctionSignature, ParameterContract,
-    ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, intern_resolved_function_signature,
@@ -47,6 +47,7 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::{
     HeaderBindingEnvironment, ImportedFunctionContract, SourceFunctionTarget,
@@ -61,8 +62,7 @@ use crate::compiler_frontend::public_interface::{
 #[cfg(test)]
 use crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity;
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModuleRootRole,
-    StableModuleOriginIdentity,
+    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::{
@@ -359,6 +359,7 @@ impl GenericTemplateArtefact {
             Rc::clone(&module_resources),
             context.module_origin.clone(),
             Arc::clone(&materialised_body.resolution_facts),
+            Arc::clone(&materialised_body.qualified_reference_targets),
         );
         let build_context = AstBuildContext {
             external_package_registry: Arc::clone(external_package_registry),
@@ -366,7 +367,7 @@ impl GenericTemplateArtefact {
             string_table,
             path_fork,
             entry_dir,
-            root_role: ModuleRootRole::Support,
+            synthesizes_entry_start: false,
             build_profile,
             file_value_resolution: Some(file_value_resolution),
             config_resolution: None,
@@ -389,6 +390,7 @@ impl GenericTemplateArtefact {
         let binding_environment = self
             .materialise_binding_environment(
                 context,
+                &materialised_body,
                 &source_file,
                 external_package_registry,
                 path_fork_ref,
@@ -463,6 +465,7 @@ impl GenericTemplateArtefact {
     fn materialise_binding_environment(
         &self,
         context: &ModuleMaterialisationContext,
+        materialised_body: &super::frozen_syntax::MaterialisedBody,
         source_file: &PathId,
         external_package_registry: &ExternalPackageRegistry,
         path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
@@ -477,6 +480,11 @@ impl GenericTemplateArtefact {
                 string_table,
             )?),
         );
+        // Qualified-reference targets are semantic facts, not donor syntax. Share the exact map
+        // the materialised body and its value services use, so generated AST lowering consumes
+        // the declaration the authored path selected without copying it or re-resolving a name.
+        environment.qualified_reference_targets =
+            Arc::clone(&materialised_body.qualified_reference_targets);
         for binding in &self.declarations {
             let local_path = binding.local_path;
             environment
@@ -783,8 +791,6 @@ impl GenericTemplateArtefact {
             let MaterialisedFunctionSignature {
                 signature,
                 function_type_id,
-                success_return_type_ids: returns,
-                error_return_type_id: error_return,
             } = method.signature.materialise(
                 &method_path,
                 &mut StableFunctionMaterialisationContext {
@@ -862,8 +868,7 @@ impl GenericTemplateArtefact {
                             "Concrete receiver method has no retained call summary",
                         )
                     })?,
-                    returns,
-                    error_return,
+                    return_contract: signature.return_contract.clone(),
                 },
             );
         }
@@ -1537,68 +1542,68 @@ impl StableFunctionSignature {
                 contract,
             });
         }
-        let mut returns =
-            Vec::with_capacity(self.returns.len() + usize::from(self.error_return.is_some()));
-        let mut success_type_ids = Vec::with_capacity(self.returns.len());
-        for returned in &self.returns {
-            let type_id = intern_materialisation_type_blueprint(
-                returned,
-                context.generic_parameter_type_ids,
-                context.nominal_source,
-                context.type_environment,
-                context.external_package_registry,
-                context.string_table,
-                context.path_fork,
-            )
-            .map_err(|error| {
-                const_store_error_into_prepared_failure(
-                    error,
-                    context.string_table,
-                    Some(context.type_environment),
-                )
-            })?;
-            returns.push(ReturnSlot {
-                type_id: Some(type_id),
-                channel: ReturnChannel::Success,
-            });
-            success_type_ids.push(type_id);
-        }
-        let error_return = if let Some(error) = &self.error_return {
-            let type_id = intern_materialisation_type_blueprint(
-                error,
-                context.generic_parameter_type_ids,
-                context.nominal_source,
-                context.type_environment,
-                context.external_package_registry,
-                context.string_table,
-                context.path_fork,
-            )
-            .map_err(|error| {
-                const_store_error_into_prepared_failure(
-                    error,
-                    context.string_table,
-                    Some(context.type_environment),
-                )
-            })?;
-            returns.push(ReturnSlot {
-                type_id: Some(type_id),
-                channel: ReturnChannel::Error,
-            });
-            Some(type_id)
-        } else {
-            None
+        let return_contract = match &self.return_contract {
+            StableFunctionReturnContract::Returns(returns) => {
+                let success_type_ids = returns
+                    .success
+                    .iter()
+                    .map(|returned| {
+                        intern_materialisation_type_blueprint(
+                            returned,
+                            context.generic_parameter_type_ids,
+                            context.nominal_source,
+                            context.type_environment,
+                            context.external_package_registry,
+                            context.string_table,
+                            context.path_fork,
+                        )
+                        .map_err(|error| {
+                            const_store_error_into_prepared_failure(
+                                error,
+                                context.string_table,
+                                Some(context.type_environment),
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let error_return = returns
+                    .error
+                    .as_ref()
+                    .map(|error| {
+                        intern_materialisation_type_blueprint(
+                            error,
+                            context.generic_parameter_type_ids,
+                            context.nominal_source,
+                            context.type_environment,
+                            context.external_package_registry,
+                            context.string_table,
+                            context.path_fork,
+                        )
+                        .map_err(|error| {
+                            const_store_error_into_prepared_failure(
+                                error,
+                                context.string_table,
+                                Some(context.type_environment),
+                            )
+                        })
+                    })
+                    .transpose()?;
+                FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                    success_type_ids,
+                    error_return,
+                ))
+            }
+            StableFunctionReturnContract::Never => FunctionReturnContract::Never,
         };
         let signature = FunctionSignature {
             parameters,
-            returns,
+            return_contract,
         };
         let function_type_id =
             intern_resolved_function_signature(&signature, context.type_environment);
         Ok(MaterialisedFunctionSignature {
             signature,
             function_type_id,
-            success_return_type_ids: success_type_ids,
-            error_return_type_id: error_return,
         })
     }
 }
@@ -1617,8 +1622,6 @@ impl super::stable_types::StableCallableBinding {
         let MaterialisedFunctionSignature {
             signature,
             function_type_id,
-            success_return_type_ids: returns,
-            error_return_type_id: error_return,
         } = self.signature.materialise(
             &local_path,
             &mut StableFunctionMaterialisationContext {
@@ -1649,6 +1652,7 @@ impl super::stable_types::StableCallableBinding {
                 path_fork,
             )?;
         }
+        let contract_returns = signature.return_contract.clone();
         Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
             local_path,
             ResolvedFunctionSignature {
@@ -1660,8 +1664,7 @@ impl super::stable_types::StableCallableBinding {
         Ok(AstImportedFunctionContract {
             target: self.target.materialise(local_path),
             summary: self.summary.clone(),
-            returns,
-            error_return,
+            return_contract: contract_returns,
         })
     }
 

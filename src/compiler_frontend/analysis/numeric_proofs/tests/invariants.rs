@@ -11,6 +11,7 @@ use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
@@ -21,7 +22,9 @@ use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageReg
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
-use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
+use crate::compiler_frontend::hir::functions::{
+    HirFunction, HirFunctionOrigin, HirFunctionReturnContract,
+};
 use crate::compiler_frontend::hir::ids::{
     BlockId, FieldId, FunctionId, HirNodeId, HirValueId, LocalId, RegionId, StructId,
 };
@@ -346,8 +349,10 @@ impl ProofFixture {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            returns: Box::new([]),
-            error_return: None,
+            return_contract: HirFunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         });
         self.module
             .function_origins

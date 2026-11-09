@@ -27,6 +27,7 @@ use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, DeclarationShell, DeclarationValue,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::DependencyClauseKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
@@ -34,9 +35,11 @@ use crate::compiler_frontend::declaration_syntax::declaration_shell::Declaration
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 
+use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderKind, RetainedDependencyClause,
 };
+use crate::compiler_frontend::headers::qualified_references::QualifiedReferenceOccurrence;
 use crate::compiler_frontend::headers::types::DependencySelection;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSlot, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
@@ -221,6 +224,14 @@ pub(crate) struct ModuleSymbols {
     /// lookup used by later semantic passes instead of repeating the path on every header.
     pub(crate) source_paths_by_source_id: FxHashMap<SourceId, PathId>,
     pub(crate) file_dependency_clauses_by_source: FxHashMap<PathId, Vec<RetainedDependencyClause>>,
+    /// Expression-qualified occurrences retained per prepared source file.
+    ///
+    /// WHAT: one row per authored `PATH SYMBOL` occurrence with its provider shell and Stage 0
+    ///       same-module source identity.
+    /// WHY: provider-dependency assembly, later semantic binding and AST lowering consume the
+    ///      same per-occurrence facts after the file output is consumed. Occurrences are
+    ///      deliberately separate from dependency clauses because they install no local name.
+    pub(crate) qualified_references_by_source: FxHashMap<PathId, Vec<QualifiedReferenceOccurrence>>,
     // One flat selection table per prepared source file. Clause ranges index this table.
     pub(crate) dependency_selections_by_source: FxHashMap<PathId, Vec<DependencySelection>>,
     // Source declarations eligible for dependency-binding surfaces. Private root-file
@@ -288,6 +299,82 @@ pub(crate) struct ModuleSymbols {
 }
 
 impl ModuleSymbols {
+    /// The active root role that owns `file`, when its authored declarations are root-local.
+    ///
+    /// WHAT: `Some(role)` only for a root file of the module currently being compiled.
+    /// WHY: declarations authored directly in `@mod.moth`, `@package.moth` or `@entry.moth`
+    ///      belong to that file alone; a reached foreign facade keeps the ordinary public-surface
+    ///      rules of its own module.
+    pub(crate) fn active_root_file_role(&self, file: &PathId) -> Option<FileRole> {
+        self.file_roles_by_source
+            .get(file)
+            .copied()
+            .filter(|role| role.is_active_module_root())
+    }
+
+    /// Every authored dependency path in this module, paired with its source and clause kind.
+    ///
+    /// WHAT: walks prepared sources in deterministic `PathId` (interning) order and yields each
+    ///       source's clauses followed by its expression-qualified occurrences.
+    /// WHY: provider dependency assembly and facade validation consume exactly the sequence
+    ///      Stage 0 discovered; one iterator keeps the union of both per-source maps and their
+    ///      order owned here instead of rebuilt at each call site.
+    pub(crate) fn authored_dependencies(
+        &self,
+    ) -> impl Iterator<Item = (&PathId, &RetainedDependencyPath, DependencyClauseKind)> + '_ {
+        let mut sources: Vec<&PathId> = self
+            .file_dependency_clauses_by_source
+            .keys()
+            .chain(self.qualified_references_by_source.keys())
+            .collect();
+        sources.sort_unstable();
+        sources.dedup();
+
+        sources.into_iter().flat_map(move |source_path| {
+            let clauses = self
+                .file_dependency_clauses_by_source
+                .get(source_path)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                .iter()
+                .map(move |clause| {
+                    (
+                        source_path,
+                        &clause.dependency,
+                        clause.binding.clause_kind(),
+                    )
+                });
+            let occurrences = self
+                .qualified_references_by_source
+                .get(source_path)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                .iter()
+                .map(move |occurrence| {
+                    (
+                        source_path,
+                        &occurrence.dependency,
+                        DependencyClauseKind::DirectSelection,
+                    )
+                });
+            clauses.chain(occurrences)
+        })
+    }
+
+    /// Whether a declaration authored in `target_file` may be resolved from `consumer_file`.
+    ///
+    /// WHAT: an active root file's authored declarations resolve only inside that same file.
+    ///       Ordinary helper declarations stay visible from every root and every other helper.
+    /// WHY: root-local isolation, not declaration flags, is the gate that keeps one root's
+    ///      private implementation out of sibling roots and the role-neutral helper environment.
+    pub(crate) fn authored_declarations_visible_from(
+        &self,
+        consumer_file: &PathId,
+        target_file: &PathId,
+    ) -> bool {
+        consumer_file == target_file || self.active_root_file_role(target_file).is_none()
+    }
+
     /// Resolve one clause range through the selection table owned by its source file.
     pub(crate) fn selections_for_clause<'a>(
         &'a self,
@@ -333,6 +420,7 @@ impl ModuleSymbols {
             source_ids_by_source: FxHashMap::default(),
             source_paths_by_source_id: FxHashMap::default(),
             file_dependency_clauses_by_source: FxHashMap::default(),
+            qualified_references_by_source: FxHashMap::default(),
             dependency_selections_by_source: FxHashMap::default(),
             dependency_bindable_source_symbol_paths: FxHashSet::default(),
             declared_paths_by_file: FxHashMap::default(),

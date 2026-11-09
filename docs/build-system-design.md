@@ -55,6 +55,8 @@ The selected builder does not supply or propagate a semantic numeric profile. It
 
 The capability surface contains registered directive signatures/contexts, source-backed Core/Builder packages, binding-backed packages, template directives, import providers, runtime requirements, supported source kinds, primitive build globals and target-affinity/capability metadata.
 
+Template constant scope is not a configurable capability. The compiler authority's Stage 2 source-kind section owns the fixed `@html` prelude and the rule that a builder enabling `.mtf` must register the official `packages/html` source package. A builder cannot opt arbitrary source packages into `.mtf` scope.
+
 Official executable environments provide the canonical Core catalogue through
 official native or browser implementations, with documented host-capability gates
 and unsupported outcomes. Custom builders may provide any subset for local code
@@ -76,25 +78,25 @@ Builder globals express stable semantic configuration. They never reveal a physi
 
 When present, `config.moth` is one build-owned compile-time source, not a semantic module. It creates no entry, HIR, runtime artefact or package interface. Bootstrap creates no config dependency graph, companion source set, package resolver or second project scan. When the file is genuinely absent, bootstrap applies validated builder defaults and a directory-derived project identity without synthesizing a config source, span or input declaration. A nested `config.moth` is reserved and inert to the enclosing build. The selected config path is inspected with explicit metadata handling: a broken or inaccessible path diagnoses through the filesystem lane, and its canonical location must remain inside the selected project directory. A dangling or external symlink never silently selects defaults or another project's configuration.
 
-The build system calls the named compiler config service with the source, capability surface, retained explicit command-input spellings and exact typed programmatic/builder inputs. The compiler resolves each input against its declared exact contract, materialises directly from retained numeric spelling and returns folded directive arguments, input-contract results, key locations and diagnostics. The build system then applies validated project/builder settings. The compiler alone sequences preparation and folding.
+The build system calls the named compiler config service with the source, capability surface, retained explicit command-input spellings and exact typed programmatic/builder inputs. The compiler resolves each input against its declared exact contract, materialises directly from retained numeric spelling and returns folded record fields, input-contract results, key locations and diagnostics. The build system then applies validated project/builder settings. The compiler alone sequences preparation and folding.
 
 Completed config values use the compiler's ordinary constant projection. Applying them does not retain or reconstruct an expression graph. Source-span construction remains live for the later build validations described below, independently of the expression store's lifetime.
 
 The source identity is registered upfront. Its live span owner survives config application and output-path validation on success and diagnosis, then freezes at the last producer boundary. The compiler/data-layout authorities define that handoff.
 
-Allowed source consists of earlier private helper constants, explicit `$config` bindings, exactly one `$project` invocation and the active builder's required config invocation. Helpers may use scalar/optional values, anonymous const records, supported folded collections and folded templates.
+Allowed source consists of earlier private helper constants, explicit `$config` bindings, at most one `project` record constant and the active builder's named configuration record. Helpers may use scalar/optional values, anonymous const records, supported folded collections and folded templates.
 
-Reject source dependency clauses before path resolution, authored file-value paths, runtime or mutable declarations, functions, named support types, traits/conformances, public exports, standalone output templates, page fragments, root-purpose directives such as `$entry`, nested config sources and inactive-builder settings retained as a holding area.
+Reject source dependency clauses before path resolution, authored file-value paths, runtime or mutable declarations, functions, named support types, traits/conformances, public exports, standalone output templates, page fragments, module-root directives, nested config sources and inactive-builder settings retained as a holding area.
 
 Config-local helpers do not become declarations visible to project modules. Only specialised build interfaces publish folded settings. Synthetic single-file operations use explicit synthetic configuration without inventing source directives or implicit input providers.
 
-The accepted replacement contract is `docs/roadmap/plans/general-directives-and-project-config-plan.md`. Its `$config`/`$project`/`$html_builder` model is the only config architecture specified here.
+`docs/roadmap/plans/general-directives-plan.md` is the accepted directive and config plan. Named `project` and active-builder records plus `$config` input contracts are the only config architecture specified here. There are no `$project`, `$builder` or `$html_builder` directives.
 
-### Project directive
+### Project record
 
-One closed `$project` invocation supplies project identity/settings. It creates no ordinary symbol named `project`. `docs/docs/project-structure/project-config.mtf` > `$project` owns the complete positional signature and defaults.
+One `project` record constant supplies project identity/settings. The `project` name has special meaning only inside `config.moth` and publishes no ordinary project-module symbol. `docs/docs/project-structure/project-config.mtf` > `Project record` owns the complete field set and defaults.
 
-`name` and `version` are optional. An omitted name derives from the exact final component of the selected directory and must validly parse as a Moth project identifier; it is never silently rewritten. An explicit name is a valid Moth project identifier. An omitted version means unversioned; no implicit `0.1.0` exists. A starter's `"0.1.0"` input fallback is not a project-field default, and a same-named input contract does not satisfy an omitted directive argument.
+`name` and `version` are optional. An omitted name derives from the exact final component of the selected directory and must validly parse as a Moth project identifier; it is never silently rewritten. An explicit name is a valid Moth project identifier. An omitted version means unversioned; no implicit `0.1.0` exists. A starter's `"0.1.0"` input fallback is not a project-field default, and a same-named input contract does not satisfy an omitted record field.
 
 Only predefined fields are accepted and published through `@project`. The compiler-control diagnostic limits `max_errors_per_module` and `max_errors_per_project` are predefined but never published. Arbitrary metadata, misspellings and `metadata = ...` are errors. Reusable project constants belong in ordinary source/support packages, not an open config record.
 
@@ -121,7 +123,7 @@ Config fallbacks may fold the permitted single-file surface and earlier helper c
 
 After resolution, numeric inputs are owned as values of their exact canonical type with a lossless value, and original input provenance remains available for diagnostics and dependency tracking. Existing semantic fingerprint domains include the exact type and canonical value; they do not use raw spelling or source location as a second semantic input.
 
-Project fields and ordinary helper constants neither supply nor block same-named inputs. Supplying an input binding to a differently named directive parameter does not rename its contract. Project metadata publication and input resolution are separate systems.
+Project fields and ordinary helper constants neither supply nor block same-named inputs. Supplying an input binding to a differently named record field does not rename its contract. Project metadata publication and input resolution are separate systems.
 
 ### Command build-input typing
 
@@ -148,7 +150,7 @@ Programmatic APIs supply already typed exact primitive values. They retain their
 
 ### `ProjectGlobalsInterface` and `@project`
 
-Folded `$project` settings produce one immutable synthetic interface at permanently reserved `@project`. It publishes only predefined fields as namespace members, not a nested `project` value or all config helpers/inputs.
+Folded `project` record settings produce one immutable synthetic interface at permanently reserved `@project`. It publishes only predefined fields as namespace members, not a nested `project` value or all config helpers/inputs.
 
 The compiler's synthetic-interface contract supplies stable member identities, folded values, field fingerprints and provenance without AST/HIR/runtime bodies. Classification is ProjectLocal and MothSource for provenance/capabilities, but the interface is not discovered as a source package.
 
@@ -178,25 +180,25 @@ Project metadata is never an input provider. Each project/package boundary has i
 
 AST receives an ordinary folded constant. A Bool input uses ordinary `if`, with both branches frontend-validated before executable selection. Config values do not change source discovery, declarations, exports or graph topology. The compiler's static-specialisation section owns downstream suppression rules.
 
-### `$html_builder` and builder settings
+### Active builder configuration record
 
-An authored HTML directory config contains exactly one closed `$html_builder` invocation. Bare invocation uses defaults. Empty directive parentheses are invalid. The command already selected the builder, so this directive never chooses a backend or runtime platform.
+An authored HTML directory config contains the named `html` record. An empty record uses defaults and the record stays required even when every field takes its default. The command already selected the builder, so this record never chooses a backend or runtime platform.
 
-The canonical project-config reference owns its signature, positional order and defaults. Shared argument validation fills defaults once. The typed HTML settings owner checks domains such as URL style, origin path, non-empty language/present favicon and output-root containment/profile conflicts.
+The canonical project-config reference owns the field set and defaults. Shared record validation fills defaults once. The typed HTML settings owner checks domains such as URL style, origin path, non-empty language/present favicon and output-root containment/profile conflicts.
 
 Settings consume permitted folded values without declaring inputs implicitly. An untracked favicon URL may be a folded String. Tracked resource paths belong in direct root builder slots because config has no source graph.
 
-Project settings and builder slot values have distinct signatures. Their explicit document fallback rules do not create a generic cross-scope inheritance or merge system. Multi-builder configuration requires structural selection rather than silently ignoring inactive directives.
+Project settings and builder slot values have distinct shapes. Their explicit document fallback rules do not create a generic cross-scope inheritance or merge system. Multi-builder configuration requires structural selection rather than silently ignoring inactive records.
 
-### Builder slots and future root purpose
+### Builder slots and entry roots
 
-HTML document metadata is not a root directive. The active builder registers a read-only set of named destinations. A direct top-level const `#[$in name: ...]` on an active entry root contributes to one registered destination. The compiler validates the name, folds the contribution to a structural String and records its destination, authored span and runtime insertion index in the existing fragment handoff. It does not know HTML slot meaning. Nested or aliased inserts remain ordinary template composition.
+HTML document metadata is not a root directive. The active builder registers a read-only set of named destinations. A direct top-level const `#[$in name: ...]` in `@entry.moth` contributes to one registered destination. The compiler validates the name, folds the contribution to a structural String and records its destination, authored span and runtime insertion index in the existing fragment handoff. It does not know HTML slot meaning. Nested or aliased inserts remain ordinary template composition.
 
 The HTML builder interprets `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and `head`; the default body destination stays on the ordinary fragment lane. Scalar contributions concatenate in source order, and an explicit empty value counts as supplied. An absent title falls back through the route and then the project name with the configured prefix and postfix. An absent description emits no element, while absent language, favicon and body style use builder settings. Title text and attribute values are escaped. Each `stylesheets` contribution must identify exactly one tracked CSS origin, and the builder keeps the first contribution for each stable origin. Complete `head` contributions deduplicate after URL rendering and are inserted after built-in head content. Runtime top-level templates contribute only to the body; runtime named builder slots are unsettled.
 
-The earlier `$page` proposal is superseded and is not an accepted directive. A general `$entry` root purpose will make HTML entry selection explicit and remains deferred. It will apply to the whole normal root, create no second entry or per-file compilation unit and use authored activity rather than optimised HIR liveness or rendered length. An inactive root `if`, a runtime binding that folds and an empty direct fragment retain their authored role. Compile-time declarations and semantically classified documentation/comment templates are exempt. Entry filtering must retain unpurposed executable candidates for diagnostics rather than dropping them, and a dependency cannot legalise invalid root work by leaving it dormant. `$test` remains a separate future purpose with its own selection, lifecycle and failure contract.
+No root-purpose directive exists. Entry eligibility is a source-structural fact: a directory containing `@entry.moth` is an entry module. Empty, static-only and metadata-only entries count. `@mod.moth` and `@package.moth` never become entries. Importing a module or package never activates its entry. HTML V1 selects at most one directory-derived route per `@entry` directory and derives it from directory position, never from source activity, rendered length, a direct `$in`, a special page filename or non-empty HIR. A project needs no homepage, and descendant-only entries are valid.
 
-The current HTML builder selects an entry from authored root activity: a non-trivial top-level runtime body, a const fragment or a runtime fragment. A direct named builder contribution is const-fragment activity, so a metadata-only root still produces a document. Named contributions keep their tracked resources live without a rendered-HTML scan.
+Retained runtime-fragment counts and const-fragment facts still feed fragment assembly and JS/Wasm runtime emission for an entry the build system selected. Named builder contributions keep their tracked resources live without a rendered-HTML scan. `$test` remains separate future work with its own selection, lifecycle and failure contract.
 
 ### Fixed bootstrap order
 
@@ -225,11 +227,11 @@ Structural `$feature` selection must use bootstrap-available facts and act befor
 
 Stage 0 builds one canonical source index per project/package boundary from the selected directory. A directory project's source root is the selected directory itself; there is no configurable entry directory beneath it. A nested module can be compiled independently by selecting its directory as a new root. Single-file compilation is a separate synthetic-module mode.
 
-The index inventories optional normal and support root surfaces per rooted directory, nearest ownership, supported source-kind candidates, provider-owned files, logical source/namespace identities, path collisions and deterministic order. It does not scan arbitrary `.moth` files as page entries. Entry selection consumes retained root-activity facts; a future root-purpose design would add purpose facts to the same lane.
+The index inventories optional `@mod`, `@package` and `@entry` root surfaces per rooted directory, nearest ownership, supported source-kind candidates, provider-owned files, logical source/namespace identities, path collisions and deterministic order. It does not scan arbitrary `.moth` files as page entries. Entry selection consumes `@entry.moth` presence; retained entry activity serves fragment accounting and link facts only.
 
-A directory component below the selected build root whose final filename starts with `_` is excluded from the entire compilation: normal and support roots, helpers, `.mtf`, resources, check-only inventory, providers, dependency resolution, incremental watches and other discovered inputs. The explicitly selected root is exempt for that root component only. Check both lexical components and canonical ancestry so a visible symlink alias cannot reveal a hidden physical subtree. Retain independently justified non-source skips such as `.git`, `target`, `node_modules` and `.cache`; do not skip visible `dev`, `release`, `dist` or `build` by name.
+A directory component below the selected build root whose final filename starts with `_` is excluded from the entire compilation: root files, helpers, `.mtf`, resources, check-only inventory, providers, dependency resolution, incremental watches and other discovered inputs. The explicitly selected root is exempt for that root component only. Check both lexical components and canonical ancestry so a visible symlink alias cannot reveal a hidden physical subtree. Retain independently justified non-source skips such as `.git`, `target`, `node_modules` and `.cache`; do not skip visible `dev`, `release`, `dist` or `build` by name.
 
-Project-local packages are structural support roots, not a configurable `package_folders` list or implicit `/lib` scan. A support surface at the selected build root is the project package surface when package assembly selects one.
+Project-local packages are structural support facades, not a configurable `package_folders` list or implicit `/lib` scan. A support surface at the selected build root is the project package surface when package assembly selects one.
 
 ### Owned source set
 
@@ -239,7 +241,7 @@ Project-local packages are structural support roots, not a configurable `package
 
 `SemanticSourceSet` contains the root, owned `.moth` files reachable through source clauses, reachable builder-supported source assets and other inputs explicitly classified as semantic by the selected builder.
 
-A content asset reached through a dependency clause or an expression-position structural reference has the same membership and preparation. Only this set contributes canonical module declarations, HIR, interfaces and link facts. Its contents determine the semantic source fingerprint.
+A content asset reached through a dependency clause or an expression-position structural reference has the same membership and preparation. A qualified expression's provider target follows the same provider-discovery, visibility and registration contract as an authored direct selection. It adds the provider to the graph without adding a file-local binding. Only this set contributes canonical module declarations, HIR, interfaces and link facts. Its contents determine the semantic source fingerprint.
 
 Provider-backed explicit-extension files follow their provider's ownership contract. They produce binding interfaces and runtime facts, not ordinary module declarations.
 
@@ -251,7 +253,9 @@ A check-only unit cannot add declarations to the canonical artefact/interface or
 
 ## Prepared-source orchestration
 
-Stage 0 schedules compiler-owned tokenization/header preparation and retains its result for graph discovery and later compilation. It consumes structural provider/file references, input-contract shells and retained root-activity facts, passing the remaining syntax into the compiler unchanged. A future root purpose will reuse the same retained lane. Stage 2 defines the payload and four reference classes.
+Stage 0 schedules compiler-owned tokenization/header preparation and retains its result for graph discovery and later compilation. It consumes structural provider/file references, input-contract shells and retained entry-root facts, passing the remaining syntax into the compiler unchanged. Stage 2 defines the payload and four reference classes.
+
+A qualified expression occurrence (`@provider symbol` in an expression) contributes an early structural provider reference. Stage 0 uses it for source discovery, the same-module content worklist and cross-module or source-package graph edges. It selects one declaration at that occurrence and installs no file-local name, alias or namespace. A `.mtf` body's qualified occurrences likewise create provider facts for its synthetic `content` constant; Stage 3 ordering and cycle handling remain compiler-owned.
 
 Preparation happens once for a source in a preparation lane, then all consumers in that lane reuse it. A separate canonical/check-only analysis may use another lane without creating another physical source identity. Such work appends spans through the same live source-local owner. This is distinct from repeatedly parsing the same source to reconstruct graph or semantic facts.
 
@@ -275,26 +279,34 @@ Ordinary static `if` excludes no references from discovery. Executable folding c
 
 Content sources may contain more references, so discovery grows the selected set until stable:
 
-1. Seed from the module root and dependency-clause sources.
-2. Prepare each newly selected source and consume its structural references.
+1. Seed from the module roots, dependency-clause sources and qualified-reference providers.
+2. Prepare each newly selected source and consume its structural references, including qualified occurrences.
 3. Add newly discovered content sources and resource inputs.
 4. Repeat until no source is added, settling membership before header aggregation. The canonical module service owns subsequent binding and local declaration ordering.
 
 Deduplicate membership by canonical source identity, not authored spelling. Keep every reference location for diagnostics. Multiple references reuse one content preparation. Repeated discovery is not a cycle. Actual synthetic-content dependency cycles belong to local ordering. Final order and diagnostics are independent of worklist insertion order.
 
-Stage 0 never binds symbols, orders local declarations or enters executable AST/HIR/borrow analysis. Input contracts and root activity use retained metadata, not a second scanner. A future root purpose will reuse the same lane. Provider discovery that mutates shared identities/caches/tables stays serial unless it supplies deterministic worker deltas and remapping.
+Stage 0 never binds symbols, orders local declarations or enters executable AST/HIR/borrow analysis. Input contracts and entry-root metadata use retained facts, not a second scanner. Provider discovery that mutates shared identities/caches/tables stays serial unless it supplies deterministic worker deltas and remapping.
 
 ## Project and package topology
 
-A **module** is a directory-scoped compilation/visibility unit rooted by `@*.moth` or `+*.moth`. A **package** is a named reusable dependency root. A **binding** is a typed bridge to an implementation outside Moth source. A **prelude** is implicit dependency policy, not a package kind. "Library" is informal.
+A **module** is a directory-scoped compilation/visibility unit rooted by `@mod.moth`, `@package.moth` or `@entry.moth`. A **package** is a named reusable dependency root. A **binding** is a typed bridge to an implementation outside Moth source. A **prelude** is implicit dependency policy, not a package kind. "Library" is informal.
 
-### Module roots and dormant work
+### Module roots and entry roles
 
-A rooted directory is one structural module with one `ModuleId` and shared owned helper sources. It may contain one `@*.moth` normal root, one `+*.moth` support root, or both. Duplicate roots of the same surface are rejected. Every root marker must resolve to a distinct physical source file owned by its structural module; aliases to one canonical file, including aliases across directories, are rejected before module identity or semantics. A support-only directory is valid and API-only. Root filename suffixes are cosmetic. `config.moth` is not a root.
+A rooted directory is one structural module with one `ModuleId`, one compilation and shared owned helper sources. It recognises exactly three optional authored root files, case-sensitively: `@mod.moth` is the normal API facade, `@package.moth` is the support API facade or external project package surface, and `@entry.moth` is the entry root. At least one present root makes the directory rooted, and a directory may contain any subset of the three, including all three. An entry-only directory is a valid module with no importable API.
 
-The normal and support roots have separate role-qualified semantic origins, public interfaces and dependency edges. Helper files keep one role-neutral origin and belong to the one structural module. Neither root may import the other, including through direct root paths, alias paths, package lookup or re-export. A successful artifact publishes exactly the surface pair declared by its structural graph: a paired module owns both interfaces, while a single-root module owns only its primary interface. Publication and boundary validation reject any missing, extra or wrongly typed secondary interface. Any diagnostic invalidates both surfaces before either is published.
+Any other authored `.moth` filename whose stem starts with `@`, `+` or `#`, including case-only variants such as `@Entry.moth`, is a Stage 0 `InvalidModuleRootFileName` error that names the invalid file and the three accepted root files without inferring a replacement role. Non-`.moth` files such as `@theme.css` and `+notes.mtf` remain ordinary resources resolved by ordinary dependency path and visibility rules, and `config.moth` remains the optional top-level build-only config rather than a root.
 
-Normal roots may own dormant runtime work/fragments. The current HTML builder selects an entry from that activity without changing module identity or making helpers independent entries. A future `$entry` root purpose will make the selection explicit. Compiler root-role rules define API-only restrictions and implicit entry. Stage 0 ensures selected normal roots complete local semantic validation before activation.
+Each root file is a root-local declaration and visibility scope. Its top-level declarations are visible only in that file. Ordinary helper `.moth` files are shared, prepared once and cannot see any root-local declaration. A root binds helper declarations through ordinary dependency clauses and cannot import another root by a direct special-file path. Same-spelling declarations in disjoint roots remain independent. Every root claim must resolve to a distinct physical file owned by its structural module. Aliases to one canonical file, including across directories, are rejected before module identity or semantics.
+
+The two facade roles carry declarations and function bodies but reject top-level runtime statements, direct fragments and builder-slot contributions. `@entry` permits private declarations, top-level runtime, fragments and registered direct builder slots, and rejects every export surface. Only `@mod` and `@package` publish API surfaces.
+
+The normal and support facades have separate role-qualified semantic origins and public interfaces. A successful artefact publishes exactly the interfaces its present `@mod` and `@package` roots declare in one atomic outcome. An absent facade publishes no placeholder interface. An `@entry` root publishes no importable API and is the only root with an implicit `start`, dormant runtime work, fragments and entry metadata. A dependency exposes declarations without activating any entry. Any diagnostic invalidates the whole module transaction, including every present interface.
+
+Support visibility selects by the importing source's role. `@package` sources occupy strict support-consumer positions, while `@mod` and `@entry` sources occupy normal positions. An entry-only module can therefore be the nearest normal-position owner of a support-only module. A co-located `@entry` does not grant its `@package` facade entry privileges, and shared helpers must obey the intersection of the imports legal to every root that can consume them. Support facades cannot import their own facade, an impermissible normal sibling, their parent consumer or a same-scope support sibling.
+
+The project-root `@package.moth` is the external project package surface. Registered Core and Builder source packages keep their existing normal-or-support public-root contract and never require `@package`. A package surface never activates an imported entry.
 
 ### Module-root-relative dependency clauses
 
@@ -302,54 +314,54 @@ Source clauses resolve from the owning module root, not the declaring file's dir
 
 ```text
 src/
-  @site.moth
+  @entry.moth
   accounts.moth
   internal/deep/renderer.moth
 ```
 
 `@accounts Account` in `renderer.moth` resolves to `src/accounts.moth`.
 
-Parent components and `@./...` are invalid. Paths may traverse unrooted directories within the same module. A child normal-module or support-package boundary ends traversal and exposes only its selected surface. `@child/internal` cannot bypass it. Scoped support packages are addressed by package name. Providers use an explicit owner without file-relative fallback.
+Parent components and `@./...` are invalid. Paths may traverse unrooted directories within the same module. A child module or support-package boundary ends traversal and exposes only its selected surface. `@child/internal` cannot bypass it. Scoped support packages are addressed by package name. Providers use an explicit owner without file-relative fallback.
 
 One clause resolves one provider/module/package surface. Direct selections are flat binding names within it and create no independent provider edges. Interface binding consumes this Stage 0 namespace without probing ordered fallback candidates.
 
-Normal modules may depend on owned ordinary files/directories, direct child normal modules, visible support packages, registered Core/Builder/dependency packages and explicitly permitted provider files.
+A source in a normal position may depend on owned ordinary files/directories, direct child modules' published surfaces, visible support packages, registered Core/Builder/dependency packages and explicitly permitted provider files. An entry-only child has no importable normal surface, so a dependency that requests one receives a missing-surface diagnostic rather than a fabricated interface.
 
-They cannot depend on parents, ancestors, normal siblings, grandchildren directly, sibling descendants, unrelated branches or private files of another module. A child public surface re-exports deeper declarations needed by its parent. Normal-module topology does not rule out every authored cycle, so the graph validator reports any remaining cycle as a circular-dependency diagnostic.
+Normal-position sources cannot depend on parents, ancestors, normal siblings, grandchildren directly, sibling descendants, unrelated branches or private files of another module. A child public surface re-exports deeper declarations needed by its parent. Normal-module topology does not rule out every authored cycle, so the graph validator reports any remaining cycle as a circular-dependency diagnostic.
 
 ### Scoped support packages
 
-A support surface exposes a package named by its containing directory. A paired directory exposes its normal surface to the parent and its support surface to visible sibling scopes under the consumer-position rule:
+A support surface exposes a package named by its containing directory. A directory with both `@mod.moth` and `@package.moth` exposes its normal surface to its parent and its support surface to visible sibling scopes under the consumer-position rule:
 
 ```text
 site/
-  @site.moth
+  @entry.moth
   markdown/
-    +package.moth
-    parser/@parser.moth
-    rendering/@rendering.moth
+    @package.moth
+    parser/@mod.moth
+    rendering/@mod.moth
   pages/
-    @pages.moth
-    article/@article.moth
+    @mod.moth
+    article/@mod.moth
 ```
 
 `@markdown` is visible to `site`, `pages` and `article`. Consumers see only its public facade, never private paths such as `@markdown/parser`.
 
-For support package `S` whose nearest ancestor normal module is `P`, `S` is visible to `P`, normal sibling modules of `S` and their descendants. It is not visible above `P` or outside that subtree. Its private implementation descendants do not depend on their own facade. Same-owner-scope support siblings cannot depend on one another.
+For support package `S` whose nearest ancestor normal-position module is `P`, `S` is visible to `P`, normal sibling modules of `S` and their descendants. It is not visible above `P` or outside that subtree. A module with `@mod.moth` or `@entry.moth` occupies the normal-position owner role. An entry-only module gives its support descendants a legal normal-position ancestor without gaining a normal public interface. `S`'s private implementation descendants do not depend on their own facade. Same-owner-scope support siblings cannot depend on one another.
 
 The support facade may depend on owned files, any descendant module in its private subtree, strictly outer-scope support packages and registered packages. It cannot depend on its parent, normal sibling consumers or same-scope support siblings.
 
-For a paired directory, the parent imports the normal surface, while a normal sibling branch and its eligible descendants import the support surface. The paired normal surface cannot import its own support surface. Selection happens when Stage 0 builds the namespace entry and carries an explicit surface on the dependency edge; resolution never falls back from one surface to the other.
+For a paired directory, a normal-position parent imports the normal surface when one exists, while a normal sibling branch and its eligible descendants import the support surface. The support facade cannot use its co-located normal-position root's privileges. Selection happens when Stage 0 builds the namespace entry and carries an explicit surface on the dependency edge. Resolution never falls back from one surface to the other.
 
 The same name may occur in disjoint scopes. Overlapping visible scopes are rejected with both locations. Direct normal-sibling dependencies remain outside the accepted topology rather than becoming an implicit fallback.
 
 ### Project package surface
 
-A `+*.moth` at the selected build root is an ordinary support surface over that structural module. Package assembly may select it as the external project package surface, whether or not the same directory has a `@` root or `config.moth`. It is not a separate graph node or root-file kind.
+A `@package.moth` at the selected build root is an ordinary support surface over that structural module. Package assembly may select it as the external project package surface, whether or not the same directory also has `@mod.moth`, `@entry.moth` or `config.moth`. It is not a separate graph node or root-file kind. Only an external project package requires this project-root facade. Without it, the project has no external Moth package surface even when it has `@mod.moth`.
 
 The project package surface never bypasses public boundaries, is invisible to internal modules, cannot import `@project` and cannot expose prohibited project-dependent facts. Provider edges ensure its dependencies compile first. It has no root runtime activation or route.
 
-`ProjectPackageAssembly` is a separate link plan over the selected project package surface, selected descendant interfaces, reachable generated functions and permitted runtime requirements. It never recompiles or mutates the facade. A project may be both application and package. Without this facade it has no external Moth package surface. Its package identity uses `$project`'s `name`.
+`ProjectPackageAssembly` is a separate link plan over the selected project package surface, selected descendant interfaces, reachable generated functions and permitted runtime requirements. It never recompiles or mutates the facade. A project may be both application and package. Without this facade it has no external Moth package surface. Its package identity uses the `project` config record's `name`.
 
 ### Namespace and collision policy
 
@@ -433,7 +445,7 @@ publishing remain separately gated.
 
 ### Core and Builder source package graphs
 
-Source-backed Core/Builder packages compile as separate immutable graphs under the same fixed language numeric contract. They do not receive the project's globals. Moth-native signatures keep exact canonical types such as `I32`, `U64` and `F64`; they are never rewritten to physical foreign carrier types.
+Source-backed Core/Builder packages compile as separate immutable graphs under the same fixed language numeric contract. They do not receive the project's globals. A registered source package needs at least one API facade root, `@mod.moth` or `@package.moth`, under its existing public-root contract; an entry-only package root is not importable. Only an external project package requires project-root `@package.moth`. A collocated `@entry.moth` is allowed inside a dependency but never activated. Moth-native signatures keep exact canonical types such as `I32`, `U64` and `F64`; they are never rewritten to physical foreign carrier types.
 
 A package needing project-specific compile-time input receives an explicit builder-owned synthetic interface declared in capability metadata. It is not `@project`, is never implicitly injected, carries provenance/fingerprints and makes the resulting artefact project-specific. Otherwise compatible pure package artefacts remain reusable.
 
@@ -473,7 +485,7 @@ A budget-stopped request is distinct from a diagnosed or blocked module. Unvisit
 
 ### Diagnostic budgets and scheduling cutoff
 
-`$project` supplies two compiler-control settings, `max_errors_per_module` and `max_errors_per_project`. The project-config reference owns their syntax, defaults and validation. Config bootstrap validates both once and projects compact options. The frontend receives only the module allowance and the command scheduler owns the project threshold. Neither setting allocates storage in proportion to its value.
+The `project` record supplies two compiler-control settings, `max_errors_per_module` and `max_errors_per_project`. The project-config reference owns their defaults and validation. Config bootstrap validates both once and projects compact options. The frontend receives only the module allowance and the command scheduler owns the project threshold. Neither setting allocates storage in proportion to its value.
 
 Before valid project settings exist, bootstrap uses the compiler defaults and gives config/bootstrap diagnostics no manufactured semantic module owner. Invalid configuration cannot partially install its own limits. Before and during module discovery, the request's project threshold governs early errors without inventing module identities for them. Directory discovery currently prepares every module before semantic scheduling and ends the request at the first diagnosed preparation, which returns at most one module allowance, so the threshold first changes admission after discovery. A synthetic single-file request compiles its source packages first and prepares its one module only if the threshold has not been reached. Every request, including a development rebuild, starts with zero counts and recomputes omitted settings from defaults.
 
@@ -501,19 +513,19 @@ A linkable `ProjectCompilation` contains the canonical structure, project global
 
 Build compiles the union required by selected artefact entries, any selected project package surface, transitive source providers, required Core/Builder/dependency packages and generated work. After successful compilation it performs link/target/memory validation, lowering and owned output emission.
 
-Current HTML application build requires at least one artefact-emitting root and a homepage at the selected project directory. Synthetic single-file HTML output uses the explicitly selected root. A package surface is not an implicit page. The deferred `$entry` design will replace the homepage requirement with at least one explicitly purposed entry below the selected project directory.
+HTML application `build` requires at least one `@entry.moth` anywhere below the selected project directory and needs no homepage. A package surface is not an implicit page. A command that explicitly selects a single ordinary `.moth` file or `@entry.moth` compiles it as a synthetic entry. A selected `@mod.moth` or `@package.moth` keeps its facade role for checking, while an application build reports the no-entry outcome.
 
 ### `dev`
 
-The first build compiles the complete selected graph under build's page policy. Subsequent requests reuse immutable successes under `Incremental and persistent artefacts`. Changed inputs invalidate the appropriate semantic, physical or output facts.
+The first build compiles the complete selected graph under build's entry policy. Subsequent requests reuse immutable successes under `Incremental and persistent artefacts`. Changed inputs invalidate the appropriate semantic, physical or output facts.
 
-Development tooling launches the real homepage when present, otherwise the lexicographically first normalised page route. It invents no homepage, redirect or route alias. Requests to an absent root retain normal missing-route behaviour.
+Development tooling launches the real homepage when present, otherwise the lexicographically first normalised entry route. It invents no homepage, redirect or route alias. Requests to an absent root retain normal missing-route behaviour.
 
 Each compilation request uniquely owns its mutable worker state. A long-lived host may catch a compiler-bug unwind only at that boundary, discard all failed worker state and retain the outer service. Host state updates after the worker joins. No panic occurs while holding shared host-state locks and no partially mutated compiler context is reused. Operational failures use their typed result rather than panic catching. The data-layout authority owns the full isolation contract.
 
 ### `check`
 
-Check compiles every discovered project module below the selected project directory, check-only orphan units, the selected project package surface and required packages/generated work. A valid declaration-only tree or synthetic root is allowed. The deferred `$entry` policy will add explicit purpose validation for authored root runtime/output.
+Check compiles every discovered project module below the selected project directory, check-only orphan units, the selected project package surface and required packages/generated work. A declaration-only tree, a zero-entry project and a synthetic single-file root are valid.
 
 Actual linkable roots receive the same selected-target and memory-plan validation as build. Check performs no backend code generation or output writing. Unsupported features in unreachable private functions impose no target failure.
 
@@ -543,13 +555,13 @@ Nested requests converge within the compiler transaction. They create no extra s
 
 ### Entry candidates and selection
 
-Current HTML entry selection uses retained root activity: a non-trivial root body, const fragments or runtime fragments identify a candidate before builder assembly. A direct named builder contribution is const-fragment activity. The candidate becomes an entry only after ordinary module validation. The deferred `$entry` design will select candidates from explicit root-purpose facts instead. Ordinary files and private dependency-package roots do not become application pages.
+Entry candidates are exactly the project-local modules with an `@entry.moth` root. Presence is the only selection fact. Empty, static-only and metadata-only entry roots are eligible, and ordinary files, `@mod.moth`, `@package.moth` and private dependency-package roots never become application entries. Entry selection and route derivation consume Stage 0 structural facts and completed artefacts, never authored activity, non-empty HIR or rendered length.
 
-A canonical normal module may support multiple entry assemblies under a builder's contract. HTML V1 defines at most one directory-derived route entry per normal module, with no filename-derived page identity or arbitrary route override.
+An entry module may support multiple entry assemblies under a builder's contract. HTML V1 defines at most one directory-derived route entry per `@entry` directory. A root-level entry maps to `index.html` and a nested entry maps to `<directory>/index.html`. No filename-derived page identity or arbitrary route override exists.
 
 ### Entry assembly
 
-An `EntryAssembly` selects an already compiled normal module's dormant entry, runtime/static fragments, folded builder-slot destinations and entry-owned runtime requirements. It activates only that root, never provider roots reached through dependencies.
+An `EntryAssembly` selects an already compiled entry module's dormant start, runtime/static fragments, folded builder-slot destinations and entry-owned runtime requirements. It activates only that `@entry` root, never provider roots reached through dependencies. A present entry needs no non-empty body or fragment to be assembled.
 
 Assembly triggers no local parsing, typing, generic inference, HIR construction, borrow checking or local lifetime analysis. Subsequent link-level lifetime validation still instantiates the completed summaries with actual roots/lifecycles. The compiler owns the entry's non-exported contract: built-in `Error!` alongside its fragment-collection success slots, including for a synthetic single-file root. Builders consume the typed outcome and add no error-fragment channel.
 
@@ -577,7 +589,7 @@ The HTML builder owns directory routes, document assembly, browser-runtime polic
 
 For each selected entry, the builder plans:
 
-1. Activation of that normal module's compiled dormant root.
+1. Activation of that entry module's compiled dormant root.
 2. Compile-time fragments at their recorded runtime insertion indexes and slots for runtime fragments.
 3. Exactly one invocation of the active entry through the selected runtime path.
 4. Runtime fragment publication in source order, only after that invocation succeeds.
@@ -806,7 +818,7 @@ Stable-origin changes follow semantic fingerprint rules. Byte-only changes inval
 
 ## Output ownership
 
-Artefact builders own output settings/defaults through their config contracts. Non-emitting builders register none. HTML defaults to `_dev` and `_release`, with overrides through `$html_builder`.
+Artefact builders own output settings/defaults through their config contracts. Non-emitting builders register none. HTML defaults to `_dev` and `_release`, with overrides through the `html` record.
 
 Output roots are relative to the selected project root. A single-component output name is prefixed once with `_` when needed; a multi-component output path preserves its spelling but requires an underscore-prefixed directory component enclosing the emitted root. Normalize before containment and manifest checks. Reject absolute paths where unauthorized, parent traversal, invalid components, paths resolving to the build root and canonical or lexical source/output overlap that would expose generated content as source. Hidden output roots legitimately live inside the selected source tree. The `_` prefix grants no overwrite or delete rights: the output manifest, owner identity, managed extensions and stale-cleanup policy remain the sole ownership authorities. The build system validates paths/conflicts, skips unchanged writes, maintains manifests and removes stale artefacts. Builders and lowerers return records rather than writing final outputs directly.
 

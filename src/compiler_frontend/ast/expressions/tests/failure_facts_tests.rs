@@ -133,6 +133,31 @@ fn classifier_rejects_a_foreign_owner_even_when_row_ids_match() {
 }
 
 #[test]
+fn never_call_argument_records_private_helper_failure() {
+    let (ast, paths, strings) = parse_single_file_ast(
+        "helper |value I32| -> I32:\n    return value * 2\n;\n\
+         fatal |code I32| -> !:\n    assert(false, \"fatal\")\n;\n\
+         stop |value I32| -> !:\n    fatal(helper(value))\n;\n",
+    );
+    let NodeKind::Function(helper, ..) =
+        &function_node_by_name(&ast, &paths, &strings, "helper").kind
+    else {
+        unreachable!()
+    };
+    let facts = pending_function_failure_facts(
+        function_body_by_name(&ast, &paths, &strings, "stop"),
+        &TemplateIrStore::new(),
+        &ast.expressions,
+    )
+    .expect("Never call argument facts are classified");
+    assert!(
+        facts.body.implicit.iter().any(|contributor| {
+            contributor.source == ImplicitFailureSource::PrivateCall(*helper)
+        })
+    );
+}
+
+#[test]
 fn arithmetic_codes_exclude_boundary_and_format_invariants() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
         "power |value I32, exponent I32| -> I32:\n    return value ^ exponent\n;\n\

@@ -1,0 +1,13 @@
+STOPPABLE must:
+    stop |This| -> !
+;
+
+Thing = |
+    value I32,
+|
+
+stop |this Thing| -> I32:
+    return this.value
+;
+
+Thing must STOPPABLE

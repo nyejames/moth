@@ -23,7 +23,7 @@ column = 14
 code = "MOTH-RULE-0053"
 occurrence = 3
 reason = "compile_time_evaluation_error.divide_by_zero"
-path = "input/static_floor/@mod.moth"
+path = "input/static_floor/@entry.moth"
 line = 1
 column = 23
 
@@ -31,6 +31,6 @@ column = 23
 code = "MOTH-RULE-0053"
 occurrence = 4
 reason = "compile_time_evaluation_error.divide_by_zero"
-path = "input/static_remainder/@mod.moth"
+path = "input/static_remainder/@entry.moth"
 line = 1
 column = 27

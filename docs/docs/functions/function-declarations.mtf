@@ -20,14 +20,20 @@ A source function forms a named top-level declaration.
     name |parameters| -> ReturnType:
         body
     ;
+
+    name |parameters| -> !:
+        body
+    ;
 ]
 
 - The function name comes first.
 - Parameters are enclosed by `|...|`.
 - `||` declares a function with no parameters.
-- `->` introduces one or more return slots.
+- `->` introduces the return contract: ordinary success and error slots, or
+  the whole Never contract `-> !`.
 - Omit the arrow only when the function has no return slots at all.
 - A function with only an error slot still writes `-> Error!`.
+- `-> !` is mutually exclusive with every success, optional and error slot.
 - `Void` is not written as a return type.
 - `:` opens the body and `;` closes it.
 - Function names use `regular_snake_case`.
@@ -47,6 +53,83 @@ inference never changes a signature or public interface.
 @../numbers/#numeric-literals (Numeric literals) owns the permitted receiving
 contexts. Generic signature relationships follow the separate bounded rules
 in @../generics (Generics).
+
+### Never return contract
+
+A callable that never returns control normally declares one whole return
+contract:
+
+[codeblock, $code("moth"):
+    fatal |message String| -> !:
+        assert(false, message)
+    ;
+
+    serve || -> !:
+        loop true:
+            io.line("ready")
+        ;
+    ;
+]
+
+The bare `!` sits immediately after `->`. It is not a type, a suffix on a type
+or a reserved keyword. It cannot mix with ordinary return slots:
+
+[codeblock, $code("moth"):
+    -- Invalid: Never mixed with a success slot
+    bad || -> String, !:
+    ;
+
+    -- Invalid: Never mixed with an error slot
+    bad || -> Error!, !:
+    ;
+
+    -- Invalid: Never followed by another slot
+    bad || -> !, String:
+    ;
+
+    -- Invalid: Never combined with `!` error syntax
+    bad || -> !!:
+    ;
+]
+
+Keep `T!` as the final error slot of an ordinary return contract.
+
+A `-> !` body is valid only when every reachable path after known-Bool
+specialisation diverges. These exits do not satisfy Never:
+
+- falling off the end of the body
+- ordinary `return`, including a bare no-value return
+- `return!`
+- postfix `!` or `?` that returns an error or absence to the caller
+- a branch that can complete normally
+- a loop that can leave through a reachable `break` targeting that loop
+
+Divergence is proved through false assertions, standalone Never calls,
+normalised-true loops with no reachable self-targeting `break`, lexical
+scopes, branches and exhaustive matches. A recursive `-> !` group cannot use
+its own unvalidated contracts as proof. Collection and range loops stay
+conservatively finite.
+
+An unannotated user function whose specialised body always diverges is
+rejected. Write `-> !` when never returning is the intended contract, or
+write the ordinary return type the body is expected to produce later. An
+explicitly typed ordinary function may currently diverge without becoming
+Never to its callers. The compiler-owned entry is exempt.
+
+Implicit built-in failure that would escape a `-> !` body is a closed-boundary
+diagnostic. Handle it locally. A Never call has no error or optional value to
+propagate.
+
+The contract is exact on every callable surface: functions, receiver methods,
+generics, traits, exports and binding-backed signatures. A body that happens
+to diverge does not match `-> !`, and `-> !` does not satisfy an ordinary
+return contract. Changing a public callable between ordinary returns and
+Never is a public semantic change.
+
+See @#calls-and-access (Calls and access) for standalone-only placement,
+@#returns-and-multiple-values (Returns and multiple values) for the
+distinction from no-value completion, and @../progress (Progress) for current
+proof coverage.
 
 ### Generic functions
 

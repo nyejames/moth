@@ -1,0 +1,5 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = ""
+runtime_error_contains = ["thing stops"]

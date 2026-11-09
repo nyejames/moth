@@ -55,6 +55,7 @@ pub fn for_each_terminator_target_mut(
         }
         HirTerminator::Return(_)
         | HirTerminator::ReturnError(_)
+        | HirTerminator::NeverCall { .. }
         | HirTerminator::RuntimeFailure { .. }
         | HirTerminator::Uninitialized
         | HirTerminator::AssertFailure { .. } => {}
@@ -95,6 +96,7 @@ pub fn try_for_each_terminator_target<E>(
 
         HirTerminator::Return(_)
         | HirTerminator::ReturnError(_)
+        | HirTerminator::NeverCall { .. }
         | HirTerminator::RuntimeFailure { .. }
         | HirTerminator::Uninitialized
         | HirTerminator::AssertFailure { .. } => {}

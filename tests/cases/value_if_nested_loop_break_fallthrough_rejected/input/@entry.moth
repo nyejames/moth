@@ -1,0 +1,8 @@
+-- The nested loop consumes its break, then the branch falls through without a value.
+value = if true:
+    loop true:
+        break
+    ;
+else
+    then 0
+;

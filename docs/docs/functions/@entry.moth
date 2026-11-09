@@ -1,0 +1,83 @@
+@function-declarations content as function_declarations
+@function-declarations-basic content as function_declarations_basic
+@parameters-and-defaults content as parameters_and_defaults
+@parameters-and-defaults-basic content as parameters_and_defaults_basic
+@calls-and-access content as calls_and_access
+@calls-and-access-basic content as calls_and_access_basic
+@returns-and-multiple-values content as returns_and_multiple_values
+@returns-and-multiple-values-basic content as returns_and_multiple_values_basic
+@styles navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+    sidebar,
+    init_docs_sidebar
+
+#[$in title:["Functions"]]
+#[$in description:["Function declarations, parameters, calls, access and return values in Moth."]]
+#[$in head:[language_theme_head]]
+
+#[navbar]
+#[sidebar]
+init_docs_sidebar()!
+#[section, $md:
+    # Functions
+
+    Moth functions use named declarations rather than anonymous closures or
+    general function values. A signature records each parameter's type and
+    access mode, then lists every success and error return or the whole Never
+    contract `-> !`.
+
+    Calls stay local and explicit. The source shows named arguments, mutable
+    access and failure propagation where they occur.
+]
+
+#[section:
+    [doc_level:
+        [$in key:function-declarations]
+        [$in title:Function declarations]
+        [$in advanced:[function_declarations]]
+
+        [function_declarations_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$in key:parameters-and-defaults]
+        [$in title:Parameters and defaults]
+        [$in advanced:[parameters_and_defaults]]
+
+        [parameters_and_defaults_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$in key:calls-and-access]
+        [$in title:Calls and access]
+        [$in advanced:[calls_and_access]]
+
+        [calls_and_access_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$in key:returns-and-multiple-values]
+        [$in title:Returns and multiple values]
+        [$in advanced:[returns_and_multiple_values]]
+
+        [returns_and_multiple_values_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$in previous_path:../casts/]
+        [$in previous_title:Casts]
+        [$in next_path:../branching/]
+        [$in next_title:Branching]
+    ]
+]

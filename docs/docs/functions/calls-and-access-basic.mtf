@@ -30,3 +30,6 @@ copies don't use `~`:
 
 Ordinary function calls keep their usual syntax, including empty `f()`. Directives
 share the call rules but reject an authored empty `()`; see @./ (Calls and access advanced).
+
+A `-> !` function can only be called as a statement. It cannot be assigned,
+passed as an argument or handled with `!`, `?` or `catch`.

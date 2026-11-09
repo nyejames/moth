@@ -19,9 +19,9 @@ use super::model::{
 };
 use super::type_projection::{
     ProjectedReceiverMethodSignature, RootIndex, origin_category_mismatch_error,
-    project_defaults_provenance, project_exported_generic_parameter_surfaces,
-    project_folded_default, project_parameter_access, project_parameter_contract,
-    project_return_slots,
+    project_callable_return_contract, project_defaults_provenance,
+    project_exported_generic_parameter_surfaces, project_folded_default, project_parameter_access,
+    project_parameter_contract,
 };
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::{
@@ -377,8 +377,8 @@ pub(crate) fn project_receiver_method_signatures(
             })
             .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
 
-        let (returns, error_return) = project_return_slots(
-            &entry.signature.returns,
+        let return_contract = project_callable_return_contract(
+            &entry.signature.return_contract,
             type_environment,
             canonical_context,
         )?;
@@ -414,8 +414,7 @@ pub(crate) fn project_receiver_method_signatures(
                 *method_index,
                 ProjectedReceiverMethodSignature {
                     parameters,
-                    returns,
-                    error_return,
+                    return_contract,
                     default_provenance,
                     generic_parameters,
                 },
@@ -483,7 +482,6 @@ pub(super) fn receiver_method_semantics_from_seed(
             PublicReceiverMethodCategory::ConcreteLocal
         },
         parameters: signature.parameters.clone(),
-        returns: signature.returns.clone(),
-        error_return: signature.error_return.clone(),
+        return_contract: signature.return_contract.clone(),
     })
 }

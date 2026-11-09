@@ -25,11 +25,13 @@ use crate::compiler_frontend::compiler_messages::render::{
     render_missing_import_target, render_missing_module_root_public_surface,
     render_missing_package_symbol, render_moth_template_inputs_share_no_common_ancestor,
     render_not_exported_by_public_surface, render_not_exported_by_source_file,
-    render_unsupported_external_extension, render_unsupported_source_file_kind,
+    render_root_local_declaration_not_visible, render_unsupported_external_extension,
+    render_unsupported_source_file_kind,
 };
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticSeverity, ExternalJsAnnotationDirective, ExternalJsDeclarationKind,
     ImportPublicSurfaceType, InvalidExternalModuleReason, InvalidImportPathReason,
+    RootLocalDeclarationRole,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -38,6 +40,14 @@ unit_code! {
     impl ImportPublicSurfaceType {
         SourcePackage = 1,
         ModuleRoot = 2,
+    }
+}
+
+unit_code! {
+    impl RootLocalDeclarationRole {
+        NormalFacade = 1,
+        SupportFacade = 2,
+        EntryRoot = 3,
     }
 }
 unit_code! {
@@ -60,6 +70,7 @@ unit_code! {
         PathContainsPackageSeparator = 4,
         MissingExportKeyword = 5,
         OrphanedAnnotation = 6,
+        MixedNeverReturnContract = 7,
     }
 }
 
@@ -168,6 +179,7 @@ impl InvalidExternalModuleCode {
         match reason {
             InvalidExternalModuleReason::ReceiverMethod { .. } => Self::ReceiverMethod,
             InvalidExternalModuleReason::ParserDiagnostic { .. } => Self::ParserDiagnostic,
+            InvalidExternalModuleReason::MixedNeverReturnContract => Self::MixedNeverReturnContract,
             InvalidExternalModuleReason::NonUtf8Source { .. } => Self::NonUtf8Source,
             InvalidExternalModuleReason::PathContainsPackageSeparator => {
                 Self::PathContainsPackageSeparator
@@ -193,6 +205,11 @@ impl InvalidExternalModuleCode {
                     strings: vec![*parser_detail],
                 }
             }
+            InvalidExternalModuleReason::MixedNeverReturnContract => InvalidExternalModuleColumns {
+                code: Self::MixedNeverReturnContract,
+                binding: None,
+                strings: Vec::new(),
+            },
             InvalidExternalModuleReason::NonUtf8Source { utf8_detail } => {
                 InvalidExternalModuleColumns {
                     code: Self::NonUtf8Source,
@@ -254,6 +271,8 @@ impl InvalidExternalModuleCode {
                         parser_detail: *parser_detail,
                     })
             }
+            Self::MixedNeverReturnContract => (binding.is_none() && strings.is_empty())
+                .then_some(InvalidExternalModuleReason::MixedNeverReturnContract),
             Self::NonUtf8Source => {
                 let [utf8_detail] = strings else {
                     return None;
@@ -878,6 +897,58 @@ pub(crate) fn moth_template_inputs_share_no_common_ancestor(
     )
 }
 
+diagnostic_family! {
+    ROOT_LOCAL_DECLARATION_NOT_VISIBLE {
+        internal: 4030,
+        stable: "MOTH-IMPORT-0030",
+        category: DiagnosticCategory::Import,
+        severity: DiagnosticSeverity::Error,
+        title: "Root-local declaration is not visible",
+        facts: [
+            symbol_path: PathFact,
+            root_role: UnitFact<RootLocalDeclarationRole>,
+            root_file: PathFact,
+        ],
+        labels: [LabelMessageCode::ROOT_LOCAL_DECLARATION_SITE],
+        extra: None,
+        ctor: manual,
+        view: RootLocalDeclarationNotVisibleView,
+        render: render_root_local_declaration_not_visible,
+    }
+}
+
+/// Stores a cross-file read of a declaration authored in an active root file.
+///
+/// WHAT: the consumer clause span is primary and the authored declaration span becomes the
+///       related root-local site when available.
+/// WHY: root-local isolation must name both the forbidden read and the declaration it tried to
+///      reach instead of falling back to an import or an internal panic.
+pub(crate) fn root_local_declaration_not_visible(
+    symbol_path: PathId,
+    root_role: RootLocalDeclarationRole,
+    root_file: PathId,
+    consumer_span: Option<SourceSpan>,
+    declaration_span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    let draft = DiagnosticDraft::with_facts(
+        &ROOT_LOCAL_DECLARATION_NOT_VISIBLE,
+        consumer_span,
+        |cursor| {
+            cursor.push::<PathFact>(&symbol_path)?;
+            cursor.push::<UnitFact<RootLocalDeclarationRole>>(&root_role)?;
+            cursor.push::<PathFact>(&root_file)?;
+            Ok(())
+        },
+    );
+    match declaration_span {
+        Some(span) => draft.with_label(
+            Some(span),
+            Some(LabelDraftMessage::RootLocalDeclarationSite),
+        ),
+        None => draft,
+    }
+}
+
 pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     UNUSED_IMPORT,
     MISSING_IMPORT_TARGET,
@@ -903,4 +974,5 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES:
     INVALID_SOURCE_FILE_ENTRY,
     DUPLICATE_MOTH_TEMPLATE_INPUT_PATH,
     MOTH_TEMPLATE_INPUTS_SHARE_NO_COMMON_ANCESTOR,
+    ROOT_LOCAL_DECLARATION_NOT_VISIBLE,
 ];

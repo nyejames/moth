@@ -318,9 +318,11 @@ There is no `Void` type and a no-success function may fall through.
     ;
 ]
 
-`-> !` declares a function that never returns normally. It replaces the return contract, not a value type.
-Every reachable path must diverge. Propagating an error or option doesn't count.
-These calls terminate their statement or branch and can't be received as values or handled with `!`, `?` or `catch`.
+`-> !` is a whole callable contract, not a value type or a suffix on a type.
+It cannot mix with success, optional or error slots. Every reachable path must
+diverge. Propagating an error or option doesn't count. These calls terminate
+their statement or branch and can't be received as values or handled with `!`,
+`?` or `catch`. Only an explicit `-> !` signature makes callers see divergence.
 
 ## Options: `T?`, `none` and postfix `?`
 
@@ -1006,9 +1008,13 @@ Moth has no `import` keyword. Use a top-level `@path` to bind names or namespace
 Bare `@core/math` binds `math`, used as `math.sin(1.0)`. Namespaces are not first-class values. Selections are flat names, not path components.
 
 Paths resolve relative to the **module root**, not the importing file. Omit `.moth`, `.mtf` and `.md` extensions for source dependencies,
-but retain extensions for providers such as `.js`. A path may bind an owned file, visible child module or support package.
+but retain extensions for providers such as `.js`. A path may bind an owned helper, visible child module or support package.
 Module boundaries expose only exports. `@./`, `@/` and `../` are invalid dependency paths.
-Root filenames (`@*.moth`, `+*.moth`) can't be imported directly.
+Root filenames (`@mod.moth`, `@package.moth`, `@entry.moth`) can't be imported directly. Depend on the module directory.
+
+An expression reads one provider symbol as `@settings site_name`. Keep the path and symbol on the same physical line. The read creates no local
+binding, so it can't shadow a local name. At the start of a statement, `@settings site_name, other` is a dependency clause instead. `@file.ext` is a
+file value, not a dependency.
 
 Selections are file-local and can't shadow existing names. Commas permit multiline selection lists, with the path and first selection on the same
 line. Source clauses bind available providers. They don't acquire or install packages.
@@ -1038,8 +1044,9 @@ See @../resources (File paths and resource values).
 
 ## Modules, exports and packages
 
-A directory-scoped `@*.moth` is a normal module root. The filename suffix is cosmetic.
-Ordinary `.moth` files and unrooted subdirectories belong to that module. Other modules see only what its root exports:
+A directory recognises exactly three optional root files. `@mod.moth` publishes the normal API, `@package.moth` publishes a scoped support API or
+the external project package API and `@entry.moth` owns page runtime work. Any subset works. Other `@*.moth` and `+*.moth` spellings are rejected.
+Helpers in ordinary `.moth` files are shared by every root, while each root keeps its own declarations:
 
 [codeblock, $code("moth"):
     private_label #= "Moth"
@@ -1055,36 +1062,39 @@ Ordinary `.moth` files and unrooted subdirectories belong to that module. Other 
     ;
 ]
 
-A root can have one non-empty `export:` block for public declarations and direct re-exports.
+A facade can have one non-empty `export:` block for public declarations and direct re-exports.
 Runtime statements, fragments and whole namespaces aren't exports. Public signatures can't expose private types or required private trait evidence.
 Methods are visible wherever their receiver type is visible. They can't be imported or exported separately.
 
-A `+*.moth` root creates a named support package, such as `shared/+package.moth` exposed as `@shared`.
+An `@package.moth` root creates a named support package, such as `shared/@package.moth` exposed as `@shared`.
 Its `export:` facade lets normal sibling modules share code, while preserving private implementation boundaries.
-It is visible to its nearest normal owner and normal siblings/descendants in that scope.
+It is visible to its nearest normal-position owner and normal siblings/descendants in that scope. An entry-only owner still counts as normal-position.
+Same-scope support siblings can't depend on each other.
 
-An optional project-root `+*.moth` exposes the project's **external** package API as an ordinary support surface. Internal modules can't import it as a private back door.
-Neither exported signatures nor reachable exported implementations may depend on private `@project` values.
+An optional project-root `@package.moth` exposes the project's **external** package API as an ordinary support surface. Internal modules can't import it
+as a private back door. Neither exported signatures nor reachable exported implementations may depend on private `@project` values. Without it, the
+project has no external package API, even with `@mod.moth`.
 
 For example, a project might contain:
 
 [codeblock, $code("text"):
     my-site/
       config.moth
-      @site.moth
+      @entry.moth
+      @package.moth          -- external package API
       helpers.moth
       tools/format.moth
       vendor/format.js
       shared/
-        +package.moth
+        @package.moth
         badge.moth
       pages/
-        @pages.moth
+        @mod.moth
         article/
-          @article.moth
+          @mod.moth
 ]
 
-From `@site.moth` (or `helpers.moth`), imports can bind:
+From `@entry.moth`, imports can bind:
 
 [codeblock, $code("moth"):
     @tools/format format_title   -- ordinary file, same module
@@ -1096,7 +1106,7 @@ From `@site.moth` (or `helpers.moth`), imports can bind:
     @vendor/format.js emphasize  -- builder-provided JS binding
 ]
 
-The nested `pages/article/@article.moth` can import the same support package and Builder packages:
+The nested `pages/article/@mod.moth` can import the same support package and Builder packages:
 
 [codeblock, $code("moth"):
     @shared badge
@@ -1111,24 +1121,29 @@ See @../project-structure (Project structure) and @../packages (Package visibili
 
 ## Directives and project configuration
 
-`$name(arguments)` invokes a registered compile-time directive. With no arguments, write the bare directive (`$html_builder`), not empty parentheses.
-Directives are provided by the compiler or selected builder, not defined in source.
+Template-head directives modify their template. A queued source modifier starts its own line and attaches to the next declaration without a blank
+line between. Each directive takes at most one optional compile-time operand. Directives are provided by the compiler, not defined in source.
 
-An authored project-root `config.moth` contains compile-time values and configuration. When present, it includes one `` and the selected builder config.
-Source imports, functions and runtime work belong in ordinary modules:
+An authored project-root `config.moth` contains compile-time values and configuration. It uses ordinary named records for the project and the selected
+builder. Source imports, functions and runtime work belong in ordinary modules:
 
 [codeblock, $code("moth"):
-    $project(name = "my_site")
-    $html_builder
+    project #= (
+        name = "my_site",
+    )
+    html #= ()
 ]
 
-`$project` accepts an optional `name` and an optional `version`. An omitted name uses the selected directory name, which must be a valid Moth project identifier. There is no `entry_root`; the selected directory is the source root. Only predefined fields are accepted.
-`$html_builder` configures HTML output, not source-level target selection. Its default output folders are `_dev` and `_release`, with `origin = "/"`.
+`project` accepts an optional `name`, `version` and the other predefined fields. An omitted name uses the selected directory name, which must be a
+valid Moth project identifier. There is no `entry_root`; the selected directory is the source root.
+`html #= ()` configures HTML output, not source-level target selection. Its default output folders are `_dev` and `_release`, with `origin = "/"`.
+There are no `$project`, `$builder` or `$html_builder` directives.
 
 ### Build inputs
 
 `$config` marks the next **explicitly typed top-level constant** as a build input. The initializer supplies a fallback.
-Without one, an ordinary input is required while an optional input defaults to `none`.
+Without one, an ordinary input is required while an optional input defaults to `none`. The marker is accepted queued design; the current compiler
+spelling is `#Config of T`.
 
 [codeblock, $code("moth"):
     $config
@@ -1181,13 +1196,14 @@ See @../project-structure/#project-config (Project configuration), @../project-s
 `check` validates the project and required target capabilities without writing output. `dev` serves the development build.
 `build --release` writes configured release output.
 
-Modular project builders supply packages, capabilities and output conventions. HTML turns active roots into documents and routes.
+Modular project builders supply packages, capabilities and output conventions. HTML turns `@entry` directories into documents and routes.
 Other builders, such as Lappet, supply their own packages and decide how to consume top-level work.
 Source can't query the OS, architecture, backend or physical target. The selected target must support every reachable required capability.
 
 ## Pages and top-level work
 
-The **HTML project builder** turns an active module root into a document and route. An entry becomes active through top-level runtime work or direct const fragments. There is no implemented `$page` directive.
+The **HTML project builder** turns every `@entry.moth` directory into a document and route. Entry eligibility follows file presence, so an empty,
+static-only or metadata-only entry still counts. `@mod.moth` and `@package.moth` never become pages.
 
 For an HTML page:
 
@@ -1207,16 +1223,16 @@ For an HTML page:
 
 Direct top-level const `$in` inserts route to builder-registered destinations. The HTML builder registers `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and `head`.
 Ordinary const and runtime fragments render into the body. Scalar metadata contributions concatenate and never raise a cardinality error, an explicitly empty value stays present, a missing value uses the builder fallback, each stylesheet insert needs one tracked CSS resource, and the builder deduplicates stylesheet links by stable origin. `head` is raw HTML after built-in head content and deduplicates identical complete contributions.
-Only direct root inserts route. Nested, stored and aliased inserts remain template composition. Runtime top-level named builder inserts are not supported and their final design is unsettled. Old `page_*` names are ordinary constants with no implicit metadata effect.
-A general `$entry` purpose remains deferred. The former `$page` metadata design is superseded by builder slots.
-Helpers, support roots, facades and `config.moth` cannot supply entry contributions.
+Only direct root inserts route. Nested, stored and aliased inserts remain template composition. Runtime top-level named builder inserts are not supported. Old `page_*` names are ordinary constants with no implicit metadata effect.
+Helpers, `@mod.moth` and `@package.moth` facades and `config.moth` cannot supply entry contributions.
 
 Direct constant fragments become static HTML. Runtime work runs once at page startup, and runtime fragments publish only after successful completion.
 An error leaves static fragments in place but doesn't roll back earlier side effects.
 The release page shows a generic failure notice, not application error text.
 
-Routes derive from directory structure: `guide/@page.moth` creates `guide/index.html`. Root filenames have no route significance.
-HTML directory builds currently require a homepage at the selected project root. Command-specific no-entry rules and explicit root-purpose validation remain deferred.
+Routes derive from directory structure: `guide/@entry.moth` creates `guide/index.html`. Root filenames have no route significance.
+HTML `build` and `dev` need at least one `@entry.moth` anywhere below the selected project root, not necessarily a homepage. `check` accepts a project
+with no entries. Development launch opens the real homepage when present, otherwise the first route in alphabetical order. It never invents one.
 
 See @../project-structure (Pages and entry behaviour) and @../project-structure/#entry-config (Entry metadata and builder slots).
 

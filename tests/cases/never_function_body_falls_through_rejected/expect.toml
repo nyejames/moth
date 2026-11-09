@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0055"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0055"
+reason = "invalid_return_shape.never_body_may_complete_normally"
+path = "input/@entry.moth"
+line = 1
+column = 1

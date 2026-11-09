@@ -736,6 +736,10 @@ pub fn handle_mutation(
     )?;
     let target_expression = match target_expression {
         ParsedPostfixExpression::Value(expression) => expression,
+        // A Never call has no value and can never be a mutation target.
+        ParsedPostfixExpression::Terminating(never_call) => {
+            return Err(never_call.used_as_value_diagnostic().into());
+        }
         // A pending receiver call has no value or place yet and can never be a mutation target; the
         // authored operator is the source boundary that reports it.
         ParsedPostfixExpression::RetainedOperand(_) => {

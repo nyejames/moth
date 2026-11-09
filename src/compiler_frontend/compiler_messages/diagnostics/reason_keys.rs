@@ -160,22 +160,19 @@ define_stable_reason_keys! {
         &InvalidConfigCode::MissingRequiredRecordField => "invalid_config.missing_required_record_field",
         &InvalidConfigCode::InvalidConfigValueShape => "invalid_config.invalid_config_value_shape",
         &InvalidConfigCode::InvalidProjectSettingValue => "invalid_config.invalid_project_setting_value",
-        &InvalidConfigCode::MissingHtmlHomepage => "invalid_config.missing_html_homepage",
         &InvalidConfigCode::DuplicateHtmlOutputPath => "invalid_config.duplicate_html_output_path",
         &InvalidConfigCode::ResourceOutputPathCollision => "invalid_config.resource_output_path_collision",
         &InvalidConfigCode::ResourceOutputPathReserved => "invalid_config.resource_output_path_reserved",
         &InvalidConfigCode::EntryRootPackagePrefixCollision => "invalid_config.entry_root_package_prefix_collision",
         &InvalidConfigCode::SourcePackageMissingRoot => "invalid_config.source_package_missing_root",
-        &InvalidConfigCode::SourcePackageMultipleRoots => "invalid_config.source_package_multiple_roots",
         &InvalidConfigCode::NoRootModuleEntries => "invalid_config.no_root_module_entries",
-        &InvalidConfigCode::MultipleModuleRootFiles => "invalid_config.multiple_module_root_files",
         &InvalidConfigCode::AliasedModuleRootFiles => "invalid_config.aliased_module_root_files",
         &InvalidConfigCode::ModuleRootFileOutsideClaimingModule => "invalid_config.module_root_file_outside_claiming_module",
         &InvalidConfigCode::ModuleRootFileNotRegularFile => "invalid_config.module_root_file_not_regular_file",
         &InvalidConfigCode::ConfigImportUnsupported => "invalid_config.config_import_unsupported",
         &InvalidConfigCode::FileValuePathUnsupported => "invalid_config.file_value_path_unsupported",
         &InvalidConfigCode::SourceFileFolderCollision => "invalid_config.source_file_folder_collision",
-        &InvalidConfigCode::LegacyModuleRootFileName => "invalid_config.legacy_module_root_file_name",
+        &InvalidConfigCode::InvalidModuleRootFileName => "invalid_config.invalid_module_root_file_name",
         &InvalidConfigCode::InvalidOutputFolderEmpty => "invalid_config.invalid_output_folder.empty",
         &InvalidConfigCode::InvalidOutputFolderNonUtf8 => "invalid_config.invalid_output_folder.non_utf8",
         &InvalidConfigCode::InvalidOutputFolderAbsolutePathWithoutFolder
@@ -301,7 +298,6 @@ define_stable_reason_keys! {
     &InvalidDependencyClauseReason::ExpectedAliasName => "invalid_dependency_clause.expected_alias_name",
     &InvalidDependencyClauseReason::DuplicateSelectionName => "invalid_dependency_clause.duplicate_selection_name",
     &InvalidDependencyClauseReason::DuplicateSelectionLocalName => "invalid_dependency_clause.duplicate_selection_local_name",
-    &InvalidDependencyClauseReason::LegacyBraceSelections => "invalid_dependency_clause.legacy_brace_selections",
     &InvalidDependencyClauseReason::MissingSelectionAfterComma => "invalid_dependency_clause.missing_selection_after_comma",
     &InvalidDependencyClauseReason::MissingCommaBetweenSelections => "invalid_dependency_clause.missing_comma_between_selections",
     &InvalidDependencyClauseReason::NamespaceAliasWithSelections => "invalid_dependency_clause.namespace_alias_with_selections",
@@ -312,10 +308,6 @@ define_stable_reason_keys! {
     &InvalidDependencyClauseReason::ProjectGlobalsReexportNotAllowed => "invalid_dependency_clause.project_globals_reexport_not_allowed",
     &InvalidDependencyClauseReason::ProviderRequiresBinding => "invalid_dependency_clause.provider_requires_binding",
     &InvalidDependencyClauseReason::ContinuationEnteredStatement => "invalid_dependency_clause.continuation_entered_statement",
-    },
-
-    LegacyDependencyClauseReason => {
-    &LegacyDependencyClauseReason::ImportKeyword => "legacy_dependency_clause.import_keyword",
     },
 
     InvalidImportPathReason => {
@@ -340,6 +332,7 @@ define_stable_reason_keys! {
         &InvalidExternalModuleCode::PathContainsPackageSeparator => "invalid_external_module.path_contains_package_separator",
         &InvalidExternalModuleCode::MissingExportKeyword => "invalid_external_module.missing_export_keyword",
         &InvalidExternalModuleCode::OrphanedAnnotation => "invalid_external_module.orphaned_annotation",
+        &InvalidExternalModuleCode::MixedNeverReturnContract => "invalid_external_module.mixed_never_return_contract",
     },
 
 
@@ -543,6 +536,7 @@ define_stable_reason_keys! {
         &InvalidFunctionSignatureCode::MultipleErrorReturnSlots => "invalid_function_signature.multiple_error_return_slots",
         &InvalidFunctionSignatureCode::ErrorSlotNotLast => "invalid_function_signature.error_slot_not_last",
         &InvalidFunctionSignatureCode::GenericWhereConstraintsUnsupported => "invalid_function_signature.generic_where_constraints_unsupported",
+        &InvalidFunctionSignatureCode::NeverCannotCombine => "invalid_function_signature.never_cannot_combine",
     },
 
     InvalidChoiceVariantReason => {
@@ -658,7 +652,6 @@ define_stable_reason_keys! {
     },
 
     InvalidTraitConformanceCode => {
-        &InvalidTraitConformanceCode::ImportedModuleRoot => "invalid_trait_conformance.imported_module_root",
         &InvalidTraitConformanceCode::AliasTarget => "invalid_trait_conformance.alias_target",
         &InvalidTraitConformanceCode::NonCanonicalTarget => "invalid_trait_conformance.non_canonical_target",
         &InvalidTraitConformanceCode::NonlocalSourceTarget => "invalid_trait_conformance.nonlocal_source_target",
@@ -676,6 +669,7 @@ define_stable_reason_keys! {
         &InvalidTraitConformanceCode::ReturnCountMismatch => "invalid_trait_conformance.return_count_mismatch",
         &InvalidTraitConformanceCode::ReturnTypeMismatch => "invalid_trait_conformance.return_type_mismatch",
         &InvalidTraitConformanceCode::ReturnChannelMismatch => "invalid_trait_conformance.return_channel_mismatch",
+        &InvalidTraitConformanceCode::ReturnContractMismatch => "invalid_trait_conformance.return_contract_mismatch",
         &InvalidTraitConformanceCode::InferredFailureInInfallibleCast => "invalid_trait_conformance.inferred_failure_in_infallible_cast",
     },
 
@@ -855,6 +849,7 @@ define_stable_reason_keys! {
     &InvalidFallibleHandlingCode::CustomErrorMixedWithImplicitFailure => "invalid_fallible_handling.custom_error_mixed_with_implicit_failure",
     &InvalidFallibleHandlingCode::UnhandledBuiltinFailureInCustomErrorFunction => "invalid_fallible_handling.unhandled_builtin_failure_in_custom_error_function",
     &InvalidFallibleHandlingCode::UnhandledBuiltinFailureInExportedFunction => "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function",
+    &InvalidFallibleHandlingCode::UnhandledBuiltinFailureInNeverFunction => "invalid_fallible_handling.unhandled_builtin_failure_in_never_function",
     },
 
     InvalidTemplateSlotReason => {
@@ -927,6 +922,8 @@ define_stable_reason_keys! {
         &InvalidCallShapeCode::MutableAccessOnNonPlace => "invalid_call_shape.mutable_access_on_non_place",
         &InvalidCallShapeCode::MutableAccessOnImmutablePlace => "invalid_call_shape.mutable_access_on_immutable_place",
         &InvalidCallShapeCode::ImmutablePlaceMutableAccessRequired => "invalid_call_shape.immutable_place_mutable_access_required",
+        &InvalidCallShapeCode::NeverCallUsedAsValue => "invalid_call_shape.never_call_used_as_value",
+        &InvalidCallShapeCode::NeverCallHandled => "invalid_call_shape.never_call_handled",
     },
 
     InvalidReturnShapeReason => {
@@ -939,6 +936,10 @@ define_stable_reason_keys! {
         &InvalidReturnShapeCode::TooFewReturnValues => "invalid_return_shape.too_few_return_values",
         &InvalidReturnShapeCode::MissingReturnBangValue => "invalid_return_shape.missing_return_bang_value",
         &InvalidReturnShapeCode::FunctionMayFallThrough => "invalid_return_shape.function_may_fall_through",
+        &InvalidReturnShapeCode::NeverBodyMayCompleteNormally => "invalid_return_shape.never_body_may_complete_normally",
+        &InvalidReturnShapeCode::NeverBodyReturnsToCaller => "invalid_return_shape.never_body_returns_to_caller",
+        &InvalidReturnShapeCode::UnannotatedFunctionAlwaysDiverges => "invalid_return_shape.unannotated_function_always_diverges",
+        &InvalidReturnShapeCode::NeverProofDependsOnCycle => "invalid_return_shape.never_proof_depends_on_cycle",
     },
 
     DeferredFeatureReason => {

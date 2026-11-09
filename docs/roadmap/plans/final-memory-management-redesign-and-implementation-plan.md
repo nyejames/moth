@@ -643,7 +643,7 @@ Accepted design must be authoritative before implementation starts. This phase d
 - [x] Replace the two-proof-layer GC fallback wording with mandatory topology plus collector-free strategy selection.
 - [x] Add retained-edge liveness, cleanup frontiers, inferred intervals, region epochs and REC's narrow role.
 - [x] Update the memory task-reading guide with the REC canonical page and the correct route for collection retention work.
-- [x] Rewrite `docs/developer-docs/memory-management/@page.moth` with the concise final summary and detailed-page routing.
+- [x] Rewrite `docs/developer-docs/memory-management/@entry.moth` with the concise final summary and detailed-page routing.
 - [x] Update `access-and-aliasing` with last-use centrality, allocation-family meaning and the static provenance versus runtime responsibility distinction.
 - [x] Update `borrow-validation` with the final last-use contract and explicit handoff to retained-edge analysis.
 - [x] Update `lifetime-regions-and-escape-validation` with non-lexical intervals, retained-edge liveness, cleanup frontiers, epochs, cycles requiring one declared region and REC eligibility.
@@ -1248,7 +1248,7 @@ Channel semantics must be constrained before any async implementation starts.
 
 ### Tasks
 
-- [ ] Update `docs/docs/async/@page.moth` to make send a mandatory affine transfer.
+- [ ] Update `docs/docs/async/@entry.moth` to make send a mandatory affine transfer.
 - [ ] Define the successful-send responsibility commit point.
 - [ ] Define failed-send responsibility preservation.
 - [ ] Define queue and receiver lifecycle ownership.
@@ -1447,7 +1447,7 @@ Do not collapse these rows into one generic "memory management" status.
 | File or area | Required change |
 |---|---|
 | `docs/developer-docs/memory-management/overview.mtf` | six-part final model, collector-free invariant, REC boundary |
-| `docs/developer-docs/memory-management/@page.moth` | concise introduction and REC route |
+| `docs/developer-docs/memory-management/@entry.moth` | concise introduction and REC route |
 | `access-and-aliasing/**` | last-use centrality, allocation families, field-splitting extension |
 | `borrow-validation/**` | affine transfer facts and handoff to retained-edge analysis |
 | `lifetime-regions-and-escape-validation/**` | intervals, liveness, frontiers, epochs, cycles requiring one declared region |
@@ -1459,9 +1459,9 @@ Do not collapse these rows into one generic "memory management" status.
 | `docs/build-system-design.md` | lifecycle instantiation, strategy plans and capability verification |
 | `docs/docs/collections/**` | trusted builtin effects and collection `clear()` |
 | `docs/docs/design-scope/**` | remove GC baseline and preserve exclusions |
-| `docs/docs/async/@page.moth` | mandatory send transfer and memory prerequisites |
+| `docs/docs/async/@entry.moth` | mandatory send transfer and memory prerequisites |
 | `docs/docs/cheatsheet/moth-language-cheatsheet.mtf` | concise user-facing final model only |
-| `docs/docs/progress/@page.moth` | separate accepted-design and implementation rows |
+| `docs/docs/progress/@entry.moth` | separate accepted-design and implementation rows |
 | `docs/roadmap/roadmap.md` | parent and companion plan sequencing, no superseded collector-first wording |
 | `docs/roadmap/plans/grouped-memory-design.md` | superseded and deleted; its declared region implementation detail now lives in Phases 7 and 8, and every live link points at this plan |
 | historical memory cleanup plan | confirm the file is absent and record that no historical annotation is required |

@@ -9,6 +9,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionB
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::expression_store::HirProjection;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
@@ -37,6 +38,7 @@ mod hir_local_lowering_tests;
 mod hir_loop_lowering_tests;
 mod hir_match_lowering_tests;
 mod hir_module_lowering_tests;
+mod hir_never_lowering_tests;
 mod hir_result_lowering_tests;
 mod hir_validation_tests;
 mod loop_lowering_tests;
@@ -173,7 +175,10 @@ pub(super) fn minimal_lowered_hir_module() -> (StringTable, HirModule, TypeEnvir
     let start_fn = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );

@@ -1391,6 +1391,11 @@ pub(crate) fn builtin_failure_diagnostic(
                 witness: reason_witness,
             }
         }
+        HirBuiltinFailureBoundary::Never => {
+            InvalidFallibleHandlingReason::UnhandledBuiltinFailureInNeverFunction {
+                witness: reason_witness,
+            }
+        }
         HirBuiltinFailureBoundary::InferPrivate | HirBuiltinFailureBoundary::BuiltinErrorSlot => {
             crate::compiler_bug!(
                 CompilerStage::HirConstruction,

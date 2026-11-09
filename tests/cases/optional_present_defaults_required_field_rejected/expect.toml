@@ -7,6 +7,6 @@ message_contains = ["missing an argument"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0054"
 reason = "invalid_call_shape.missing_argument"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 5
 count = 1

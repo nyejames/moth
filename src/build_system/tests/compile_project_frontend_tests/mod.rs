@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::display::display_type;
+use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAbiType, ExternalAccessKind, ExternalFunctionId, ExternalFunctionLowerings,
     ExternalFunctionSpec, ExternalJsLowering, ExternalReturnSlot, ExternalSignatureType,
@@ -88,6 +89,8 @@ fn assert_has_diagnostic_code<T>(result: &CompilationResult<T>, expected_code: &
         "expected diagnostic code {expected_code}, got {actual_codes:?}"
     );
 }
+#[path = "entry_api_stability_tests.rs"]
+mod entry_api_stability_tests;
 #[path = "package_materialisation_tests.rs"]
 mod package_materialisation_tests;
 #[path = "provider_sources_tests.rs"]

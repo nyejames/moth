@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-IMPORT-0024"]
+message_contains = ["`@+notes.mtf`", "Use `@+notes` instead"]
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-IMPORT-0024"]
+message_contains = ["`@+notes.mtf`", "Use `@+notes` instead"]

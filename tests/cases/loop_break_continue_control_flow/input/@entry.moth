@@ -1,0 +1,157 @@
+i ~= 0
+sum ~= 0
+
+loop i < 10:
+    ~i = i + 1
+    if i is 3:
+        continue
+    ;
+    if i is 7:
+        break
+    ;
+    ~sum = sum + i
+;
+
+-- Control flow inside a reversed strided collection loop: `continue` advances
+-- by the negative step and `break` exits without stepping to a smaller index.
+stride_items = {0, 1, 2, 3, 4, 5, 6}
+stride_seen ~= [:]
+stride_sum ~= 0
+loop stride_items by -2 |item, index|:
+    ~stride_seen = [:[stride_seen][index],]
+    if index is 4:
+        continue
+    ;
+    if index is 0:
+        break
+    ;
+    ~stride_sum = stride_sum + item
+;
+
+-- A folded-true conditional loop still resumes after a reachable break.
+true_count ~= 0
+loop true:
+    ~true_count = true_count + 1
+    if true_count is 2:
+        break
+    ;
+;
+
+can_fail |value I32| -> I32, Error!:
+    if value is 3:
+        return! Error("stop")
+    ;
+    return value
+;
+
+-- A value-if branch may continue or break the enclosing loop.
+value_if_sum ~= 0
+value_if_i ~= 0
+loop value_if_i < 6:
+    ~value_if_i = value_if_i + 1
+    should_continue = value_if_i is 2
+    first = if should_continue:
+        continue
+    else
+        then value_if_i
+    ;
+    should_break = value_if_i is 4
+    second = if should_break:
+        break
+    else
+        then first
+    ;
+    ~value_if_sum = value_if_sum + second
+;
+
+fail_zero || -> Error!:
+    return! Error("zero")
+;
+
+-- A zero-success catch statement hides its break inside an expression.
+zero_catch_count ~= 0
+loop true:
+    ~zero_catch_count = zero_catch_count + 1
+    fail_zero() catch:
+        break
+    ;
+;
+
+-- A value-required catch handler may break the enclosing loop.
+catch_i ~= 0
+recovered ~= 0
+loop catch_i < 6:
+    ~catch_i = catch_i + 1
+    value = can_fail(catch_i) catch:
+        break
+    ;
+    ~recovered = recovered + value
+;
+
+-- A value-required catch handler may also continue the enclosing loop.
+catch_continue_i ~= 0
+catch_continue_sum ~= 0
+loop catch_continue_i < 5:
+    ~catch_continue_i = catch_continue_i + 1
+    value = can_fail(catch_continue_i) catch:
+        continue
+    ;
+    ~catch_continue_sum = catch_continue_sum + value
+;
+
+-- Value match arms use the same escaping-loop-exit rule.
+match_i ~= 0
+match_sum ~= 0
+loop match_i < 6:
+    ~match_i = match_i + 1
+    selected = if match_i is:
+        2 => continue
+        4 => break
+        else => then match_i
+    ;
+    ~match_sum = match_sum + selected
+;
+
+-- Early break before an unreachable `then` still completes the branch.
+early_break_count ~= 0
+loop early_break_count < 3:
+    ~early_break_count = early_break_count + 1
+    picked = if early_break_count is 1:
+        break
+        then 10
+    else
+        then early_break_count
+    ;
+;
+
+-- Early continue before an unreachable `then` still completes the branch.
+early_continue_count ~= 0
+early_continue_sum ~= 0
+loop early_continue_count < 3:
+    ~early_continue_count = early_continue_count + 1
+    picked = if early_continue_count is 1:
+        continue
+        then 10
+    else
+        then early_continue_count
+    ;
+    ~early_continue_sum = early_continue_sum + picked
+;
+
+-- A mutable collection stays usable after a break leaves the value-if branch.
+borrow_items ~{I32} = {}
+borrow_i ~= 0
+loop borrow_i < 5:
+    ~borrow_i = borrow_i + 1
+    picked = if borrow_i is 2:
+        ~borrow_items.push(99)
+        break
+    else
+        then borrow_i
+    ;
+    ~borrow_items.push(picked)
+;
+borrow_len = borrow_items.length()
+borrow_last = borrow_items.get(1)!
+
+[:<p>[sum] [stride_sum] [stride_seen] [true_count] [zero_catch_count] [value_if_sum] [value_if_i] [recovered] [catch_i] [catch_continue_sum] [catch_continue_i] [match_sum] [match_i] [early_break_count] [early_continue_sum] [borrow_len] [borrow_last]</p>]

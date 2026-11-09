@@ -22,7 +22,7 @@ fn page_path(
     path_fork: &mut PathInternerFork,
 ) -> PathId {
     let scope = path_fork
-        .try_intern_portable_path("@page.moth", string_table)
+        .try_intern_portable_path("@entry.moth", string_table)
         .expect("test path fits");
     path_fork
         .try_intern_child(scope, string_table.intern(name))

@@ -85,9 +85,14 @@ pub(crate) fn append_reachable_resource_uses(
     Ok(())
 }
 
-/// Append non-HIR resource pieces owned by one module's compile-time fragments.
+/// Append non-HIR resource pieces owned by one module's entry compile-time fragments.
+///
+/// An entryless module has no entry fragment schedule, so there is nothing to append.
 pub(crate) fn append_const_fragment_resources(union: &mut ResourceOriginUnion, module: &Module) {
-    for fragment in &module.metadata.const_top_level_fragments {
+    let Some(entry) = &module.metadata.entry else {
+        return;
+    };
+    for fragment in &entry.const_top_level_fragments {
         append_owned_folded_string(union, &fragment.value);
     }
 }

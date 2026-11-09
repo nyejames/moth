@@ -211,6 +211,30 @@ fn push_accessed_symbol_statement(
     .into())
 }
 
+/// Place one Never call statement that began with a symbol or `this` receiver.
+///
+/// WHAT: rejects assignment to the call and otherwise publishes `NodeKind::NeverCall`.
+/// WHY: the chain owner already rejected postfix handling and further members, so a terminal Never
+///      method is a complete statement at this authored position.
+fn push_terminating_accessed_symbol_statement(
+    never_call: Box<crate::compiler_frontend::ast::statements::never_call::NeverCall>,
+    draft: &mut BodyDraft,
+    context: &ScopeContext,
+    token_stream: &AstCursor,
+) -> Result<(), ExpressionParseError> {
+    if token_stream.current_tag().is_assignment_operator() {
+        return Err(never_call.used_as_value_diagnostic().into());
+    }
+
+    let span = never_call.span;
+    draft.push_node(AstNode {
+        kind: NodeKind::NeverCall(never_call),
+        span,
+        scope: context.scope,
+    });
+    Ok(())
+}
+
 /// Route one retained postfix expression at its authored position.
 ///
 /// WHAT: rejects assignment to a temporary receiver and otherwise records the retained item as an
@@ -316,6 +340,14 @@ pub(crate) fn parse_this_statement(
             )?;
             let accessed_node = match accessed_node {
                 ParsedPostfixExpression::Value(node) => node,
+                ParsedPostfixExpression::Terminating(never_call) => {
+                    return push_terminating_accessed_symbol_statement(
+                        never_call,
+                        draft,
+                        context,
+                        token_stream,
+                    );
+                }
                 ParsedPostfixExpression::RetainedOperand(item) => {
                     return push_retained_accessed_symbol_statement(
                         item,
@@ -1335,6 +1367,14 @@ pub(crate) fn parse_symbol_statement(
                 )?;
                 let accessed_node = match accessed_node {
                     ParsedPostfixExpression::Value(node) => node,
+                    ParsedPostfixExpression::Terminating(never_call) => {
+                        return push_terminating_accessed_symbol_statement(
+                            never_call,
+                            draft,
+                            context,
+                            token_stream,
+                        );
+                    }
                     ParsedPostfixExpression::RetainedOperand(item) => {
                         return push_retained_accessed_symbol_statement(
                             item,

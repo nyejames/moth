@@ -9,7 +9,7 @@ diagnostic_codes = ["MOTH-SYNTAX-0029", "MOTH-SYNTAX-0029", "MOTH-SYNTAX-0029", 
 code = "MOTH-SYNTAX-0029"
 reason = "invalid_loop_header.zero_loop_step"
 occurrence = 5
-path = "input/static_zero/@mod.moth"
+path = "input/static_zero/@entry.moth"
 line = 3
 column = 15
 
@@ -17,7 +17,7 @@ column = 15
 code = "MOTH-SYNTAX-0029"
 reason = "invalid_loop_header.zero_loop_step"
 occurrence = 6
-path = "input/static_zero_empty/@mod.moth"
+path = "input/static_zero_empty/@entry.moth"
 line = 3
 column = 15
 
@@ -25,7 +25,7 @@ column = 15
 code = "MOTH-SYNTAX-0029"
 reason = "invalid_loop_header.misplaced_loop_step"
 occurrence = 2
-path = "input/misplaced_by/@mod.moth"
+path = "input/misplaced_by/@entry.moth"
 line = 3
 column = 19
 
@@ -33,7 +33,7 @@ column = 19
 code = "MOTH-SYNTAX-0029"
 reason = "invalid_loop_header.missing_collection_step"
 occurrence = 3
-path = "input/missing_value/@mod.moth"
+path = "input/missing_value/@entry.moth"
 line = 3
 column = 12
 
@@ -41,7 +41,7 @@ column = 12
 code = "MOTH-SYNTAX-0029"
 reason = "invalid_loop_header.repeated_loop_step"
 occurrence = 4
-path = "input/repeated_by/@mod.moth"
+path = "input/repeated_by/@entry.moth"
 line = 3
 column = 17
 
@@ -49,7 +49,7 @@ column = 17
 code = "MOTH-SYNTAX-0029"
 reason = "invalid_loop_header.step_on_conditional_loop"
 occurrence = 1
-path = "input/conditional_by/@mod.moth"
+path = "input/conditional_by/@entry.moth"
 line = 3
 column = 16
 
@@ -57,7 +57,7 @@ column = 16
 code = "MOTH-RULE-0059"
 reason = "invalid_loop_operand.step_not_signed_integer"
 occurrence = 1
-path = "input/bool_step/@mod.moth"
+path = "input/bool_step/@entry.moth"
 line = 4
 column = 15
 
@@ -65,7 +65,7 @@ column = 15
 code = "MOTH-RULE-0059"
 reason = "invalid_loop_operand.step_not_signed_integer"
 occurrence = 2
-path = "input/byte_step/@mod.moth"
+path = "input/byte_step/@entry.moth"
 line = 4
 column = 15
 
@@ -73,7 +73,7 @@ column = 15
 code = "MOTH-RULE-0059"
 reason = "invalid_loop_operand.step_not_signed_integer"
 occurrence = 3
-path = "input/dec_step/@mod.moth"
+path = "input/dec_step/@entry.moth"
 line = 4
 column = 15
 
@@ -81,7 +81,7 @@ column = 15
 code = "MOTH-RULE-0059"
 reason = "invalid_loop_operand.step_not_signed_integer"
 occurrence = 4
-path = "input/float_step/@mod.moth"
+path = "input/float_step/@entry.moth"
 line = 4
 column = 15
 
@@ -89,6 +89,6 @@ column = 15
 code = "MOTH-RULE-0059"
 reason = "invalid_loop_operand.step_not_signed_integer"
 occurrence = 5
-path = "input/unsigned_step/@mod.moth"
+path = "input/unsigned_step/@entry.moth"
 line = 4
 column = 15

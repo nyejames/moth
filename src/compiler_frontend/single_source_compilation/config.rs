@@ -51,8 +51,8 @@ use crate::compiler_frontend::folded_value::{
 };
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, Header,
-    HeaderKind, HeaderParseOptions, HeaderPreparationFailure, bind_module_headers,
+    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole,
+    Header, HeaderKind, HeaderParseOptions, HeaderPreparationFailure, bind_module_headers,
     prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::module_compilation::{
@@ -62,7 +62,7 @@ use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, resolve_module_dependencies,
 };
 use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
-use crate::compiler_frontend::semantic_identity::{ModuleRootRole, OriginTypeId};
+use crate::compiler_frontend::semantic_identity::OriginTypeId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternError, PathInternerFork};
@@ -308,7 +308,7 @@ fn compile_prepared_config_source(
             source_build_config_contract_names: std::sync::Arc::new(Default::default()),
         },
         AstBuildContext {
-            root_role: ModuleRootRole::Normal,
+            synthesizes_entry_start: false,
             external_package_registry: std::sync::Arc::new(request.binding_packages.clone()),
             style_directives: request.style_directives,
             string_table,
@@ -846,8 +846,14 @@ fn prepare_config_file(
         owner,
         authored_scope,
         path_syntax,
-        request.authored_path,
-        &HeaderParseOptions::default(),
+        &HeaderParseOptions {
+            root_file_ids: Default::default(),
+            // `config.moth` is a self-contained build input, not a module root. Select it
+            // explicitly so its authored top-level statements reach the config dialect
+            // validator instead of an ordinary-file runtime rejection.
+            selected_file: Some((request.file_id, FileRole::ConfigBootstrap)),
+            reached_root_roles: &[],
+        },
         string_table,
         0,
         0,

@@ -1,0 +1,8 @@
+-- The unqualified form `n I32 = width` before `width #= 3` is accepted. The qualified
+-- form must keep that success: the ordering edge sorts `width` first, and the
+-- constant-only forward-reference diagnostic must not reject the default.
+Box = |
+    n I32 = @shapes width,
+|
+
+width #= 3

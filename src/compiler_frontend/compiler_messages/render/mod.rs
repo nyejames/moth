@@ -86,9 +86,7 @@ use crate::compiler_frontend::datatypes::display::{
     BOOL_TYPE_SPELLING, TypeDisplayShape, TypeDisplayView,
 };
 use crate::compiler_frontend::datatypes::numeric_operators::common_fixed_integer;
-use crate::compiler_frontend::source_packages::root_file::{
-    dependency_component_is_config_file, dependency_component_is_support_root_file,
-};
+use crate::compiler_frontend::source_packages::root_file::dependency_component_is_config_file;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass};
@@ -1215,24 +1213,16 @@ pub(crate) fn invalid_expression_message(reason: InvalidExpressionReason) -> Str
 
 /// Determine which special file name is referenced by a dependency path.
 ///
-/// WHAT: inspects path components to find a support-root or canonical config reference.
-/// WHY: the direct-special-file diagnostic covers support roots and config files, and
-/// renderers should name the specific file when possible so the author knows which file
-/// to avoid binding directly. Normal `@*.moth` root references are caught earlier by
-/// the path parser's `LeadingAtInPathComponent` rejection.
+/// WHAT: inspects path components to find a canonical config reference.
+/// WHY: the direct-special-file diagnostic covers the build-only config source, and renderers
+/// should name that file when possible so the author knows which spelling to stop binding
+/// directly. `@` root references are caught earlier by the path parser's
+/// `LeadingAtInPathComponent` rejection.
 pub(crate) fn special_file_name_from_path(
     path: PathId,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    // Support-root markers (`+`) are unambiguous even when an earlier folder shares a name.
     let path_text = context.render_path(path);
-    for segment in path_text.split('/') {
-        if dependency_component_is_support_root_file(segment) {
-            let suffix = if segment.contains('.') { "" } else { ".moth" };
-            return format!("{segment}{suffix}");
-        }
-    }
-
     for segment in path_text.split('/') {
         if dependency_component_is_config_file(segment) {
             return "config.moth".to_owned();
@@ -1248,41 +1238,6 @@ fn named_value_or_default(
 ) -> String {
     name.map(|name| format!("'{}'", string_table.resolve(name)))
         .unwrap_or_else(|| fallback.to_string())
-}
-
-/// Build a human-facing suggestion for a direct support-root-file dependency.
-///
-/// WHAT: inspects the dependency path and produces a hint that names the package directory the
-/// author should bind instead of the support root file.
-/// WHY: the `+` prefix on support root filenames is cosmetic and does not appear in dependency
-///      paths. Authors who write `@helper/+page symbol` should be told to use
-///      `@helper symbol` instead.
-pub(crate) fn support_root_import_suggestion(
-    path: PathId,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
-    let path_text = context.render_path(path);
-    let mut suggestion_path: Vec<&str> = Vec::new();
-    let mut found_root_component = false;
-
-    for segment in path_text.split('/') {
-        if dependency_component_is_support_root_file(segment) {
-            found_root_component = true;
-            continue;
-        }
-        suggestion_path.push(segment);
-    }
-
-    if !found_root_component {
-        return String::new();
-    }
-
-    let directory = suggestion_path.join("/");
-    if directory.is_empty() {
-        " Bind the support package directory instead of the root file.".to_owned()
-    } else {
-        format!(" Bind the support package `@{directory}` instead of the root file.")
-    }
 }
 
 pub(crate) fn display_line_number(raw_line: i32) -> i32 {

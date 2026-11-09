@@ -497,7 +497,7 @@ fn source_dependency_resolution_preserves_moth_template_folder_ambiguity() {
     fs::create_dir_all(entry_root.join("docs/intro")).unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
     fs::write(entry_root.join("docs/intro.mtf"), b"hello").unwrap();
-    fs::write(entry_root.join("docs/intro/@content.moth"), b"").unwrap();
+    fs::write(entry_root.join("docs/intro/@entry.moth"), b"").unwrap();
 
     let mut registry = SourceFileKindRegistry::new();
     registry.register("mtf", SourceFileKind::MothTemplate);
@@ -977,7 +977,7 @@ fn concrete_file_dependency_inside_module_root_is_accepted() {
 
     fs::create_dir_all(&entry_root).unwrap();
     fs::create_dir_all(entry_root.join("helper")).unwrap();
-    fs::write(entry_root.join("helper/@home.moth"), b"").unwrap();
+    fs::write(entry_root.join("helper/@entry.moth"), b"").unwrap();
     fs::write(entry_root.join("helper/thing.moth"), b"").unwrap();
     fs::write(entry_root.join("index.moth"), b"").unwrap();
 
@@ -1016,13 +1016,13 @@ fn nearest_root_parent_walk_chooses_nested_module_root_over_ancestor() {
     let entry_root = temp_dir.path().join("src");
 
     fs::create_dir_all(entry_root.join("outer/inner/deep")).unwrap();
-    fs::write(entry_root.join("outer/@outer.moth"), b"").unwrap();
-    fs::write(entry_root.join("outer/inner/@inner.moth"), b"").unwrap();
+    fs::write(entry_root.join("outer/@entry.moth"), b"").unwrap();
+    fs::write(entry_root.join("outer/inner/@entry.moth"), b"").unwrap();
     fs::write(entry_root.join("outer/inner/deep/page.moth"), b"").unwrap();
 
-    let outer_root_file = fs::canonicalize(entry_root.join("outer/@outer.moth"))
+    let outer_root_file = fs::canonicalize(entry_root.join("outer/@entry.moth"))
         .expect("outer root file should canonicalize");
-    let inner_root_file = fs::canonicalize(entry_root.join("outer/inner/@inner.moth"))
+    let inner_root_file = fs::canonicalize(entry_root.join("outer/inner/@entry.moth"))
         .expect("inner root file should canonicalize");
     let outer_root_dir = outer_root_file
         .parent()

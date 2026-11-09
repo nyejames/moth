@@ -7,6 +7,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::timing_scope_attributed;
 
 use crate::builder_surface::BuilderSurface;
+use crate::builder_surface::definition::TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::{
@@ -52,7 +53,7 @@ use rustc_hash::FxHashMap;
 
 use super::super::compiled_boundary::{
     BlockedModule, BlockedProvider, CompiledGraphBoundary, CompletedSourcePackageRegistry,
-    DiagnosedModule, PackageBoundaryId, ProjectDiagnosticBudget, SchedulingCutoff,
+    DiagnosedModule, ProjectDiagnosticBudget, SchedulingCutoff,
 };
 use super::super::config_boundary;
 use super::super::generated_store::BoundaryGeneratedFunctionStore;
@@ -129,7 +130,6 @@ pub(super) struct BoundaryCompilationContext<'a> {
     build_config_inputs: BuildConfigInputSet,
     builder_globals: BuilderConfigGlobalSet,
     direct_project_facts: Vec<BuildConfigContractFact>,
-    implicit_template_package_ids: Vec<PackageBoundaryId>,
 }
 
 impl<'a> BoundaryCompilationContext<'a> {
@@ -153,14 +153,6 @@ impl<'a> BoundaryCompilationContext<'a> {
         direct_project_facts: Vec<BuildConfigContractFact>,
         project_globals: Option<&'a ProjectGlobalsInterface>,
     ) -> Self {
-        let mut implicit_template_package_ids = builder_surface
-            .implicit_template_scope_source_packages
-            .iter()
-            .filter_map(|prefix| completed_packages.by_prefix(prefix))
-            .collect::<Vec<_>>();
-        implicit_template_package_ids.sort_unstable();
-        implicit_template_package_ids.dedup();
-
         Self {
             config,
             build_profile,
@@ -176,7 +168,6 @@ impl<'a> BoundaryCompilationContext<'a> {
             builder_globals,
             direct_project_facts,
             project_globals,
-            implicit_template_package_ids,
         }
     }
 
@@ -248,57 +239,40 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
 fn facade_project_globals_dependency(
     prepared: &PreparedModule,
 ) -> Result<Option<DiagnosticDraft>, InfrastructureFailure> {
-    let active_origin = prepared
+    // Only the selected project root's support facade is the external project package surface.
+    // An entry-only or normal-only module has no project package surface to validate.
+    let mut is_project_package_surface = false;
+    for (surface_root_file_id, surface_role) in prepared
         .semantic
-        .source_module_origins
-        .origin_for(prepared.semantic.active_root_file_id)?
-        .ok_or_else(|| {
-            InfrastructureFailure::internal(
-                CompilerStage::ProjectBuildAssembly,
-                "facade dependency validation found no owning origin for the active root",
-            )
-        })?;
-    let is_project_package_surface = matches!(
-        active_origin.role(),
-        ModuleRootRole::SyntheticProjectContext | ModuleRootRole::Support
-    ) && active_origin.logical_module_path().is_empty();
-    let has_project_package_support_surface = match prepared.semantic.support_root_file_id {
-        Some(support_root_file_id) => {
-            let support_origin = prepared
-                .semantic
-                .source_module_origins
-                .origin_for(support_root_file_id)?
-                .ok_or_else(|| {
-                    InfrastructureFailure::internal(
-                        CompilerStage::ProjectBuildAssembly,
-                        format!(
-                            "facade dependency validation found no owning origin for paired support root source {}",
-                            support_root_file_id.index()
-                        ),
-                    )
-                })?;
-            support_origin.role() == ModuleRootRole::Support
-                && support_origin.logical_module_path().is_empty()
+        .facade_surface_roots()
+        .into_iter()
+        .flatten()
+    {
+        if surface_role != ModuleRootRole::Support {
+            continue;
         }
-        None => false,
-    };
-    if !is_project_package_surface && !has_project_package_support_surface {
+        let surface_origin = prepared
+            .semantic
+            .source_module_origins
+            .origin_for(surface_root_file_id)?
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    "facade dependency validation found no owning origin for a support facade root",
+                )
+            })?;
+        if surface_origin.logical_module_path().is_empty() {
+            is_project_package_surface = true;
+            break;
+        }
+    }
+    if !is_project_package_surface {
         return Ok(None);
     }
 
-    for (source_path, clauses) in &prepared
-        .semantic
-        .prepared_header_syntax
-        .module_symbols
-        .file_dependency_clauses_by_source
-    {
-        let Some(source_id) = prepared
-            .semantic
-            .prepared_header_syntax
-            .module_symbols
-            .source_ids_by_source
-            .get(source_path)
-        else {
+    let module_symbols = &prepared.semantic.prepared_header_syntax.module_symbols;
+    for (source_path, dependency, clause_kind) in module_symbols.authored_dependencies() {
+        let Some(source_id) = module_symbols.source_ids_by_source.get(source_path) else {
             continue;
         };
         let Some(source_origin) = prepared
@@ -314,19 +288,17 @@ fn facade_project_globals_dependency(
         ) {
             continue;
         }
-        for clause in clauses {
-            if is_project_globals_dependency(
-                clause.dependency.path,
-                &prepared.semantic.path_fork,
-                &prepared.semantic.string_table,
-            ) {
-                let diagnostic = project_config::invalid_dependency_clause(
-                    clause.binding.clause_kind(),
-                    InvalidDependencyClauseReason::ProjectGlobalsFacadeDependencyNotAllowed,
-                    Some(clause.dependency.span),
-                );
-                return Ok(Some(diagnostic));
-            }
+        if is_project_globals_dependency(
+            dependency.path,
+            &prepared.semantic.path_fork,
+            &prepared.semantic.string_table,
+        ) {
+            let diagnostic = project_config::invalid_dependency_clause(
+                clause_kind,
+                InvalidDependencyClauseReason::ProjectGlobalsFacadeDependencyNotAllowed,
+                Some(dependency.span),
+            );
+            return Ok(Some(diagnostic));
         }
     }
     Ok(None)
@@ -402,59 +374,57 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         }
 
         let mut dependencies = Vec::new();
-        for file_dependency_clauses in prepared
-            .semantic
-            .prepared_header_syntax
-            .module_symbols
-            .file_dependency_clauses_by_source
-            .values()
-        {
-            for clause in file_dependency_clauses {
-                let shell_id = clause.dependency.dependency_shell_id;
-                if is_project_globals_dependency(
-                    clause.dependency.path,
-                    &prepared.semantic.path_fork,
-                    &prepared.semantic.string_table,
-                ) {
-                    let Some(project_globals) = self.boundary.project_globals else {
-                        return Err(InfrastructureFailure::internal(
-                            CompilerStage::ProjectBuildAssembly,
-                            format!(
-                                "ModuleId {} attempted to bind reserved @project outside its owning project boundary",
-                                consumer_module_id.index()
-                            ),
-                        ));
-                    };
-                    dependencies.push(SourceProviderDependency {
-                        kind: ProviderDependencyKind::Authored { shell: shell_id },
-                        interface: project_globals.interface(),
-                    });
-                    continue;
-                }
-                if check_only {
-                    if let Some((provider_module_id, provider_surface)) =
-                        transient_provider_index.get(&shell_id).copied()
-                    {
-                        let interface = self
+        // Authored clauses and expression-qualified occurrences share one provider-interface
+        // contract: every retained shell resolves by identity against the same module/package
+        // indexes. Occurrences install no local name, so only their shell and authored path
+        // participate here. A file may contribute only occurrences, so the source set is the
+        // union of both retained maps.
+        let module_symbols = &prepared.semantic.prepared_header_syntax.module_symbols;
+        for (_, dependency, _) in module_symbols.authored_dependencies() {
+            let shell_id = dependency.dependency_shell_id;
+            if is_project_globals_dependency(
+                dependency.path,
+                &prepared.semantic.path_fork,
+                &prepared.semantic.string_table,
+            ) {
+                let Some(project_globals) = self.boundary.project_globals else {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "ModuleId {} attempted to bind reserved @project outside its owning project boundary",
+                            consumer_module_id.index()
+                        ),
+                    ));
+                };
+                dependencies.push(SourceProviderDependency {
+                    kind: ProviderDependencyKind::Authored { shell: shell_id },
+                    interface: project_globals.interface(),
+                });
+                continue;
+            }
+            if check_only {
+                if let Some((provider_module_id, provider_surface)) =
+                    transient_provider_index.get(&shell_id).copied()
+                {
+                    let interface = self
                             .provider_store
                             .interface_for_surface(provider_module_id, provider_surface)?
                             .ok_or_else(|| {
                                 InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
-                                    "Check-only ModuleId {} started semantic binding before provider ModuleId {} published a complete interface",
+                                    "Check-only ModuleId {} started semantic binding before provider ModuleId {} published its {provider_surface:?} interface",
                                     consumer_module_id.index(),
                                     provider_module_id.index()
                                 ))
                             })?;
-                        dependencies.push(SourceProviderDependency {
-                            kind: ProviderDependencyKind::Authored { shell: shell_id },
-                            interface,
-                        });
-                        continue;
-                    }
+                    dependencies.push(SourceProviderDependency {
+                        kind: ProviderDependencyKind::Authored { shell: shell_id },
+                        interface,
+                    });
+                    continue;
+                }
 
-                    if let Some(dependency_prefix) = transient_package_index.get(&shell_id).copied()
-                    {
-                        let package_id = self
+                if let Some(dependency_prefix) = transient_package_index.get(&shell_id).copied() {
+                    let package_id = self
                             .boundary
                             .completed_packages
                             .by_prefix(dependency_prefix)
@@ -465,26 +435,25 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                                     dependency_prefix
                                 ))
                             })?;
-                        let completed_package =
-                            self.boundary.completed_packages.package(package_id)?;
-                        dependencies.push(SourceProviderDependency {
-                            kind: ProviderDependencyKind::Authored { shell: shell_id },
-                            interface: completed_package.root_interface()?,
-                        });
-                    }
-
-                    // Same-owner source dependencies and provider clauses handled by the external
-                    // registry intentionally have no transient interface record. Do not consult
-                    // the canonical indexes for this shell.
-                    continue;
+                    let completed_package = self.boundary.completed_packages.package(package_id)?;
+                    dependencies.push(SourceProviderDependency {
+                        kind: ProviderDependencyKind::Authored { shell: shell_id },
+                        interface: completed_package.root_interface()?,
+                    });
                 }
 
-                if let Some(binding_index) = self
-                    .provider_binding_index
-                    .get(&(consumer_module_id, shell_id))
-                {
-                    let binding = &self.provider_bindings[*binding_index];
-                    let interface = self
+                // Same-owner source dependencies and provider clauses handled by the external
+                // registry intentionally have no transient interface record. Do not consult
+                // the canonical indexes for this shell.
+                continue;
+            }
+
+            if let Some(binding_index) = self
+                .provider_binding_index
+                .get(&(consumer_module_id, shell_id))
+            {
+                let binding = &self.provider_bindings[*binding_index];
+                let interface = self
                         .provider_store
                         .interface_for_surface(
                             binding.provider_module_id,
@@ -492,27 +461,28 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                         )?
                         .ok_or_else(|| {
                             InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
-                                "ModuleId {} started semantic binding before provider ModuleId {} published a complete interface",
+                                "ModuleId {} started semantic binding before provider ModuleId {} published its {:?} interface",
                                 consumer_module_id.index(),
-                                binding.provider_module_id.index()
+                                binding.provider_module_id.index(),
+                                binding.provider_surface
                             ))
                         })?;
 
-                    dependencies.push(SourceProviderDependency {
-                        kind: ProviderDependencyKind::Authored { shell: shell_id },
-                        interface,
-                    });
-                    continue;
-                }
+                dependencies.push(SourceProviderDependency {
+                    kind: ProviderDependencyKind::Authored { shell: shell_id },
+                    interface,
+                });
+                continue;
+            }
 
-                let Some(package_index) = self
-                    .source_package_dependency_index
-                    .get(&(consumer_module_id, shell_id))
-                else {
-                    continue;
-                };
-                let package_dependency = &self.source_package_dependencies[*package_index];
-                let package_id = self
+            let Some(package_index) = self
+                .source_package_dependency_index
+                .get(&(consumer_module_id, shell_id))
+            else {
+                continue;
+            };
+            let package_dependency = &self.source_package_dependencies[*package_index];
+            let package_id = self
                     .boundary
                     .completed_packages
                     .by_prefix(package_dependency.dependency_prefix.as_str())
@@ -523,36 +493,37 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                             package_dependency.dependency_prefix
                         ))
                     })?;
-                let completed_package = self.boundary.completed_packages.package(package_id)?;
+            let completed_package = self.boundary.completed_packages.package(package_id)?;
 
-                dependencies.push(SourceProviderDependency {
-                    kind: ProviderDependencyKind::Authored { shell: shell_id },
-                    interface: completed_package.root_interface()?,
-                });
-            }
+            dependencies.push(SourceProviderDependency {
+                kind: ProviderDependencyKind::Authored { shell: shell_id },
+                interface: completed_package.root_interface()?,
+            });
         }
 
-        // Builder source-backed packages are implicitly available only to modules that actually
-        // contain a `.mtf` semantic source. The package capability is supplied by the active
-        // builder surface; generic orchestration must not infer it from a package-name list.
+        // The flat `.mtf` helper prelude is compiler policy, not a builder capability list. The
+        // constants come from the official compiled `@html` source package whenever a module
+        // contains a Moth template, so they keep normal provider identity and diagnostics.
         if prepared.contains_moth_template {
-            let implicit_provider_dependencies: Vec<SourceProviderDependency<'boundary>> = self
+            let package_id = self
                 .boundary
-                .implicit_template_package_ids
-                .iter()
-                .map(|package_id| {
-                    let package = self.boundary.completed_packages.package(*package_id)?;
-                    let interface = package.root_interface()?;
-                    Ok(SourceProviderDependency {
-                        kind: ProviderDependencyKind::ImplicitTemplate {
-                            package_prefix: package.package_prefix(),
-                        },
-                        interface,
-                    })
-                })
-                .collect::<Result<_, InfrastructureFailure>>()?;
+                .completed_packages
+                .by_prefix(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX)
+                .ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "Moth template module cannot bind the template prelude because no \
+                             '@{TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX}' source package is registered"
+                        ),
+                    )
+                })?;
+            let package = self.boundary.completed_packages.package(package_id)?;
 
-            dependencies.extend(implicit_provider_dependencies);
+            dependencies.push(SourceProviderDependency {
+                kind: ProviderDependencyKind::TemplatePrelude,
+                interface: package.root_interface()?,
+            });
         }
 
         SourceProviderDependencySet::new(dependencies)
@@ -674,7 +645,6 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 None,
                 None,
                 None,
-                None,
                 module_context,
             )
         }
@@ -688,7 +658,6 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 prepared,
                 preparation_warnings,
                 known_generated,
-                None,
                 None,
                 None,
                 None,
@@ -716,7 +685,6 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         check_only_source_package_dependencies: Option<
             &[module_inventory::CheckOnlySourcePackageDependency],
         >,
-        check_only_source_role: Option<ModuleRootRole>,
         external_packages: Option<Arc<ExternalPackageRegistry>>,
         external_dependency_resolution_table: Option<&ExternalImportResolutionTable>,
         module_error_allowance_override: Option<NonZeroU32>,
@@ -806,11 +774,6 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             options: frontend_options,
             build_profile: self.boundary.build_profile,
             source_files: &self.boundary.source_files,
-            root_role_override: check_only_source_role.or_else(|| {
-                (check_only_provider_bindings.is_some()
-                    || check_only_source_package_dependencies.is_some())
-                .then_some(ModuleRootRole::Support)
-            }),
             project_path_resolver: Some(self.boundary.project_path_resolver),
             style_directives: self.boundary.style_directives,
             external_packages: effective_external_packages,
@@ -877,7 +840,6 @@ fn compile_check_only_job(
 ) -> DirectoryModuleTaskResult {
     let module_inventory::CheckOnlyModuleCompilationJob {
         owner_module_id: module_id,
-        source_role,
         path_base_len,
         string_table_base_len: base_len,
         provider_bindings,
@@ -945,7 +907,6 @@ fn compile_check_only_job(
             Some(&check_only_build_config_values),
             Some(&provider_bindings),
             Some(&source_package_dependencies),
-            Some(source_role),
             Some(external_packages),
             Some(&external_dependency_resolution_table),
             module_error_allowance_override,
@@ -965,7 +926,6 @@ fn compile_check_only_job(
             Some(&check_only_build_config_values),
             Some(&provider_bindings),
             Some(&source_package_dependencies),
-            Some(source_role),
             Some(external_packages),
             Some(&external_dependency_resolution_table),
             module_error_allowance_override,
@@ -1383,7 +1343,7 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                 match outcome.outcome {
                     DirectoryModuleTaskOutcome::Success(compiled, warnings, sidecar_warnings) => {
                         let node = graph.node(outcome.module_id);
-                        let (expected_origin, expected_support_origin) =
+                        let (expected_normal_origin, expected_support_origin) =
                             node.publication_surfaces();
                         publish_compiled_module(
                             &mut provider_store,
@@ -1391,7 +1351,7 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                             &mut provider_materialisations,
                             resource_inputs,
                             outcome.module_id,
-                            expected_origin,
+                            expected_normal_origin,
                             expected_support_origin,
                             *compiled,
                             warnings,

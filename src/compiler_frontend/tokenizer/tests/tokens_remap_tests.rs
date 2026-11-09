@@ -299,7 +299,6 @@ fn prepared_output_merge_remaps_canonical_token_payloads() {
         owner,
         source_file,
         lexed.path_syntax,
-        source_path,
         &HeaderParseOptions::default(),
         local_strings,
         &mut local_paths,

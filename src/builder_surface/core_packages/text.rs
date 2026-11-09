@@ -5,6 +5,7 @@
 //! and backend lowering all share one canonical API shape.
 
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalAccessKind, ExternalReturnAlias, ExternalSignatureType,
 };
@@ -75,11 +76,10 @@ pub fn register_core_text_package(registry: &mut ExternalPackageRegistry) {
                 ExternalFunctionSpec {
                     name: (*name).to_owned(),
                     parameters: parameters.clone(),
-                    returns: external_success_returns(
-                        return_type.clone(),
-                        ExternalReturnAlias::Fresh,
+                    return_contract: external_returns(
+                        external_success_returns(return_type.clone(), ExternalReturnAlias::Fresh),
+                        None,
                     ),
-                    error_return_type: None,
                     const_eval: Some(ExternalConstEvalOp::Text(*const_eval_op)),
                     lowerings: ExternalFunctionLowerings {
                         js: Some(ExternalJsLowering::RuntimeFunction((*js_name).to_owned())),

@@ -39,12 +39,12 @@ Neither analysis depends on a collector. A GC backend must receive the same vali
 
 ## The proof pipeline
 
-[diagram:
+[@diagrams diagram:
     [$in label: Legality is proven before representation is chosen]
     [$in caption: The first two steps decide whether the program is allowed at all. Only the last two decide how it gets stored. Swapping that order is the mistake this whole design exists to prevent.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../borrow-validation-and-drops/]
             [$in eyebrow: Shared, target-independent]
             [$in title: Proof of legality]
@@ -52,10 +52,10 @@ Neither analysis depends on a collector. A GC backend must receive the same vali
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Last shared artefact]
-                [lane:
-                [detail:
+                [@diagrams lane:
+                [@diagrams detail:
                     [$in href: ./]
                     Backend-neutral memory requirements, carrying no chosen strategy
                 ]
@@ -64,8 +64,8 @@ Neither analysis depends on a collector. A GC backend must receive the same vali
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../target-planning-and-validation/]
             [$in eyebrow: Build-owned]
             [$in title: Target partition and validation]
@@ -73,8 +73,8 @@ Neither analysis depends on a collector. A GC backend must receive the same vali
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Per variant, compiler-owned]
             [$in title: Choice of representation]
@@ -82,22 +82,22 @@ Neither analysis depends on a collector. A GC backend must receive the same vali
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Strategies available]
-                [fanout:
-                [detail:
+                [@diagrams fanout:
+                [@diagrams detail:
                     [$in href: ./]
                     Stack or inline placement
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     Affine cleanup
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     Inferred or declared regions
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     REC or a collector
                 ]
@@ -106,8 +106,8 @@ Neither analysis depends on a collector. A GC backend must receive the same vali
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../backend-lowering/]
             [$in eyebrow: Encoded]
             [$in title: ValidatedMemoryPlan]
@@ -231,12 +231,12 @@ Backends realise the validated memory plan through different physical mechanisms
 
 ### Retained Edge Counting
 
-[diagram:
+[@diagrams diagram:
     [$in label: The planner works down a ladder before it reaches REC]
     [$in caption: Each step down the ladder costs more than the one above it, so the planner takes the first rung that answers precisely enough. A counter is the last option.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Cheapest]
             [$in title: Static cleanup]
@@ -244,8 +244,8 @@ Backends realise the validated memory plan through different physical mechanisms
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Bulk]
             [$in title: Regions]
@@ -253,8 +253,8 @@ Backends realise the validated memory plan through different physical mechanisms
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Refinement]
             [$in title: Frontiers, splitting and bounded retention]
@@ -262,8 +262,8 @@ Backends realise the validated memory plan through different physical mechanisms
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Last resort]
             [$in title: Retained Edge Counting]
@@ -327,7 +327,7 @@ Source failures use structured diagnostics. Missing compiler-owned metadata or a
 - **Queued work:** consolidate and implement the collector-free memory and REC plans named in `docs/roadmap/roadmap.md`.
 - **Deferred or outside scope:** lifetime topology, retained-edge liveness and epochs, declared regions and cycles, memory-strategy planning, REC, field splitting, region lowering, builder lifecycle roots and collector-free verification.
 
-Read this page as the accepted destination. The memory rows in `docs/docs/progress/@page.moth` are the authority on what runs today.
+Read this page as the accepted destination. The memory rows in `docs/docs/progress/@entry.moth` are the authority on what runs today.
 
 ## Exit state
 

@@ -136,6 +136,11 @@ impl GenericParameterOriginResolver for GeneratedRequestGenericParameters<'_> {
 #[derive(Clone)]
 pub(crate) struct CanonicalGeneratedRequest {
     pub(crate) identity: GeneratedFunctionIdentity,
+    /// Requester-local call target path installed for this request's generated contract.
+    ///
+    /// Keep this beside the identity so proof-cycle accumulation can join a sidecar's generated
+    /// root back to the path requester Never calls target.
+    pub(crate) instance_path: PathId,
     pub(crate) function_name: Option<StringId>,
     pub(crate) call_span: Option<SourceSpan>,
 }
@@ -245,10 +250,10 @@ pub(crate) fn install_generated_request_contracts<'a>(
             &mapping,
             &mut module_ast.type_environment,
         );
-        let returns = signature.success_return_type_ids();
-        let error_return = signature.error_return_type_id();
+        let return_contract = signature.return_contract.clone();
         identities.push(CanonicalGeneratedRequest {
             identity: identity.clone(),
+            instance_path: request.instance_path,
             function_name: path_fork.component(request.key.function_path),
             call_span: request.call_span,
         });
@@ -259,8 +264,7 @@ pub(crate) fn install_generated_request_contracts<'a>(
                 local_path: request.instance_path,
             },
             summary,
-            returns,
-            error_return,
+            return_contract,
         };
 
         module_ast

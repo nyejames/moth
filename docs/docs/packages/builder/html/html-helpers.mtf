@@ -2,9 +2,9 @@
 
 `@html` ships as a skeleton. The current export surface covers common HTML tags, a few formatting helpers, table components and a thin canvas wrapper. It will grow as the language stabilises and the first-party packages expand.
 
-### Implicit scope for Moth template files
+### The fixed template prelude
 
-Exported compile-time constants from `@html` are visible inside `.mtf` files without an explicit dependency clause. This is the primary way authors use the helpers.
+Exported compile-time constants from `@html` are visible flat inside `.mtf` files without an explicit dependency clause. This is the standard HTML template prelude.
 
 [codeblock, $code("moth"):
     -- docs/intro.mtf
@@ -13,13 +13,17 @@ Exported compile-time constants from `@html` are visible inside `.mtf` files wit
     [codeblock, $code("moth"): value = 42]
 ]
 
-A `.moth` file that needs specific `@html` symbols can bind them explicitly:
+The prelude is compiler policy, not builder configuration. A builder that enables `.mtf` sources must register the official `@html` package set at its built-in package root. `@html` is reserved for that package set, so a custom source package cannot take the name or substitute different constants. Source packages that contain `.mtf` files order after `@html`.
+
+A `.moth` file that needs specific `@html` symbols binds them explicitly:
 
 [codeblock, $code("moth"):
     @html table, th, td
 ]
 
-Same-directory module root constants and `@html` constants don't shadow each other. If both surfaces expose the same visible name, compilation fails with a collision diagnostic. See @../../../moth-templates/#template-scope (Template scope) for the full collision contract.
+A `.mtf` file has no implicit module facade constants. Reach any helper value with a qualified reference that names the helper path and one selected symbol, or move the shared value into a helper the template can select. Root-local declarations in `@mod.moth`, `@package.moth` and `@entry.moth` stay invisible. See @../../../moth-templates/#template-scope (Template scope) for the full template scope contract.
+
+A qualified selection introduces no local binding, so it never collides with a prelude name. A real local binding that matches a prelude name still fails with an ordinary visible-name collision.
 
 ### Exported constants
 
@@ -275,5 +279,5 @@ The canvas wrapper functions call through to `@web/canvas`, which emits JavaScri
 
 - For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
 - For dependency-path rules see @../../#dependency-paths (Dependency paths).
-- For `.mtf` implicit scope see @../../../moth-templates/#template-scope (Template scope).
+- For `.mtf` template scope and the fixed prelude see @../../../moth-templates/#template-scope (Template scope).
 - For the `@web/canvas` runtime package see @../canvas (@web/canvas).

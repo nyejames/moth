@@ -11,7 +11,7 @@ message_contains = ["expected 1 success slot(s), but this expression produces 2.
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0087"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 6
 count = 1
 
@@ -23,6 +23,6 @@ message_contains = ["expected 1 success slot(s), but this expression produces 2.
 
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0087"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 6
 count = 1

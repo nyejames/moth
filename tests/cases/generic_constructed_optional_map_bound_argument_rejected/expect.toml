@@ -9,7 +9,7 @@ message_contains = ["expected {String = U64?}", "found {String = U64}"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 4
 column = 18
 count = 1

@@ -322,6 +322,15 @@ fn expand_node<'a>(
         | NodeKind::PushStartRuntimeFragment(value)
         | NodeKind::ExpressionStatement(value) => push_expression(*value, context, out),
 
+        NodeKind::NeverCall(call) => {
+            if let Some(receiver) = call.receiver {
+                push_expression(receiver, context, out);
+            }
+            for argument in &call.arguments {
+                push_expression(argument.value, context, out);
+            }
+        }
+
         // Declarations and assignments.
         NodeKind::VariableDeclaration(declaration) => {
             expand_declaration(declaration, context, out)?
@@ -852,9 +861,11 @@ fn validate_signature(
             })?;
         }
     }
-    validate_type_ids(&signature.success_return_type_ids(), context)?;
-    if let Some(error_return_type_id) = signature.error_return_type_id() {
-        validate_type_id(error_return_type_id, context)?;
+    if let Some(returns) = signature.return_contract.ordinary() {
+        validate_type_ids(returns.success(), context)?;
+        if let Some(error_return_type_id) = returns.error() {
+            validate_type_id(error_return_type_id, context)?;
+        }
     }
     Ok(())
 }

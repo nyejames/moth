@@ -483,7 +483,7 @@ fn catch_body_warnings_require_a_warning_sink() {
 fn catch_handler_warning_codes() -> Vec<&'static str> {
     let source = "|BadName|:\n    if 1 is:\n        1 => return 0\n        else => return 0\n        2 => return 0\n    ;\n;";
     let mut path_fork = PathInternerFork::empty();
-    let mut source_context = TestSourceContext::new("@page.moth");
+    let mut source_context = TestSourceContext::new("@entry.moth");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let lexed = source_context
         .tokenize(
@@ -720,6 +720,29 @@ fn parses_catch_handler_without_fallback_when_handler_ends_with_assert_false_no_
 fn rejects_catch_handler_without_fallback_when_handler_can_fall_through() {
     assert_invalid_fallible_handling(
         "can_error |value String| -> String, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String, route Bool| -> String:\n    return can_error(value) catch |err|:\n        if route:\n            io.line([: [err.message]])\n        else\n            io.line([: [err.code]])\n        ;\n    ;\n;\n",
+        InvalidFallibleHandlingReason::CatchHandlerCanFallThrough,
+    );
+}
+
+#[test]
+fn accepts_catch_handler_ending_in_loop_exit_inside_loop() {
+    for exit in ["break", "continue"] {
+        let source = format!(
+            "can_error || -> I32, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |keep_going Bool| -> I32:\n    loop keep_going:\n        output = can_error() catch:\n            {exit}\n        ;\n        return output\n    ;\n    return 0\n;\n"
+        );
+        let (ast, path_fork, string_table) = parse_single_file_ast(&source);
+        let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
+        assert!(
+            matches!(body[0].kind, NodeKind::WhileLoop(..)),
+            "the accepted value-required catch handler stays inside its loop"
+        );
+    }
+}
+
+#[test]
+fn rejects_catch_handler_whose_nested_loop_consumes_its_break() {
+    assert_invalid_fallible_handling(
+        "can_error || -> I32, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |keep_going Bool| -> I32:\n    loop keep_going:\n        output = can_error() catch:\n            loop true:\n                break\n            ;\n        ;\n        return output\n    ;\n    return 0\n;\n",
         InvalidFallibleHandlingReason::CatchHandlerCanFallThrough,
     );
 }

@@ -6,5 +6,5 @@ diagnostic_codes = ["MOTH-RULE-0051"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0051"
 reason = "invalid_fallible_handling.catch_on_non_fallible"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 count = 1

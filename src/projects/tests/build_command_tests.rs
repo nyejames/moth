@@ -46,7 +46,7 @@ fn write_directory_project(root: &Path, page_source: &str) {
         "project #= (\n    name = \"docs\",\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
     )
     .expect("should write project config");
-    fs::write(root.join("@page.moth"), page_source).expect("should write page source");
+    fs::write(root.join("@entry.moth"), page_source).expect("should write page source");
 }
 
 fn build_result_with_warnings(
@@ -162,12 +162,12 @@ fn budget_stopped_build_writes_no_output_and_reports_the_cutoff() {
     )
     .expect("should write project config");
     fs::write(
-        src.join("first/@first.moth"),
+        src.join("first/@entry.moth"),
         "first || -> I32:\n    return missing_one\n;\n",
     )
     .expect("should write first failing module root");
     fs::write(
-        src.join("second/@second.moth"),
+        src.join("second/@entry.moth"),
         "second || -> I32:\n    return missing_two\n;\n",
     )
     .expect("should write second failing module root");
@@ -364,7 +364,7 @@ fn cli_warning_report_owns_its_identity_context_until_dropped() {
                 let position = DiagnosticRenderContext::for_report(warning_report)
                     .site_position(warning.primary_site())
                     .expect("the warning should resolve through its report context");
-                assert!(position.path.ends_with("@page.moth"));
+                assert!(position.path.ends_with("@entry.moth"));
                 assert!(position.line.contains("\"one\" => ~result = \"one\""));
                 Arc::downgrade(&warning_report.shared_context())
             };

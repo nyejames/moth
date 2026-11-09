@@ -216,8 +216,6 @@ impl HeaderFileParseState {
         file_role: FileRole,
     ) -> FileFrontendPrepareOutput {
         let file_id = owner.source_id();
-        let has_non_trivial_root_body =
-            file_role == FileRole::ActiveModuleRoot && self.has_non_trivial_start_body();
         let token_stats = owner.token_stats();
         let source_token_stream = owner.into_tokens();
         FileFrontendPrepareOutput {
@@ -229,13 +227,13 @@ impl HeaderFileParseState {
             file_role,
             file_dependency_clauses: self.file_dependency_clauses,
             structural_file_references: Default::default(),
+            qualified_references: Default::default(),
             dependency_selections: self.dependency_selections,
             headers: self.headers,
             top_level_const_fragments: self.top_level_const_fragments,
             source_token_stream: Some(source_token_stream),
             const_template_count: self.const_template_count,
             runtime_fragment_count: self.runtime_fragment_count,
-            has_non_trivial_root_body,
             start_body_binding_spans: self.start_body_binding_spans,
             warnings: self.warnings,
         }
@@ -250,11 +248,11 @@ impl HeaderFileParseState {
         file_role: FileRole,
     ) -> Result<FileFrontendPrepareOutput, InfrastructureFailure> {
         let file_id = owner.source_id();
-        let has_non_trivial_root_body = self.has_non_trivial_start_body();
         use crate::compiler_frontend::headers::types::HeaderExportMode;
 
-        // Active module root: publish the source-owned start sequence for later AST body parsing.
-        // `start` is never a dependency-graph participant, so this header keeps no graph edges.
+        // The start-bearing root publishes its source-owned start sequence for later AST body
+        // parsing. `start` is never a dependency-graph participant, so this header keeps no
+        // graph edges.
         let token_sequence = owner.register_token_sequence(&self.start_body_ranges)?;
         let start_range = TokenRange::new(file_id, end_index, end_index)
             .expect("equal token indexes always form a valid empty range");
@@ -284,12 +282,12 @@ impl HeaderFileParseState {
             file_role,
             file_dependency_clauses: self.file_dependency_clauses,
             structural_file_references: Default::default(),
+            qualified_references: Default::default(),
             dependency_selections: self.dependency_selections,
             headers: self.headers,
             top_level_const_fragments: self.top_level_const_fragments,
             const_template_count: self.const_template_count,
             runtime_fragment_count: self.runtime_fragment_count,
-            has_non_trivial_root_body,
             start_body_binding_spans: self.start_body_binding_spans,
             warnings: self.warnings,
         })

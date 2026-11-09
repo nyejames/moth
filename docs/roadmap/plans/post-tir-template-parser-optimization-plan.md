@@ -36,7 +36,7 @@ ACTIVATION_GATE: representative profiling or counters must identify a material b
 - `docs/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
 - `docs/developer-docs/memory-management/overview.mtf` and selected leaves when source slices,
   arenas or borrowed storage change lifetime or ownership
-- `docs/docs/progress/@page.moth` for current support and backend coverage
+- `docs/docs/progress/@entry.moth` for current support and backend coverage
 - delivered canonical module compilation and scoped packages, for stable source and
   module identities required by persistent reuse
 - the build and memory authorities' mixed-target output and runtime-string ownership contracts

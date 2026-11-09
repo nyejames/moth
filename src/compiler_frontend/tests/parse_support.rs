@@ -27,8 +27,8 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    HeaderParseOptions, HeaderPreparationFailure, bind_module_headers, prepare_file_from_tokens,
-    prepare_header_syntax,
+    FileRole, HeaderParseOptions, HeaderPreparationFailure, bind_module_headers,
+    prepare_file_from_tokens, prepare_header_syntax,
 };
 use crate::compiler_frontend::module_compilation::{
     AstRecoveryPolicy, DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
@@ -57,6 +57,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::TokenizeFailure;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use std::cell::RefCell;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -70,6 +71,37 @@ pub(crate) fn test_project_path_resolver() -> ProjectPathResolver {
         &crate::builder_surface::SourceFileKindRegistry::default(),
         ModuleRootTable::empty(),
     )
+}
+
+/// Header options for one single-file fixture selected as its synthetic entry root.
+pub(crate) fn synthetic_entry_options(file_id: SourceId) -> HeaderParseOptions<'static> {
+    HeaderParseOptions {
+        root_file_ids: Default::default(),
+        selected_file: Some((file_id, FileRole::ActiveEntryRoot)),
+        reached_root_roles: &[],
+    }
+}
+
+/// Header role for one file in a single-module header fixture.
+///
+/// WHAT: maps the fixture's explicitly selected executable path and the canonical `@entry.moth`
+///       spelling to the entry root, and the two API-facade spellings to their active facade
+///       roles. Returns `None` for ordinary sources so the caller keeps
+///       [`HeaderParseOptions::default`].
+/// WHY: test fixtures prepare several root-named files in one set and identify the executable root
+///       by path. Production derives roles from Stage 0's root inventory and the explicit
+///       synthetic selection instead; this helper keeps that shape in the one test-only owner.
+pub(crate) fn fixture_file_role(file_path: &Path, entry_file_path: &Path) -> Option<FileRole> {
+    if entry_file_path == file_path {
+        return Some(FileRole::ActiveEntryRoot);
+    }
+    let file_name = file_path.file_name()?.to_str()?;
+    match file_name {
+        "@entry.moth" => Some(FileRole::ActiveEntryRoot),
+        "@package.moth" => Some(FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Support)),
+        "@mod.moth" => Some(FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal)),
+        _ => None,
+    }
 }
 
 /// Build deterministic Stage 0 facts for parser tests without reading the filesystem.
@@ -123,6 +155,7 @@ fn test_file_value_resolution_services(
             SourceDatabase::empty().into(),
         ))),
         module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
+        qualified_reference_targets: Arc::default(),
         module_origin: None,
         public_source_trait_origins: Arc::default(),
         frozen_identity_handle: FrozenIdentityHandle::new(),
@@ -169,6 +202,19 @@ pub(crate) fn parse_single_file_ast_build_result(
     parse_single_file_ast_build_result_with_registry(source, ExternalPackageRegistry::new())
 }
 
+/// Parse one single-file fixture whose authored filename selects its root role.
+pub(crate) fn parse_single_file_ast_build_result_with_path(
+    source: &str,
+    path: &str,
+) -> Result<(AstBuildResult, PathInternerFork, StringTable), PreparedFailure> {
+    parse_single_file_ast_build_result_inner(
+        source,
+        path,
+        ExternalPackageRegistry::new(),
+        AstRecoveryPolicy::configured_defaults(),
+    )
+}
+
 pub(crate) fn parse_single_file_ast_build_result_with_registry(
     source: &str,
     registry: ExternalPackageRegistry,
@@ -185,20 +231,21 @@ pub(crate) fn parse_single_file_ast_build_result_with_recovery_policy(
     registry: ExternalPackageRegistry,
     recovery_policy: AstRecoveryPolicy,
 ) -> Result<(AstBuildResult, PathInternerFork, StringTable), PreparedFailure> {
-    let mut source_context = TestSourceContext::new("@page.moth");
+    parse_single_file_ast_build_result_inner(source, "@entry.moth", registry, recovery_policy)
+}
+
+fn parse_single_file_ast_build_result_inner(
+    source: &str,
+    path: &str,
+    registry: ExternalPackageRegistry,
+    recovery_policy: AstRecoveryPolicy,
+) -> Result<(AstBuildResult, PathInternerFork, StringTable), PreparedFailure> {
+    let mut source_context = TestSourceContext::new(path);
 
     let mut path_fork = PathInternerFork::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let external_package_registry = Arc::new(registry);
-    let file_path = source_context.path().to_path_buf();
     let project_path_resolver = test_project_path_resolver();
-
-    let options = HeaderParseOptions {
-        entry_file_id: None,
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
-    };
 
     let lexed = match source_context.tokenize(
         source,
@@ -219,15 +266,35 @@ pub(crate) fn parse_single_file_ast_build_result_with_recovery_policy(
             panic!("parse fixture tokenization encountered infrastructure failure: {error:?}")
         }
     };
+    let file_id = lexed.file_id;
     let owner = SourceTokenOwner::new(lexed.tokens);
     let path_syntax = lexed.path_syntax;
     let (string_table, span_builder) = source_context.preparation_parts();
+
+    // The single-file fixture role follows its authored root filename; ordinary names are
+    // explicitly selected entry roots.
+    let selected_role = Path::new(path)
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .and_then(
+            crate::compiler_frontend::source_packages::root_file::module_root_role_for_file_name,
+        )
+        .map_or(FileRole::ActiveEntryRoot, |role| match role {
+            crate::compiler_frontend::semantic_identity::ModuleRootRole::Entry => {
+                FileRole::ActiveEntryRoot
+            }
+            role => FileRole::ActiveApiOnlyModuleRoot(role),
+        });
+    let options = HeaderParseOptions {
+        root_file_ids: Default::default(),
+        selected_file: Some((file_id, selected_role)),
+        reached_root_roles: &[],
+    };
 
     let output = match prepare_file_from_tokens(
         owner,
         lexed.logical_path,
         path_syntax,
-        &file_path,
         &options,
         string_table,
         0,
@@ -309,7 +376,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_recovery_policy(
     };
 
     let entry_path = path_fork
-        .try_intern_portable_path("@page.moth", string_table)
+        .try_intern_portable_path("@entry.moth", string_table)
         .expect("test entry path fits");
     let build_result = Ast::new(
         AstBuildInput {
@@ -322,7 +389,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_recovery_policy(
             source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
-            root_role: ModuleRootRole::Normal,
+            synthesizes_entry_start: selected_role.synthesizes_entry_start(),
             external_package_registry,
             style_directives: &style_directives,
             path_fork: &mut path_fork,
@@ -353,7 +420,16 @@ pub(crate) fn parse_single_file_ast_result(
 }
 
 pub(crate) fn parse_single_file_ast(source: &str) -> (Ast, PathInternerFork, StringTable) {
-    parse_single_file_ast_result(source).expect("source should parse into AST")
+    match parse_single_file_ast_result(source) {
+        Ok(parsed) => parsed,
+        Err(failure) => {
+            let frozen = freeze_ast_diagnostic_failure(failure);
+            panic!(
+                "source should parse into AST: {}",
+                crate::compiler_frontend::compiler_messages::render::terse::format_terse_compilation_result(&frozen).join("\n")
+            )
+        }
+    }
 }
 
 pub(crate) fn parse_single_file_ast_diagnostic(source: &str) -> CompilationResult<()> {

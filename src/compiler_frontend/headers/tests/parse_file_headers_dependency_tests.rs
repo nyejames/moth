@@ -4,7 +4,7 @@ use super::*;
 fn one_dependency_shell_and_selection_list_per_authored_clause() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/helper.moth");
-    let entry_file_path = PathBuf::from("src/@page.moth");
+    let entry_file_path = PathBuf::from("src/@entry.moth");
     let (output, _span_builder) = prepare_single_file(
         "@core/math sin, cos as cosine\n@core/io\n",
         &file_path,
@@ -55,7 +55,7 @@ fn one_dependency_shell_and_selection_list_per_authored_clause() {
 #[test]
 fn selected_name_duplicate_declaration_preserves_both_exact_spans() {
     let source = "@core/math sin\nsin #= 1\n";
-    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
+    let result = parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
     let errors = expect_header_error(result, "a selected name must conflict with a declaration");
     let diagnostic =
         find_diagnostic_family::<names_declarations::DuplicateDeclarationView>(&errors.diagnostics)
@@ -73,7 +73,7 @@ fn selected_name_duplicate_declaration_preserves_both_exact_spans() {
 #[test]
 fn selected_alias_duplicate_declaration_uses_the_alias_span() {
     let source = "@core/math sin as local\nlocal #= 1\n";
-    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
+    let result = parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
     let errors = expect_header_error(result, "a selected alias must conflict with a declaration");
     let diagnostic =
         find_diagnostic_family::<names_declarations::DuplicateDeclarationView>(&errors.diagnostics)
@@ -91,7 +91,7 @@ fn selected_alias_duplicate_declaration_uses_the_alias_span() {
 #[test]
 fn declaration_followed_by_selection_preserves_declaration_and_selection_spans() {
     let source = "line #= 1\n@core/io line\n";
-    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
+    let result = parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
     let errors = expect_header_error(result, "a selection must conflict with a declaration");
     let diagnostic =
         find_diagnostic_family::<imports::ImportNameCollisionView>(&errors.diagnostics)
@@ -109,7 +109,7 @@ fn declaration_followed_by_selection_preserves_declaration_and_selection_spans()
 #[test]
 fn duplicate_selected_aliases_preserve_first_and_current_alias_spans() {
     let source = "@core/io line as value\n@core/io debug as value\n";
-    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
+    let result = parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
     let errors = expect_header_error(result, "duplicate selected aliases must conflict");
     let diagnostic =
         find_diagnostic_family::<imports::ImportNameCollisionView>(&errors.diagnostics)
@@ -154,7 +154,7 @@ fn direct_selection_out_of_bounds_range_is_rejected_in_the_internal_error_lane()
 #[test]
 fn namespace_alias_duplicate_declaration_uses_the_alias_span() {
     let source = "@core/io as io\nio #= 1\n";
-    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
+    let result = parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
     let errors = expect_header_error(result, "a namespace alias must conflict with a declaration");
     let diagnostic =
         find_diagnostic_family::<names_declarations::DuplicateDeclarationView>(&errors.diagnostics)
@@ -172,7 +172,7 @@ fn namespace_alias_duplicate_declaration_uses_the_alias_span() {
 #[test]
 fn inferred_namespace_duplicate_declaration_uses_the_provider_path_span() {
     let source = "@core/io\nio #= 1\n";
-    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
+    let result = parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
     let errors = expect_header_error(
         result,
         "an inferred namespace name must conflict with a declaration",
@@ -193,7 +193,7 @@ fn inferred_namespace_duplicate_declaration_uses_the_provider_path_span() {
 #[test]
 fn inferred_namespace_provider_path_span_excludes_trailing_whitespace() {
     let source = "@core/io   \nio #= 1\n";
-    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
+    let result = parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
     let errors = expect_header_error(
         result,
         "trailing whitespace must not enter the inferred namespace path span",
@@ -211,7 +211,7 @@ fn inferred_namespace_provider_path_span_excludes_trailing_whitespace() {
 fn retained_clause_uses_one_shell_for_the_provider_binding_index() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/helper.moth");
-    let entry_file_path = PathBuf::from("src/@page.moth");
+    let entry_file_path = PathBuf::from("src/@entry.moth");
     let (output, _span_builder) = prepare_single_file(
         "@drawing.js draw, clear\n",
         &file_path,

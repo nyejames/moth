@@ -37,6 +37,7 @@ use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::CompilationOutcome;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_reports;
+use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalFunctionDef, ExternalFunctionLowerings, ExternalJsLowering,
     ExternalReturnSlot, ExternalSignatureType,
@@ -93,12 +94,13 @@ impl RawFixedF64Function {
         ExternalFunctionDef {
             name: self.name.to_owned(),
             parameters: Vec::new(),
-            returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Fixed(
-                FixedScalar::F64,
-            ))],
-            error_return_type: self
-                .declares_error_slot
-                .then_some(ExternalSignatureType::BuiltinError),
+            return_contract: external_returns(
+                vec![ExternalReturnSlot::fresh(ExternalAbiType::Fixed(
+                    FixedScalar::F64,
+                ))],
+                self.declares_error_slot
+                    .then_some(ExternalSignatureType::BuiltinError),
+            ),
             const_eval: None,
             lowerings: ExternalFunctionLowerings {
                 js: Some(ExternalJsLowering::RuntimeFunction(
@@ -134,7 +136,7 @@ fn compile_raw_fixed_f64_fixture(
     let root = temporary_project.path().to_path_buf();
     fs::write(root.join(CONFIG_FILE_NAME), CONFIG_SOURCE)
         .expect("fixture should write config.moth");
-    fs::write(root.join("@page.moth"), source).expect("fixture should write the entry module");
+    fs::write(root.join("@entry.moth"), source).expect("fixture should write the entry module");
 
     // The registered boundary lives on the builder surface's external registry, the same surface
     // the canonical service clones into each module's effective registry for frontend resolution
@@ -185,8 +187,9 @@ fn compile_raw_fixed_f64_fixture(
             artefact
                 .module
                 .metadata
-                .entry_point
-                .ends_with(Path::new("@page.moth"))
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with(Path::new("@entry.moth")))
         })
         .map(|artefact| &artefact.module)
         .expect("the fixture project should compile its entry module");

@@ -180,6 +180,8 @@ unit_code! {
         MutableAccessOnNonPlace = 15,
         MutableAccessOnImmutablePlace = 16,
         ImmutablePlaceMutableAccessRequired = 17,
+        NeverCallUsedAsValue = 18,
+        NeverCallHandled = 19,
     }
 }
 
@@ -209,6 +211,8 @@ impl InvalidCallShapeCode {
             InvalidCallShapeReason::ImmutablePlaceMutableAccessRequired { .. } => {
                 Self::ImmutablePlaceMutableAccessRequired
             }
+            InvalidCallShapeReason::NeverCallUsedAsValue => Self::NeverCallUsedAsValue,
+            InvalidCallShapeReason::NeverCallHandled => Self::NeverCallHandled,
         }
     }
 }
@@ -314,6 +318,10 @@ unit_code! {
         TooFewReturnValues = 4,
         MissingReturnBangValue = 5,
         FunctionMayFallThrough = 6,
+        NeverBodyMayCompleteNormally = 7,
+        NeverBodyReturnsToCaller = 8,
+        UnannotatedFunctionAlwaysDiverges = 9,
+        NeverProofDependsOnCycle = 10,
     }
 }
 
@@ -330,6 +338,14 @@ impl InvalidReturnShapeCode {
             InvalidReturnShapeReason::TooFewReturnValues { .. } => Self::TooFewReturnValues,
             InvalidReturnShapeReason::MissingReturnBangValue => Self::MissingReturnBangValue,
             InvalidReturnShapeReason::FunctionMayFallThrough => Self::FunctionMayFallThrough,
+            InvalidReturnShapeReason::NeverBodyMayCompleteNormally => {
+                Self::NeverBodyMayCompleteNormally
+            }
+            InvalidReturnShapeReason::NeverBodyReturnsToCaller => Self::NeverBodyReturnsToCaller,
+            InvalidReturnShapeReason::UnannotatedFunctionAlwaysDiverges => {
+                Self::UnannotatedFunctionAlwaysDiverges
+            }
+            InvalidReturnShapeReason::NeverProofDependsOnCycle => Self::NeverProofDependsOnCycle,
         }
     }
 
@@ -357,6 +373,14 @@ impl InvalidReturnShapeCode {
             },
             Self::MissingReturnBangValue => InvalidReturnShapeReason::MissingReturnBangValue,
             Self::FunctionMayFallThrough => InvalidReturnShapeReason::FunctionMayFallThrough,
+            Self::NeverBodyMayCompleteNormally => {
+                InvalidReturnShapeReason::NeverBodyMayCompleteNormally
+            }
+            Self::NeverBodyReturnsToCaller => InvalidReturnShapeReason::NeverBodyReturnsToCaller,
+            Self::UnannotatedFunctionAlwaysDiverges => {
+                InvalidReturnShapeReason::UnannotatedFunctionAlwaysDiverges
+            }
+            Self::NeverProofDependsOnCycle => InvalidReturnShapeReason::NeverProofDependsOnCycle,
         }
     }
 }
@@ -538,6 +562,19 @@ pub(crate) fn invalid_return_shape(
     reason: InvalidReturnShapeReason,
     span: Option<SourceSpan>,
 ) -> DiagnosticDraft {
+    invalid_return_shape_named(reason, None, span)
+}
+
+/// Build a return-shape diagnostic that names the function it belongs to.
+///
+/// WHAT: carries the callable's authored name alongside the same reason and span.
+/// WHY: contract-shape diagnostics point at a declaration, so the message must identify which
+///      function's body or omitted contract was rejected after static specialisation.
+pub(crate) fn invalid_return_shape_named(
+    reason: InvalidReturnShapeReason,
+    function_name: Option<StringId>,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
     let code = InvalidReturnShapeCode::of(&reason);
     let (expected_count, provided_count) = match reason {
         InvalidReturnShapeReason::BareReturnWithExpectedValues { expected_count }
@@ -554,6 +591,7 @@ pub(crate) fn invalid_return_shape(
         cursor.push::<UnitFact<InvalidReturnShapeCode>>(&code)?;
         cursor.push::<OptCountFact>(&expected_count)?;
         cursor.push::<OptCountFact>(&provided_count)?;
+        cursor.push::<OptStringFact>(&function_name)?;
         Ok(())
     })
 }
@@ -695,7 +733,9 @@ pub(crate) fn invalid_call_shape(
         | InvalidCallShapeReason::RouteArgumentNotDirect
         | InvalidCallShapeReason::RouteForwardingContractMismatch
         | InvalidCallShapeReason::RouteParameterRead
-        | InvalidCallShapeReason::RouteInputFieldMismatch => (None, None, Vec::new()),
+        | InvalidCallShapeReason::RouteInputFieldMismatch
+        | InvalidCallShapeReason::NeverCallUsedAsValue
+        | InvalidCallShapeReason::NeverCallHandled => (None, None, Vec::new()),
     };
     DiagnosticDraft::with_facts(&INVALID_CALL_SHAPE, span, |cursor| {
         let count = match extra_positional_counts {
@@ -928,6 +968,8 @@ pub(crate) fn invalid_call_shape_reason(
                 known_parameters: known_parameters.to_vec(),
             }
         }
+        InvalidCallShapeCode::NeverCallUsedAsValue => InvalidCallShapeReason::NeverCallUsedAsValue,
+        InvalidCallShapeCode::NeverCallHandled => InvalidCallShapeReason::NeverCallHandled,
         InvalidCallShapeCode::PositionalAfterNamed => InvalidCallShapeReason::PositionalAfterNamed,
         InvalidCallShapeCode::NamedArgumentsNotSupported => {
             InvalidCallShapeReason::NamedArgumentsNotSupported
@@ -1010,6 +1052,7 @@ diagnostic_family! {
             reason: UnitFact<InvalidReturnShapeCode>,
             expected_count: OptCountFact,
             provided_count: OptCountFact,
+            function_name: OptStringFact,
         ],
         labels: [],
         extra: None,

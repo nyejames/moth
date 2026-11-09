@@ -32,9 +32,9 @@ use crate::compiler_frontend::external_packages::ExternalPackageId;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedValue,
 };
+use crate::compiler_frontend::module_compilation::Module;
 use crate::compiler_frontend::module_compilation::ModuleExternalImport;
 use crate::compiler_frontend::module_compilation::ResolvedConstFragment;
-use crate::compiler_frontend::module_compilation::{Module, ModuleRootActivity};
 use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -273,11 +273,6 @@ fn frontend_surface_registers_core_packages_with_core_binding_metadata() {
             crate::builder_surface::PackageOrigin::Builder,
         )
     );
-    assert!(
-        !frontend_surface
-            .implicit_template_scope_source_packages
-            .contains("web/site")
-    );
 
     let page_package = frontend_surface
         .binding_packages
@@ -313,7 +308,7 @@ fn frontend_surface_registers_core_packages_with_core_binding_metadata() {
 #[test]
 fn build_backend_emits_single_html_output_file() {
     let builder = HtmlProjectBuilder::new();
-    let entry_path = PathBuf::from("@page.moth");
+    let entry_path = PathBuf::from("@entry.moth");
     let config = Config::new(entry_path.clone());
 
     let project = expect_successful_build(build_with_test_modules(
@@ -360,14 +355,19 @@ fn shared_resource_origin_defers_one_output_file_across_pages() {
         .expect("shared resource origin should attach");
 
     let mut string_table = StringTable::new();
-    let mut first_page = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let mut first_page = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     let mut second_page = create_test_module(PathBuf::from("docs.moth"), &mut string_table);
     for module in [&mut first_page, &mut second_page] {
         module
             .executable
             .resource_table
             .intern_origin(resource_origin.clone(), None);
-        module.metadata.const_top_level_fragments = vec![ResolvedConstFragment {
+        module
+            .metadata
+            .entry
+            .as_mut()
+            .expect("fixture module represents an entry root")
+            .const_top_level_fragments = vec![ResolvedConstFragment {
             runtime_insertion_index: 0,
             destination: ConstFragmentDestination::Body,
             span: None,
@@ -606,32 +606,13 @@ fn successful_resource_emit_reads_and_writes_bytes() {
 }
 
 #[test]
-fn at_prefixed_route_name_strips_at_from_output() {
-    let builder = HtmlProjectBuilder::new();
-    let entry_path = PathBuf::from("@404.moth");
-    let config = Config::new(entry_path.clone());
-
-    let project = expect_successful_build(build_with_test_modules(
-        &builder,
-        vec![entry_path],
-        &config,
-        &[],
-    ));
-
-    assert_eq!(
-        project.output_files[0].relative_output_path(),
-        PathBuf::from("404.html")
-    );
-}
-
-#[test]
 fn build_backend_emits_html_for_multiple_modules() {
     let builder = HtmlProjectBuilder::new();
     let config = Config::new(PathBuf::from("docs.moth"));
 
     let project = expect_successful_build(build_with_test_modules(
         &builder,
-        vec![PathBuf::from("@page.moth"), PathBuf::from("@404.moth")],
+        vec![PathBuf::from("@entry.moth"), PathBuf::from("404.moth")],
         &config,
         &[],
     ));
@@ -650,7 +631,7 @@ fn duplicate_output_paths_are_rejected() {
 
     let result = build_with_test_modules(
         &builder,
-        vec![PathBuf::from("@page.moth"), PathBuf::from("index.moth")],
+        vec![PathBuf::from("@entry.moth"), PathBuf::from("index.moth")],
         &config,
         &[],
     );
@@ -668,8 +649,8 @@ fn repeated_glue_path_shares_identical_source_and_rejects_different_bytes() {
     let glue_path = PathBuf::from("_moth/js/glue/module-0123456789abcdef.js");
     let glue = |source: &str| OutputFile::new(glue_path.clone(), FileKind::Js(source.to_owned()));
     let first = glue("export function __moth_glue_fn1() {}\n");
-    let home = Path::new("src/@page.moth");
-    let about = Path::new("src/about/@page.moth");
+    let home = Path::new("src/@entry.moth");
+    let about = Path::new("src/about/@entry.moth");
 
     let shared = is_shared_glue_output(
         &first,
@@ -690,8 +671,8 @@ fn repeated_glue_path_shares_identical_source_and_rejects_different_bytes() {
     assert_eq!(failure.kind, InfrastructureFailureKind::Internal);
     for detail in [
         "_moth/js/glue/module-0123456789abcdef.js",
-        "src/@page.moth",
-        "src/about/@page.moth",
+        "src/@entry.moth",
+        "src/about/@entry.moth",
     ] {
         assert!(failure.message.contains(detail), "{}", failure.message);
     }
@@ -719,10 +700,15 @@ fn emits_const_fragment_and_calls_start() {
     // WHY: root activity metadata supplies the slot count; the test module has no runtime slots,
     //      so only the const fragment and start() invocation are asserted here.
     let builder = HtmlProjectBuilder::new();
-    let entry_path = PathBuf::from("@page.moth");
+    let entry_path = PathBuf::from("@entry.moth");
     let mut string_table = StringTable::new();
     let mut module = create_test_module(entry_path.clone(), &mut string_table);
-    module.metadata.const_top_level_fragments = vec![ResolvedConstFragment {
+    module
+        .metadata
+        .entry
+        .as_mut()
+        .expect("fixture module represents an entry root")
+        .const_top_level_fragments = vec![ResolvedConstFragment {
         runtime_insertion_index: 0,
         destination: ConstFragmentDestination::Body,
         span: None,
@@ -764,10 +750,10 @@ fn directory_build_maps_routes_relative_to_selected_directory() {
     let project = expect_successful_build(build_with_test_modules(
         &builder,
         vec![
-            entry_root.join("@home.moth"),
-            entry_root.join("about").join("@anything.moth"),
-            entry_root.join("docs").join("basics").join("@page.moth"),
-            entry_root.join("blog").join("@404.moth"),
+            entry_root.join("@entry.moth"),
+            entry_root.join("about").join("@entry.moth"),
+            entry_root.join("docs").join("basics").join("@entry.moth"),
+            entry_root.join("blog").join("@entry.moth"),
         ],
         &config,
         &[],
@@ -779,6 +765,41 @@ fn directory_build_maps_routes_relative_to_selected_directory() {
     assert!(output_paths.contains(&PathBuf::from("docs/basics/index.html")));
     assert!(output_paths.contains(&PathBuf::from("blog/index.html")));
     assert_eq!(project.entry_page_rel, Some(PathBuf::from("index.html")));
+}
+
+#[test]
+fn directory_build_without_homepage_launches_the_first_route() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+    fs::create_dir_all(root.join("src/docs/basics")).expect("should create docs dir");
+    fs::create_dir_all(root.join("src/blog")).expect("should create blog dir");
+    fs::create_dir_all(root.join("src/about")).expect("should create about dir");
+    let entry_root = fs::canonicalize(root.join("src")).expect("entry root should resolve");
+
+    let builder = HtmlProjectBuilder::new();
+    let config = Config::new(entry_root.clone());
+
+    // No module sits at the selected root, so the directory build has no homepage. The dev
+    // launch route is the lexicographically first emitted route, not the first input module.
+    let project = expect_successful_build(build_with_test_modules(
+        &builder,
+        vec![
+            entry_root.join("docs/basics").join("@entry.moth"),
+            entry_root.join("blog").join("@entry.moth"),
+            entry_root.join("about").join("@entry.moth"),
+        ],
+        &config,
+        &[],
+    ));
+
+    let output_paths = collect_output_paths(&project.output_files);
+    assert!(output_paths.contains(&PathBuf::from("about/index.html")));
+    assert!(output_paths.contains(&PathBuf::from("blog/index.html")));
+    assert!(output_paths.contains(&PathBuf::from("docs/basics/index.html")));
+    assert_eq!(
+        project.entry_page_rel,
+        Some(PathBuf::from("about/index.html"))
+    );
 }
 
 // Windows cannot create the reserved directory.
@@ -798,8 +819,8 @@ fn directory_build_rejects_reserved_output_path_component() {
     let result = build_with_test_modules(
         &builder,
         vec![
-            entry_root.join("@home.moth"),
-            entry_root.join("CON").join("@page.moth"),
+            entry_root.join("@entry.moth"),
+            entry_root.join("CON").join("@entry.moth"),
         ],
         &config,
         &[],
@@ -836,7 +857,7 @@ fn js_runtime_asset_is_deferred_and_written_verbatim() {
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
 
-    let mut module = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
+    let mut module = create_test_module(canonical_root.join("@entry.moth"), &mut string_table);
     let runtime_asset =
         js_runtime_asset_import(Path::new("src/lib.js"), canonical_root.join("src/lib.js"));
     let asset_output_path = PathBuf::from(runtime_asset.origin.logical_path().as_str());
@@ -922,7 +943,7 @@ fn js_runtime_asset_deduped_across_modules() {
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
 
-    let mut module_a = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
+    let mut module_a = create_test_module(canonical_root.join("@entry.moth"), &mut string_table);
     add_reachable_external_import(
         &mut module_a,
         ModuleExternalImport {
@@ -936,7 +957,7 @@ fn js_runtime_asset_deduped_across_modules() {
     );
 
     let mut module_b =
-        create_test_module(canonical_root.join("docs/@page.moth"), &mut string_table);
+        create_test_module(canonical_root.join("docs/@entry.moth"), &mut string_table);
     add_reachable_external_import(
         &mut module_b,
         ModuleExternalImport {
@@ -980,7 +1001,7 @@ fn js_runtime_assets_with_same_stem_get_distinct_output_paths() {
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
 
-    let mut module = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
+    let mut module = create_test_module(canonical_root.join("@entry.moth"), &mut string_table);
     add_reachable_external_import(
         &mut module,
         ModuleExternalImport {
@@ -1045,7 +1066,7 @@ fn non_js_runtime_asset_is_ignored() {
     let config = Config::new(root.clone());
     let mut string_table = StringTable::new();
 
-    let mut module = create_test_module(canonical_root.join("@page.moth"), &mut string_table);
+    let mut module = create_test_module(canonical_root.join("@entry.moth"), &mut string_table);
     add_reachable_external_import(
         &mut module,
         ModuleExternalImport {
@@ -1090,8 +1111,8 @@ fn directory_build_supports_custom_selected_directory_names() {
     let project = expect_successful_build(build_with_test_modules(
         &builder,
         vec![
-            entry_root.join("@page.moth"),
-            entry_root.join("docs").join("@page.moth"),
+            entry_root.join("@entry.moth"),
+            entry_root.join("docs").join("@entry.moth"),
         ],
         &config,
         &[],
@@ -1101,37 +1122,6 @@ fn directory_build_supports_custom_selected_directory_names() {
     assert!(output_paths.contains(&PathBuf::from("index.html")));
     assert!(output_paths.contains(&PathBuf::from("docs/index.html")));
     assert_eq!(project.entry_page_rel, Some(PathBuf::from("index.html")));
-}
-
-#[test]
-fn directory_build_requires_homepage_at_selected_root() {
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-    fs::create_dir_all(root.join("src/about")).expect("should create about dir");
-    let entry_root = fs::canonicalize(root.join("src")).expect("entry root should resolve");
-
-    let builder = HtmlProjectBuilder::new();
-    let config = Config::new(entry_root.clone());
-
-    let result = build_with_test_modules(
-        &builder,
-        vec![entry_root.join("about").join("@page.moth")],
-        &config,
-        &[],
-    );
-
-    let reports = expect_diagnosed(result, "missing homepage should diagnose");
-    let (reason, context) = first_invalid_config_reason(&reports);
-    let InvalidConfigReason::MissingHtmlHomepage {
-        entry_root: reported_entry_root,
-    } = reason
-    else {
-        panic!("expected missing HTML homepage config reason");
-    };
-    assert_eq!(
-        context.string_table.resolve(reported_entry_root),
-        portable_path_text(&entry_root)
-    );
 }
 
 #[test]
@@ -1145,9 +1135,9 @@ fn directory_build_skips_api_only_sibling_from_all_artifact_planning() {
     let config = Config::new(entry_root.clone());
     let mut string_table = StringTable::new();
 
-    let homepage = create_test_module(entry_root.join("@home.moth"), &mut string_table);
-    let mut api_only = create_test_module(entry_root.join("api/@api.moth"), &mut string_table);
-    api_only.metadata.root_activity = ModuleRootActivity::default();
+    let homepage = create_test_module(entry_root.join("@entry.moth"), &mut string_table);
+    let mut api_only = create_test_module(entry_root.join("api/@mod.moth"), &mut string_table);
+    api_only.metadata.entry = None;
     api_only.link_facts.external_import_candidates = vec![ModuleExternalImport {
         package_id: ExternalPackageId(1),
         runtime_asset: Some(js_runtime_asset_import(
@@ -1173,12 +1163,27 @@ fn directory_build_skips_api_only_sibling_from_all_artifact_planning() {
 }
 
 #[test]
+fn single_file_ordinary_page_stem_names_the_output_file() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let entry = _temp.path().join("page.moth");
+    let builder = HtmlProjectBuilder::new();
+    let config = Config::new(entry.clone());
+
+    let project =
+        expect_successful_build(build_with_test_modules(&builder, vec![entry], &config, &[]));
+
+    let output_paths = collect_output_paths(&project.output_files);
+    assert_eq!(output_paths, vec![PathBuf::from("page.html")]);
+    assert_eq!(project.entry_page_rel, Some(PathBuf::from("page.html")));
+}
+
+#[test]
 fn single_file_api_only_build_can_emit_no_artifacts() {
     let builder = HtmlProjectBuilder::new();
     let entry_path = PathBuf::from("api.moth");
     let mut string_table = StringTable::new();
     let mut api_only = create_test_module(entry_path.clone(), &mut string_table);
-    api_only.metadata.root_activity = ModuleRootActivity::default();
+    api_only.metadata.entry = None;
 
     let project = builder
         .build_backend_with_test_context(
@@ -1197,7 +1202,7 @@ fn single_file_api_only_build_can_emit_no_artifacts() {
 #[test]
 fn wasm_flag_emits_html_js_and_wasm_artifacts() {
     let builder = HtmlProjectBuilder::new();
-    let entry_path = PathBuf::from("@page.moth");
+    let entry_path = PathBuf::from("@entry.moth");
 
     let project = expect_successful_build(build_with_test_modules(
         &builder,
@@ -1227,7 +1232,7 @@ fn wasm_mode_uses_per_page_folder_layout() {
 
     let project = expect_successful_build(build_with_test_modules(
         &builder,
-        vec![PathBuf::from("@page.moth"), PathBuf::from("@404.moth")],
+        vec![PathBuf::from("@entry.moth"), PathBuf::from("404.moth")],
         &config,
         &[Flag::HtmlWasm],
     ));
@@ -1255,9 +1260,9 @@ fn wasm_directory_build_preserves_nested_routes() {
     let project = expect_successful_build(build_with_test_modules(
         &builder,
         vec![
-            entry_root.join("@page.moth"),
-            entry_root.join("docs").join("@page.moth"),
-            entry_root.join("blog").join("@404.moth"),
+            entry_root.join("@entry.moth"),
+            entry_root.join("docs").join("@entry.moth"),
+            entry_root.join("blog").join("@entry.moth"),
         ],
         &config,
         &[Flag::HtmlWasm],
@@ -1287,7 +1292,8 @@ fn builder_rejects_invalid_origin_config() {
         None,
     );
 
-    let result = build_with_test_modules(&builder, vec![PathBuf::from("@page.moth")], &config, &[]);
+    let result =
+        build_with_test_modules(&builder, vec![PathBuf::from("@entry.moth")], &config, &[]);
     let reports = expect_diagnosed(result, "invalid origin should fail diagnostically");
     let (reason, context) = first_invalid_config_reason(&reports);
     let InvalidConfigReason::InvalidProjectSettingValue { expected, .. } = reason else {

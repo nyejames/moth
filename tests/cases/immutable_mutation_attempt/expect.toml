@@ -7,6 +7,6 @@ message_contains = ["immutable", "Declare it mutable"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0044"
 reason = "invalid_assignment_target.immutable_binding"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 8
 column = 8

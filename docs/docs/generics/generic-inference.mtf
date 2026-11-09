@@ -80,6 +80,23 @@ evidence.
     consume(items)
 ]
 
+### Never generic calls
+
+A generic function declared `-> !` has no result shape. Inference uses the
+immediate arguments only. There is no expected result type to solve a
+parameter.
+
+[codeblock, $code("moth"):
+    abort type A |value A| -> !:
+        assert(false, "aborted")
+    ;
+
+    abort("unreachable")
+]
+
+A Never call remains a standalone statement, so it cannot sit at a typed
+receiving site that would otherwise supply result evidence.
+
 ### Optional and fallible generic returns
 
 Generic functions may return optional or fallible values when the concrete envelope is solved by immediate evidence.

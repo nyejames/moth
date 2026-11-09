@@ -6,6 +6,6 @@ diagnostic_codes = ["MOTH-SYNTAX-0029"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0029"
 reason = "invalid_loop_header.zero_loop_step"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 2
 column = 21

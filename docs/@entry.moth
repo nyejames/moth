@@ -1,0 +1,82 @@
+@styles navbar, section, theme_head, highlight, sidebar, init_docs_sidebar
+
+#[$in title:["What is Moth?"]]
+#[$in description:["Introduction to the Moth language and toolchain."]]
+#[$in head:[theme_head]]
+
+#[navbar]
+#[sidebar]
+init_docs_sidebar()!
+#[section, $md:
+
+    # What is Moth?
+
+    Moth is a new programming language and toolchain.
+
+    It focuses on predictable, safe and reliable code with modern language ergonomics.
+
+    There is also an ambitious and unique memory management plan and
+    a Wasm focused but modular backend design for future proofing (with incomplete implementation).
+
+    [highlight, $md: *This website was created using Moth!*]
+
+    The source code for this whole website can be found on @https://github.com/nyejames/moth/tree/main/docs (Github).
+
+
+    ## Documentation
+    
+    The @./docs (Alpha language docs) explains everything about the language, compiler and making Moth projects.
+
+    This project is in early alpha, so not everything is exactly up to date with the current compiler.
+    [highlight, $md: *You can already use Moth for web projects, but be aware of the early alpha status*]
+
+
+    ## AI
+
+    This project started off all handwritten, and is still human designed.
+
+    But most of the coding workflow is now heavily AI driven.
+    You can @https://github.com/nyejames/moth/blob/main/HUMANS.md (read this document) for more detail on the project's AI policy.
+
+    Moths design turned out to be great for LLM coding workflows due to its Rust inspiration.
+
+    It's now actively being designed for a future where most code is written by AI,
+    with humans driving the core design and review loops.
+
+    This is because the design principles follow this rule:
+    *Keep the programmer-facing model small and predictable. Make a strict compiler that proves more and gives snappy, comprehensive feedback.*
+
+    ## A small language with a powerful compiler
+
+    Programmers should spend less time worrying about bundling piles of languages together and what their code should look like in their codebase. 
+    
+    [highlight, $md: **This is why Moth exists.**]
+
+    Most languages leave a lot of the powerful stuff we use all the time in modern development to libraries and frameworks.
+    Template engines, bundlers, web frameworks, documentation generation and module systems often get overlooked as fertile ground for first-class features that have been tried and tested already.
+    
+    Moth considers the lifecycle of a project the responsibility of the language and its integrated build system. 
+    And it should look the same no matter the scale.
+
+    
+    ### Its time to re-imagine strings
+
+    Templates are central to all of these design principles. They are Moth's most powerful feature. 
+
+    Templates are core to the language and produce ordinary `String` values. 
+    The compiler then handles the composition, slots, control flow and Markdown formatting.
+    When every input resolves at compile time, Moth folds the whole template to a string before HIR and code generation. 
+    When runtime work remains, only that work survives. 
+    
+    The HTML builder then brings Moth source, `.mtf` templates, Markdown, assets, routing and hot reload into the same project flow. 
+    Static content leaves no general template engine behind, and builders consume compiler graphs and link plans instead of inventing a second understanding of the program. 
+    
+    [highlight, $md:*This docs site already runs through this toolchain.*]
+    
+    General closures, operator overloading, reflection, trait objects and broad metaprogramming are excluded from the language design on purpose. 
+    Those mechanisms can hide control flow, add runtime machinery or turn local code into a type-solving exercise. 
+    Moth provides simpler tools that scale better. 
+
+    Moth still has plenty of rough edges but aspires to grow into a language that feels joyful at every scale without different sized projects feeling like a completely different tech stack. 
+
+]

@@ -1,0 +1,5 @@
+@impl value, Message
+
+export:
+    @impl value, Message
+;

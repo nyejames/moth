@@ -3,6 +3,7 @@
 use super::super::abi::{
     ExternalAbiType, ExternalAccessKind, ExternalReturnAlias, ExternalSignatureType,
 };
+use super::super::definitions::external_returns;
 use super::super::definitions::{
     ExternalConstantDef, ExternalConstantValue, ExternalFunctionDef, ExternalFunctionLowerings,
     ExternalJsLowering, ExternalReturnSlot, ExternalTypeDef, external_success_returns,
@@ -42,11 +43,10 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     language_type: ExternalSignatureType::Abi(ExternalAbiType::Inferred),
                     access_kind: ExternalAccessKind::Shared,
                 }],
-                returns: external_success_returns(
-                    ExternalAbiType::Void,
-                    ExternalReturnAlias::Fresh,
+                return_contract: external_returns(
+                    external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
+                    None,
                 ),
-                error_return_type: None,
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
@@ -68,8 +68,10 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     language_type: ExternalSignatureType::Abi(ExternalAbiType::Utf8Str),
                     access_kind: ExternalAccessKind::Shared,
                 }],
-                returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)],
-                error_return_type: Some(ExternalSignatureType::BuiltinError),
+                return_contract: external_returns(
+                    vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)],
+                    Some(ExternalSignatureType::BuiltinError),
+                ),
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
@@ -88,8 +90,10 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
             ExternalFunctionDef {
                 name: "fallible_text_err".to_owned(),
                 parameters: Vec::new(),
-                returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)],
-                error_return_type: Some(ExternalSignatureType::BuiltinError),
+                return_contract: external_returns(
+                    vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)],
+                    Some(ExternalSignatureType::BuiltinError),
+                ),
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
@@ -109,8 +113,10 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
             ExternalFunctionDef {
                 name: "fallible_custom_error_ok".to_owned(),
                 parameters: Vec::new(),
-                returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)],
-                error_return_type: Some(ExternalSignatureType::External(ExternalTypeId(1005))),
+                return_contract: external_returns(
+                    vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)],
+                    Some(ExternalSignatureType::External(ExternalTypeId(1005))),
+                ),
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
@@ -138,11 +144,10 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     language_type: ExternalSignatureType::Abi(ExternalAbiType::Inferred),
                     access_kind: ExternalAccessKind::Shared,
                 }],
-                returns: external_success_returns(
-                    ExternalAbiType::Void,
-                    ExternalReturnAlias::Fresh,
+                return_contract: external_returns(
+                    external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
+                    None,
                 ),
-                error_return_type: None,
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::RuntimeFunction(
@@ -210,8 +215,10 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
             ExternalFunctionDef {
                 name: "greet".to_owned(),
                 parameters: Vec::new(),
-                returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)],
-                error_return_type: None,
+                return_contract: external_returns(
+                    vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)],
+                    None,
+                ),
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
@@ -240,8 +247,10 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
                     language_type: ExternalSignatureType::StringContent,
                     access_kind: ExternalAccessKind::Shared,
                 }],
-                returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)],
-                error_return_type: None,
+                return_contract: external_returns(
+                    vec![ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)],
+                    None,
+                ),
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression("#0".to_owned())),
@@ -266,10 +275,12 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
             ExternalFunctionDef {
                 name: "present_text".to_owned(),
                 parameters: Vec::new(),
-                returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::Optional(
-                    Box::new(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
-                ))],
-                error_return_type: None,
+                return_contract: external_returns(
+                    vec![ExternalReturnSlot::fresh(ExternalSignatureType::Optional(
+                        Box::new(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
+                    ))],
+                    None,
+                ),
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(
@@ -289,10 +300,12 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
             ExternalFunctionDef {
                 name: "absent_text".to_owned(),
                 parameters: Vec::new(),
-                returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::Optional(
-                    Box::new(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
-                ))],
-                error_return_type: None,
+                return_contract: external_returns(
+                    vec![ExternalReturnSlot::fresh(ExternalSignatureType::Optional(
+                        Box::new(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
+                    ))],
+                    None,
+                ),
                 const_eval: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::InlineExpression(

@@ -1617,6 +1617,14 @@ impl<'a> FunctionProblemBuilder<'a> {
                 self.lower_expression(*message, source, event_ids)?;
                 TerminatorEventKind::AssertFailure
             }
+            HirTerminator::NeverCall { target, args } => {
+                // Argument evaluation and call effects precede the terminal divergence event,
+                // exactly like an ordinary call. The call has no result row or continuation; the
+                // terminator event records only that this block cannot return.
+                let argument_ids = self.module.expressions.values(*args).to_vec();
+                self.lower_call(target, &argument_ids, &[], source, event_ids)?;
+                TerminatorEventKind::NeverCall
+            }
             HirTerminator::Uninitialized => {
                 return Err(internal_failure(format!(
                     "Boracle problem extraction reached uninitialized HIR terminator in block {:?}",
@@ -1948,7 +1956,8 @@ impl<'a> FunctionProblemBuilder<'a> {
             TerminatorEventKind::Return
             | TerminatorEventKind::ReturnError
             | TerminatorEventKind::RuntimeFailure
-            | TerminatorEventKind::AssertFailure => {}
+            | TerminatorEventKind::AssertFailure
+            | TerminatorEventKind::NeverCall => {}
         }
         Ok(())
     }

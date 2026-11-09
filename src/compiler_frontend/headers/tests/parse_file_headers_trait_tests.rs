@@ -37,7 +37,7 @@ fn trait_declaration_headers_parse_requirement_shells() {
         ParsedTypeRef::This { .. }
     ));
     assert!(matches!(
-        copy_requirement.signature.returns[0].value,
+        copy_requirement.signature.ordinary_return_slots()[0].value,
         FunctionReturnSyntax {
             type_annotation: ParsedTypeRef::This { .. },
             ..
@@ -136,8 +136,8 @@ fn uint_conformance_header_parses_as_builtin_trait_conformance() {
 fn trait_requirement_rejects_lowercase_this_receiver() {
     let result = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |this|\n;\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     let errors = expect_header_error(result, "lowercase this should be rejected");
 
@@ -152,8 +152,8 @@ fn trait_requirement_rejects_lowercase_this_receiver() {
 fn trait_requirement_rejects_missing_this_receiver() {
     let result = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |value I32|\n;\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     let errors = expect_header_error(result, "trait requirements should start with This");
 
@@ -170,8 +170,8 @@ fn trait_requirement_rejects_missing_this_receiver() {
 fn trait_requirement_rejects_mutable_this_after_receiver() {
     let result = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |This, ~This|\n;\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     let errors = expect_header_error(result, "mutable This is receiver-only");
 
@@ -188,8 +188,8 @@ fn trait_requirement_rejects_mutable_this_after_receiver() {
 fn trait_requirement_rejects_composed_this_type_forms() {
     let result = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |This, values {This}|\n;\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     let errors = expect_header_error(result, "composed This forms are deferred");
 
@@ -205,8 +205,8 @@ fn trait_requirement_rejects_composed_this_type_forms() {
 fn trait_requirement_rejects_method_bodies_and_reversed_mutability() {
     let method_body_result = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |This|:\n        return \"bad\"\n    ;\n;\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     let method_body_errors = expect_header_error(
         method_body_result,
@@ -219,8 +219,8 @@ fn trait_requirement_rejects_method_bodies_and_reversed_mutability() {
 
     let reversed_mutability_result = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |This ~|\n;\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     let reversed_mutability_errors = expect_header_error(
         reversed_mutability_result,
@@ -240,7 +240,7 @@ fn trait_requirement_rejects_method_bodies_and_reversed_mutability() {
 #[test]
 fn trait_conformance_rejects_missing_trait_name() {
     let result =
-        parse_single_file_headers_with_entry("Card must\n", "src/@page.moth", "src/@page.moth");
+        parse_single_file_headers_with_entry("Card must\n", "src/@entry.moth", "src/@entry.moth");
     let errors = expect_header_error(result, "conformance declarations require a trait name");
 
     assert!(errors.diagnostics.views().any(|diagnostic| {
@@ -256,8 +256,8 @@ fn trait_conformance_rejects_missing_trait_name() {
 fn trait_declaration_and_reference_names_must_be_all_caps() {
     let declaration_result = parse_single_file_headers_with_entry(
         "Displayable must:\n;\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     let declaration_errors = expect_header_error(
         declaration_result,
@@ -273,8 +273,8 @@ fn trait_declaration_and_reference_names_must_be_all_caps() {
 
     let conformance_result = parse_single_file_headers_with_entry(
         "Card must Displayable\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     let conformance_errors = expect_header_error(
         conformance_result,
@@ -343,7 +343,7 @@ fn trait_incompatibility_reuses_subject_trait_name_without_duplicate_error() {
 #[test]
 fn trait_incompatibility_rejects_missing_trait_name() {
     let result =
-        parse_single_file_headers_with_entry("A must not\n", "src/@page.moth", "src/@page.moth");
+        parse_single_file_headers_with_entry("A must not\n", "src/@entry.moth", "src/@entry.moth");
     let errors = expect_header_error(
         result,
         "incompatibility declarations require at least one trait name",
@@ -360,8 +360,11 @@ fn trait_incompatibility_rejects_missing_trait_name() {
 
 #[test]
 fn trait_incompatibility_rejects_trailing_comma() {
-    let result =
-        parse_single_file_headers_with_entry("A must not B,\n", "src/@page.moth", "src/@page.moth");
+    let result = parse_single_file_headers_with_entry(
+        "A must not B,\n",
+        "src/@entry.moth",
+        "src/@entry.moth",
+    );
     let errors = expect_header_error(result, "trailing incompatibility commas should be rejected");
 
     assert!(errors.diagnostics.views().any(|diagnostic| {
@@ -371,8 +374,11 @@ fn trait_incompatibility_rejects_trailing_comma() {
 
 #[test]
 fn trait_incompatibility_rejects_semicolon_terminator() {
-    let result =
-        parse_single_file_headers_with_entry("A must not B;\n", "src/@page.moth", "src/@page.moth");
+    let result = parse_single_file_headers_with_entry(
+        "A must not B;\n",
+        "src/@entry.moth",
+        "src/@entry.moth",
+    );
     let errors = expect_header_error(
         result,
         "incompatibility declarations should be newline terminated",
@@ -391,8 +397,8 @@ fn trait_incompatibility_rejects_semicolon_terminator() {
 fn trait_incompatibility_subject_and_reference_names_must_be_all_caps() {
     let declaration_result = parse_single_file_headers_with_entry(
         "Displayable must not Other\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     let declaration_errors = expect_header_error(
         declaration_result,
@@ -408,8 +414,8 @@ fn trait_incompatibility_subject_and_reference_names_must_be_all_caps() {
 
     let reference_result = parse_single_file_headers_with_entry(
         "DISPLAYABLE must not Other\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     let reference_errors = expect_header_error(
         reference_result,
@@ -428,8 +434,8 @@ fn trait_incompatibility_subject_and_reference_names_must_be_all_caps() {
 fn trait_this_outside_trait_declaration_is_targeted() {
     let result = parse_single_file_headers_with_entry(
         "value This = 1\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     let errors = expect_header_error(result, "This outside trait declarations should be rejected");
 

@@ -23,8 +23,12 @@ use crate::compiler_frontend::ast::generic_functions::{
     GenericRequestSlot, ModuleMaterialisationEnvironmentInput,
     ModuleMaterialisationPreparationBuilder,
 };
+use crate::compiler_frontend::ast::statements::control_flow_exits::{
+    ControlFlowExitSummary, analyze_control_flow_exits_with_never_targets,
+};
 use crate::compiler_frontend::ast::statements::terminality::{
-    terminality_policy_for_signature, validate_function_body_terminality,
+    NeverProofNode, never_proof_cycle, terminality_policy_for_signature,
+    validate_function_body_terminality, validate_function_body_terminality_with_exits,
 };
 use crate::compiler_frontend::ast::templates::top_level_templates::{
     collect_and_strip_comment_templates, collect_const_top_level_fragments,
@@ -291,13 +295,24 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             self.template_normalization_error_messages(error, &mut emitted.warnings, string_table)
         })?;
         specialization.merge(template_specialization);
+        // The Never proof graph and per-body terminality need the same exit analysis, so each
+        // declared Never body is summarised once and both consumers read that summary. The
+        // executable declarations lead the node list and keep their exact call targets; a
+        // requester unions them with its generated sidecars' nodes after materialisation.
+        let (mut never_proof_nodes, executable_never_count, never_exit_summaries) = self
+            .declared_never_proof_nodes(&emitted.ast, &emitted.validated_generic_template_bodies);
+        self.validate_never_proof_cycles(&never_proof_nodes, &mut emitted.warnings, string_table)?;
+        never_proof_nodes.truncate(executable_never_count);
+        let exact_never_proofs = never_proof_nodes;
         self.validate_specialized_function_terminality(
             &emitted.ast,
+            &never_exit_summaries,
             &mut emitted.warnings,
             string_table,
         )?;
         self.validate_specialized_function_terminality(
             &emitted.validated_generic_template_bodies,
+            &never_exit_summaries,
             &mut emitted.warnings,
             string_table,
         )?;
@@ -468,7 +483,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             expression_builder,
             const_values,
             file_value_resolution,
-            root_role,
+            synthesizes_entry_start,
             ..
         } = self.context;
         let template_ir_store = Rc::try_unwrap(template_ir_store).map_err(|shared| {
@@ -519,7 +534,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 expressions,
                 const_values,
                 doc_fragments,
-                root_role,
+                synthesizes_entry_start,
                 const_top_level_fragments,
                 warnings: emitted.warnings,
                 choice_definitions,
@@ -535,6 +550,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             materialisation_context,
             deferred_generic_requests: committed_generic_requests.executable,
             assertion_validation_generic_requests: committed_generic_requests.assertion_validation,
+            exact_never_proofs,
         })
     }
 
@@ -829,19 +845,23 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                     string_table,
                 ));
             }
-            let custom_error = match signature.error_return_type_id() {
-                Some(error_type) if Some(error_type) == builtin_error_type => continue,
-                Some(error_type) => Some(error_type),
-                None if authored_path.is_some_and(|path| {
-                    self.environment
-                        .lookups
-                        .exported_callable_paths
-                        .contains(&path)
-                }) =>
-                {
-                    None
-                }
-                None => continue,
+            // Never contracts have no error channel and are closed boundaries even when private.
+            let custom_error = match signature.return_contract.ordinary() {
+                None => None,
+                Some(returns) => match returns.error() {
+                    Some(error_type) if Some(error_type) == builtin_error_type => continue,
+                    Some(error_type) => Some(error_type),
+                    None if authored_path.is_some_and(|path| {
+                        self.environment
+                            .lookups
+                            .exported_callable_paths
+                            .contains(&path)
+                    }) =>
+                    {
+                        None
+                    }
+                    None => continue,
+                },
             };
             let contributor = summaries.first_active(&pending.body.implicit);
             let Some(contributor) = contributor else {
@@ -854,16 +874,23 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 origin: witness.origin,
                 elided_call_hops: witness.elided_call_hops,
             };
-            let reason = match custom_error {
-                Some(error_type_id) => {
+            let reason = match (signature.return_contract.is_never(), custom_error) {
+                (true, _) => {
+                    InvalidFallibleHandlingReason::UnhandledBuiltinFailureInNeverFunction {
+                        witness: Box::new(reason_witness),
+                    }
+                }
+                (false, Some(error_type_id)) => {
                     InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
                         error_type_id,
                         witness: Box::new(reason_witness),
                     }
                 }
-                None => InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
-                    witness: Box::new(reason_witness),
-                },
+                (false, None) => {
+                    InvalidFallibleHandlingReason::UnhandledBuiltinFailureInExportedFunction {
+                        witness: Box::new(reason_witness),
+                    }
+                }
             };
             let diagnostic = choices_control_flow::invalid_fallible_handling(
                 reason,
@@ -893,30 +920,124 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         Ok(assertion_validation_paths)
     }
 
+    /// Rejects a circular divergence proof in this module's declaring template graph before
+    /// per-body validation runs.
+    ///
+    /// WHAT: checks the declared Never dependency graph across concrete functions and generic
+    ///       template bodies in this module, resolving concrete generic calls to their template
+    ///       declarations, then reports the first circular proof.
+    /// WHY: a body must not validate against an unproven peer contract. Checking the graph once
+    ///      per module keeps the bookkeeping compiler-local and independent of declaration order;
+    ///      an acyclic group is valid whether it is declared before or after its dependency.
+    ///      This graph proves declarations, including uncalled templates. A requester's exact
+    ///      call-target graph, checked after generated materialisation, proves the generated
+    ///      instances that this graph deliberately folds into their templates.
+    fn validate_never_proof_cycles(
+        &self,
+        nodes: &[NeverProofNode],
+        warnings: &mut Vec<DiagnosticDraft>,
+        string_table: &mut StringTable,
+    ) -> Result<(), PreparedFailure> {
+        let templates = &self.environment.lookups.generic_function_templates_by_path;
+        let template_declaration = |target: PathId| match self.path_fork.parent(target) {
+            Some(parent) if templates.contains_key(&parent) => parent,
+            _ => target,
+        };
+        let Some((_, diagnostic)) = never_proof_cycle(nodes, template_declaration) else {
+            return Ok(());
+        };
+        Err(self.diagnostic_failure(diagnostic, warnings, string_table))
+    }
+
+    /// Collects every declared `-> !` function's proof node and exit summary.
+    ///
+    /// WHAT: analyses each Never body once, executable declarations first and validated generic
+    ///       template bodies after, keeping each body's exact Never call targets. Returns the
+    ///       nodes, the count of leading executable nodes and the summary keyed by declaration
+    ///       path.
+    /// WHY: the proof graph and per-body terminality both need the exit analysis; one pass keeps
+    ///      every Never body from being walked twice. Exact targets serve both graphs without a
+    ///      second copy: the template check resolves instance paths at check time, and the
+    ///      executable prefix becomes the requester's exact-target nodes.
+    fn declared_never_proof_nodes(
+        &self,
+        executable: &[AstNode],
+        template_bodies: &[AstNode],
+    ) -> (
+        Vec<NeverProofNode>,
+        usize,
+        FxHashMap<PathId, ControlFlowExitSummary>,
+    ) {
+        let mut nodes = Vec::new();
+        let mut executable_count = 0;
+        let mut summaries = FxHashMap::default();
+        for (is_executable, ast_nodes) in [(true, executable), (false, template_bodies)] {
+            for node in ast_nodes {
+                let NodeKind::Function(path, signature, body) = &node.kind else {
+                    continue;
+                };
+                if !signature.return_contract.is_never() {
+                    continue;
+                }
+                let (summary, dependencies) = analyze_control_flow_exits_with_never_targets(
+                    body,
+                    self.context.expression_builder.store(),
+                    &self.context.const_values,
+                );
+                summaries.insert(*path, summary);
+                nodes.push(NeverProofNode {
+                    key: *path,
+                    function_name: self.path_fork.component(*path),
+                    span: node.span,
+                    dependencies,
+                });
+            }
+            if is_executable {
+                executable_count = nodes.len();
+            }
+        }
+        (nodes, executable_count, summaries)
+    }
+
     fn validate_specialized_function_terminality(
         &self,
         ast_nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
+        never_exit_summaries: &FxHashMap<PathId, ControlFlowExitSummary>,
         warnings: &mut Vec<DiagnosticDraft>,
         string_table: &mut StringTable,
     ) -> Result<(), PreparedFailure> {
         for node in ast_nodes {
-            let (signature, body) = match &node.kind {
-                NodeKind::Function(_, signature, body) => (signature, body),
-                NodeKind::EntryStart(signature, body) => (signature, body),
+            let (signature, body, function_name, function_path) = match &node.kind {
+                NodeKind::Function(path, signature, body) => (
+                    signature,
+                    body,
+                    self.path_fork.component(*path),
+                    Some(*path),
+                ),
+                NodeKind::EntryStart(signature, body) => (signature, body, None, None),
                 _ => continue,
             };
             let policy = terminality_policy_for_signature(
                 signature,
                 matches!(&node.kind, NodeKind::EntryStart(..)),
             );
-            let terminality_diagnostic = validate_function_body_terminality(
-                body,
-                policy,
-                node.span,
-                &self.context.expression_builder,
-                &self.context.const_values,
-            )
-            .map_err(|error| self.error_messages(error, warnings, string_table))?;
+            let terminality_diagnostic =
+                match function_path.and_then(|path| never_exit_summaries.get(&path)) {
+                    Some(exits) => validate_function_body_terminality_with_exits(
+                        *exits,
+                        policy,
+                        node.span,
+                        function_name,
+                    ),
+                    None => validate_function_body_terminality(
+                        body,
+                        policy,
+                        node.span,
+                        function_name,
+                        self.context.expression_builder.store(),
+                        &self.context.const_values,
+                    ),
+                };
             if let Some(diagnostic) = terminality_diagnostic {
                 return Err(self.diagnostic_failure(diagnostic, warnings, string_table));
             }

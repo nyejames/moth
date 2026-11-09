@@ -1,9 +1,0 @@
-export:
-    wide_add |left I8, right U8| -> I16:
-        return left + right
-    ;
-;
-
-result = wide_add(127, 255)
-
-[: discharged u8 add sum=[result]]

@@ -36,4 +36,8 @@ Block form also inspects a present option:
 
 Both branches must provide the value or leave the function through another valid path.
 
+A block-form branch can also diverge instead of producing a value, for
+example by calling a `-> !` function as a statement. The short inline form
+cannot, because that puts the call in a value slot.
+
 When a condition is a known Bool, the same ordinary `if` can select one frontend-valid branch before HIR. Runtime conditions keep their normal behavior.

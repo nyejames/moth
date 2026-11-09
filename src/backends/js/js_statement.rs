@@ -930,10 +930,16 @@ impl<'hir> JsEmitter<'hir> {
                     "JavaScript backend: missing current function"
                 )
             });
-        if expressions.len() != function.returns.len()
+        let Some(returns) = function.return_contract.ordinary() else {
+            crate::compiler_bug!(
+                CompilerStage::BackendLowering,
+                "JavaScript backend: Return emitted in a Never function; HIR validation rejects this"
+            );
+        };
+        if expressions.len() != returns.success().len()
             || expressions
                 .iter()
-                .zip(function.returns.iter())
+                .zip(returns.success())
                 .any(|(value, ty)| self.hir.expressions.expression(*value).ty != *ty)
         {
             crate::compiler_bug!(
@@ -941,7 +947,7 @@ impl<'hir> JsEmitter<'hir> {
                 "JavaScript backend: Return slots mismatch"
             );
         }
-        let fallible = function.error_return.is_some();
+        let fallible = returns.is_fallible();
         let values = expressions
             .iter()
             .map(|value| self.lower_moth_return_value(*value))
@@ -982,10 +988,14 @@ impl<'hir> JsEmitter<'hir> {
                     "JavaScript backend: current function {function_id:?} is missing"
                 )
             });
-        let Some(error_type) = function.error_return else {
+        let Some(error_type) = function
+            .return_contract
+            .ordinary()
+            .and_then(|returns| returns.error())
+        else {
             crate::compiler_bug!(
                 CompilerStage::BackendLowering,
-                "JavaScript backend: ReturnError emitted in a non-fallible function"
+                "JavaScript backend: ReturnError emitted in a function without an ordinary error slot"
             );
         };
         if self.hir.expressions.expression(expression).ty != error_type {
@@ -1225,6 +1235,11 @@ impl<'hir> JsEmitter<'hir> {
                     CompilerStage::BackendLowering,
                     "Uninitialized terminator reached JS backend lowering"
                 );
+            }
+
+            HirTerminator::NeverCall { target, args } => {
+                // The fallback throws, so dispatcher control cannot continue to another block.
+                self.emit_never_call_terminator(target, *args)?;
             }
 
             HirTerminator::RuntimeFailure { message, .. } => {

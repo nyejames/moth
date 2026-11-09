@@ -5,6 +5,6 @@ diagnostic_codes = ["MOTH-RULE-0048"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0048"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 2
 column = 13

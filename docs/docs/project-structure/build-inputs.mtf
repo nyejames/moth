@@ -145,6 +145,6 @@ Moth source cannot inspect or branch on operating system, architecture, backend,
 
 ### Concepts related to build inputs
 
-- For `$project` and `$html_builder` see @#project-config (Project config).
+- For named `project` and builder records see @#project-config (Project config).
 - For builder slots see @#entry-config (Entry metadata and builder slots).
 - For general directive grammar see @../directives (Directives).

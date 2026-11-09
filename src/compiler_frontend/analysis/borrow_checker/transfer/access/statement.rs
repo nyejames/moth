@@ -5,6 +5,7 @@
 //! entrypoint easier to inspect without changing the borrow-analysis model.
 
 use super::*;
+use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expressions::HirMapOp;
 use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
@@ -528,6 +529,33 @@ pub(super) fn transfer_invoke(
             }
         }
     }
+}
+
+/// Apply one terminating call's argument effects before the block diverges.
+///
+/// WHAT: resolves the ordinary call-target contract and transfers every evaluated argument
+///       with no result destinations.
+/// WHY: a declared Never call has ordinary argument access and optional final-use effects but
+///      produces no value, so no result local, return alias or post-call state may be created.
+pub(super) fn transfer_never_call(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    target: &CallTarget,
+    args: &[HirValueId],
+) -> Result<(), BorrowCheckError> {
+    let semantics = resolve_call_semantics(input.context, target, args.len())?;
+    let arguments = args
+        .iter()
+        .copied()
+        .zip(semantics.arg_effects)
+        .map(|(argument, effect)| CallArgumentTransfer { argument, effect })
+        .collect::<Vec<_>>();
+    transfer_call_arguments_and_result(
+        input,
+        &arguments,
+        std::iter::empty(),
+        FunctionReturnAliasSummary::Fresh,
+        false,
+    )
 }
 
 struct CallArgumentTransfer {

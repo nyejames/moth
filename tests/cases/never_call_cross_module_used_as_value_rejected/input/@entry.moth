@@ -1,0 +1,5 @@
+@helper stop
+
+compute || -> I32:
+    return stop() + 1
+;

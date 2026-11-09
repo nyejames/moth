@@ -21,7 +21,7 @@ fn rejects_failure_fixture_without_diagnostic_codes() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(input_root.join("@page.moth"), "x = 1\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "x = 1\n").expect("should write fixture source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\n",
@@ -50,7 +50,7 @@ fn accepts_failure_fixture_without_message_contains() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(input_root.join("@page.moth"), "x = 1\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "x = 1\n").expect("should write fixture source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\n",
@@ -68,7 +68,7 @@ fn rejects_canonical_fixture_without_expectation_before_execution() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(input_root.join("@page.moth"), "not valid Moth source\n")
+    fs::write(input_root.join("@entry.moth"), "not valid Moth source\n")
         .expect("should write fixture source");
 
     // Production reports the canonical fixture root, so expectations derive from the same identity.
@@ -103,7 +103,7 @@ fn rejects_acceptance_only_fixture_with_golden_artifacts() {
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
     fs::create_dir_all(&golden_root).expect("should create fixture golden directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(golden_root.join("index.html"), "<h1>ok</h1>\n")
         .expect("should write fixture golden");
     fs::write(
@@ -134,8 +134,11 @@ fn accepts_acceptance_only_without_fixture_specific_source_marker() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(input_root.join("@page.moth"), "#[:not_a_contract_marker]\n")
-        .expect("should write fixture source");
+    fs::write(
+        input_root.join("@entry.moth"),
+        "#[:not_a_contract_marker]\n",
+    )
+    .expect("should write fixture source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nsuccess_contract = \"acceptance_only\"\n",
@@ -160,7 +163,7 @@ fn empty_backend_golden_directory_has_no_contract() {
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
     fs::create_dir_all(case_root.join(GOLDEN_DIR_NAME).join("html"))
         .expect("should create empty golden directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nsuccess_contract = \"acceptance_only\"\n",
@@ -185,7 +188,7 @@ fn empty_nested_golden_directory_has_no_contract() {
     fs::create_dir_all(case_root.join(GOLDEN_DIR_NAME).join("html").join("nested"))
         .expect("should create empty nested golden directory");
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nsuccess_contract = \"acceptance_only\"\n",
@@ -208,7 +211,7 @@ fn explicit_golden_mode_without_files_is_rejected() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\ngolden_mode = \"strict\"\n",
@@ -241,7 +244,7 @@ fn nested_golden_files_use_relative_inventory_paths() {
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
     fs::create_dir_all(nested_file.parent().expect("nested parent should exist"))
         .expect("should create nested golden directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(&nested_file, "<h1>ok</h1>\n").expect("should write nested golden file");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
@@ -268,7 +271,7 @@ fn accepts_backend_matrix_and_expands_case_variants() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "entry = \".\"\n\n[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nsuccess_contract = \"acceptance_only\"\n\n[backends.html_wasm]\nmode = \"success\"\nwarnings = \"forbid\"\nsuccess_contract = \"acceptance_only\"\n",
@@ -290,7 +293,7 @@ fn backend_filter_limits_loaded_case_variants() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "entry = \".\"\n\n[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nsuccess_contract = \"acceptance_only\"\n\n[backends.html_wasm]\nmode = \"success\"\nwarnings = \"forbid\"\nsuccess_contract = \"acceptance_only\"\n",
@@ -322,7 +325,7 @@ fn manifest_metadata_survives_backend_expansion() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "entry = \".\"\n\n[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nsuccess_contract = \"acceptance_only\"\n\n[backends.html_wasm]\nmode = \"success\"\nwarnings = \"forbid\"\nsuccess_contract = \"acceptance_only\"\n",
@@ -369,7 +372,7 @@ fn matrix_cases_resolve_backend_specific_golden_directories() {
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
     fs::create_dir_all(&golden_html_root).expect("should create html golden directory");
     fs::create_dir_all(&golden_wasm_root).expect("should create wasm golden directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(golden_html_root.join("index.html"), "<h1>html</h1>\n")
         .expect("should write html golden");
     fs::write(golden_wasm_root.join("index.html"), "<h1>wasm</h1>\n")
@@ -431,7 +434,7 @@ fn accepts_success_fixture_with_golden_only_assertion() {
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
     fs::create_dir_all(&golden_root).expect("should create fixture golden directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(golden_root.join("index.html"), "<h1>ok</h1>\n").expect("should write golden file");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
@@ -451,7 +454,7 @@ fn accepts_success_fixture_with_artifact_assertion() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\n\n[[backends.html.artifact_assertions]]\npath = \"index.html\"\nkind = \"html\"\nmust_contain = [\"ok\"]\n",
@@ -469,7 +472,7 @@ fn math_random_samples_require_a_rendered_output_assertion() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write source");
 
     let expectation_path = case_root.join(EXPECT_FILE_NAME);
     let artifact_assertion = "\
@@ -516,7 +519,7 @@ fn accepts_success_fixture_with_rendered_output_assertion() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nrendered_output_contains = [\"ok\"]\n",
@@ -547,7 +550,7 @@ fn each_new_rendered_output_form_satisfies_success_completeness() {
         let case_root = root.join("case");
         let input_root = case_root.join(INPUT_DIR_NAME);
         fs::create_dir_all(&input_root).expect("should create input directory");
-        fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write source");
+        fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write source");
         fs::write(
             case_root.join(EXPECT_FILE_NAME),
             format!("[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\n{field}\n"),
@@ -566,7 +569,7 @@ fn accepts_success_fixture_with_artifact_absence_assertion() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\nartifacts_must_not_exist = [\"unexpected.html\"]\n",
@@ -584,7 +587,7 @@ fn accepts_success_fixture_with_exact_warning_contract() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"success\"\nwarnings = \"exact\"\nwarning_codes = [\"MOTH-RULE-0022\"]\n",
@@ -604,7 +607,7 @@ fn rejects_failure_fixture_with_authored_golden_mode() {
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
     fs::create_dir_all(&input_root).expect("should create input directory");
     fs::create_dir_all(&golden_root).expect("should create golden directory");
-    fs::write(input_root.join("@page.moth"), "x = 1\n").expect("should write source");
+    fs::write(input_root.join("@entry.moth"), "x = 1\n").expect("should write source");
     fs::write(golden_root.join("index.html"), "<h1>ok</h1>\n").expect("should write golden file");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
@@ -637,7 +640,7 @@ fn rejects_failure_fixture_with_discovered_file_backed_golden() {
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
     fs::create_dir_all(&input_root).expect("should create input directory");
     fs::create_dir_all(&golden_root).expect("should create golden directory");
-    fs::write(input_root.join("@page.moth"), "x = 1\n").expect("should write source");
+    fs::write(input_root.join("@entry.moth"), "x = 1\n").expect("should write source");
     fs::write(golden_root.join("index.html"), "<h1>ok</h1>\n").expect("should write golden file");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
@@ -667,7 +670,7 @@ fn accepts_failure_fixture_without_any_golden() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
-    fs::write(input_root.join("@page.moth"), "x = 1\n").expect("should write source");
+    fs::write(input_root.join("@entry.moth"), "x = 1\n").expect("should write source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"failure\"\nwarnings = \"forbid\"\ndiagnostic_codes = [\"MOTH-RULE-0001\"]\n",
@@ -685,7 +688,7 @@ fn rejects_baseline_only_success_fixture() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\n",
@@ -717,7 +720,7 @@ fn default_forbidden_warnings_do_not_satisfy_success_completeness() {
     let case_root = root.join("case");
     let input_root = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create input directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write source");
     fs::write(
         case_root.join(EXPECT_FILE_NAME),
         "[backends.html]\nmode = \"success\"\nwarnings = \"forbid\"\n",
@@ -865,7 +868,7 @@ fn rejects_input_directory_symlink_escape() {
     let input_link = case_root.join(INPUT_DIR_NAME);
     fs::create_dir_all(&case_root).expect("should create fixture root");
     fs::create_dir_all(&outside).expect("should create outside input root");
-    fs::write(outside.join("@page.moth"), "#[:ok]\n").expect("should write outside source");
+    fs::write(outside.join("@entry.moth"), "#[:ok]\n").expect("should write outside source");
     if symlink_directory(&outside, &input_link).is_err() {
         return;
     }
@@ -942,7 +945,7 @@ fn rejects_contained_golden_file_symlink() {
     let golden_root = case_root.join(GOLDEN_DIR_NAME).join("html");
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
     fs::create_dir_all(&golden_root).expect("should create golden directory");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(golden_root.join("real.html"), "<h1>ok</h1>\n")
         .expect("should write real golden file");
     if symlink_file(
@@ -984,7 +987,7 @@ fn rejects_escaping_golden_file_symlink() {
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
     fs::create_dir_all(&golden_root).expect("should create golden directory");
     fs::create_dir_all(&outside).expect("should create outside target");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write fixture source");
     let outside_file = outside.join("stolen.html");
     fs::write(&outside_file, "<h1>stolen</h1>\n").expect("should write outside golden");
     if symlink_file(&outside_file, &golden_root.join("escape.html")).is_err() {
@@ -1023,7 +1026,7 @@ fn rejects_golden_directory_symlink() {
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
     fs::create_dir_all(&golden_root).expect("should create golden directory");
     fs::create_dir_all(&outside).expect("should create outside target");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(outside.join("nested.html"), "<h1>stolen</h1>\n")
         .expect("should write outside golden");
     if symlink_directory(&outside, &golden_root.join("linked_dir")).is_err() {
@@ -1062,7 +1065,7 @@ fn rejects_backend_golden_root_symlink() {
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
     fs::create_dir_all(&golden_parent).expect("should create golden parent directory");
     fs::create_dir_all(&outside).expect("should create outside target");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write fixture source");
     fs::write(outside.join("index.html"), "<h1>stolen</h1>\n")
         .expect("should write outside golden");
     if symlink_directory(&outside, &golden_parent.join("html")).is_err() {
@@ -1103,7 +1106,7 @@ fn rejects_golden_parent_symlink() {
     let golden_parent = case_root.join(GOLDEN_DIR_NAME);
     fs::create_dir_all(&input_root).expect("should create fixture input directory");
     fs::create_dir_all(&outside).expect("should create outside target");
-    fs::write(input_root.join("@page.moth"), "#[:ok]\n").expect("should write fixture source");
+    fs::write(input_root.join("@entry.moth"), "#[:ok]\n").expect("should write fixture source");
     let outside_golden_root = outside.join("html");
     fs::create_dir_all(&outside_golden_root).expect("should create outside golden backend");
     fs::write(outside_golden_root.join("index.html"), "<h1>stolen</h1>\n")

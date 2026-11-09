@@ -6,7 +6,7 @@ fn multi_file_parsing_aggregates_headers_const_fragments_and_runtime_count() {
     let sources = vec![
         (
             "[runtime1]\n#[const1]\n[runtime2]\n".to_owned(),
-            "src/@page.moth".to_owned(),
+            "src/@entry.moth".to_owned(),
         ),
         (
             "helper_func || -> I32:\n    return 1\n;\n".to_owned(),
@@ -14,7 +14,7 @@ fn multi_file_parsing_aggregates_headers_const_fragments_and_runtime_count() {
         ),
     ];
 
-    let headers = parse_multi_file_headers(&sources, "src/@page.moth");
+    let headers = parse_multi_file_headers(&sources, "src/@entry.moth");
 
     // Entry file: 2 runtime templates + 1 const template + 1 start function = 2 headers
     // (const template + start function; runtime templates are inside start function)
@@ -47,7 +47,7 @@ fn multi_file_parsing_aggregates_warnings_from_all_files() {
     let sources = vec![
         (
             "Status_type :: bad_variant;\n".to_owned(),
-            "src/@page.moth".to_owned(),
+            "src/@entry.moth".to_owned(),
         ),
         (
             "Helper_type :: other_variant;\n".to_owned(),
@@ -56,7 +56,7 @@ fn multi_file_parsing_aggregates_warnings_from_all_files() {
     ];
 
     let (result, warnings, _string_table) =
-        parse_multi_file_headers_with_result(&sources, "src/@page.moth");
+        parse_multi_file_headers_with_result(&sources, "src/@entry.moth");
 
     assert!(result.is_ok(), "expected successful header parsing");
     assert_eq!(
@@ -79,7 +79,7 @@ fn multi_file_parsing_preserves_warnings_before_later_parse_error() {
     let sources = vec![
         (
             "io.line([: [\"hello\"]])\n".to_owned(),
-            "src/@page.moth".to_owned(),
+            "src/@entry.moth".to_owned(),
         ),
         (
             "Status_type :: bad_variant;\ndup ||:\n;\ndup ||:\n;\n".to_owned(),
@@ -88,7 +88,7 @@ fn multi_file_parsing_preserves_warnings_before_later_parse_error() {
     ];
 
     let (result, warnings, _string_table) =
-        parse_multi_file_headers_with_result(&sources, "src/@page.moth");
+        parse_multi_file_headers_with_result(&sources, "src/@entry.moth");
 
     assert!(
         result.is_err(),
@@ -113,7 +113,7 @@ fn per_file_fork_merge_produces_correct_headers_and_warnings_for_multiple_files(
     let sources = [
         (
             "FooA #= \"a\"\nBarA #= \"b\"\n".to_owned(),
-            "src/@page.moth".to_owned(),
+            "src/@entry.moth".to_owned(),
         ),
         (
             "FooB #= \"c\"\nBarB #= \"d\"\n".to_owned(),
@@ -122,7 +122,7 @@ fn per_file_fork_merge_produces_correct_headers_and_warnings_for_multiple_files(
     ];
 
     let (result, warnings, string_table, path_fork) =
-        parse_multi_file_headers_with_path(&sources, "src/@page.moth");
+        parse_multi_file_headers_with_path(&sources, "src/@entry.moth");
 
     let headers = result.expect("headers should parse");
 
@@ -143,8 +143,8 @@ fn per_file_fork_merge_produces_correct_headers_and_warnings_for_multiple_files(
         })
         .collect();
 
-    assert!(constant_names.contains(&"src/@page.moth/FooA".to_owned()));
-    assert!(constant_names.contains(&"src/@page.moth/BarA".to_owned()));
+    assert!(constant_names.contains(&"src/@entry.moth/FooA".to_owned()));
+    assert!(constant_names.contains(&"src/@entry.moth/BarA".to_owned()));
     assert!(constant_names.contains(&"src/helper.moth/FooB".to_owned()));
     assert!(constant_names.contains(&"src/helper.moth/BarB".to_owned()));
 
@@ -179,7 +179,7 @@ fn per_file_fork_merge_remaps_non_identity_strings_across_multiple_files() {
     ];
 
     let (result, warnings, string_table) =
-        parse_multi_file_headers_with_result(&sources, "src/@page.moth");
+        parse_multi_file_headers_with_result(&sources, "src/@entry.moth");
 
     assert!(
         result.is_err(),
@@ -224,7 +224,7 @@ fn dependency_only_file_contributes_file_dependency_clauses_and_module_file_path
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/helper.moth");
-    let entry_file_path = PathBuf::from("src/@page.moth");
+    let entry_file_path = PathBuf::from("src/@entry.moth");
     let (helper_output, _) = prepare_single_file_with_fork(
         "@core/math\n",
         &file_path,
@@ -237,7 +237,6 @@ fn dependency_only_file_contributes_file_dependency_clauses_and_module_file_path
     let styles = StyleDirectiveRegistry::built_ins();
     let context = HeaderTestPrepareContext {
         source_id: SourceId::from_index(1),
-        entry_file_path: &entry_file_path,
         options: &options,
         style_directives: &styles,
     };
@@ -271,7 +270,7 @@ fn dependency_only_file_contributes_file_dependency_clauses_and_module_file_path
         .try_intern_filesystem_path(&PathBuf::from("src/helper.moth"), &mut string_table)
         .expect("test path should be UTF-8");
     let page_path = path_fork
-        .try_intern_filesystem_path(&PathBuf::from("src/@page.moth"), &mut string_table)
+        .try_intern_filesystem_path(&PathBuf::from("src/@entry.moth"), &mut string_table)
         .expect("test path should be UTF-8");
 
     assert!(
@@ -301,7 +300,7 @@ fn per_file_prepare_output_preserves_file_role_and_dependencies_on_output() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/helper.moth");
-    let entry_file_path = PathBuf::from("src/@page.moth");
+    let entry_file_path = PathBuf::from("src/@entry.moth");
     let (output, _span_builder) = prepare_single_file_with_fork(
         "@core/math\n",
         &file_path,
@@ -324,8 +323,8 @@ fn retained_js_provider_path_records_external_target() {
     let mut path_fork = PathInternerFork::empty();
     let (output, _span_builder) = prepare_single_file_with_fork(
         "@drawing.js as drawing\n",
-        &PathBuf::from("src/@page.moth"),
-        &PathBuf::from("src/@page.moth"),
+        &PathBuf::from("src/@entry.moth"),
+        &PathBuf::from("src/@entry.moth"),
         &mut string_table,
         &mut path_fork,
     );
@@ -352,7 +351,7 @@ fn retained_js_provider_path_records_external_target() {
 #[test]
 fn explicit_extension_provider_requires_alias_or_selection() {
     let result =
-        parse_single_file_headers_with_entry("@drawing.js\n", "src/@page.moth", "src/@page.moth");
+        parse_single_file_headers_with_entry("@drawing.js\n", "src/@entry.moth", "src/@entry.moth");
     let errors = expect_header_error(result, "bare provider clauses should be rejected");
     assert!(errors.diagnostics.views().any(|diagnostic| {
         diagnostic
@@ -369,15 +368,12 @@ fn dependency_clause_is_rejected_in_config_source() {
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("config.moth");
     let options = HeaderParseOptions {
-        entry_file_id: None,
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role: ModuleRootRole::Normal,
+        selected_file: None,
+        ..Default::default()
     };
     let style_directives = StyleDirectiveRegistry::built_ins();
     let context = HeaderTestPrepareContext {
         source_id: SourceId::COMPILATION_ROOT,
-        entry_file_path: &file_path,
         options: &options,
         style_directives: &style_directives,
     };
@@ -416,10 +412,9 @@ fn dependency_clause_is_rejected_in_config_source() {
 fn retained_dependency_shells_get_deterministic_ordinals_per_authored_clause() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
-    let (output, _span_builder) = prepare_single_file_with_fork(
+    let file_path = PathBuf::from("src/@mod.moth");
+    let (output, _span_builder) = prepare_api_root_with_fork(
         "@one a\n@two\nexport:\n    @one a\n;\n",
-        &file_path,
         &file_path,
         &mut string_table,
         &mut path_fork,
@@ -465,7 +460,7 @@ fn retained_dependency_shells_get_deterministic_ordinals_per_authored_clause() {
 fn direct_selection_and_namespace_clauses_keep_provider_root_and_selection_shape() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let (output, _span_builder) = prepare_single_file_with_fork(
         "@one a\n@one/a\n",
         &file_path,
@@ -503,11 +498,11 @@ fn direct_selection_and_namespace_clauses_keep_provider_root_and_selection_shape
 }
 
 #[test]
-fn imported_module_root_prepare_output_has_imported_root_role() {
+fn non_selected_module_root_prepare_output_has_normal_role() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@mod.moth");
-    let entry_file_path = PathBuf::from("src/@page.moth");
+    let entry_file_path = PathBuf::from("src/@entry.moth");
     let (output, _span_builder) = prepare_single_file_with_fork(
         "Button = | label String |\n",
         &file_path,
@@ -516,16 +511,16 @@ fn imported_module_root_prepare_output_has_imported_root_role() {
         &mut path_fork,
     );
 
-    assert_eq!(output.file_role, FileRole::ImportedModuleRoot);
+    assert_eq!(output.file_role, FileRole::Normal);
     assert!(output.file_dependency_clauses.is_empty());
 }
 
 #[test]
-fn entry_normal_module_root_file_is_assigned_active_module_root_role() {
+fn entry_normal_module_root_file_is_assigned_the_entry_root_role() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
-    let entry_file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
+    let entry_file_path = PathBuf::from("src/@entry.moth");
     let (output, _span_builder) = prepare_single_file_with_fork(
         "greeting #= \"hello\"\n",
         &file_path,
@@ -534,45 +529,71 @@ fn entry_normal_module_root_file_is_assigned_active_module_root_role() {
         &mut path_fork,
     );
 
-    assert_eq!(output.file_role, FileRole::ActiveModuleRoot);
+    assert_eq!(output.file_role, FileRole::ActiveEntryRoot);
 }
 
 #[test]
-fn api_only_active_roots_export_declarations_without_synthesizing_start() {
-    for root_role in [
-        ModuleRootRole::Support,
-        ModuleRootRole::SyntheticProjectContext,
-    ] {
-        let mut string_table = StringTable::new();
-        let mut path_fork = PathInternerFork::empty();
-        let file_path = PathBuf::from("src/styles/+package.moth");
-        let mut span_builder = ExtendedSpanBuilder::new();
-        let output = prepare_active_root_with_role(
-            "export:\n    theme #= \"dark\"\n;\n",
-            &file_path,
-            root_role,
-            &mut string_table,
-            &mut span_builder,
-            &mut path_fork,
-        )
-        .expect("API-only roots should accept public declarations");
+fn api_only_support_root_exports_declarations_without_synthesizing_start() {
+    let root_role = ModuleRootRole::Support;
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let file_path = PathBuf::from("src/styles/@package.moth");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let output = prepare_active_root_with_role(
+        "export:\n    theme #= \"dark\"\n;\n",
+        &file_path,
+        root_role,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    )
+    .expect("API-only roots should accept public declarations");
 
-        assert_eq!(output.file_role, FileRole::ActiveApiOnlyModuleRoot);
-        assert!(output.headers.iter().any(|header| {
-            matches!(header.kind, HeaderKind::Constant { .. })
-                && header.export_mode == HeaderExportMode::Public
-        }));
-        assert!(
-            output
-                .headers
-                .iter()
-                .all(|header| !matches!(header.kind, HeaderKind::StartFunction)),
-            "API-only roots must not synthesize start"
-        );
-        assert_eq!(output.runtime_fragment_count, 0);
-        assert_eq!(output.const_template_count, 0);
-        assert!(!output.has_non_trivial_root_body);
-    }
+    assert_eq!(
+        output.file_role,
+        FileRole::ActiveApiOnlyModuleRoot(root_role)
+    );
+    assert!(output.headers.iter().any(|header| {
+        matches!(header.kind, HeaderKind::Constant { .. })
+            && header.export_mode == HeaderExportMode::Public
+    }));
+    assert!(
+        output
+            .headers
+            .iter()
+            .all(|header| !matches!(header.kind, HeaderKind::StartFunction)),
+        "API-only roots must not synthesize start"
+    );
+    assert_eq!(output.runtime_fragment_count, 0);
+    assert_eq!(output.const_template_count, 0);
+}
+
+#[test]
+fn synthetic_project_context_root_rejects_export_surfaces() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let file_path = PathBuf::from("src/styles/@package.moth");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let diagnostic = match prepare_active_root_with_role(
+        "export:\n    theme #= \"dark\"\n;\n",
+        &file_path,
+        ModuleRootRole::SyntheticProjectContext,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    ) {
+        Ok(_) => panic!("a synthetic project-context root owns no export surface"),
+        Err(FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+            diagnostic, ..
+        })) => diagnostic,
+        Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
+            panic!("synthetic project-context export rejection became infrastructure: {error:?}")
+        }
+    };
+
+    let diagnostics = diagnostic_view_for_test(diagnostic);
+    let diagnostic = diagnostics.first().expect("the export rejection compacts");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-RULE-0077");
 }
 
 #[test]
@@ -584,7 +605,7 @@ fn api_only_active_roots_reject_every_root_activity_form() {
         for source in ["value = 1\n", "[3]\n", "#[3]\n"] {
             let mut string_table = StringTable::new();
             let mut path_fork = PathInternerFork::empty();
-            let file_path = PathBuf::from("src/styles/+package.moth");
+            let file_path = PathBuf::from("src/styles/@package.moth");
             let mut span_builder = ExtendedSpanBuilder::new();
             let diagnostic = match prepare_active_root_with_role(
                 source,
@@ -618,11 +639,11 @@ fn api_only_active_roots_reject_every_root_activity_form() {
 }
 
 #[test]
-fn support_package_root_file_is_assigned_imported_module_root_role() {
+fn support_package_root_file_outside_the_selection_has_normal_role() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/styles/+package.moth");
-    let entry_file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/styles/@package.moth");
+    let entry_file_path = PathBuf::from("src/@entry.moth");
     let (output, _span_builder) = prepare_single_file_with_fork(
         "theme #= \"dark\"\n",
         &file_path,
@@ -631,7 +652,7 @@ fn support_package_root_file_is_assigned_imported_module_root_role() {
         &mut path_fork,
     );
 
-    assert_eq!(output.file_role, FileRole::ImportedModuleRoot);
+    assert_eq!(output.file_role, FileRole::Normal);
 }
 
 #[test]
@@ -639,7 +660,7 @@ fn ordinary_source_file_is_assigned_normal_role() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/helper.moth");
-    let entry_file_path = PathBuf::from("src/@page.moth");
+    let entry_file_path = PathBuf::from("src/@entry.moth");
     let (output, _span_builder) = prepare_single_file_with_fork(
         "value #= 1\n",
         &file_path,
@@ -656,8 +677,8 @@ fn support_package_root_file_accepts_an_export_block() {
     let headers = expect_header_success(
         parse_single_file_headers_with_entry(
             "export:\n    Button = | label String |\n;\n",
-            "src/styles/+package.moth",
-            "src/@page.moth",
+            "src/styles/@package.moth",
+            "src/@entry.moth",
         ),
         "a `+*.moth` support-package root should be export-capable",
     );

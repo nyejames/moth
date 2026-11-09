@@ -12,8 +12,8 @@ compiler work. All user-facing tooling remains under `moth`.
 
 The next major plans are kept inside [plans](./plans) and linked here in top to bottom order under the `Plans` heading.
 
-Use the [Compiler Progress Matrix](../docs/progress/@page.moth) for language, compiler, memory and backend status.
-Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-builders/@page.moth) for package and project-builder status.
+Use the [Compiler Progress Matrix](../docs/progress/@entry.moth) for language, compiler, memory and backend status.
+Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-builders/@entry.moth) for package and project-builder status.
 
 ---
 
@@ -29,15 +29,13 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Sequenced work
 
-- [General compiler directives](./plans/general-directives-plan.md) **NEXT**
+- [General compiler directives](./plans/general-directives-plan.md) **ACTIVE**
 
 - [Const functions and shared compile-time evaluation](./plans/const-functions-plan.md) - explicit `#|...|` compile-time-only callable contracts, a unified constant/function dependency graph, bounded shared function evaluation, cross-module const body publication, release-only ordinary function folding and low-priority budget suggestions. The first active slice is the Stage 4 ownership and early-HIR feasibility gate.
 
 - [Constraints foundations and fast math](./plans/constraints-and-fast-math-plan.md) - Queued: compiler-owned `$fast_math`, transitive `$safe_math` and `$infallible`, a universal numeric backend contract V1, selected fast Core Math helpers and the corresponding documentation and optimisation work. Ordinary arithmetic remains checked. Fast arithmetic has specified wrapping and trapping while preserving numeric value invariants.
 
 - [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md) - Queued: consume delivered shared MON syntax, exact numeric types and bounded known-leaf inference. Wait for the required compact typed-expression and ordinary-struct construction capabilities. Support recursive local anonymous records through ordinary hidden nominal structs, with explicit nominal children and transitive escape checks.
-
-- [Never return contracts](./plans/never-return-contract-plan.md)
 
 - [Reusable generics, type-parametric Core bindings and file-backed JS/WAT](./plans/generics-core-bindings-and-file-backed-js-wat-plan.md) - Queued: file-private reusable generic declarations, closed numeric-family limits, bounded nested-call context, trusted scalar-parametric Core bindings and file-backed JS/WAT implementations. Deliver generic min, max, clamp and uniformly fallible abs. Consume exact numeric semantics and existing backend capabilities without waiting for the later mixed-Wasm implementation.
 
@@ -55,7 +53,7 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 - [Collection-producing and repeated option-capture loops](./plans/collection-producing-and-repeated-option-loops-plan.md) - Low priority. Add eager `{T}`-producing loops through terminal `then` and repeated `T?` option-capture loop headers, lowering both to ordinary HIR CFG and collection operations without iterator or generator abstractions.
 
-- [Built-in testing and test modules](./plans/built-in-testing-and-test-modules-plan.md) - Late priority, after the final `$export` directive and support-package model: reserved `tests/` source modules, scoped test-only `+` support exports, `$test` functions and the `moth test` runner. The plan records accepted boundaries and the implementation-time contracts still to settle.
+- [Built-in testing and test modules](./plans/built-in-testing-and-test-modules-plan.md) - Late priority, after the final `$export` directive and support-package model: reserved `tests/` source modules, scoped test-only `@package.moth` support exports, `$test` functions and the `moth test` runner. The plan records accepted boundaries and the implementation-time contracts still to settle.
 
 - [contextual constants - design draft](./plans/html-builder-contextual-constants-draft.md) - look at reopening this later.
 contextual constants are useful for things like components that want to use builder compile time info at the point of their actual use (e.g canonical page url).
@@ -83,6 +81,21 @@ This roadmap owns the normal serial order. A plan owns its own work and nothing 
 # Deferred design and follow-ups
 
 This is a bunch of notes for work that will likely be picked up in the future, but has no set design plan yet.
+
+## Never return proof follow-ups
+
+Accepted `-> !` body proof covers false assertions, explicit Never calls,
+normalised-true loops with no reachable self-targeting break, lexical scopes,
+branches and exhaustive matches. These extensions remain:
+
+- direct and mutual recursion proof for declared Never bodies
+- richer data-flow proof of permanently true runtime loop conditions
+- broader deterministic structural, SCC or whole-program non-termination proof
+
+They may accept more correctly declared `-> !` bodies later. They are not a
+path to first-class Never values, bottom coercion, value-position Never calls
+or implicit ordinary-call divergence. The progress matrix keeps the same gaps
+on the Never return contracts row.
 
 ## Builder slot and template constraints
 
@@ -191,7 +204,7 @@ performs semantic symbol resolution or syntax diagnostics.
 - `$export` block support is undecided. The queued export-directive TODO owns the later choice of prefix-only versus optional block form. Keep one final visibility syntax.
 - A possible separate custom-metadata directive remains open design. `$project` stays a closed predefined-field signature in the meantime.
 
-Permanent owners: `docs/docs/directives/directives.mtf`, `docs/docs/design-scope/`, `docs/docs/async/@page.moth`, and the checked-proof-budget references. Do not treat these bullets as implementation-plan files.
+Permanent owners: `docs/docs/directives/directives.mtf`, `docs/docs/design-scope/`, `docs/docs/async/@entry.moth`, and the checked-proof-budget references. Do not treat these bullets as implementation-plan files.
 
 ## Wiring follow-ups
 

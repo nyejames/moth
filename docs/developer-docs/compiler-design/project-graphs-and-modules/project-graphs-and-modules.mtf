@@ -14,29 +14,29 @@ A **graph** here means nodes plus directed edges with meaning.
 
 A **provider** supplies a public interface. A **consumer** binds against that interface after the provider succeeds.
 
-Not every `@` clause makes an edge between modules, though. In the running example `@page.moth` and `greeting.moth` share a directory, so they are one module and `@greeting` binds a sibling source file directly. A provider edge appears when a dependency resolves to a *different* module or package, and even then it names a relationship rather than copying `greet`'s body across. Think of a graft point, not a clone.
+Not every `@` clause makes an edge between modules, though. In the running example `@entry.moth` and `greeting.moth` share a directory, so they are one module and `@greeting` binds a sibling source file directly. A provider edge appears when a dependency resolves to a *different* module or package, and even then it names a relationship rather than copying `greet`'s body across. Think of a graft point, not a clone.
 
-[diagram:
+[@diagrams diagram:
     [$in label: A directory becomes one module, not one module per file]
     [$in caption: The root marks the boundary. Everything beside it in the same directory is owned source, which is why the walkthrough compiles one module rather than two.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: One directory]
-            [$in title: Project root rooted by @page.moth]
-            A directory forms at most one structural module. Its one normal root or one normal/support root pair defines one compilation and visibility unit.
+            [$in title: Project root rooted by @entry.moth]
+            A directory forms at most one structural module. At least one present root among `@mod.moth`, `@package.moth` and `@entry.moth` defines one compilation and visibility unit.
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Owned by that root]
-                [lane:
-                [detail:
+                [@diagrams lane:
+                [@diagrams detail:
                     [$in href: ./]
-                    `@page.moth`, the root itself
+                    `@entry.moth`, the root itself
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     `greeting.moth`, ordinary owned source
                 ]
@@ -45,8 +45,8 @@ Not every `@` clause makes an edge between modules, though. In the running examp
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../declarations-dependencies-and-ordering/]
             [$in eyebrow: Inside]
             [$in title: @greeting greet binds a sibling]
@@ -54,8 +54,8 @@ Not every `@` clause makes an edge between modules, though. In the running examp
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Across]
             [$in title: A real provider edge]
@@ -68,10 +68,14 @@ Not every `@` clause makes an edge between modules, though. In the running examp
 
 Moth marks module roots in the filesystem on purpose.
 
-- **Normal roots** use names like `@page.moth`. They may hold declarations and dormant top-level runtime work; current Alpha selects activity-based page output, including direct builder slot contributions. A future general `$entry` purpose is deferred.
-- **Support roots** use names like `+helpers.moth`. They are scoped API-only support-package facades: declarations yes, implicit entry and page fragments no. Consumers see only the facade's `export:` surface and cannot reach private descendants.
-- The **project package facade** is another API-only role with project-wide assembly privilege owned by the build system.
+- **`@mod.moth`** is the normal API facade. It holds declarations and function bodies, publishes the module's importable normal surface and carries no implicit entry, top-level runtime or fragments.
+- **`@package.moth`** is the support API facade. It publishes the scoped support surface, or the external project package surface at the selected project root, and never becomes an entry.
+- **`@entry.moth`** is the entry root. It holds private declarations, dormant top-level runtime work, fragments and builder metadata, publishes no importable API and is the only root with an implicit `start`. Its presence selects an entry.
+- The **project package facade** is the selected project root's `@package.moth`. It carries project-wide assembly privilege owned by the build system.
 - Ordinary owned source files such as `greeting.moth` sit under a root's ownership without each file becoming its own root.
+- Any other authored `@*.moth`, `+*.moth` or `#*.moth` filename is rejected with a rename suggestion rather than treated as an ordinary file.
+
+Each root file is a separate visibility scope. Its top-level declarations do not leak into another root or into ordinary helper files. Helpers are shared and prepared once, and a root binds their declarations through ordinary dependency clauses.
 
 **Source-backed packages** compile Moth source into ordinary module artefacts. They compile as separate package graphs with their own config, their own private `@project` and their own source index, and consumers bind the public facade rather than reaching inside. **Binding-backed packages** expose typed external interfaces without Moth module bodies. Both appear in the capability surface. Only source-backed modules produce HIR.
 
@@ -99,7 +103,7 @@ One physical module compiles **once** per project or package compilation boundar
 
 Scheduling is where the build system stops. When a module is ready it builds one compiler input and calls **one** compiler module compilation service, then handles the outcome: success, diagnosed or an internal compiler error. Binding, ordering, AST, HIR and borrow validation happen inside that call. The build system never runs those stages step by step from its own code.
 
-The greeting project is the simple case, and worth being precise about. `@page.moth` and `greeting.moth` live in the same directory, so they form one canonical module that compiles once with `greeting.moth` as owned source. Binding `@greeting greet` happens inside that single compilation. Provider-first waves matter when a dependency crosses a module or package boundary, which this example never does.
+The greeting project is the simple case, and worth being precise about. `@entry.moth` and `greeting.moth` live in the same directory, so they form one canonical module that compiles once with `greeting.moth` as owned source. Binding `@greeting greet` happens inside that single compilation. Provider-first waves matter when a dependency crosses a module or package boundary, which this example never does.
 
 ## Deterministic identity
 
@@ -130,8 +134,8 @@ Determinism lets parallel compilation merge results in canonical order. Diagnost
 ## Roadmap and current status
 
 - **Accepted design:** canonical graph, provider-first waves and immutable module compilation once per boundary.
-- **Current implementation:** canonical module compilation and scoped packages already landed. The progress matrix rows for project config and project-local packages carry the remaining partial coverage.
-- **Queued work:** `html-page-directives-and-runtime-title-plan.md` adds general `$entry` purpose validation and explicit entry selection without changing the one-structural-module-per-directory graph. Builder slots own initial document metadata; the earlier `$page` proposal is superseded.
+- **Current implementation:** fixed root roles, presence-based entries, canonical module compilation and scoped packages are delivered. The progress matrix rows for project config and project-local packages carry the remaining partial coverage.
+- **Queued work:** capability-checked runtime title mutation. Builder slots own initial document metadata.
 - **Deferred or outside scope:** old flat module handoff and default package-folder scanning as the primary model.
 
 ## Exit state

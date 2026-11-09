@@ -27,6 +27,7 @@ use crate::compiler_frontend::datatypes::ids::{
 use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
@@ -34,7 +35,7 @@ use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirMapEntry, HirVariantCarrier, HirVariantField,
     OPTION_SOME_VARIANT_INDEX, ValueKind,
 };
-use crate::compiler_frontend::hir::functions::HirFunctionOrigin;
+use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirFunctionReturnContract};
 use crate::compiler_frontend::hir::hir_builder::validate_module_for_tests;
 use crate::compiler_frontend::hir::hir_datatypes::classify_hir_type;
 use crate::compiler_frontend::hir::ids::{
@@ -1770,7 +1771,10 @@ fn valid_module_passes_explicit_validation() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );
@@ -2545,7 +2549,10 @@ fn validator_rejects_invalid_jump_target() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );
@@ -3020,7 +3027,10 @@ fn validator_rejects_jump_sources_owned_by_another_function() {
         helper_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
         None,
@@ -3028,7 +3038,10 @@ fn validator_rejects_jump_sources_owned_by_another_function() {
     let start = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );
@@ -3269,7 +3282,10 @@ fn validator_rejects_non_literal_match_pattern() {
                 false,
                 None,
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );
@@ -3559,7 +3575,10 @@ fn validator_rejects_missing_side_table_mappings() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -3604,7 +3623,10 @@ fn validator_rejects_unresolved_generic_parameter_types() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );
@@ -3714,8 +3736,11 @@ fn validator_rejects_function_type_containing_generic_parameter() {
         let generic_type_id = generic_parameter_type_id(string_table, type_environment);
         type_environment.intern_function(FunctionTypeKey {
             parameters: Box::new([generic_type_id]),
-            returns: Box::new([builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
-            error_return: None,
+            return_contract: (CallableReturnShape::from_slots(
+                [builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+                None,
+            ))
+            .into(),
         })
     });
 
@@ -3731,7 +3756,10 @@ fn validator_rejects_struct_field_type_containing_generic_parameter() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );
@@ -3786,7 +3814,9 @@ fn validator_rejects_function_return_type_containing_generic_parameter() {
         .start_function
         .expect("normal test module should have start")
         .0 as usize;
-    module.functions[start_index].returns = vec![generic_type_id].into_boxed_slice();
+    module.functions[start_index].return_contract = HirFunctionReturnContract::Returns(
+        CallableReturnShape::from_slots([generic_type_id], None),
+    );
 
     let error = validate_module_for_tests(
         &module,
@@ -3807,7 +3837,11 @@ fn validator_rejects_function_error_type_containing_generic_parameter() {
         .start_function
         .expect("normal test module should have start")
         .0 as usize;
-    module.functions[start_index].error_return = Some(generic_type_id);
+    module.functions[start_index]
+        .return_contract
+        .ordinary_mut()
+        .expect("fixture function is ordinary")
+        .set_error(Some(generic_type_id));
 
     let error = validate_module_for_tests(
         &module,
@@ -3834,7 +3868,10 @@ fn validator_rejects_function_parameter_type_containing_generic_parameter() {
                 false,
                 None,
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );
@@ -4001,7 +4038,8 @@ fn validator_rejects_anonymous_const_record_marker_on_function_return() {
     let start_function = module
         .start_function
         .expect("normal test module should have start");
-    module.functions[start_function.0 as usize].returns = vec![marker].into_boxed_slice();
+    module.functions[start_function.0 as usize].return_contract =
+        HirFunctionReturnContract::Returns(CallableReturnShape::from_slots([marker], None));
 
     let error = validate_module_for_tests(
         &module,
@@ -4041,7 +4079,10 @@ fn validator_rejects_placeholder_terminator() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );
@@ -4085,7 +4126,10 @@ fn validator_rejects_region_cycle() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );
@@ -5315,7 +5359,10 @@ fn validator_rejects_missing_region_parent() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );
@@ -5357,7 +5404,10 @@ fn validator_rejects_cross_function_cfg_edges() {
         helper_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
         None,
@@ -5365,7 +5415,10 @@ fn validator_rejects_cross_function_cfg_edges() {
     let start = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );
@@ -5430,7 +5483,10 @@ fn lowering_errors_preserve_string_table_context() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(NodeKind::ExpressionStatement(call), call_span),
@@ -5465,7 +5521,10 @@ fn hir_variant_construct_option_invalid_index_rejected() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );
@@ -5585,7 +5644,10 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
                 false,
                 None,
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );
@@ -5720,7 +5782,10 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
                 false,
                 None,
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );
@@ -5857,7 +5922,10 @@ fn hir_route_construct_with_input_missing_leading_capture_rejected() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), None)],
     );

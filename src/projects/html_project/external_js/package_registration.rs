@@ -12,10 +12,10 @@ use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalAccessKind, ExternalConstantDef, ExternalConstantValue,
     ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering, ExternalPackageId,
     ExternalPackageRegistry, ExternalParameter, ExternalRegistrationError, ExternalReturnSlot,
-    ExternalSignatureType, ExternalTypeSpec,
+    ExternalSignatureType, ExternalTypeSpec, external_never, external_returns,
 };
 use crate::projects::html_project::external_js::parser::parsed_js_module::{
-    ParsedJsFunction, ParsedJsModule, ParsedSignature,
+    ParsedJsFunction, ParsedJsModule, ParsedReturnClause, ParsedSignature,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::collections::HashMap;
@@ -169,28 +169,32 @@ fn convert_parsed_function_to_spec(
         });
     }
 
-    let mut returns: Vec<ExternalReturnSlot> = Vec::new();
-    let mut error_return_type: Option<ExternalSignatureType> = None;
+    let return_contract = match &function.signature.return_clause {
+        ParsedReturnClause::Never => external_never(),
+        ParsedReturnClause::Returns {
+            returns,
+            has_error_return,
+        } => {
+            let mut return_slots: Vec<ExternalReturnSlot> = Vec::with_capacity(returns.len());
+            for return_type in returns {
+                let signature_type = parsed_type_to_signature_type(
+                    &return_type.type_name,
+                    &function.moth_name,
+                    false,
+                    type_id_by_opaque_name,
+                )?;
+                return_slots.push(ExternalReturnSlot::fresh(signature_type));
+            }
 
-    for return_type in &function.signature.returns {
-        let signature_type = parsed_type_to_signature_type(
-            &return_type.type_name,
-            &function.moth_name,
-            false,
-            type_id_by_opaque_name,
-        )?;
-        returns.push(ExternalReturnSlot::fresh(signature_type));
-    }
-
-    if function.signature.has_error_return {
-        error_return_type = Some(ExternalSignatureType::BuiltinError);
-    }
+            let error_return_type = has_error_return.then_some(ExternalSignatureType::BuiltinError);
+            external_returns(return_slots, error_return_type)
+        }
+    };
 
     Ok(ExternalFunctionSpec {
         name: function.moth_name.clone(),
         parameters,
-        returns,
-        error_return_type,
+        return_contract,
         const_eval: None,
         lowerings: ExternalFunctionLowerings {
             js: Some(ExternalJsLowering::ExternalModuleExport {

@@ -18,6 +18,7 @@ use crate::compiler_frontend::ast::statements::value_production::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId};
@@ -153,7 +154,10 @@ fn lowers_if_to_then_else_merge_blocks() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![flag_decl, if_node],
     );
@@ -205,7 +209,10 @@ fn rejects_statically_decided_statement_if_at_hir_boundary() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(
             NodeKind::If(condition, vec![], None, test_if_branch_metadata(false)),
@@ -241,7 +248,9 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
         rhs_name,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::BOOL]),
+            return_contract: FunctionReturnContract::Returns(fresh_success_returns(vec![
+                builtin_type_ids::BOOL,
+            ])),
         },
         vec![node(NodeKind::Return(vec![rhs_result]), location)],
         location,
@@ -274,7 +283,10 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(
             NodeKind::If(
@@ -394,7 +406,9 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
         rhs_name,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::BOOL]),
+            return_contract: FunctionReturnContract::Returns(fresh_success_returns(vec![
+                builtin_type_ids::BOOL,
+            ])),
         },
         vec![node(NodeKind::Return(vec![rhs_result]), location)],
         location,
@@ -427,7 +441,10 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(
             NodeKind::If(
@@ -574,7 +591,10 @@ fn short_circuit_place_rhs_materializes_value_load_before_edge_transfer() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(NodeKind::VariableDeclaration(lhs_decl), location),
@@ -728,7 +748,10 @@ fn value_if_then_place_materializes_value_load_before_result_definition() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             flag_decl,
@@ -918,7 +941,10 @@ fn assertion_failure_uses_message_value_block_tail() {
                 false,
                 location,
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(
             NodeKind::Assert {
@@ -1008,7 +1034,9 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
         message_name,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::STRING]),
+            return_contract: FunctionReturnContract::Returns(fresh_success_returns(vec![
+                builtin_type_ids::STRING,
+            ])),
         },
         vec![node(NodeKind::Return(vec![message_string]), location)],
         location,
@@ -1044,7 +1072,10 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(
             NodeKind::Assert {
@@ -1175,7 +1206,10 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
                 false,
                 location,
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(
             NodeKind::Assert {
@@ -1249,7 +1283,9 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
         chooser,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
+            return_contract: FunctionReturnContract::Returns(fresh_success_returns(vec![
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ])),
         },
         vec![
             flag_decl,
@@ -1287,7 +1323,10 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
     let start_fn = super::entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
     );

@@ -7,16 +7,23 @@
 //!      makes the module structure easier to navigate.
 
 use crate::builder_surface::SourceFileKind;
+use crate::builder_surface::definition::TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::ImportPublicSurfaceType;
-use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
+use crate::compiler_frontend::compiler_messages::InvalidReceiverDeclarationReason;
+use crate::compiler_frontend::compiler_messages::NameNamespace;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::ExternalSymbolCategory;
-use crate::compiler_frontend::headers::dependency_clause_syntax::DependencyAlias;
+use crate::compiler_frontend::external_packages::ExternalSymbolId;
+use crate::compiler_frontend::headers::dependency_clause_syntax::{
+    DependencyAlias, RetainedDependencyPath,
+};
 use crate::compiler_frontend::headers::module_symbols::{ModuleSymbols, PublicExportEntry};
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
 use crate::compiler_frontend::headers::types::DependencySelection;
@@ -25,12 +32,10 @@ use crate::compiler_frontend::public_interface::{
     ProviderInterfaceId, PublicDeclarationSemantics, ResolvedDependencyClause,
     SourceProviderDependencySet,
 };
+use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
 use crate::compiler_frontend::source::{SourceDatabase, SourceKind, SourceSpan};
-use crate::compiler_frontend::source_packages::root_file::{
-    dependency_path_references_config_file, dependency_path_references_support_root_file,
-};
+use crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
-use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -45,11 +50,12 @@ use super::{
     ModuleBoundaryCheckInput, NamespaceRecord, NamespaceRecordSource,
     NamespaceTargetResolutionInput, NamespaceTypeMember, NamespaceValueMember,
     PublicExportLookupResult, PublicExportResolutionInput, ReceiverMethodVisibility,
-    ResolvedDependencyTarget, ResolvedNamespaceTarget, SourceDeclarationTarget,
-    SourceDependencyAccess, SourceFunctionTarget, SourcePackageBoundaryCheckInput,
-    VisibleNameBinding, VisibleNameRegistry, check_alias_case_warning, check_module_boundary,
-    check_source_package_boundary, has_explicit_moth_extension, resolve_dependency_target,
-    resolve_external_package_symbol, resolve_namespace_target, resolve_public_export_boundary,
+    ResolvedDependencyTarget, ResolvedNamespaceTarget, ResolvedQualifiedReference,
+    ResolvedQualifiedTarget, SourceDeclarationTarget, SourceDependencyAccess, SourceFunctionTarget,
+    SourcePackageBoundaryCheckInput, VisibleNameBinding, VisibleNameRegistry,
+    check_alias_case_warning, check_module_boundary, check_source_package_boundary,
+    has_explicit_moth_extension, resolve_dependency_target, resolve_external_package_symbol,
+    resolve_namespace_target, resolve_public_export_boundary,
 };
 
 /// Result for the binding-environment builder family.
@@ -61,17 +67,28 @@ use super::{
 ///      into a source diagnostic.
 type BuilderResult<T> = Result<T, BindingEnvironmentError>;
 
-/// Resolution facts for one direct dependency selection.
+/// One direct-selection target after resolution but before any consumer-local publication.
 ///
-/// WHAT: carries the selected provider path and consumer context through one source-or-external
-///       target resolution.
-/// WHY: keeps the builder's resolution boundary explicit while avoiding repeated argument lists
-///      for path, selection and source-file facts.
-struct SelectedDependencyInput<'a> {
-    selection: &'a DependencySelection,
-    selected_path: &'a PathId,
-    source_file: &'a PathId,
-    dependency_bindable_symbol_paths: &'a FxHashSet<PathId>,
+/// WHAT: distinguishes a provider export, a source declaration with its visibility requirement,
+///       and an external package symbol.
+/// WHY: an ordinary dependency clause registers every target as a visible local name, while a
+///      qualified occurrence records the same target without publishing a name. Sharing the
+///      resolved target keeps both callers on one visibility, boundary and provider check.
+#[derive(Clone)]
+enum ResolvedSelectedTarget {
+    ProviderDeclaration {
+        provider_id: ProviderInterfaceId,
+        public_name: StringId,
+        origin: OriginDeclarationId,
+        local_path: PathId,
+    },
+    Source {
+        symbol_path: PathId,
+        access: SourceDependencyAccess,
+    },
+    External {
+        symbol_id: ExternalSymbolId,
+    },
 }
 
 /// Inputs for one provider declaration binding.
@@ -82,25 +99,12 @@ struct SelectedDependencyInput<'a> {
 /// operation; a named input prevents either caller from growing a positional argument list.
 struct ProviderDeclarationBindingInput<'a> {
     public_name: StringId,
+    origin: &'a OriginDeclarationId,
     local_name: StringId,
     local_alias: Option<&'a DependencyAlias>,
     local_path: &'a PathId,
     source_span: Option<SourceSpan>,
     provider_id: ProviderInterfaceId,
-}
-
-/// Inputs for one provider-backed selection reached through a public export boundary.
-///
-/// WHAT: carries the consumer selection and the provider-selection identity through the one
-/// public-provider registration owner.
-/// WHY: the shell/name/path tuple is one semantic fact even though the selection's local alias
-/// and consumer path are owned by the binding clause.
-struct PublicProviderSelectionInput<'a> {
-    selection: &'a DependencySelection,
-    selected_path: &'a PathId,
-    provider_selection: DependencySelectionId,
-    provider_source_name: StringId,
-    diagnostic_path: &'a PathId,
 }
 
 /// Insert one provider fact only when every publisher of the same key agrees.
@@ -189,6 +193,16 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         consumer_file: &PathId,
         target_file: &PathId,
     ) -> bool {
+        // A declaration authored directly in an active root file is internal only to that file.
+        // Neither a sibling root nor an ordinary helper shares its dependency boundary, so this
+        // answer gates direct selections, receiver-method travel and namespace records before AST.
+        if !self
+            .module_symbols
+            .authored_declarations_visible_from(consumer_file, target_file)
+        {
+            return false;
+        }
+
         let consumer_package = self
             .module_symbols
             .file_package_membership
@@ -213,22 +227,23 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         !consumer_has_explicit_module && !target_has_explicit_module
     }
 
-    /// Validate a Stage 0-resolved same-module edge before binding uses the retained clause.
+    /// Validate a Stage 0-resolved same-module edge before binding uses the retained path.
     ///
     /// Stage 0 stores the final compiler `SourceId` on the retained dependency so semantic
     /// binding can verify that the edge still belongs to this module's prepared source slots.
-    /// Binding continues to resolve the authored symbol path for visibility, but it must fail
-    /// closed if a stale or provider-owned identity is attached to a local source edge.
+    /// Dependency clauses and expression-qualified occurrences share this check. Binding
+    /// continues to resolve the authored symbol path for visibility, but it must fail closed if
+    /// a stale or provider-owned identity is attached to a local source edge.
     fn validate_local_source_edge(
         &mut self,
-        dependency: &RetainedDependencyClause,
+        dependency: &RetainedDependencyPath,
     ) -> BuilderResult<()> {
-        let Some(local_source_id) = dependency.dependency.local_source_id else {
+        let Some(local_source_id) = dependency.local_source_id else {
             return Ok(());
         };
 
         if matches!(
-            dependency.dependency.target,
+            dependency.target,
             crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::ExternalProvider {
                 ..
             }
@@ -273,7 +288,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
 
         let Some(namespace_target) = resolve_namespace_target(NamespaceTargetResolutionInput {
-            dependency_path: &dependency.dependency.path,
+            dependency_path: &dependency.path,
             module_file_paths: &self.module_symbols.module_file_paths,
             external_package_registry: self.external_package_registry,
             string_table: self.string_table,
@@ -454,19 +469,15 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             .get(source_file)
         {
             for dependency in dependencies {
-                self.validate_local_source_edge(dependency)?;
+                self.validate_local_source_edge(&dependency.dependency)?;
                 let selections = dependency
                     .selections(selection_table)
                     .map_err(BindingEnvironmentError::Internal)?;
-                // Reject direct dependencies of support-root files and canonical config files.
-                // Normal `@*.moth` root references are already caught by the path parser's
-                // LeadingAtInPathComponent rejection. Support roots and config files need
-                // this later check because `+` and `config` are valid path component characters.
-                if dependency_path_references_support_root_file(
-                    dependency.dependency.path,
-                    &*self.path_fork,
-                    self.string_table,
-                ) || dependency_path_references_config_file(
+                // Reject direct dependencies of canonical config files. Canonical `@` root
+                // references are already caught by the path parser's LeadingAtInPathComponent
+                // rejection. The config file needs this later check because `config` is a valid
+                // path component character.
+                if dependency_path_references_config_file(
                     dependency.dependency.path,
                     &*self.path_fork,
                     self.string_table,
@@ -501,6 +512,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 }
             }
         }
+
+        // 5b. Resolve expression-qualified occurrences through the same direct-selection target
+        // resolution. The resolved target joins the per-occurrence lookup without publishing a
+        // visible local name, so occurrences never collide with declarations or dependency names.
+        self.bind_qualified_reference_occurrences(&mut file_visibility, source_file)?;
 
         // 6. Inject unshadowed prelude symbols into visible maps.
         // Prelude entries that are still registered as Prelude were not shadowed by dependencies
@@ -545,10 +561,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             }
         }
 
-        // 8. Add Moth template's compiler-integrated implicit constant scope.
-        // WHY: `.mtf` bodies are synthetic constant initializers, so they need the same
-        // file-local visibility maps as authored constants without a user-visible dependency record.
-        self.register_implicit_moth_template_constant_scope(
+        // 8. Add Moth template's compiler-standard constant prelude.
+        // WHY: `.mtf` bodies are synthetic constant initializers, so the official `@html`
+        //      helper constants must join the same file-local visibility maps as authored
+        //      constants without a user-visible dependency record.
+        self.register_moth_template_constant_prelude(
             &mut file_visibility,
             &mut registry,
             source_file,
@@ -641,6 +658,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     ) -> BuilderResult<()> {
         let ProviderDeclarationBindingInput {
             public_name,
+            origin,
             local_name,
             local_alias,
             local_path,
@@ -654,20 +672,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         let view = self
             .source_provider_dependencies
             .binding_view(provider_id)?;
-        let public_name_text = self.string_table.resolve(public_name);
-        let origin = view
-            .exported_origin(public_name_text)
-            .cloned()
-            .ok_or_else(|| {
-                InfrastructureFailure::internal(
-                    CompilerStage::HeaderParsing,
-                    format!(
-                        "provider interface {:?} has no declaration export for public name '{}'",
-                        provider_id, public_name_text
-                    ),
-                )
-            })?;
-        let declaration = view.declaration(&origin).ok_or_else(|| {
+        let declaration = view.declaration(origin).ok_or_else(|| {
             InfrastructureFailure::internal(
                 CompilerStage::HeaderParsing,
                 format!(
@@ -740,13 +745,13 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         if let crate::compiler_frontend::semantic_identity::OriginDeclarationId::Function(
             function_origin,
         ) = origin
-            && view.concrete_call_summary(&function_origin).is_some()
+            && view.concrete_call_summary(function_origin).is_some()
         {
             self.environment.imported_functions_by_local_path.insert(
                 *local_path,
                 super::ImportedFunctionContract {
                     target: SourceFunctionTarget::Imported {
-                        origin: function_origin,
+                        origin: function_origin.clone(),
                         local_path: *local_path,
                     },
                 },
@@ -754,183 +759,6 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
 
         Ok(())
-    }
-
-    /// Resolve and register a provider-backed selection reached through another module's public
-    /// export surface.
-    ///
-    /// WHAT: joins the retained provider shell and provider public name from `ProviderSelection`
-    ///       before publishing the consumer-local binding.
-    /// WHY: `diagnostic_path` is only authored context. Treating it as a source declaration path
-    ///       bypasses the completed provider interface and can bind a coincident local path.
-    fn register_public_provider_selection(
-        &mut self,
-        file_visibility: &mut FileVisibility,
-        registry: &mut VisibleNameRegistry,
-        input: PublicProviderSelectionInput<'_>,
-    ) -> BuilderResult<()> {
-        let PublicProviderSelectionInput {
-            selection,
-            selected_path,
-            provider_selection,
-            provider_source_name,
-            diagnostic_path,
-        } = input;
-        let provider_id = self
-            .source_provider_dependencies
-            .resolve_reexport(provider_selection.shell)
-            .ok_or_else(|| {
-                InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
-                    "public provider selection {:?} has no resolved provider for diagnostic path {:?}",
-                    provider_selection, diagnostic_path
-                ))
-            })?;
-        self.register_provider_semantics_once(provider_id)?;
-        let view = self
-            .source_provider_dependencies
-            .binding_view(provider_id)?;
-        let provider_name = self.string_table.resolve(provider_source_name);
-        let local_name = selection.local_name();
-
-        if view.exported_origin(provider_name).is_some() {
-            return self.register_provider_declaration_binding(
-                file_visibility,
-                registry,
-                ProviderDeclarationBindingInput {
-                    public_name: provider_source_name,
-                    local_name,
-                    local_alias: selection.local_alias(),
-                    local_path: selected_path,
-                    source_span: Some(selection.source_span),
-                    provider_id,
-                },
-            );
-        }
-
-        if let Some(binding) = view.binding_export(provider_name) {
-            let symbol_id = self
-                .external_package_registry
-                .resolve_canonical_symbol(&binding.target)
-                .ok_or_else(|| {
-                    InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
-                        "public provider selection {:?} has an unresolvable binding target for '{}'",
-                        provider_selection, provider_name
-                    ))
-                })?;
-            return self.register_external_import(
-                file_visibility,
-                registry,
-                ExternalImportInput {
-                    symbol_name: provider_source_name,
-                    local_name,
-                    source_span: Some(selection.source_span),
-                    local_alias: selection.local_alias(),
-                    symbol_id,
-                },
-            );
-        }
-
-        let interface = self.source_provider_dependencies.interface(provider_id)?;
-        Err(super::provider_public_surface_diagnostic(
-            selected_path,
-            interface,
-            Some(selection.source_span),
-            self.string_table,
-        )
-        .into())
-    }
-
-    fn register_source_provider_dependency(
-        &mut self,
-        file_visibility: &mut FileVisibility,
-        registry: &mut VisibleNameRegistry,
-        dependency: &RetainedDependencyClause,
-        selections: &[DependencySelection],
-        resolved_clause: ResolvedDependencyClause,
-    ) -> BuilderResult<()> {
-        debug_assert_eq!(
-            resolved_clause.shell, dependency.dependency.dependency_shell_id,
-            "resolved provider clause must retain its authored shell identity"
-        );
-        let provider_id = resolved_clause.provider;
-        // Register the provider's closed semantics once and reuse the narrow binding view for
-        // every selected name in this clause.
-        self.register_provider_semantics_once(provider_id)?;
-        let view = self
-            .source_provider_dependencies
-            .binding_view(provider_id)?;
-        let interface = self.source_provider_dependencies.interface(provider_id)?;
-
-        for selection in selections {
-            let public_name_id = selection.source_name;
-            let public_name = self.string_table.resolve(public_name_id);
-            if view.exported_origin(public_name).is_some() {
-                let local_path = self
-                    .path_fork
-                    .try_intern_child(dependency.dependency.path, public_name_id)
-                    .ok_or_else(token_lexical::logical_path_capacity)?;
-                self.register_provider_declaration_binding(
-                    file_visibility,
-                    registry,
-                    ProviderDeclarationBindingInput {
-                        public_name: public_name_id,
-                        local_name: selection.local_name(),
-                        local_alias: selection.local_alias(),
-                        local_path: &local_path,
-                        source_span: Some(selection.source_span),
-                        provider_id,
-                    },
-                )?;
-                continue;
-            }
-
-            if let Some(binding) = view.binding_export(public_name) {
-                let Some(symbol_id) = self
-                    .external_package_registry
-                    .resolve_canonical_symbol(&binding.target)
-                else {
-                    return Err(self
-                        .provider_public_surface_diagnostic(dependency, selection, interface)?
-                        .into());
-                };
-                self.register_external_import(
-                    file_visibility,
-                    registry,
-                    ExternalImportInput {
-                        symbol_name: public_name_id,
-                        local_name: selection.local_name(),
-                        source_span: Some(selection.source_span),
-                        local_alias: selection.local_alias(),
-                        symbol_id,
-                    },
-                )?;
-                continue;
-            }
-
-            return Err(self
-                .provider_public_surface_diagnostic(dependency, selection, interface)?
-                .into());
-        }
-        Ok(())
-    }
-
-    fn provider_public_surface_diagnostic(
-        &mut self,
-        dependency: &RetainedDependencyClause,
-        selection: &DependencySelection,
-        interface: &crate::compiler_frontend::public_interface::PublicSemanticInterface,
-    ) -> BuilderResult<DiagnosticDraft> {
-        let selected_path = self
-            .path_fork
-            .try_intern_child(dependency.dependency.path, selection.source_name)
-            .ok_or_else(token_lexical::logical_path_capacity)?;
-
-        Ok(super::provider_public_surface_diagnostic(
-            &selected_path,
-            interface,
-            Some(selection.source_span),
-            self.string_table,
-        ))
     }
 
     fn register_source_provider_namespace_binding(
@@ -1110,14 +938,19 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 local_path: method_path,
             };
 
-            file_visibility
+            let methods = file_visibility
                 .visible_receiver_methods
                 .entry(method_name)
-                .or_default()
-                .push(ReceiverMethodVisibility {
+                .or_default();
+            if !methods
+                .iter()
+                .any(|method| method.target.local_path() == target.local_path())
+            {
+                methods.push(ReceiverMethodVisibility {
                     target: target.clone(),
                     span: dependency_span,
                 });
+            }
 
             if self
                 .environment
@@ -1133,7 +966,16 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         Ok(())
     }
 
-    fn register_implicit_moth_template_constant_scope(
+    /// Register the compiler-standard flat constant prelude for one Moth template file.
+    ///
+    /// WHAT: makes the official `@html` package's public compile-time constants visible by bare
+    ///       name in every `.mtf` body. The constants travel through the ordinary visible-name
+    ///       registry, so a genuine collision with another binding is still diagnosed.
+    /// WHY: template helper ergonomics are a fixed language contract, not a builder capability
+    ///      list. Only compile-time constants enter the prelude; runtime values, functions and
+    ///      types stay unavailable. A binding set without a prelude provider (the standalone
+    ///      single-source template service, which has no builder surface) simply has no prelude.
+    fn register_moth_template_constant_prelude(
         &mut self,
         file_visibility: &mut FileVisibility,
         registry: &mut VisibleNameRegistry,
@@ -1145,17 +987,17 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         self.remove_moth_template_generated_self_constants(file_visibility, registry, source_file);
 
-        let mut implicit_constants = Vec::new();
+        let Some(provider_id) = self
+            .source_provider_dependencies
+            .template_prelude_provider()
+        else {
+            return Ok(());
+        };
 
-        // Layer 1: exported constants from every builder-declared source-backed package surface.
-        self.collect_implicit_template_scope_constants(&mut implicit_constants)?;
+        let mut prelude_constants = Vec::new();
+        self.collect_html_template_prelude_constants(provider_id, &mut prelude_constants)?;
 
-        // Layer 2: exported constants from the exact same-directory module public surface. Both
-        // layers pass through the same visible-name registry, so equal spellings are diagnosed
-        // rather than resolved by source-order precedence.
-        self.collect_same_directory_public_export_constants(source_file, &mut implicit_constants);
-
-        for (name, path, span) in implicit_constants {
+        for (name, path, span) in prelude_constants {
             registry.register(
                 name,
                 VisibleNameBinding::SourceDependency {
@@ -1217,104 +1059,76 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         }
     }
 
-    fn collect_implicit_template_scope_constants(
+    fn collect_html_template_prelude_constants(
         &mut self,
-        implicit_constants: &mut Vec<(StringId, PathId, Option<SourceSpan>)>,
+        provider_id: ProviderInterfaceId,
+        prelude_constants: &mut Vec<(StringId, PathId, Option<SourceSpan>)>,
     ) -> BuilderResult<()> {
-        for (prefix, provider_id) in self
+        let prefix = TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
+        self.register_provider_semantics_once(provider_id)?;
+        let view = self
             .source_provider_dependencies
-            .implicit_template_scope_providers()
-        {
-            self.register_provider_semantics_once(provider_id)?;
-            let view = self
-                .source_provider_dependencies
-                .binding_view(provider_id)?;
-            let interface = self.source_provider_dependencies.interface(provider_id)?;
+            .binding_view(provider_id)?;
+        let interface = self.source_provider_dependencies.interface(provider_id)?;
 
-            // When a source-package root is prepared in the current module (test fixtures), the
-            // header-built public-export map contains the entries. Production packages expose
-            // the same surface through a completed provider interface.
-            if let Some(entries) = self
-                .module_symbols
-                .source_package_public_exports
-                .get(prefix)
-                .filter(|entries| !entries.is_empty())
-            {
-                self.collect_constant_exports(entries, implicit_constants, None);
+        // When a source-package root is prepared in the current module (test fixtures), the
+        // header-built public-export map contains the entries. Production packages expose the
+        // same surface through a completed provider interface.
+        if let Some(entries) = self
+            .module_symbols
+            .source_package_public_exports
+            .get(prefix)
+            .filter(|entries| !entries.is_empty())
+        {
+            self.collect_constant_exports(entries, prelude_constants);
+            return Ok(());
+        }
+
+        for binding in &interface.export_bindings {
+            let Some(origin) = view.exported_origin(binding.public_name()).cloned() else {
+                continue;
+            };
+            let Some(declaration) = self
+                .environment
+                .imported_declarations_by_origin
+                .get(&origin)
+            else {
+                continue;
+            };
+
+            if !matches!(
+                declaration.semantics,
+                PublicDeclarationSemantics::Constant(_)
+            ) {
                 continue;
             }
 
-            for binding in &interface.export_bindings {
-                let Some(origin) = view.exported_origin(binding.public_name()).cloned() else {
-                    continue;
-                };
-                let Some(declaration) = self
-                    .environment
-                    .imported_declarations_by_origin
-                    .get(&origin)
-                else {
-                    continue;
-                };
+            let name_id = self.string_table.intern(binding.public_name());
 
-                if !matches!(
-                    declaration.semantics,
-                    PublicDeclarationSemantics::Constant(_)
-                ) {
-                    continue;
-                }
-
-                let name_id = self.string_table.intern(binding.public_name());
-
-                // The synthetic path serves as the consumer-local identity for this
-                // cross-module constant. Include the provider prefix so each selected source
-                // package retains a distinct identity in collision diagnostics.
-                let package_name = self.string_table.intern(prefix);
-                let synthetic_path = self
-                    .path_fork
-                    .try_intern_components(&[package_name, name_id])
-                    .ok_or_else(token_lexical::logical_path_capacity)?;
-                self.environment
-                    .imported_declarations_by_local_path
-                    .entry(synthetic_path)
-                    .or_insert_with(|| origin);
-                // Provider declaration provenance does not cross the interface boundary. This
-                // compiler-generated implicit binding therefore carries no authored span.
-                implicit_constants.push((name_id, synthetic_path, None));
-            }
+            // The synthetic path serves as the consumer-local identity for this cross-module
+            // constant. Include the provider prefix so the prelude's identity stays distinct
+            // from local declarations in collision diagnostics.
+            let package_name = self.string_table.intern(prefix);
+            let synthetic_path = self
+                .path_fork
+                .try_intern_components(&[package_name, name_id])
+                .ok_or_else(token_lexical::logical_path_capacity)?;
+            self.environment
+                .imported_declarations_by_local_path
+                .entry(synthetic_path)
+                .or_insert_with(|| origin);
+            // Provider declaration provenance does not cross the interface boundary. This
+            // compiler-generated prelude binding therefore carries no authored span.
+            prelude_constants.push((name_id, synthetic_path, None));
         }
 
         Ok(())
     }
 
-    fn collect_same_directory_public_export_constants(
-        &mut self,
-        source_file: &PathId,
-        implicit_constants: &mut Vec<(StringId, PathId, Option<SourceSpan>)>,
-    ) {
-        let Some(root_file) = self.same_directory_root_file(source_file) else {
-            return;
-        };
-
-        if let Some(entries) = self
-            .source_package_public_exports_for_file(&root_file)
-            .cloned()
-        {
-            self.collect_constant_exports(&entries, implicit_constants, Some(source_file));
-        }
-
-        if let Some(entries) = self
-            .module_root_public_exports_for_file(&root_file)
-            .cloned()
-        {
-            self.collect_constant_exports(&entries, implicit_constants, Some(source_file));
-        }
-    }
-
     fn collect_constant_exports(
-        &mut self,
+        &self,
         entries: &FxHashSet<PublicExportEntry>,
-        implicit_constants: &mut Vec<(StringId, PathId, Option<SourceSpan>)>,
-        excluded_source_file: Option<&PathId>,
+        prelude_constants: &mut Vec<(StringId, PathId, Option<SourceSpan>)>,
     ) {
         for entry in entries {
             let Some(path) = entry.target.source_path() else {
@@ -1325,18 +1139,12 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 continue;
             }
 
-            if excluded_source_file
-                .is_some_and(|source_file| self.symbol_origin_matches_source(path, source_file))
-            {
-                continue;
-            }
-
             let span = self
                 .module_symbols
                 .declaration_spans_by_symbol_path
                 .get(path)
                 .copied();
-            implicit_constants.push((entry.export_name, *path, span));
+            prelude_constants.push((entry.export_name, *path, span));
         }
     }
 
@@ -1374,63 +1182,14 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             Some(SourceKind::Compiler(SourceFileKind::MothTemplate))
         )
     }
-    fn same_directory_root_file(&self, source_file: &PathId) -> Option<PathId> {
-        let moth_template_directory = self.source_directory(source_file)?;
-        let mut roots = self.module_symbols.file_roles_by_source.iter().filter_map(
-            |(candidate_source, role)| {
-                (role.is_export_capable()
-                    && self.source_directory(candidate_source) == Some(moth_template_directory))
-                .then_some(*candidate_source)
-            },
-        );
 
-        let root = roots.next()?;
-        // A shared source may not inherit one arbitrary root's declaration surface. A paired
-        // directory therefore gives `.mtf` helpers no implicit root-constant scope.
-        if roots.next().is_some() {
-            return None;
-        }
-        Some(root)
-    }
-
-    fn source_directory(&self, source_file: &PathId) -> Option<PathId> {
-        // Same-directory public-export visibility is a module-scope question. Canonical OS
-        // parents can disagree with logical parents under a symlink that places two logical
-        // siblings on different physical directories, or that collides two logical directories
-        // onto one physical directory. Visibility follows the logical interned path uniformly.
-        self.path_fork.try_parent(*source_file)
-    }
-
-    fn source_package_public_exports_for_file(
-        &self,
-        root_file: &PathId,
-    ) -> Option<&FxHashSet<PublicExportEntry>> {
-        let prefix = self
-            .module_symbols
-            .source_package_root_files
-            .iter()
-            .find_map(|(prefix, source)| {
-                if source == root_file {
-                    Some(prefix)
-                } else {
-                    None
-                }
-            })?;
-
-        self.module_symbols
-            .source_package_public_exports
-            .get(prefix)
-    }
-
-    fn module_root_public_exports_for_file(
-        &self,
-        root_file: &PathId,
-    ) -> Option<&FxHashSet<PublicExportEntry>> {
-        self.module_symbols
-            .module_root_public_exports
-            .get(root_file)
-    }
-
+    /// Resolve and register one clause's direct selections.
+    ///
+    /// WHAT: every selection goes through the shared target resolution, then the clause publishes
+    ///       its consumer-local names through the ordinary registration lanes.
+    /// WHY: direct dependency clauses and expression-qualified occurrences must agree on
+    ///      visibility, root-local isolation, package/module boundaries and provider origin; only
+    ///      local-name publication may differ.
     fn resolve_and_register_selection_bindings(
         &mut self,
         file_visibility: &mut FileVisibility,
@@ -1439,75 +1198,302 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         selections: &[DependencySelection],
         source_file: &PathId,
     ) -> BuilderResult<()> {
-        let source_provider_clause = self
-            .source_provider_dependencies
-            .resolve_clause(dependency.dependency.dependency_shell_id);
-        if let Some(resolved_clause) = source_provider_clause {
-            return self.register_source_provider_dependency(
-                file_visibility,
-                registry,
-                dependency,
-                selections,
-                resolved_clause,
-            );
-        }
-
-        // Check for provider-backed external-file selections first.
-        if let Some(resolved) = self.resolve_provider_backed_selection_dependencies(
-            file_visibility,
-            registry,
-            dependency,
-            selections,
-            source_file,
-        )? {
-            return Ok(resolved);
-        }
-
-        if let Some(resolved) = self.resolve_and_register_external_package_selection_dependencies(
-            file_visibility,
-            registry,
-            dependency,
-            selections,
-        )? {
-            return Ok(resolved);
-        }
-
         for selection in selections {
-            let selected_path = self
-                .path_fork
-                .try_intern_child(dependency.dependency.path, selection.source_name)
-                .ok_or_else(token_lexical::logical_path_capacity)?;
-            self.resolve_and_register_selected_dependency(
-                file_visibility,
-                registry,
-                SelectedDependencyInput {
-                    selection,
-                    selected_path: &selected_path,
-                    source_file,
-                    dependency_bindable_symbol_paths: &self
-                        .module_symbols
-                        .dependency_bindable_source_symbol_paths,
-                },
-            )?;
+            let target =
+                self.resolve_selected_target(&dependency.dependency, selection, source_file)?;
+            self.register_selected_target(file_visibility, registry, selection, target)?;
         }
 
         Ok(())
     }
 
-    fn resolve_and_register_selected_dependency(
+    /// Resolve one direct-selection target through the existing dependency lanes.
+    ///
+    /// WHAT: checks an authored provider shell first, then a registered provider-backed file,
+    ///       then a virtual package symbol, then the source public-export and ordinary source
+    ///       target path. It performs every visibility, boundary and declaration-origin check the
+    ///       clause form performs.
+    /// WHY: a qualified occurrence is a single-use direct selection. Sharing this operation keeps
+    ///      the occurrence lane from inventing a second visibility or provider policy while the
+    ///      caller decides whether to publish a local name.
+    fn resolve_selected_target(
+        &mut self,
+        dependency: &RetainedDependencyPath,
+        selection: &DependencySelection,
+        source_file: &PathId,
+    ) -> BuilderResult<ResolvedSelectedTarget> {
+        let target = self.resolve_selected_target_inner(dependency, selection, source_file)?;
+        if let ResolvedSelectedTarget::Source { symbol_path, .. } = &target
+            && self
+                .module_symbols
+                .receiver_method_paths
+                .contains(symbol_path)
+        {
+            // Source-authored receiver methods are not independently bindable or aliasable.
+            // They travel with their receiver type's visibility. Both direct clauses and
+            // expression-qualified occurrences must reject this selection here, before either
+            // caller can publish or record a free-standing target.
+            return Err(generics_traits_api::invalid_receiver_declaration(
+                InvalidReceiverDeclarationReason::ReceiverMethodImportOrExportNotAllowed,
+                Some(selection.source_span),
+            )
+            .into());
+        }
+        Ok(target)
+    }
+
+    /// Resolve one selection without the shared receiver-method policy.
+    ///
+    /// WHY: provider, package and source routes each return a target, so the receiver-method
+    ///      rejection belongs in the outer wrapper after every route has produced a final source
+    ///      path. Keeping the inner function policy-free prevents one route from forgetting it.
+    fn resolve_selected_target_inner(
+        &mut self,
+        dependency: &RetainedDependencyPath,
+        selection: &DependencySelection,
+        source_file: &PathId,
+    ) -> BuilderResult<ResolvedSelectedTarget> {
+        let selected_path = self
+            .path_fork
+            .try_intern_child(dependency.path, selection.source_name)
+            .ok_or_else(token_lexical::logical_path_capacity)?;
+
+        if let Some(resolved_clause) = self
+            .source_provider_dependencies
+            .resolve_clause(dependency.dependency_shell_id)
+        {
+            return self.resolve_provider_selected_target(
+                resolved_clause.provider,
+                selection.source_name,
+                &selected_path,
+                selection,
+            );
+        }
+
+        if let Some(target) = self.resolve_provider_backed_selected_target(
+            dependency,
+            selection,
+            &selected_path,
+            source_file,
+        )? {
+            return Ok(target);
+        }
+
+        if let Some(target) =
+            self.resolve_external_package_selected_target(&selected_path, selection)?
+        {
+            return Ok(target);
+        }
+
+        self.resolve_public_or_source_selected_target(selection, source_file, &selected_path)
+    }
+
+    /// Resolve one selection against a completed provider interface.
+    ///
+    /// WHAT: accepts a provider declaration origin or a provider binding export, reporting the
+    ///       same public-surface diagnostic a direct-selection clause reports for a missing name.
+    /// WHY: `local_path` is the consumer-local path the AST uses for imported declarations; the
+    ///      provider public name may differ from the authored selection on a re-exported surface.
+    fn resolve_provider_selected_target(
+        &mut self,
+        provider_id: ProviderInterfaceId,
+        provider_name: StringId,
+        local_path: &PathId,
+        selection: &DependencySelection,
+    ) -> BuilderResult<ResolvedSelectedTarget> {
+        self.register_provider_semantics_once(provider_id)?;
+        let view = self
+            .source_provider_dependencies
+            .binding_view(provider_id)?;
+        let interface = self.source_provider_dependencies.interface(provider_id)?;
+        let provider_name_text = self.string_table.resolve(provider_name);
+
+        if let Some(origin) = view.exported_origin(provider_name_text).cloned() {
+            // Preserve the successful-interface invariant: an exported origin must carry its
+            // declaration record before either a clause or an occurrence may bind it.
+            if view.declaration(&origin).is_none() {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
+                    format!(
+                        "provider interface {:?} has no declaration record for exported origin {:?}",
+                        provider_id, origin
+                    ),
+                )
+                .into());
+            }
+
+            return Ok(ResolvedSelectedTarget::ProviderDeclaration {
+                provider_id,
+                public_name: provider_name,
+                origin,
+                local_path: *local_path,
+            });
+        }
+
+        if let Some(binding) = view.binding_export(provider_name_text) {
+            let Some(symbol_id) = self
+                .external_package_registry
+                .resolve_canonical_symbol(&binding.target)
+            else {
+                return Err(super::provider_public_surface_diagnostic(
+                    local_path,
+                    interface,
+                    Some(selection.source_span),
+                    self.string_table,
+                )
+                .into());
+            };
+            return Ok(ResolvedSelectedTarget::External { symbol_id });
+        }
+
+        Err(super::provider_public_surface_diagnostic(
+            local_path,
+            interface,
+            Some(selection.source_span),
+            self.string_table,
+        )
+        .into())
+    }
+
+    /// Resolve one selection against a registered provider-backed external file.
+    fn resolve_provider_backed_selected_target(
+        &self,
+        dependency: &RetainedDependencyPath,
+        selection: &DependencySelection,
+        selected_path: &PathId,
+        source_file: &PathId,
+    ) -> BuilderResult<Option<ResolvedSelectedTarget>> {
+        let Some((resolved, remaining)) =
+            self.find_provider_resolution_from_retained_target(source_file, dependency)?
+        else {
+            return Ok(None);
+        };
+
+        // A retained provider root must match the provider prefix exactly. Any remaining path
+        // component is a malformed provider identity, not a selected source name.
+        if !remaining.is_empty() {
+            return Err(
+                imports::direct_symbol_path_import(dependency.path, Some(dependency.span)).into(),
+            );
+        }
+
+        let package = self
+            .external_package_registry
+            .get_package_by_id(resolved.package_id);
+        let Some(package) = package else {
+            return Err(super::diagnostics::missing_dependency_target(
+                &dependency.path,
+                Some(dependency.span),
+            )
+            .into());
+        };
+
+        let symbol_id = self
+            .lookup_external_symbol_id_by_name(&package.path, selection.source_name)
+            .ok_or_else(|| {
+                super::diagnostics::missing_dependency_target(
+                    selected_path,
+                    Some(selection.source_span),
+                )
+            })?;
+
+        Ok(Some(ResolvedSelectedTarget::External { symbol_id }))
+    }
+
+    /// Resolve one selection against virtual external-package metadata.
+    fn resolve_external_package_selected_target(
+        &mut self,
+        selected_path: &PathId,
+        selection: &DependencySelection,
+    ) -> BuilderResult<Option<ResolvedSelectedTarget>> {
+        match resolve_external_package_symbol(ExternalPackageSymbolResolutionInput {
+            dependency_path: selected_path,
+            external_package_registry: self.external_package_registry,
+            string_table: self.string_table,
+            path_fork: &*self.path_fork,
+        }) {
+            ExternalPackageSymbolLookup::Found { symbol_id } => {
+                Ok(Some(ResolvedSelectedTarget::External { symbol_id }))
+            }
+            ExternalPackageSymbolLookup::PackageFoundSymbolMissing {
+                package_path,
+                symbol_name,
+                candidates,
+            } => Err(super::diagnostics::missing_package_symbol(
+                symbol_name,
+                package_path,
+                candidates,
+                Some(selection.source_span),
+            )
+            .into()),
+            ExternalPackageSymbolLookup::NoMatch => Ok(None),
+        }
+    }
+
+    /// Publish one already-resolved target as a clause's consumer-local binding.
+    fn register_selected_target(
         &mut self,
         file_visibility: &mut FileVisibility,
         registry: &mut VisibleNameRegistry,
-        input: SelectedDependencyInput<'_>,
+        selection: &DependencySelection,
+        target: ResolvedSelectedTarget,
     ) -> BuilderResult<()> {
-        let SelectedDependencyInput {
-            selection,
-            selected_path,
-            source_file,
-            dependency_bindable_symbol_paths,
-        } = input;
+        match target {
+            ResolvedSelectedTarget::ProviderDeclaration {
+                provider_id,
+                public_name,
+                origin,
+                local_path,
+            } => self.register_provider_declaration_binding(
+                file_visibility,
+                registry,
+                ProviderDeclarationBindingInput {
+                    public_name,
+                    origin: &origin,
+                    local_name: selection.local_name(),
+                    local_alias: selection.local_alias(),
+                    local_path: &local_path,
+                    source_span: Some(selection.source_span),
+                    provider_id,
+                },
+            ),
+            ResolvedSelectedTarget::Source {
+                symbol_path,
+                access,
+            } => self.register_source_dependency(
+                file_visibility,
+                registry,
+                SourceDependencyInput {
+                    symbol_path: &symbol_path,
+                    local_name: selection.local_name(),
+                    source_span: Some(selection.source_span),
+                    local_alias: selection.local_alias(),
+                    access,
+                },
+            ),
+            ResolvedSelectedTarget::External { symbol_id } => self.register_external_import(
+                file_visibility,
+                registry,
+                ExternalImportInput {
+                    symbol_name: selection.source_name,
+                    local_name: selection.local_name(),
+                    source_span: Some(selection.source_span),
+                    local_alias: selection.local_alias(),
+                    symbol_id,
+                },
+            ),
+        }
+    }
 
-        let local_name = selection.local_name();
+    /// Resolve one selection through public-export boundaries and ordinary source targets.
+    fn resolve_public_or_source_selected_target(
+        &mut self,
+        selection: &DependencySelection,
+        source_file: &PathId,
+        selected_path: &PathId,
+    ) -> BuilderResult<ResolvedSelectedTarget> {
+        let dependency_bindable_symbol_paths =
+            &self.module_symbols.dependency_bindable_source_symbol_paths;
 
         let mut public_export_input = PublicExportResolutionInput {
             consumer_file: source_file,
@@ -1529,17 +1515,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     path,
                     exported_entries,
                 } => {
-                    return self.register_source_dependency(
-                        file_visibility,
-                        registry,
-                        SourceDependencyInput {
-                            symbol_path: &path,
-                            local_name: selection.local_name(),
-                            source_span: Some(selection.source_span),
-                            local_alias: selection.local_alias(),
-                            access: SourceDependencyAccess::PublicExport { exported_entries },
-                        },
-                    );
+                    return Ok(ResolvedSelectedTarget::Source {
+                        symbol_path: path,
+                        access: SourceDependencyAccess::PublicExport { exported_entries },
+                    });
                 }
                 PublicExportLookupResult::ExportedProviderSelection {
                     selection: provider_selection,
@@ -1547,30 +1526,24 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     diagnostic_path,
                     ..
                 } => {
-                    return self.register_public_provider_selection(
-                        file_visibility,
-                        registry,
-                        PublicProviderSelectionInput {
-                            selection,
-                            selected_path,
-                            provider_selection,
-                            provider_source_name,
-                            diagnostic_path: &diagnostic_path,
-                        },
+                    let provider_id = self
+                        .source_provider_dependencies
+                        .resolve_reexport(provider_selection.shell)
+                        .ok_or_else(|| {
+                            InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
+                                "public provider selection {:?} has no resolved provider for diagnostic path {:?}",
+                                provider_selection, diagnostic_path
+                            ))
+                        })?;
+                    return self.resolve_provider_selected_target(
+                        provider_id,
+                        provider_source_name,
+                        selected_path,
+                        selection,
                     );
                 }
                 PublicExportLookupResult::ExportedExternal { symbol_id } => {
-                    return self.register_external_import(
-                        file_visibility,
-                        registry,
-                        ExternalImportInput {
-                            symbol_name: selection.source_name,
-                            local_name: selection.local_name(),
-                            source_span: Some(selection.source_span),
-                            local_alias: selection.local_alias(),
-                            symbol_id,
-                        },
-                    );
+                    return Ok(ResolvedSelectedTarget::External { symbol_id });
                 }
                 PublicExportLookupResult::NotExported {
                     public_surface_name,
@@ -1617,6 +1590,16 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                     .canonical_source_by_symbol_path
                     .get(&symbol_path)
                 {
+                    if let Some(diagnostic) = super::diagnostics::cross_file_root_local_declaration(
+                        self.module_symbols,
+                        source_file,
+                        target_file,
+                        &symbol_path,
+                        Some(selection.source_span),
+                    ) {
+                        return Err(diagnostic.into());
+                    }
+
                     check_source_package_boundary(SourcePackageBoundaryCheckInput {
                         consumer_file: source_file,
                         target_file,
@@ -1643,107 +1626,227 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                         access
                     };
 
-                self.register_source_dependency(
-                    file_visibility,
-                    registry,
-                    SourceDependencyInput {
-                        symbol_path: &symbol_path,
-                        local_name,
-                        source_span: Some(selection.source_span),
-                        local_alias: selection.local_alias(),
-                        access: effective_requirement,
-                    },
-                )?;
+                Ok(ResolvedSelectedTarget::Source {
+                    symbol_path,
+                    access: effective_requirement,
+                })
             }
             ResolvedDependencyTarget::External { symbol_id } => {
-                self.register_external_import(
-                    file_visibility,
-                    registry,
-                    ExternalImportInput {
-                        symbol_name: selection.source_name,
-                        local_name,
-                        source_span: Some(selection.source_span),
-                        local_alias: selection.local_alias(),
-                        symbol_id,
-                    },
-                )?;
+                Ok(ResolvedSelectedTarget::External { symbol_id })
+            }
+        }
+    }
+
+    /// Bind every retained expression-qualified occurrence authored by one file.
+    ///
+    /// WHAT: resolves each occurrence through the shared direct-selection target path and records
+    ///       the result in the per-occurrence lookup. Imported targets join provider provenance,
+    ///       but no selected name is inserted into any visible-name map or registry.
+    /// WHY: occurrence semantics must be exactly direct-selection semantics minus local-name
+    ///       publication; recording the resolved target here lets AST and Stage 3 consume it
+    ///       without re-resolving a name or reopening provider state.
+    fn bind_qualified_reference_occurrences(
+        &mut self,
+        file_visibility: &mut FileVisibility,
+        source_file: &PathId,
+    ) -> BuilderResult<()> {
+        let Some(occurrences) = self
+            .module_symbols
+            .qualified_references_by_source
+            .get(source_file)
+        else {
+            return Ok(());
+        };
+
+        // A repeated provider selection resolves and registers provenance once per file. The
+        // cache holds the final target so cache hits skip path resolution, namespace checks and
+        // provider registration.
+        let mut resolved_by_selection: FxHashMap<(PathId, StringId), ResolvedQualifiedTarget> =
+            FxHashMap::default();
+
+        for occurrence in occurrences {
+            // Occurrences travel through the same Stage 0-resolved edge as dependency clauses.
+            // Validate it before the memo can answer from another occurrence's resolution.
+            self.validate_local_source_edge(&occurrence.dependency)?;
+            let memo_key = (occurrence.dependency.path, occurrence.selected);
+            let target = if let Some(target) = resolved_by_selection.get(&memo_key) {
+                target.clone()
+            } else {
+                let selection = DependencySelection {
+                    source_name: occurrence.selected,
+                    source_span: occurrence.selected_span,
+                    local_alias: None,
+                };
+                let selected_target =
+                    self.resolve_selected_target(&occurrence.dependency, &selection, source_file)?;
+                let target = match selected_target {
+                    ResolvedSelectedTarget::ProviderDeclaration {
+                        provider_id,
+                        origin,
+                        local_path,
+                        ..
+                    } => {
+                        self.register_imported_qualified_target(
+                            file_visibility,
+                            provider_id,
+                            &origin,
+                            local_path,
+                            occurrence.selected,
+                            occurrence.selected_span,
+                        )?;
+                        ResolvedQualifiedTarget::Imported { origin, local_path }
+                    }
+                    ResolvedSelectedTarget::Source { symbol_path, .. } => {
+                        // A type alias or trait is dependency-bindable as a type, but a value
+                        // expression can never consume it. Report the ordinary lane's namespace
+                        // diagnostic here, at the selected span, instead of recording a target
+                        // AST cannot project into its declaration table.
+                        if self.module_symbols.type_alias_paths.contains(&symbol_path) {
+                            return Err(names_declarations::namespace_misuse(
+                                occurrence.selected,
+                                NameNamespace::Value,
+                                NameNamespace::Type,
+                                Some(occurrence.selected_span),
+                            )
+                            .into());
+                        }
+                        if self.module_symbols.trait_paths.contains(&symbol_path) {
+                            return Err(generics_traits_api::trait_name_used_as_type(
+                                occurrence.selected,
+                                Some(occurrence.selected_span),
+                            )
+                            .into());
+                        }
+                        ResolvedQualifiedTarget::Source {
+                            declaration_path: symbol_path,
+                        }
+                    }
+                    ResolvedSelectedTarget::External { symbol_id } => {
+                        ResolvedQualifiedTarget::External { symbol_id }
+                    }
+                };
+                resolved_by_selection.insert(memo_key, target.clone());
+                target
+            };
+
+            let key = (
+                occurrence.selected_span.source(),
+                occurrence.dependency.path_syntax,
+            );
+            // Binding construction holds the only handle, so `make_mut` completes the map in
+            // place instead of copying it per inserted occurrence.
+            let previous = Arc::make_mut(&mut self.environment.qualified_reference_targets).insert(
+                key,
+                ResolvedQualifiedReference {
+                    target,
+                    selected_span: occurrence.selected_span,
+                },
+            );
+            if previous.is_some() {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
+                    "two qualified-reference occurrences share one authored path row",
+                )
+                .into());
             }
         }
 
         Ok(())
     }
 
-    /// Resolve direct selections from a virtual package before source public-surface enforcement.
+    /// Register the semantic provenance an imported qualified target needs for AST projection.
     ///
-    /// WHAT: the provider root and selected name are combined only for the external-package
-    /// registry lookup. The retained clause still owns one shell and one flat selection list.
-    /// Checking external metadata here keeps virtual packages out of source public-surface privacy
-    /// rules while leaving all source dependencies on normal public-surface-first resolution.
-    fn resolve_and_register_external_package_selection_dependencies(
+    /// WHAT: records the consumer-local path to origin mapping, receiver methods for nominal
+    ///       targets and the concrete call contract for functions, exactly as a direct-selection
+    ///       clause does.
+    /// WHY: AST projects imported declarations from this provenance. Skipping it would make an
+    ///       occurrence-selected function or struct unusable even though binding proved it. The
+    ///       selected name itself is still never published.
+    fn register_imported_qualified_target(
         &mut self,
         file_visibility: &mut FileVisibility,
-        registry: &mut VisibleNameRegistry,
-        dependency: &RetainedDependencyClause,
-        selections: &[DependencySelection],
-    ) -> BuilderResult<Option<()>> {
-        if selections.is_empty() {
-            return Ok(None);
-        }
+        provider_id: ProviderInterfaceId,
+        origin: &OriginDeclarationId,
+        local_path: PathId,
+        selected: StringId,
+        selected_span: SourceSpan,
+    ) -> BuilderResult<()> {
+        let view = self
+            .source_provider_dependencies
+            .binding_view(provider_id)?;
+        let declaration = view.declaration(origin).ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!(
+                    "provider interface {:?} has no declaration record for exported origin {:?}",
+                    provider_id, origin
+                ),
+            )
+        })?;
 
-        let mut found = false;
-        for selection in selections {
-            let selected_path = self
-                .path_fork
-                .try_intern_child(dependency.dependency.path, selection.source_name)
-                .ok_or_else(token_lexical::logical_path_capacity)?;
-            match resolve_external_package_symbol(ExternalPackageSymbolResolutionInput {
-                dependency_path: &selected_path,
-                external_package_registry: self.external_package_registry,
-                string_table: self.string_table,
-                path_fork: &*self.path_fork,
-            }) {
-                ExternalPackageSymbolLookup::Found { symbol_id } => {
-                    found = true;
-                    let local_name = selection.local_name();
-                    self.register_external_import(
-                        file_visibility,
-                        registry,
-                        ExternalImportInput {
-                            symbol_name: selection.source_name,
-                            local_name,
-                            source_span: Some(selection.source_span),
-                            local_alias: selection.local_alias(),
-                            symbol_id,
-                        },
-                    )?;
-                }
-                ExternalPackageSymbolLookup::PackageFoundSymbolMissing {
-                    package_path,
-                    symbol_name,
-                    candidates,
-                } => {
-                    return Err(super::diagnostics::missing_package_symbol(
-                        symbol_name,
-                        package_path,
-                        candidates,
-                        Some(selection.source_span),
-                    )
-                    .into());
-                }
-                ExternalPackageSymbolLookup::NoMatch => {
-                    if found {
-                        return Err(super::diagnostics::missing_dependency_target(
-                            &selected_path,
-                            Some(selection.source_span),
-                        )
-                        .into());
-                    }
-                    return Ok(None);
-                }
+        // Provider aliases and traits are valid direct-selection *type* bindings, but an
+        // expression-qualified selection is always a value. Match the ordinary value lane's
+        // diagnostics before recording provenance the AST declaration table cannot project.
+        match &declaration.semantics {
+            PublicDeclarationSemantics::TransparentAlias(_) => {
+                return Err(names_declarations::namespace_misuse(
+                    selected,
+                    NameNamespace::Value,
+                    NameNamespace::Type,
+                    Some(selected_span),
+                )
+                .into());
             }
+            PublicDeclarationSemantics::Trait(_) => {
+                return Err(generics_traits_api::trait_name_used_as_type(
+                    selected,
+                    Some(selected_span),
+                )
+                .into());
+            }
+            PublicDeclarationSemantics::Function(_)
+            | PublicDeclarationSemantics::Struct(_)
+            | PublicDeclarationSemantics::Choice(_)
+            | PublicDeclarationSemantics::Constant(_) => {}
         }
 
-        Ok(found.then_some(()))
+        insert_agreed(
+            &mut self.environment.imported_declarations_by_local_path,
+            local_path,
+            origin,
+            "qualified-reference declaration path",
+        )?;
+
+        let receiver_methods = match &declaration.semantics {
+            PublicDeclarationSemantics::Struct(structure) => Some(&structure.receiver_methods),
+            PublicDeclarationSemantics::Choice(choice) => Some(&choice.receiver_methods),
+            _ => None,
+        };
+        if let Some(receiver_methods) = receiver_methods {
+            self.register_imported_receiver_methods(
+                file_visibility,
+                &local_path,
+                receiver_methods,
+                provider_id,
+                Some(selected_span),
+            )?;
+        }
+
+        if let OriginDeclarationId::Function(function_origin) = origin
+            && view.concrete_call_summary(function_origin).is_some()
+        {
+            self.environment.imported_functions_by_local_path.insert(
+                local_path,
+                super::ImportedFunctionContract {
+                    target: SourceFunctionTarget::Imported {
+                        origin: function_origin.clone(),
+                        local_path,
+                    },
+                },
+            );
+        }
+
+        Ok(())
     }
 
     fn resolve_and_register_namespace_binding(

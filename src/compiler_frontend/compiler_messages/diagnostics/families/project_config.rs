@@ -17,16 +17,15 @@ use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
 };
 use crate::compiler_frontend::compiler_messages::render::{
     render_circular_dependency, render_dependency_namespace_used_as_value,
-    render_html_single_file_route_name_empty, render_invalid_compile_time_path,
-    render_invalid_config, render_invalid_dependency_clause, render_invalid_html_slot_contribution,
-    render_legacy_dependency_clause, render_namespace_type_value_misuse,
+    render_invalid_compile_time_path, render_invalid_config, render_invalid_dependency_clause,
+    render_invalid_html_slot_contribution, render_namespace_type_value_misuse,
     render_nested_dependency_traversal, render_project_context_escape,
     render_project_entry_extension_required, render_unsupported_builder_package,
 };
 use crate::compiler_frontend::compiler_messages::{
     DependencyClauseKind, DiagnosticSeverity, InvalidCompileTimePathReason, InvalidConfigReason,
     InvalidDependencyClauseReason, InvalidHtmlSlotContributionReason, InvalidOutputFolderReason,
-    LegacyDependencyClauseReason, NamespaceTypeValueMisuseKind, ProjectContextEscapeReason,
+    NamespaceTypeValueMisuseKind, ProjectContextEscapeReason,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -118,7 +117,6 @@ unit_code! {
         ExpectedAliasName = 5,
         DuplicateSelectionName = 6,
         DuplicateSelectionLocalName = 7,
-        LegacyBraceSelections = 8,
         MissingSelectionAfterComma = 9,
         MissingCommaBetweenSelections = 10,
         NamespaceAliasWithSelections = 11,
@@ -132,11 +130,6 @@ unit_code! {
     }
 }
 
-unit_code! {
-    impl LegacyDependencyClauseReason {
-        ImportKeyword = 1,
-    }
-}
 unit_code! {
     impl InvalidHtmlSlotContributionReason {
         MissingResource = 1,
@@ -191,39 +184,6 @@ pub(crate) fn invalid_dependency_clause(
     DiagnosticDraft::with_facts(&INVALID_DEPENDENCY_CLAUSE, span, |cursor| {
         cursor.push::<UnitFact<DependencyClauseKind>>(&clause_kind)?;
         cursor.push::<UnitFact<InvalidDependencyClauseReason>>(&reason)?;
-        Ok(())
-    })
-}
-
-diagnostic_family! {
-    LEGACY_DEPENDENCY_CLAUSE {
-        internal: 1035,
-        stable: "MOTH-SYNTAX-0035",
-        category: DiagnosticCategory::Syntax,
-        severity: DiagnosticSeverity::Error,
-        title: "Legacy dependency clause syntax",
-        facts: [
-            reason: UnitFact<LegacyDependencyClauseReason>,
-            replacement: OptStringFact,
-        ],
-        labels: [],
-        extra: None,
-        ctor: manual,
-        reason_key: reason,
-        view: LegacyDependencyClauseView,
-        render: render_legacy_dependency_clause,
-    }
-}
-
-/// Builds the legacy clause diagnostic with its fixed reason and optional replacement.
-pub(crate) fn legacy_dependency_clause(
-    replacement: Option<StringId>,
-    span: Option<SourceSpan>,
-) -> DiagnosticDraft {
-    let reason = LegacyDependencyClauseReason::ImportKeyword;
-    DiagnosticDraft::with_facts(&LEGACY_DEPENDENCY_CLAUSE, span, |cursor| {
-        cursor.push::<UnitFact<LegacyDependencyClauseReason>>(&reason)?;
-        cursor.push::<OptStringFact>(&replacement)?;
         Ok(())
     })
 }
@@ -453,19 +413,16 @@ unit_code! {
         MissingRequiredRecordField = 45,
         InvalidConfigValueShape = 46,
         InvalidProjectSettingValue = 47,
-        MissingHtmlHomepage = 48,
         DuplicateHtmlOutputPath = 49,
         ResourceOutputPathCollision = 50,
         ResourceOutputPathReserved = 51,
         EntryRootPackagePrefixCollision = 53,
         SourcePackageMissingRoot = 54,
-        SourcePackageMultipleRoots = 55,
         NoRootModuleEntries = 56,
-        MultipleModuleRootFiles = 57,
         ConfigImportUnsupported = 58,
         FileValuePathUnsupported = 59,
         SourceFileFolderCollision = 60,
-        LegacyModuleRootFileName = 61,
+        InvalidModuleRootFileName = 61,
         InvalidOutputFolderEmpty = 62,
         InvalidOutputFolderNonUtf8 = 63,
         InvalidOutputFolderAbsolutePathWithoutFolder = 64,
@@ -549,7 +506,6 @@ impl InvalidConfigCode {
             InvalidConfigReason::InvalidProjectSettingValue { .. } => {
                 Self::InvalidProjectSettingValue
             }
-            InvalidConfigReason::MissingHtmlHomepage { .. } => Self::MissingHtmlHomepage,
             InvalidConfigReason::DuplicateHtmlOutputPath { .. } => Self::DuplicateHtmlOutputPath,
             InvalidConfigReason::ResourceOutputPathCollision { .. } => {
                 Self::ResourceOutputPathCollision
@@ -561,11 +517,7 @@ impl InvalidConfigCode {
                 Self::EntryRootPackagePrefixCollision
             }
             InvalidConfigReason::SourcePackageMissingRoot { .. } => Self::SourcePackageMissingRoot,
-            InvalidConfigReason::SourcePackageMultipleRoots { .. } => {
-                Self::SourcePackageMultipleRoots
-            }
             InvalidConfigReason::NoRootModuleEntries { .. } => Self::NoRootModuleEntries,
-            InvalidConfigReason::MultipleModuleRootFiles { .. } => Self::MultipleModuleRootFiles,
             InvalidConfigReason::AliasedModuleRootFiles { .. } => Self::AliasedModuleRootFiles,
             InvalidConfigReason::ModuleRootFileOutsideClaimingModule { .. } => {
                 Self::ModuleRootFileOutsideClaimingModule
@@ -578,7 +530,9 @@ impl InvalidConfigCode {
             InvalidConfigReason::SourceFileFolderCollision { .. } => {
                 Self::SourceFileFolderCollision
             }
-            InvalidConfigReason::LegacyModuleRootFileName { .. } => Self::LegacyModuleRootFileName,
+            InvalidConfigReason::InvalidModuleRootFileName { .. } => {
+                Self::InvalidModuleRootFileName
+            }
             InvalidConfigReason::InvalidOutputFolder { folder, reason } => {
                 Self::output_folder_variant(*reason, folder.is_some())
             }
@@ -956,8 +910,7 @@ fn invalid_config_string_ids(
         InvalidConfigReason::InvalidProjectSettingValue { value, expected } => {
             strings.extend([*value, *expected]);
         }
-        InvalidConfigReason::MissingHtmlHomepage { entry_root }
-        | InvalidConfigReason::NoRootModuleEntries { entry_root } => strings.push(*entry_root),
+        InvalidConfigReason::NoRootModuleEntries { entry_root } => strings.push(*entry_root),
         InvalidConfigReason::DuplicateHtmlOutputPath {
             output_path,
             entry_point,
@@ -985,21 +938,6 @@ fn invalid_config_string_ids(
         InvalidConfigReason::SourcePackageMissingRoot { prefix, root } => {
             strings.extend([*prefix, *root]);
         }
-        InvalidConfigReason::SourcePackageMultipleRoots {
-            prefix,
-            root,
-            candidates,
-        } => {
-            strings.extend([*prefix, *root]);
-            strings.extend(candidates.iter().copied());
-        }
-        InvalidConfigReason::MultipleModuleRootFiles {
-            directory,
-            candidates,
-        } => {
-            strings.push(*directory);
-            strings.extend(candidates.iter().copied());
-        }
         InvalidConfigReason::AliasedModuleRootFiles {
             first_root,
             second_root,
@@ -1020,7 +958,7 @@ fn invalid_config_string_ids(
             folder_name,
             directory,
         } => strings.extend([*file_name, *folder_name, *directory]),
-        InvalidConfigReason::LegacyModuleRootFileName {
+        InvalidConfigReason::InvalidModuleRootFileName {
             file_name,
             directory,
         } => strings.extend([*file_name, *directory]),
@@ -1071,12 +1009,6 @@ impl<'a> InvalidConfigStringIds<'a> {
         let (first, remaining) = self.remaining.split_first()?;
         self.remaining = remaining;
         Some(*first)
-    }
-
-    fn take_remaining(&mut self) -> Vec<StringId> {
-        let remaining = self.remaining.to_vec();
-        self.remaining = &[];
-        remaining
     }
 
     fn finish_key(&mut self, uses_outer_key: bool) -> Option<Option<StringId>> {
@@ -1243,9 +1175,6 @@ pub(crate) fn decode_invalid_config(
                 expected: strings.take()?,
             }
         }
-        InvalidConfigCode::MissingHtmlHomepage => InvalidConfigReason::MissingHtmlHomepage {
-            entry_root: strings.take()?,
-        },
         InvalidConfigCode::DuplicateHtmlOutputPath => {
             InvalidConfigReason::DuplicateHtmlOutputPath {
                 output_path: strings.take()?,
@@ -1294,22 +1223,9 @@ pub(crate) fn decode_invalid_config(
                 root: strings.take()?,
             }
         }
-        InvalidConfigCode::SourcePackageMultipleRoots => {
-            InvalidConfigReason::SourcePackageMultipleRoots {
-                prefix: strings.take()?,
-                root: strings.take()?,
-                candidates: strings.take_remaining(),
-            }
-        }
         InvalidConfigCode::NoRootModuleEntries => InvalidConfigReason::NoRootModuleEntries {
             entry_root: strings.take()?,
         },
-        InvalidConfigCode::MultipleModuleRootFiles => {
-            InvalidConfigReason::MultipleModuleRootFiles {
-                directory: strings.take()?,
-                candidates: strings.take_remaining(),
-            }
-        }
         InvalidConfigCode::AliasedModuleRootFiles => InvalidConfigReason::AliasedModuleRootFiles {
             first_root: strings.take()?,
             second_root: strings.take()?,
@@ -1342,8 +1258,8 @@ pub(crate) fn decode_invalid_config(
                 directory: strings.take()?,
             }
         }
-        InvalidConfigCode::LegacyModuleRootFileName => {
-            InvalidConfigReason::LegacyModuleRootFileName {
+        InvalidConfigCode::InvalidModuleRootFileName => {
+            InvalidConfigReason::InvalidModuleRootFileName {
                 file_name: strings.take()?,
                 directory: strings.take()?,
             }
@@ -1369,22 +1285,6 @@ pub(crate) fn decode_invalid_config(
 }
 
 diagnostic_family! {
-    HTML_SINGLE_FILE_ROUTE_NAME_EMPTY {
-        internal: 6002,
-        stable: "MOTH-CONFIG-0002",
-        category: DiagnosticCategory::Config,
-        severity: DiagnosticSeverity::Error,
-        title: "Invalid HTML single-file route",
-        facts: [entry_path: StringFact],
-        labels: [],
-        extra: None,
-        ctor: generated html_single_file_route_name_empty,
-        view: HtmlSingleFileRouteNameEmptyView,
-        render: render_html_single_file_route_name_empty,
-    }
-}
-
-diagnostic_family! {
     PROJECT_ENTRY_EXTENSION_REQUIRED {
         internal: 6003,
         stable: "MOTH-CONFIG-0003",
@@ -1402,7 +1302,6 @@ diagnostic_family! {
 
 pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     INVALID_DEPENDENCY_CLAUSE,
-    LEGACY_DEPENDENCY_CLAUSE,
     CIRCULAR_DEPENDENCY,
     UNSUPPORTED_BUILDER_PACKAGE,
     INVALID_HTML_SLOT_CONTRIBUTION,
@@ -1412,6 +1311,5 @@ pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES:
     NAMESPACE_TYPE_VALUE_MISUSE,
     PROJECT_CONTEXT_ESCAPE,
     INVALID_CONFIG,
-    HTML_SINGLE_FILE_ROUTE_NAME_EMPTY,
     PROJECT_ENTRY_EXTENSION_REQUIRED,
 ];

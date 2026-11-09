@@ -23,6 +23,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::ExpressionStor
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::{DiagnosticBag, PreparedFailure};
+use crate::compiler_frontend::datatypes::CallableReturnShape;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -116,6 +117,26 @@ pub(in crate::compiler_frontend) fn lower_module_with_owner<'a>(
 pub(super) struct LoopTargets {
     pub break_target: BlockId,
     pub continue_target: BlockId,
+    /// Whether a `break` was lowered for this loop while its targets were active.
+    ///
+    /// WHY: a folded-true loop's exit is reachable only through a self-targeting break. Recording
+    /// the fact as the break is lowered avoids rescanning every module block at the loop boundary.
+    pub saw_break: bool,
+}
+
+/// Whether a folded-true condition may prove this loop's continuation unreachable.
+///
+/// WHAT: a statement loop shares the AST constant-store fact with the exit owner, while a runtime
+/// template loop shares the CFG builder without that AST terminality contract.
+/// WHY: template loops must keep the ordinary two-way header even when their condition folds to
+/// `true`, because their continuation is owned by the template emitter and has no terminality
+/// analysis behind it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LoopExitPolicy {
+    /// A statement loop consumes the AST terminality proof for its body.
+    Statement,
+    /// A runtime template loop keeps the ordinary two-way header.
+    Template,
 }
 
 #[cfg(test)]
@@ -192,11 +213,11 @@ pub struct HirBuilder<'a> {
     pub(super) functions_by_name: FxHashMap<PathId, FunctionId>,
     pub(super) imported_functions_by_name: FxHashMap<PathId, AstImportedFunctionContract>,
     pub(super) imported_fallible_results_by_origin:
-        FxHashMap<OriginFunctionId, (Vec<TypeId>, TypeId)>,
+        FxHashMap<OriginFunctionId, CallableReturnShape>,
     pub(super) module_private_fallible_results_by_identity:
-        FxHashMap<ModulePrivateExecutableIdentity, (Vec<TypeId>, TypeId)>,
+        FxHashMap<ModulePrivateExecutableIdentity, CallableReturnShape>,
     pub(super) generated_fallible_results_by_identity:
-        FxHashMap<GeneratedFunctionIdentity, (Vec<TypeId>, TypeId)>,
+        FxHashMap<GeneratedFunctionIdentity, CallableReturnShape>,
     pub(super) structs_by_name: FxHashMap<PathId, StructId>,
     pub(super) choices_by_name: FxHashMap<PathId, ChoiceId>,
     /// Generic struct instantiations keyed by structured identity, not string paths.
@@ -521,10 +542,15 @@ impl<'a> HirBuilder<'a> {
 
         self.imported_functions_by_name = ast.imported_functions_by_local_path.clone();
         for contract in self.imported_functions_by_name.values() {
-            let Some(error) = contract.error_return else {
+            let Some(returns) = contract.return_contract.ordinary() else {
+                // A Never imported callable owns no success or error channel; its call is a
+                // dedicated terminating terminator, never an Invoke.
                 continue;
             };
-            let results = (contract.returns.clone(), error);
+            if !returns.is_fallible() {
+                continue;
+            }
+            let results = returns.clone();
             match &contract.target {
                 crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::Imported { origin, .. } => {
                     self.imported_fallible_results_by_origin.insert(origin.clone(), results);

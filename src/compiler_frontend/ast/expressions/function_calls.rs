@@ -36,8 +36,8 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
 };
 use crate::compiler_frontend::ast::generic_functions::numeric_origins::GenericErrorReturn;
 use crate::compiler_frontend::ast::numeric_construction::{
-    DeferredCall, DeferredCallArgument, DeferredCallHandling, DeferredExpressionCompletion,
-    DeferredExpressionServices, DeferredSourceCall,
+    CallCompletion, CompletedExpression, DeferredCall, DeferredCallArgument, DeferredCallHandling,
+    DeferredExpressionCompletion, DeferredExpressionServices, DeferredSourceCall,
 };
 use crate::compiler_frontend::ast::statements::fallible_handling::{
     FUNCTION_CALL_STAGE, FallibleCallSite, FallibleHostCallSite, FallibleSuccessContract,
@@ -47,16 +47,20 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
     token_stream_starts_typed_propagation_suffix,
 };
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::ast::statements::never_call::{NeverCall, NeverCallTarget};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::InvalidCallShapeReason;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{
-    ExternalFunctionDef, ExternalFunctionId, ExternalSignatureType,
+    ExternalFunctionDef, ExternalFunctionId, ExternalFunctionReturnContract, ExternalReturnSlot,
+    ExternalReturnsView, ExternalSignatureType,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -89,6 +93,8 @@ pub struct FunctionCallParseInput<'a, 'b, 'tokens> {
 pub(crate) enum ParsedFunctionCallExpression {
     /// The call completed with its validated argument list.
     Value(OwnedExpr),
+    /// The call's contract is `-> !`: it has no value and is valid only as a standalone statement.
+    Terminating(Box<NeverCall>),
     /// A retained operand item: the pending call itself, with its authored operand `!` when one
     /// was consumed. A `catch` is never consumed here; it stays with the enclosing fragment.
     RetainedOperand(ExpressionRpnItem),
@@ -124,7 +130,8 @@ struct ParsedExternalFunctionCall {
 ///
 /// WHAT: the stable host identity, the already-built parameter expectations and interned diagnostic
 ///       name, the ordered argument list, the result slots with the single float-integrity fact,
-///       and the authored call-site facts (operand `!`, span).
+///       the contract-derived completion kind, and the authored call-site facts (operand `!`,
+///       span).
 /// WHY: the external ABI's parameter slots are concrete at the authored site, but argument
 ///      compatibility cannot run before the numeric origins resolve. Moving the expectations and
 ///      guard facts here lets body completion rebuild the ordinary host constructor exactly once
@@ -139,6 +146,12 @@ pub(crate) struct DeferredExternalCall {
     pub(crate) requires_external_float_validation: bool,
     pub(crate) error_return_type_id: Option<TypeId>,
     pub(crate) call_span: Option<SourceSpan>,
+    /// Whether the host signature's settled return contract completes as a value or terminates.
+    ///
+    /// This is the contract fact, settled from the registered definition at retention; completion
+    /// reads it back instead of accepting a caller's preference. Zero success slots are also valid
+    /// for ordinary no-value completion, so the slots alone cannot distinguish the two.
+    pub(crate) completion: CallCompletion,
     /// The authored operand `!` consumed at the call's receiving site.
     pub(crate) authored_handling: DeferredCallHandling,
 }
@@ -264,16 +277,40 @@ pub(crate) fn parse_function_call_expression(
         path_fork,
     )?;
 
+    // A Never callee has no value. The statement owner lifts this outcome into `NeverCall`;
+    // every value owner rejects it at the shared evaluation choke point.
+    let Some(returns) = signature.return_contract.ordinary() else {
+        let callee_name = path_fork.component(*id).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "a resolved Never call has no terminal path component"
+            )
+        });
+        reject_never_call_continuation(token_stream, callee_name, call_span)?;
+        return Ok(ParsedFunctionCallExpression::Terminating(Box::new(
+            NeverCall {
+                target: NeverCallTarget::Source(*id),
+                receiver: None,
+                arguments: args
+                    .into_iter()
+                    .map(|argument| argument.map_value(OwnedExpr::id))
+                    .collect(),
+                name: callee_name,
+                span: call_span,
+            },
+        )));
+    };
+
     let call = HandledFallibleCall {
         name: id.to_owned(),
-        result_type_ids: signature.success_return_type_ids(),
+        result_type_ids: returns.success().to_vec(),
         args,
         call_span,
     };
 
     finish_function_call_expression(
         call,
-        signature.error_return_type_id(),
+        returns.error(),
         CallFinishContext {
             token_stream,
             context,
@@ -344,9 +381,33 @@ fn retain_numeric_source_call(
         allow_boundary_catch,
     } = input;
 
-    let error_return_type_id = signature.error_return_type_id();
+    let Some(returns) = signature.return_contract.ordinary() else {
+        // Arguments still depend on numeric completion, but the call stores no success slots or
+        // error channel. The record's own contract-derived completion fact makes completion
+        // rebuild the exact call and hand it back as a terminating statement payload.
+        let callee_name = path_fork.component(*function_path).unwrap_or_else(|| {
+            crate::compiler_bug!(
+                CompilerStage::AstConstruction,
+                "a resolved Never call has no terminal path component"
+            )
+        });
+        reject_never_call_continuation(token_stream, callee_name, call_span)?;
+        let call = DeferredCall::Source(Box::new(DeferredSourceCall {
+            function_path: function_path.to_owned(),
+            success_result_type_ids: Vec::new(),
+            error_return_type_id: None,
+            completion: CallCompletion::Never,
+            expectations,
+            arguments,
+            call_span,
+            authored_handling: DeferredCallHandling::Unhandled,
+        }));
+        return Ok(retained_pending_call_operand(call, call_span));
+    };
+
+    let error_return_type_id = returns.error();
     let error_return = error_return_type_id.map(GenericErrorReturn::Concrete);
-    let success_result_type_ids = signature.success_return_type_ids();
+    let success_result_type_ids = returns.success();
     // ------------------------
     //  Operand postfix `!`
     // ------------------------
@@ -361,7 +422,7 @@ fn retain_numeric_source_call(
         type_interner,
         expression_builder,
         const_values,
-        success_result_type_ids: &success_result_type_ids,
+        success_result_type_ids,
         error_return,
         authored_failure_lane: context.source_call_has_private_failure_lane(*function_path),
         value_required,
@@ -373,15 +434,16 @@ fn retain_numeric_source_call(
     })?;
 
     Ok(retained_pending_call_operand(
-        retained_source_call_record(
-            function_path,
-            success_result_type_ids,
+        DeferredCall::Source(Box::new(DeferredSourceCall {
+            function_path: function_path.to_owned(),
+            success_result_type_ids: success_result_type_ids.to_vec(),
             error_return_type_id,
+            completion: CallCompletion::Value,
             expectations,
             arguments,
             call_span,
             authored_handling,
-        ),
+        })),
         call_span,
     ))
 }
@@ -466,26 +528,6 @@ pub(crate) fn parse_retained_call_authored_handling(
     })
 }
 
-fn retained_source_call_record(
-    function_path: &PathId,
-    success_result_type_ids: Vec<TypeId>,
-    error_return_type_id: Option<TypeId>,
-    expectations: Vec<ParameterExpectation>,
-    arguments: Vec<DeferredCallArgument>,
-    call_span: Option<SourceSpan>,
-    authored_handling: DeferredCallHandling,
-) -> DeferredCall {
-    DeferredCall::Source(Box::new(DeferredSourceCall {
-        function_path: function_path.to_owned(),
-        success_result_type_ids,
-        error_return_type_id,
-        expectations,
-        arguments,
-        call_span,
-        authored_handling,
-    }))
-}
-
 /// Places one retained call in its authored operand position.
 pub(crate) fn retained_pending_call_operand(
     call: DeferredCall,
@@ -495,6 +537,34 @@ pub(crate) fn retained_pending_call_operand(
         call: Box::new(call),
         span,
     })
+}
+
+/// Reject every continuation a Never call cannot support.
+///
+/// WHAT: reports postfix `!`, `?`, `catch` and member access after a call whose contract is
+///       `-> !`.
+/// WHY: the callee never produces a success, error, optional or receiver value, so these suffixes
+///      have nothing to consume. Rejecting them at the call site keeps the targeted placement
+///      diagnostic on the authored call instead of an unrelated fallible-handling error.
+pub(crate) fn reject_never_call_continuation(
+    token_stream: &AstCursor<'_>,
+    callee_name: StringId,
+    call_span: Option<SourceSpan>,
+) -> Result<(), ExpressionParseError> {
+    let is_continuation = matches!(
+        token_stream.current_tag(),
+        TokenTag::BANG | TokenTag::QUESTION_MARK | TokenTag::CATCH | TokenTag::DOT
+    );
+    if !is_continuation {
+        return Ok(());
+    }
+
+    Err(calls_data::invalid_call_shape(
+        InvalidCallShapeReason::NeverCallHandled,
+        Some(callee_name),
+        call_span.or_else(|| Some(token_stream.current_span())),
+    )
+    .into())
 }
 
 pub(crate) fn finish_function_call_expression(
@@ -660,14 +730,46 @@ pub(crate) fn parse_external_function_call_expression(
         path_fork,
     )?;
 
+    // Signature types are shared by ordinary and Never contracts; validate them once before
+    // either lane settles its result facts.
+    validate_external_signature_types_are_registered(
+        external_function,
+        &external_function.return_contract,
+        context,
+        call_span,
+    )?;
+    let ordinary_returns = external_function.return_contract.ordinary();
+
     let arguments = match raw_args {
         ParsedCallArguments::Ready(arguments) => arguments,
         ParsedCallArguments::Retained(arguments) => {
+            let Some(returns) = ordinary_returns else {
+                // Arguments still depend on numeric completion, but a Never call has no result
+                // facts to settle. Completion rebuilds the same external call and hands it back
+                // as a terminating statement payload.
+                reject_never_call_continuation(token_stream, callee_name, call_span)?;
+                return Ok(retained_pending_call_operand(
+                    DeferredCall::External(Box::new(DeferredExternalCall {
+                        function_id: external_function_id,
+                        callee_name,
+                        expectations,
+                        arguments,
+                        result_type_ids: Vec::new(),
+                        requires_external_float_validation: false,
+                        error_return_type_id: None,
+                        call_span,
+                        completion: CallCompletion::Never,
+                        authored_handling: DeferredCallHandling::Unhandled,
+                    })),
+                    call_span,
+                ));
+            };
             // The host ABI's parameter and result slots are already concrete, so the signature,
             // error and float-integrity facts settle here and travel with the pending call.
             let facts = settle_external_call_facts(
                 external_function_id,
                 external_function,
+                returns,
                 call_span,
                 context,
                 type_interner,
@@ -734,9 +836,28 @@ pub(crate) fn parse_external_function_call_expression(
     // ------------------------
     //  Validate signature and returns
     // ------------------------
+    let Some(returns) = ordinary_returns else {
+        // A Never callee has no value. The statement owner lifts this outcome into
+        // `NeverCall`; every value owner rejects it at the shared evaluation choke point.
+        reject_never_call_continuation(token_stream, callee_name, call_span)?;
+        return Ok(ParsedFunctionCallExpression::Terminating(Box::new(
+            NeverCall {
+                target: NeverCallTarget::External(external_function_id),
+                receiver: None,
+                arguments: args
+                    .into_iter()
+                    .map(|argument| argument.map_value(OwnedExpr::id))
+                    .collect(),
+                name: callee_name,
+                span: call_span,
+            },
+        )));
+    };
+
     let facts = settle_external_call_facts(
         external_function_id,
         external_function,
+        returns,
         call_span,
         context,
         type_interner,
@@ -783,10 +904,14 @@ struct ParsedExternalCallFacts {
     span: Option<SourceSpan>,
 }
 
-/// Settles one external call's signature, result and guard facts from its registered definition.
+/// Settles one ordinary external call's signature, result and guard facts from its registered
+/// definition.
+///
+/// A Never contract is handled before this owner: it has no result facts to settle.
 fn settle_external_call_facts(
     external_function_id: ExternalFunctionId,
     external_function: &ExternalFunctionDef,
+    returns: ExternalReturnsView<'_>,
     call_span: Option<SourceSpan>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -796,20 +921,28 @@ fn settle_external_call_facts(
     //  Validate signature and returns
     // ------------------------
     let builtin_error_type = resolve_builtin_error_type_typed(context, call_span, string_table)?;
-    validate_external_signature_types_are_registered(external_function, context, call_span)?;
-    let result_type_ids = external_function.success_return_type_ids(
-        type_interner.environment_mut_for_derived_types(),
-        builtin_error_type.type_id,
-    );
-    validate_external_return_slots_are_visible(external_function, &result_type_ids, call_span)?;
+    let type_environment = type_interner.environment_mut_for_derived_types();
+    let result_type_ids = returns
+        .success
+        .iter()
+        .filter_map(|slot| {
+            slot.value_type
+                .to_type_id(type_environment, builtin_error_type.type_id)
+        })
+        .collect::<Vec<_>>();
+    validate_external_return_slots_are_visible(
+        external_function,
+        returns.success,
+        &result_type_ids,
+        call_span,
+    )?;
 
-    let error_return_type_id = external_function.error_return_type_id(
-        type_interner.environment_mut_for_derived_types(),
-        builtin_error_type.type_id,
-    );
+    let error_return_type_id = returns
+        .error
+        .and_then(|error_type| error_type.to_type_id(type_environment, builtin_error_type.type_id));
 
     let error_return_type_id =
-        if external_function.is_fallible() {
+        if returns.error.is_some() {
             let Some(error_return_type_id) = error_return_type_id else {
                 return Err(InfrastructureFailure::internal(CompilerStage::AstConstruction, format!(
                 "Fallible external function '{}' has no frontend-visible concrete error slot.",
@@ -1056,6 +1189,7 @@ fn retained_external_call_record(
         requires_external_float_validation: facts.requires_external_float_validation,
         error_return_type_id: facts.error_return_type_id,
         call_span: facts.span,
+        completion: CallCompletion::Value,
         authored_handling,
     }))
 }
@@ -1065,18 +1199,21 @@ fn retained_external_call_record(
 /// WHAT: completes every retained argument through the session's shared argument placement,
 ///       revalidates the whole list against the retained parameter expectations, and
 ///       rebuilds the exact host call the completed path builds, preserving its separate
-///       success/error channels and authored propagation handling.
-/// WHY: the host identity, expectations, result slots, float-integrity fact and authored operand `!`
-///      were settled at the call site and must not be re-derived, re-parsed or dropped. The body root
-///      only supplies concrete argument values, so completion needs neither the host definition nor
-///      another expectation-building pass, registry lookup or token cursor.
+///       success/error channels and authored propagation handling. The completion kind comes
+///       from the record, which settled it from the host signature's return contract at the
+///       authored site.
+/// WHY: the host identity, expectations, result slots, float-integrity fact, return-contract
+///      completion kind and authored operand `!` were settled at the call site and must not be
+///      re-derived, re-parsed or dropped. The body root only supplies concrete argument values, so
+///      completion needs neither the host definition nor another expectation-building pass,
+///      registry lookup or token cursor.
 pub(crate) fn complete_deferred_external_call<
     'env,
     S: DeferredExpressionCompletion<'env> + ?Sized,
 >(
     deferred: DeferredExternalCall,
     session: &mut S,
-) -> Result<OwnedExpr, ExpressionParseError> {
+) -> Result<CompletedExpression, ExpressionParseError> {
     let DeferredExternalCall {
         function_id,
         callee_name,
@@ -1086,6 +1223,7 @@ pub(crate) fn complete_deferred_external_call<
         requires_external_float_validation,
         error_return_type_id,
         call_span,
+        completion,
         authored_handling,
     } = deferred;
 
@@ -1120,17 +1258,35 @@ pub(crate) fn complete_deferred_external_call<
     )
     .map_err(ExpressionParseError::from)?;
 
+    // The retained record settled this fact from the host signature's return contract; a Never
+    // contract has no success or error slot. Completion keeps the stable external target and the
+    // completed argument routing for statement lifting, exactly like the completed call path.
+    if completion == CallCompletion::Never {
+        return Ok(CompletedExpression::NeverCall(Box::new(NeverCall {
+            target: NeverCallTarget::External(function_id),
+            receiver: None,
+            arguments: args
+                .into_iter()
+                .map(|argument| argument.map_value(OwnedExpr::id))
+                .collect(),
+            name: callee_name,
+            span: call_span,
+        })));
+    }
+
     let Some(error_type_id) = error_return_type_id else {
         // The retention site already reported the authored operand `!` on an infallible callee,
         // and a `catch` was never the call site's to consume, so an infallible retained call
         // resumes as the plain host call.
-        return Ok(expression_builder.host_function_call_with_typed_arguments(
-            function_id,
-            args,
-            result_type_ids,
-            requires_external_float_validation,
-            call_span,
-        )?);
+        return Ok(CompletedExpression::Value(
+            expression_builder.host_function_call_with_typed_arguments(
+                function_id,
+                args,
+                result_type_ids,
+                requires_external_float_validation,
+                call_span,
+            )?,
+        ));
     };
 
     let call = HandledFallibleHostCall {
@@ -1157,16 +1313,20 @@ pub(crate) fn complete_deferred_external_call<
                         span: call.call_span,
                     },
                 )?;
-            Ok(expression_builder.with_typed_error_producer(handled, error_type_id, None)?)
+            Ok(CompletedExpression::Value(
+                expression_builder.with_typed_error_producer(handled, error_type_id, None)?,
+            ))
         }
         // Replay the authored `!` through the same constructor the completed call path uses; the
         // retention site already validated the callee's error slot and the authored value
         // requirement, so no second decision exists here.
-        DeferredCallHandling::Propagate { span } => Ok(call.into_expression(
-            FallibleHandling::Propagate,
-            span.or(call_span),
-            expression_builder,
-        )?),
+        DeferredCallHandling::Propagate { span } => {
+            Ok(CompletedExpression::Value(call.into_expression(
+                FallibleHandling::Propagate,
+                span.or(call_span),
+                expression_builder,
+            )?))
+        }
     }
 }
 
@@ -1195,12 +1355,12 @@ fn external_call_requires_float_validation(
 /// resolve a `TypeId`, which shortens the projected slot list.
 fn validate_external_return_slots_are_visible(
     external_function: &ExternalFunctionDef,
+    success_slots: &[ExternalReturnSlot],
     result_type_ids: &[TypeId],
     span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
-    if external_function.returns.len() != result_type_ids.len()
-        || external_function
-            .returns
+    if success_slots.len() != result_type_ids.len()
+        || success_slots
             .iter()
             .any(|slot| !slot.value_type.represents_moth_value())
     {
@@ -1216,8 +1376,12 @@ fn validate_external_return_slots_are_visible(
 
 /// Ensures every type referenced in an external function signature is registered
 /// in the external package registry.
+///
+/// Parameters belong to both contract variants. Success slots and the error slot are visited
+/// only for an ordinary contract; a Never contract owns neither by construction.
 fn validate_external_signature_types_are_registered(
     external_function: &ExternalFunctionDef,
+    contract: &ExternalFunctionReturnContract,
     context: &ScopeContext,
     span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
@@ -1230,7 +1394,11 @@ fn validate_external_signature_types_are_registered(
         )?;
     }
 
-    for slot in &external_function.returns {
+    let Some(returns) = contract.ordinary() else {
+        return Ok(());
+    };
+
+    for slot in returns.success {
         validate_external_signature_type_is_registered(
             external_function,
             &slot.value_type,
@@ -1239,7 +1407,7 @@ fn validate_external_signature_types_are_registered(
         )?;
     }
 
-    if let Some(error_type) = &external_function.error_return_type {
+    if let Some(error_type) = returns.error {
         validate_external_signature_type_is_registered(
             external_function,
             error_type,

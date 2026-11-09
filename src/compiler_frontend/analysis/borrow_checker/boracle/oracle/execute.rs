@@ -1418,7 +1418,8 @@ fn execute_terminator<'problem>(
         TerminatorEventKind::Return
         | TerminatorEventKind::ReturnError
         | TerminatorEventKind::RuntimeFailure
-        | TerminatorEventKind::AssertFailure => Ok(EventExecutionResult::Complete),
+        | TerminatorEventKind::AssertFailure
+        | TerminatorEventKind::NeverCall => Ok(EventExecutionResult::Complete),
     }
 }
 

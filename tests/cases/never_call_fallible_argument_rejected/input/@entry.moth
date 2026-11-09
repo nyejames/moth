@@ -1,0 +1,13 @@
+can_error || -> I32, Error!:
+    return 1
+;
+
+fatal |code I32| -> !:
+    assert(false, "fatal")
+;
+
+run ||:
+    fatal(can_error())
+;
+
+run()

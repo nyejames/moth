@@ -27,17 +27,17 @@ use crate::compiler_frontend::ast::numeric_construction::{
 use crate::compiler_frontend::ast::statements::branching::{
     DeferredMatchBodyReceiver, resume_deferred_match,
 };
+use crate::compiler_frontend::ast::statements::control_flow_exits::{
+    ControlFlowExitScratch, ControlFlowExitSummary, analyze_control_flow_exits_in_scratch,
+};
 use crate::compiler_frontend::ast::statements::match_patterns::{
     ensure_pattern_compatible_with_subject, finish_pending_choice_pattern,
     finish_pending_option_pattern, finish_retained_pattern,
 };
-use crate::compiler_frontend::ast::statements::value_production::completeness::{
-    analyze_branch_exits, visit_reachable_then_values,
-};
+use crate::compiler_frontend::ast::statements::value_production::completeness::visit_reachable_then_values;
 use crate::compiler_frontend::ast::statements::value_production::multi_bind::finalize_inferred_value_block;
 use crate::compiler_frontend::ast::statements::value_production::types::{
-    ActiveValueProductionTarget, BranchExitSummary, ParsedReceiverValue, ProducedValues,
-    ThenValueSlot,
+    ActiveValueProductionTarget, ParsedReceiverValue, ProducedValues, ThenValueSlot,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -248,8 +248,9 @@ fn collect_deferred_body_producers(
     expressions: &AstExpressionBuilder,
     constants: &ConstValueStore,
     slots: &mut [Vec<MultiBindProducerFact>],
-) -> Result<BranchExitSummary, ExpressionParseError> {
-    let mut exits = BranchExitSummary::FALLS_THROUGH;
+) -> Result<ControlFlowExitSummary, ExpressionParseError> {
+    let mut exits = ControlFlowExitSummary::FALLS_THROUGH;
+    let mut scratch = ControlFlowExitScratch::default();
     for entry in &body.draft.entries {
         if !exits.can_fall_through {
             break;
@@ -262,7 +263,12 @@ fn collect_deferred_body_producers(
                     expressions,
                     constants,
                 )?;
-                analyze_branch_exits(std::slice::from_ref(node), expressions, constants)
+                analyze_control_flow_exits_in_scratch(
+                    std::slice::from_ref(node),
+                    expressions.store(),
+                    constants,
+                    &mut scratch,
+                )
             }
             BodyEntry::Pending(id) => {
                 collect_pending_continuation_producers(*id, state, expressions, constants, slots)?
@@ -279,10 +285,10 @@ fn collect_pending_continuation_producers(
     expressions: &AstExpressionBuilder,
     constants: &ConstValueStore,
     slots: &mut [Vec<MultiBindProducerFact>],
-) -> Result<BranchExitSummary, ExpressionParseError> {
+) -> Result<ControlFlowExitSummary, ExpressionParseError> {
     if let Some(continuation) = state.continuation_then_values(id) {
         collect_retained_then_producers(id, continuation, expressions, slots)?;
-        return Ok(BranchExitSummary::PRODUCES);
+        return Ok(ControlFlowExitSummary::PRODUCES_VALUE);
     }
     let continuation = state.continuation(id).ok_or_else(|| {
         InfrastructureFailure::internal(
@@ -296,11 +302,11 @@ fn collect_pending_continuation_producers(
             "a live `then` continuation was not exposed through its producer-slot accessor",
         )
         .into()),
-        NumericContinuation::Return(_) => Ok(BranchExitSummary::TERMINATES),
+        NumericContinuation::Return(_) => Ok(ControlFlowExitSummary::RETURNS_TO_CALLER),
         NumericContinuation::Construct(construct) => {
             collect_construct_producers(construct, state, expressions, constants, slots)
         }
-        _ => Ok(BranchExitSummary::FALLS_THROUGH),
+        _ => Ok(ControlFlowExitSummary::FALLS_THROUGH),
     }
 }
 
@@ -310,7 +316,7 @@ fn collect_construct_producers(
     expressions: &AstExpressionBuilder,
     constants: &ConstValueStore,
     slots: &mut [Vec<MultiBindProducerFact>],
-) -> Result<BranchExitSummary, ExpressionParseError> {
+) -> Result<ControlFlowExitSummary, ExpressionParseError> {
     match construct {
         DeferredConstruct::If(deferred) => {
             collect_if_producers(deferred, state, expressions, constants, slots)
@@ -318,7 +324,9 @@ fn collect_construct_producers(
         DeferredConstruct::Match(deferred) => {
             collect_match_exits_and_producers(deferred, state, expressions, constants, slots)
         }
-        DeferredConstruct::Loop(_) => Ok(BranchExitSummary::FALLS_THROUGH),
+        // The deferred loop body is not walked, so a reachable break cannot be ruled out here.
+        // Keep the post-loop continuation reachable for producer collection.
+        DeferredConstruct::Loop(_) => Ok(ControlFlowExitSummary::FALLS_THROUGH),
     }
 }
 
@@ -328,12 +336,12 @@ fn collect_if_producers(
     expressions: &AstExpressionBuilder,
     constants: &ConstValueStore,
     slots: &mut [Vec<MultiBindProducerFact>],
-) -> Result<BranchExitSummary, ExpressionParseError> {
+) -> Result<ControlFlowExitSummary, ExpressionParseError> {
     let then_exits =
         collect_deferred_body_producers(&deferred.then_body, state, expressions, constants, slots)?;
     let else_exits = match &deferred.else_body {
         Some(body) => collect_deferred_body_producers(body, state, expressions, constants, slots)?,
-        None => BranchExitSummary::FALLS_THROUGH,
+        None => ControlFlowExitSummary::FALLS_THROUGH,
     };
     Ok(then_exits.union(else_exits))
 }
@@ -344,12 +352,12 @@ fn collect_match_exits_and_producers(
     expressions: &AstExpressionBuilder,
     constants: &ConstValueStore,
     slots: &mut [Vec<MultiBindProducerFact>],
-) -> Result<BranchExitSummary, ExpressionParseError> {
+) -> Result<ControlFlowExitSummary, ExpressionParseError> {
     let mut exits = None;
     for arm in &deferred.arms {
         let arm_exits =
             collect_deferred_body_producers(&arm.body, state, expressions, constants, slots)?;
-        exits = Some(exits.map_or(arm_exits, |existing: BranchExitSummary| {
+        exits = Some(exits.map_or(arm_exits, |existing: ControlFlowExitSummary| {
             existing.union(arm_exits)
         }));
     }
@@ -358,7 +366,7 @@ fn collect_match_exits_and_producers(
             collect_deferred_body_producers(default, state, expressions, constants, slots)?;
         exits = Some(exits.map_or(default_exits, |existing| existing.union(default_exits)));
     }
-    Ok(exits.unwrap_or(BranchExitSummary::FALLS_THROUGH))
+    Ok(exits.unwrap_or(ControlFlowExitSummary::FALLS_THROUGH))
 }
 
 fn collect_match_producers(

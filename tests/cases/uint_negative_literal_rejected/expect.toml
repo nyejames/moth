@@ -9,7 +9,7 @@ diagnostic_codes = ["MOTH-SYNTAX-0008", "MOTH-SYNTAX-0008"]
 code = "MOTH-SYNTAX-0008"
 occurrence = 1
 reason = "invalid_number_literal.negative_unsigned_literal"
-path = "input/neg_one/@mod.moth"
+path = "input/neg_one/@entry.moth"
 line = 1
 column = 9
 
@@ -17,6 +17,6 @@ column = 9
 code = "MOTH-SYNTAX-0008"
 occurrence = 2
 reason = "invalid_number_literal.negative_unsigned_literal"
-path = "input/neg_zero/@mod.moth"
+path = "input/neg_zero/@entry.moth"
 line = 1
 column = 9

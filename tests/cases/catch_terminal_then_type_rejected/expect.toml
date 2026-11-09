@@ -14,7 +14,7 @@ message_contains = ["expected I32, found String"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 4
 column = 14
 count = 1

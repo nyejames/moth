@@ -1,0 +1,5 @@
+@lib value
+
+helper || -> String:
+    return value
+;

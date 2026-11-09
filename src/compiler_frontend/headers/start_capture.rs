@@ -2,7 +2,8 @@
 //!
 //! WHAT: records source-owned token ranges for non-header top-level tokens and runtime templates.
 //! WHY: only the active root executes top-level runtime code; ordinary source executable code must
-//! be rejected before AST lowering, while imported-root tokens are discarded after balancing.
+//! be rejected before AST lowering, while a reached foreign root's body is discarded after
+//! balancing.
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;

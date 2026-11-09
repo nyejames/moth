@@ -275,3 +275,30 @@ fn module_package_dependency_index_walks_only_direct_dependencies() {
         "modules without package dependencies must not appear in the readiness index"
     );
 }
+
+#[test]
+fn template_bearing_packages_order_after_the_html_prelude_package() {
+    let package_prefixes = vec!["docs".to_owned(), "html".to_owned()];
+    let mut dependencies = vec![Vec::new(), Vec::new()];
+    super::compilation::add_template_prelude_ordering_dependencies(
+        &package_prefixes,
+        &[true, false],
+        &mut dependencies,
+    );
+    assert_eq!(dependencies[0], vec!["html".to_owned()]);
+
+    let order = super::compilation::order_packages_by_dependency(&package_prefixes, &dependencies)
+        .expect("the template edge orders the prelude package first");
+    assert_eq!(package_prefixes[order[0]], "html");
+
+    let mut dependencies = vec![Vec::new(), Vec::new()];
+    super::compilation::add_template_prelude_ordering_dependencies(
+        &package_prefixes,
+        &[false, true],
+        &mut dependencies,
+    );
+    assert!(
+        dependencies[1].is_empty(),
+        "the prelude package must not depend on itself"
+    );
+}

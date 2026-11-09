@@ -1,0 +1,3 @@
+stop || -> !:
+    assert(true, "keeps going")
+;

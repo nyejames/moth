@@ -6,7 +6,7 @@ message_contains = ["compile-time `String`"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0021"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 9
 
 [backends.html_wasm]
@@ -16,5 +16,5 @@ diagnostic_codes = ["MOTH-SYNTAX-0021"]
 
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0021"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 9

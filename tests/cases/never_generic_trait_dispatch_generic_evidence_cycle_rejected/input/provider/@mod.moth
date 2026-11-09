@@ -1,0 +1,19 @@
+export:
+    STOPPABLE must:
+        stop |This| -> !
+    ;
+
+    abort type T is STOPPABLE |value T| -> !:
+        value.stop()
+    ;
+
+    Box type T is STOPPABLE = |
+        value T,
+    |
+;
+
+stop type T is STOPPABLE |this Box of T| -> !:
+    this.value.stop()
+;
+
+Box must STOPPABLE

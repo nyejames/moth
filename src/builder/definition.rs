@@ -7,7 +7,9 @@
 
 use super::Error;
 use crate::build_system::output::BuilderIdentity;
-use crate::builder_surface::definition::BuilderSurfaceValidationError;
+use crate::builder_surface::definition::{
+    BuilderSurfaceValidationError, TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
+};
 use crate::builder_surface::{BuilderSurface, PackageOrigin, SourceFileKind};
 use crate::compiler_frontend::external_packages::ExternalRegistrationError;
 use crate::host::HostFunction;
@@ -100,12 +102,6 @@ impl BuilderDefinitionDraft {
         self
     }
 
-    /// Accepts `.mtf` template content files.
-    pub fn moth_templates(mut self) -> Self {
-        self.source_kinds.push(SourceFileKind::MothTemplate);
-        self
-    }
-
     /// Accepts plain `.md` Markdown content files.
     pub fn markdown(mut self) -> Self {
         self.source_kinds.push(SourceFileKind::PlainMarkdown);
@@ -121,6 +117,14 @@ impl BuilderDefinitionDraft {
 
         for package in &self.source_packages {
             let prefix = package_path_without_introducer(&package.path)?;
+            let root = prefix.split('/').next().unwrap_or_default();
+            if root.eq_ignore_ascii_case(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX) {
+                return Err(Error::invalid_definition(format!(
+                    "Source package '@{}' is reserved for the standard HTML builder package set; \
+                     an SDK builder cannot register the official template prelude package.",
+                    TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX
+                )));
+            }
             let root = package.root.as_ref().ok_or_else(|| {
                 Error::invalid_definition(format!(
                     "Source package '{}' needs an installed directory from `from_dir`.",
@@ -145,16 +149,6 @@ impl BuilderDefinitionDraft {
                 .source_packages
                 .register_filesystem_root(prefix, root.clone(), PackageOrigin::Builder)
                 .map_err(|error| Error::invalid_definition(error.msg))?;
-            if package.available_in_templates {
-                if !self.source_kinds.contains(&SourceFileKind::MothTemplate) {
-                    return Err(Error::invalid_definition(format!(
-                        "Source package '{}' is available in templates, so the definition must \
-                         call `moth_templates`.",
-                        package.path
-                    )));
-                }
-                surface.register_implicit_template_scope_source_package(prefix);
-            }
         }
 
         // These registrations only validate this draft's descriptors and use IDs issued by
@@ -218,7 +212,6 @@ fn package_path_without_introducer(path: &str) -> Result<&str, Error> {
 pub struct SourcePackage {
     path: String,
     root: Option<PathBuf>,
-    available_in_templates: bool,
 }
 
 impl SourcePackage {
@@ -227,19 +220,12 @@ impl SourcePackage {
         Self {
             path: path.into(),
             root: None,
-            available_in_templates: false,
         }
     }
 
     /// Supplies the directory holding the package's facade and source files.
     pub fn from_dir(mut self, root: impl Into<PathBuf>) -> Self {
         self.root = Some(root.into());
-        self
-    }
-
-    /// Makes the package's exported constants eligible for implicit `.mtf` template scope.
-    pub fn available_in_templates(mut self) -> Self {
-        self.available_in_templates = true;
         self
     }
 }

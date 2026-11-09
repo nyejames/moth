@@ -138,7 +138,7 @@ fn function_signature_member_count(signature: &FunctionSignatureSyntax) -> usize
     signature
         .parameters
         .len()
-        .saturating_add(signature.returns.len())
+        .saturating_add(signature.ordinary_return_slots().len())
 }
 
 /// Trait extension to count payload fields without leaking variant internals.

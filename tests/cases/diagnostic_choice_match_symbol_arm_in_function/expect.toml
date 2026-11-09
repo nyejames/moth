@@ -6,5 +6,5 @@ diagnostic_codes = ["MOTH-SYNTAX-0028"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0028"
 reason = "invalid_match_arm.expected_arm_header"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 8

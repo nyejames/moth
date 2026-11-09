@@ -20,9 +20,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnIte
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, OwnedExpr,
 };
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionSignature, ReturnChannel, ReturnSlot,
-};
+use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::{
     MultipleMutableBorrowsView, SharedMutableConflictView,
@@ -34,6 +32,8 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnContract};
+use crate::compiler_frontend::external_packages::external_returns;
 use crate::compiler_frontend::external_packages::test_support::{
     TestExternalAccessKind as ExternalAccessKind, TestExternalReturnAlias as ExternalReturnAlias,
     TestExternalReturnType as ExternalReturnType, set_test_external_function_return_alias,
@@ -169,7 +169,10 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
                     test_source_location(1),
                 ),
             ],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(
             NodeKind::Assignment {
@@ -195,7 +198,10 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
     let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
     );
@@ -303,7 +309,10 @@ fn incomplete_public_call_summary_metadata_uses_infrastructure_lane() {
     let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
     );
@@ -347,7 +356,10 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
                 true,
                 test_source_location(1),
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
         None,
@@ -361,7 +373,10 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
                 true,
                 test_source_location(2),
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(
             {
@@ -393,7 +408,10 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
     let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
     );
@@ -442,7 +460,7 @@ mutator(shared, ~mutable)
 ;"#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(
@@ -496,7 +514,7 @@ fn local_call_mutation_summary_in_order(
     };
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
     let entry_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(
@@ -580,7 +598,7 @@ fn public_call_summary_map_set_only_writes_receiver_parameter() {
 ;"#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(
@@ -645,7 +663,10 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
                 false,
                 test_source_location(1),
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
         None,
@@ -653,7 +674,10 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
     let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -889,10 +913,10 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
                 false,
                 test_source_location(1),
             )],
-            returns: vec![ReturnSlot {
-                type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
-                channel: ReturnChannel::Success,
-            }],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+                None,
+            )),
         },
         vec![node(
             NodeKind::Return(vec![immutable_reference_expr(
@@ -909,7 +933,10 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
     let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -1059,16 +1086,10 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
                     test_source_location(20),
                 ),
             ],
-            returns: vec![
-                ReturnSlot {
-                    type_id: Some(builtin_type_ids::STRING),
-                    channel: ReturnChannel::Success,
-                },
-                ReturnSlot {
-                    type_id: Some(builtin_type_ids::STRING),
-                    channel: ReturnChannel::Error,
-                },
-            ],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [builtin_type_ids::STRING],
+                Some(builtin_type_ids::STRING),
+            )),
         },
         vec![node(
             NodeKind::Return(vec![immutable_reference_expr(
@@ -1131,16 +1152,10 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
                 false,
                 test_source_location(29),
             )],
-            returns: vec![
-                ReturnSlot {
-                    type_id: Some(builtin_type_ids::STRING),
-                    channel: ReturnChannel::Success,
-                },
-                ReturnSlot {
-                    type_id: Some(builtin_type_ids::STRING),
-                    channel: ReturnChannel::Error,
-                },
-            ],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [builtin_type_ids::STRING],
+                Some(builtin_type_ids::STRING),
+            )),
         },
         vec![node(
             NodeKind::Return(vec![propagated_call]),
@@ -1152,7 +1167,10 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
     let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(NodeKind::Return(vec![]), test_source_location(40))],
     );
@@ -1224,7 +1242,9 @@ fn fresh_user_return_does_not_alias_caller_roots() {
                 false,
                 test_source_location(1),
             )],
-            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
+            return_contract: FunctionReturnContract::Returns(fresh_success_returns(vec![
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ])),
         },
         vec![node(
             NodeKind::Return(vec![i32_expression(
@@ -1242,7 +1262,10 @@ fn fresh_user_return_does_not_alias_caller_roots() {
     let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -1358,13 +1381,15 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
         .register_function(ExternalFunctionDef {
             name: "imprecise_external".to_owned(),
             parameters: vec![],
-            returns: vec![
-                ExternalReturnSlot::fresh(RegistryAbiType::Fixed(FixedScalar::I32)),
-                ExternalReturnSlot::fresh(RegistryAbiType::Fixed(FixedScalar::I32)),
-            ],
-            error_return_type: Some(ExternalSignatureType::Abi(RegistryAbiType::Fixed(
-                FixedScalar::I32,
-            ))),
+            return_contract: external_returns(
+                vec![
+                    ExternalReturnSlot::fresh(RegistryAbiType::Fixed(FixedScalar::I32)),
+                    ExternalReturnSlot::fresh(RegistryAbiType::Fixed(FixedScalar::I32)),
+                ],
+                Some(ExternalSignatureType::Abi(RegistryAbiType::Fixed(
+                    FixedScalar::I32,
+                ))),
+            ),
             const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
@@ -1399,20 +1424,13 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
         imprecise_return_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                ReturnSlot {
-                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
-                    channel: ReturnChannel::Success,
-                },
-                ReturnSlot {
-                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
-                    channel: ReturnChannel::Success,
-                },
-                ReturnSlot {
-                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
-                    channel: ReturnChannel::Error,
-                },
-            ],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                ],
+                Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
+            )),
         },
         vec![node(
             NodeKind::Return(vec![fallible_external_call]),
@@ -1445,20 +1463,13 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
         forward_name,
         FunctionSignature {
             parameters: vec![],
-            returns: vec![
-                ReturnSlot {
-                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
-                    channel: ReturnChannel::Success,
-                },
-                ReturnSlot {
-                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
-                    channel: ReturnChannel::Success,
-                },
-                ReturnSlot {
-                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
-                    channel: ReturnChannel::Error,
-                },
-            ],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                ],
+                Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
+            )),
         },
         vec![node(
             NodeKind::Return(vec![forwarded_call]),
@@ -1469,7 +1480,10 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
     let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
     );
@@ -1551,7 +1565,7 @@ return input + 1
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(
@@ -1594,7 +1608,7 @@ return ~scores.remove("key")!
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(
@@ -1762,7 +1776,9 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
                 false,
                 test_source_location(1),
             )],
-            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
+            return_contract: FunctionReturnContract::Returns(fresh_success_returns(vec![
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ])),
         },
         vec![
             node(
@@ -1794,7 +1810,10 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
     let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -1901,7 +1920,10 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
                 true,
                 test_source_location(1),
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
         None,
@@ -1910,7 +1932,10 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
     let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -2053,7 +2078,10 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
                     test_source_location(1),
                 ),
             ],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
         None,
@@ -2062,7 +2090,10 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
     let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -2160,7 +2191,10 @@ fn host_mutable_parameter_requires_mutable_access() {
     let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -2236,7 +2270,10 @@ fn host_mutable_parameter_accepts_mutable_local_argument() {
     let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -2311,7 +2348,10 @@ fn host_shared_parameter_is_shared_only() {
     let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -2398,7 +2438,10 @@ fn two_mutable_args_to_same_root_are_rejected() {
                     test_source_location(1),
                 ),
             ],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
         None,
@@ -2407,7 +2450,10 @@ fn two_mutable_args_to_same_root_are_rejected() {
     let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -2537,7 +2583,10 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
                     test_source_location(1),
                 ),
             ],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
         None,
@@ -2546,7 +2595,10 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
     let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -2682,7 +2734,10 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
     let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -2941,7 +2996,10 @@ fn unresolved_or_mismatched_host_signature_errors() {
         symbol("start_missing", &mut path_fork, &mut string_table),
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(
             {
@@ -2962,7 +3020,10 @@ fn unresolved_or_mismatched_host_signature_errors() {
     let start_mismatch = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![node(
             {
@@ -3076,7 +3137,10 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
                 true,
                 test_source_location(1),
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
         None,
@@ -3085,7 +3149,10 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
     let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -3186,7 +3253,10 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
     let start = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -3270,7 +3340,10 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
                 true,
                 test_source_location(1),
             )],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![],
         None,
@@ -3282,7 +3355,10 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
     let caller = entry_start_node(
         FunctionSignature {
             parameters: vec![],
-            returns: vec![],
+            return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                [],
+                None,
+            )),
         },
         vec![
             node(
@@ -3381,7 +3457,9 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                 true,
                 test_source_location(1),
             )],
-            returns: fresh_success_returns(vec![builtin_type_ids::BOOL]),
+            return_contract: FunctionReturnContract::Returns(fresh_success_returns(vec![
+                builtin_type_ids::BOOL,
+            ])),
         },
         vec![
             node(
@@ -3452,10 +3530,7 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
         )
     };
 
-    let start_function = entry_start_node(FunctionSignature {
-        parameters: vec![],
-        returns: vec![],
-    }, vec![
+    let start_function = entry_start_node(FunctionSignature { parameters: vec![], return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots([], None)),  }, vec![
         node(
             NodeKind::VariableDeclaration(make_test_variable(lhs, expression_builder.bool(&mut const_values, false, test_source_location(10), ValueMode::ImmutableOwned).expect("valid expression fixture").id(), &expression_builder)),
             test_source_location(10),
@@ -3500,7 +3575,7 @@ fn catch_private_call_return_alias_unions_success_and_parameter_derived_handler(
                   ;\n;\n";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test entry path fits");
     let registry = default_external_package_registry(&mut string_table);
     let (mut hir, mut type_environment) =

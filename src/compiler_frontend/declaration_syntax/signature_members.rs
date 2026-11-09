@@ -88,7 +88,7 @@ pub struct SignatureMemberSyntax {
     pub span: Option<SourceSpan>,
 }
 
-/// Function return-channel syntax before it becomes an AST `ReturnChannel`.
+/// Authored function return-channel syntax, retained until signature resolution.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReturnChannelSyntax {
     Success,
@@ -108,11 +108,28 @@ pub struct ReturnSlotSyntax {
     pub channel: ReturnChannelSyntax,
 }
 
+/// Authored whole return contract: ordinary slots or a bare `!` after `->`.
+///
+/// WHAT: keeps the two mutually exclusive return-contract spellings unrepresentable together.
+/// WHY: `-> !` is not an empty slot list; a whole-contract enum stops later consumers from
+///      rebuilding Never from omitted slots or mixing it with success and error returns.
+#[derive(Clone, Debug)]
+pub enum FunctionReturnContractSyntax {
+    Returns(Vec<ReturnSlotSyntax>),
+    Never,
+}
+
+impl Default for FunctionReturnContractSyntax {
+    fn default() -> Self {
+        Self::Returns(Vec::new())
+    }
+}
+
 /// Parsed function signature shell.
 #[derive(Clone, Debug, Default)]
 pub struct FunctionSignatureSyntax {
     pub parameters: Vec<SignatureMemberSyntax>,
-    pub returns: Vec<ReturnSlotSyntax>,
+    pub return_contract: FunctionReturnContractSyntax,
 }
 
 impl SignatureMemberSyntax {
@@ -153,14 +170,29 @@ impl FunctionReturnSyntax {
 }
 
 impl FunctionSignatureSyntax {
+    /// Ordinary authored return slots.
+    ///
+    /// WHAT: yields the `Returns` payload, or no slots when the signature is Never.
+    /// WHY: header bookkeeping that only walks authored type references has nothing to visit for
+    ///      a whole `-> !` contract. Resolved consumers must not use this query to encode Never
+    ///      as no-value returns; `FunctionReturnContract::ordinary` is the decision point there.
+    pub(crate) fn ordinary_return_slots(&self) -> &[ReturnSlotSyntax] {
+        match &self.return_contract {
+            FunctionReturnContractSyntax::Returns(return_slots) => return_slots,
+            FunctionReturnContractSyntax::Never => &[],
+        }
+    }
+
     /// Remap all interned string IDs in the signature shell.
     // Called by per-file frontend output remapping before module-wide dependency sorting.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         for parameter in &mut self.parameters {
             parameter.remap_string_ids(remap);
         }
-        for return_slot in &mut self.returns {
-            return_slot.value.remap_string_ids(remap);
+        if let FunctionReturnContractSyntax::Returns(return_slots) = &mut self.return_contract {
+            for return_slot in return_slots {
+                return_slot.value.remap_string_ids(remap);
+            }
         }
     }
 
@@ -213,7 +245,7 @@ pub fn parse_function_signature_syntax(
             token_stream.advance();
             return Ok(FunctionSignatureSyntax {
                 parameters,
-                returns: Vec::new(),
+                return_contract: FunctionReturnContractSyntax::Returns(Vec::new()),
             });
         }
 
@@ -259,11 +291,16 @@ pub fn parse_function_signature_syntax(
         }
     }
 
-    let returns = parse_return_list_syntax(token_stream, &parameters, string_table)?;
+    let return_contract = parse_return_contract_syntax(
+        token_stream,
+        &parameters,
+        string_table,
+        ReturnContractEnd::FunctionBody,
+    )?;
 
     Ok(FunctionSignatureSyntax {
         parameters,
-        returns,
+        return_contract,
     })
 }
 
@@ -898,68 +935,6 @@ fn collect_member_default_range(
     Ok(Some(range))
 }
 
-/// Parse a return list for a trait requirement, stopping at newline or block end.
-///
-/// ENTRY INVARIANT: the stream is positioned on the `->` arrow.
-/// EXIT INVARIANT: the stream is positioned on the first token after the last return type.
-fn parse_trait_requirement_return_list(
-    token_stream: &mut DeclarationCursor<'_>,
-    parameters: &[SignatureMemberSyntax],
-    string_table: &mut StringTable,
-) -> SignatureMemberParseResult<Vec<ReturnSlotSyntax>> {
-    let mut return_slots = Vec::new();
-
-    token_stream.advance(); // past ->
-    if let Some(diagnostic) = missing_return_type_after_arrow(
-        token_stream,
-        InvalidFunctionSignatureReason::MissingTraitRequirementReturnType,
-    ) {
-        return Err(diagnostic.into());
-    }
-    loop {
-        return_slots.push(parse_single_return_item_syntax(
-            token_stream,
-            parameters,
-            string_table,
-            TypeAnnotationContext::TraitRequirement,
-        )?);
-
-        match token_stream.current_tag() {
-            TokenTag::COMMA => {
-                let comma_span = current_source_span(token_stream);
-                token_stream.advance();
-
-                match token_stream.current_tag() {
-                    TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => {
-                        return Err(token_lexical::unexpected_trailing_comma(comma_span).into());
-                    }
-
-                    _ => {}
-                }
-            }
-
-            TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => {
-                return Ok(return_slots);
-            }
-
-            _unexpected_token => {
-                let found =
-                    current_diagnostic_token(token_stream, string_table)?.ok_or_else(|| {
-                        InfrastructureFailure::internal(
-                            CompilerStage::HeaderParsing,
-                            "signature diagnostic requested without a current token",
-                        )
-                    })?;
-                return Err(generics_traits_api::invalid_function_signature(
-                    InvalidFunctionSignatureReason::MissingCommaOrColon { found },
-                    current_source_span(token_stream),
-                )
-                .into());
-            }
-        }
-    }
-}
-
 /// Parse a trait requirement signature from `| params | [-> returns]`.
 ///
 /// ENTRY INVARIANT: the stream is positioned on the opening `|`.
@@ -982,15 +957,20 @@ pub fn parse_trait_requirement_signature_syntax(
     )?;
     token_stream.advance(); // past |
 
-    let returns = if token_stream.current_tag() == TokenTag::ARROW {
-        parse_trait_requirement_return_list(token_stream, &parameters, string_table)?
+    let return_contract = if token_stream.current_tag() == TokenTag::ARROW {
+        parse_return_contract_syntax(
+            token_stream,
+            &parameters,
+            string_table,
+            ReturnContractEnd::TraitRequirement,
+        )?
     } else {
-        Vec::new()
+        FunctionReturnContractSyntax::Returns(Vec::new())
     };
 
     Ok(FunctionSignatureSyntax {
         parameters,
-        returns,
+        return_contract,
     })
 }
 
@@ -1000,7 +980,7 @@ pub fn parse_trait_requirement_signature_syntax(
 ///       boundaries where the signature parser owns the missing-type diagnosis instead of
 ///       delegating to a generic type-annotation error. The diagnostic points at the first
 ///       missing-type boundary after the arrow, never at the arrow itself.
-/// WHY: function-signature and trait-requirement return lists share this boundary but need
+/// WHY: function-signature and trait-requirement return contracts share this boundary but need
 ///      different guidance. A function signature ends its body with `:`, while a bodyless
 ///      trait requirement does not. The caller selects the factual reason so the shared
 ///      boundary predicate stays in one place.
@@ -1019,27 +999,61 @@ fn missing_return_type_after_arrow(
     }
 }
 
-fn parse_return_list_syntax(
+/// Token that closes an authored return contract.
+///
+/// WHAT: distinguishes a function body's `:` terminator from a bodyless trait requirement.
+/// WHY: the same return-contract parser serves both spellings, but only a function body consumes
+///      the body colon and only a trait requirement ends at the newline.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReturnContractEnd {
+    FunctionBody,
+    TraitRequirement,
+}
+
+/// Parse the whole return contract after an authored `->`.
+///
+/// ENTRY INVARIANT: the stream is positioned on the `->` arrow.
+/// EXIT INVARIANT: the stream is positioned after the contract terminator. A function body
+///                 consumes its `:`; a trait requirement stops on newline or block end.
+fn parse_return_contract_syntax(
     token_stream: &mut DeclarationCursor<'_>,
     parameters: &[SignatureMemberSyntax],
     string_table: &mut StringTable,
-) -> SignatureMemberParseResult<Vec<ReturnSlotSyntax>> {
-    let mut return_slots = Vec::new();
+    end: ReturnContractEnd,
+) -> SignatureMemberParseResult<FunctionReturnContractSyntax> {
+    token_stream.advance(); // past ->
 
-    token_stream.advance();
-    if let Some(diagnostic) = missing_return_type_after_arrow(
-        token_stream,
-        InvalidFunctionSignatureReason::MissingReturnType,
-    ) {
+    if token_stream.current_tag() == TokenTag::BANG {
+        token_stream.advance();
+        return finish_never_return_contract(token_stream, string_table, end);
+    }
+
+    let missing_type_reason = match end {
+        ReturnContractEnd::FunctionBody => InvalidFunctionSignatureReason::MissingReturnType,
+        ReturnContractEnd::TraitRequirement => {
+            InvalidFunctionSignatureReason::MissingTraitRequirementReturnType
+        }
+    };
+    if let Some(diagnostic) = missing_return_type_after_arrow(token_stream, missing_type_reason) {
         return Err(diagnostic.into());
     }
 
+    let type_context = match end {
+        ReturnContractEnd::FunctionBody => TypeAnnotationContext::SignatureReturn,
+        ReturnContractEnd::TraitRequirement => TypeAnnotationContext::TraitRequirement,
+    };
+
+    let mut return_slots = Vec::new();
     loop {
+        if token_stream.current_tag() == TokenTag::BANG {
+            return Err(never_cannot_combine(token_stream, string_table));
+        }
+
         return_slots.push(parse_single_return_item_syntax(
             token_stream,
             parameters,
             string_table,
-            TypeAnnotationContext::SignatureReturn,
+            type_context,
         )?);
 
         match token_stream.current_tag() {
@@ -1048,7 +1062,7 @@ fn parse_return_list_syntax(
                 token_stream.advance();
 
                 match token_stream.current_tag() {
-                    TokenTag::COLON => {
+                    TokenTag::COLON if end == ReturnContractEnd::FunctionBody => {
                         return Err(generics_traits_api::invalid_function_signature(
                             InvalidFunctionSignatureReason::TrailingCommaInReturns,
                             comma_span,
@@ -1057,11 +1071,22 @@ fn parse_return_list_syntax(
                     }
 
                     TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF => {
-                        return Err(generics_traits_api::invalid_function_signature(
-                            InvalidFunctionSignatureReason::UnexpectedEndAfterComma,
-                            comma_span,
-                        )
+                        return Err(match end {
+                            ReturnContractEnd::FunctionBody => {
+                                generics_traits_api::invalid_function_signature(
+                                    InvalidFunctionSignatureReason::UnexpectedEndAfterComma,
+                                    comma_span,
+                                )
+                            }
+                            ReturnContractEnd::TraitRequirement => {
+                                token_lexical::unexpected_trailing_comma(comma_span)
+                            }
+                        }
                         .into());
+                    }
+
+                    TokenTag::BANG => {
+                        return Err(never_cannot_combine(token_stream, string_table));
                     }
 
                     _ => {}
@@ -1079,10 +1104,15 @@ fn parse_return_list_syntax(
                 )
                 .into());
             }
-            TokenTag::COLON => {
+            TokenTag::COLON if end == ReturnContractEnd::FunctionBody => {
                 token_stream.advance();
                 validate_return_slots_syntax(&return_slots, token_stream, string_table)?;
-                return Ok(return_slots);
+                return Ok(FunctionReturnContractSyntax::Returns(return_slots));
+            }
+            TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF
+                if end == ReturnContractEnd::TraitRequirement =>
+            {
+                return Ok(FunctionReturnContractSyntax::Returns(return_slots));
             }
             TokenTag::EOF => {
                 return Err(generics_traits_api::invalid_function_signature(
@@ -1120,6 +1150,54 @@ fn parse_return_list_syntax(
                 .into());
             }
         }
+    }
+}
+
+/// Finish a whole Never contract after the bare `!` has been consumed.
+///
+/// WHAT: accepts only the terminator the owning signature spelling allows.
+/// WHY: `-> !` is a whole contract. A following success type, error slot, optional suffix or
+///      second `!` must be rejected as a combination instead of being parsed as another slot.
+fn finish_never_return_contract(
+    token_stream: &mut DeclarationCursor<'_>,
+    string_table: &mut StringTable,
+    end: ReturnContractEnd,
+) -> SignatureMemberParseResult<FunctionReturnContractSyntax> {
+    match (end, token_stream.current_tag()) {
+        (ReturnContractEnd::FunctionBody, TokenTag::COLON) => {
+            token_stream.advance();
+            Ok(FunctionReturnContractSyntax::Never)
+        }
+        (
+            ReturnContractEnd::TraitRequirement,
+            TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF,
+        ) => Ok(FunctionReturnContractSyntax::Never),
+        (ReturnContractEnd::FunctionBody, TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF) => {
+            Err(generics_traits_api::invalid_function_signature(
+                InvalidFunctionSignatureReason::MissingColonAfterReturns,
+                current_source_span(token_stream),
+            )
+            .into())
+        }
+        _ => Err(never_cannot_combine(token_stream, string_table)),
+    }
+}
+
+/// Build the targeted diagnostic for syntax attached to a whole Never contract.
+fn never_cannot_combine(
+    token_stream: &mut DeclarationCursor<'_>,
+    string_table: &mut StringTable,
+) -> HeaderParseFailure {
+    match current_diagnostic_token(token_stream, string_table) {
+        Ok(Some(found)) => generics_traits_api::invalid_function_signature(
+            InvalidFunctionSignatureReason::NeverCannotCombine { found },
+            current_source_span(token_stream),
+        )
+        .into(),
+        Ok(None) => {
+            token_lexical::unexpected_end_of_file(None, current_source_span(token_stream)).into()
+        }
+        Err(failure) => failure,
     }
 }
 
@@ -1219,3 +1297,6 @@ fn current_source_span(token_stream: &DeclarationCursor<'_>) -> Option<SourceSpa
 #[cfg(test)]
 #[path = "tests/signature_member_duplicate_tests.rs"]
 mod signature_member_duplicate_tests;
+#[cfg(test)]
+#[path = "tests/signature_return_contract_tests.rs"]
+mod signature_return_contract_tests;

@@ -11,6 +11,6 @@ diagnostic_codes = ["MOTH-RULE-0044"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0044"
 reason = "invalid_assignment_target.map_get_target_not_writable"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 3
 column = 17

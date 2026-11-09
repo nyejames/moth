@@ -68,6 +68,16 @@ pub fn evaluate_expression(
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
 ) -> Result<OwnedExpr, ExpressionTypingError> {
+    // Single value-position choke point: a Never call has no value, whether it is the whole
+    // fragment or one operand inside an operator, cast, constructor, collection, map, template,
+    // condition or assertion. Only the statement entry above may accept it.
+    if let Some(never_call) = nodes.iter().find_map(|item| match item {
+        ExpressionRpnItem::NeverCall(never_call) => Some(never_call.as_ref()),
+        _ => None,
+    }) {
+        return Err(never_call.used_as_value_diagnostic().into());
+    }
+
     let (mut ordered_nodes, span) = ordering::order_expression_nodes(nodes, expressions)?;
     let literal_destination =
         numeric_literal_destination(type_interner.environment(), expected_type);

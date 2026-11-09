@@ -8,7 +8,7 @@ Read [testing standards](../../developer-docs/style-guide/testing.mtf) in full b
 
 ## Build the contract inventory first
 
-From canonical docs and the [progress matrix](../../docs/progress/@page.moth), list the supported success and failure contracts, target and command variations, and the internal invariants that normal output cannot observe. Separate supported from partial, experimental and deferred - deferred surfaces do not need coverage.
+From canonical docs and the [progress matrix](../../docs/progress/@entry.moth), list the supported success and failure contracts, target and command variations, and the internal invariants that normal output cannot observe. Separate supported from partial, experimental and deferred - deferred surfaces do not need coverage.
 
 ## One primary owner per contract
 
