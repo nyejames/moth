@@ -34,7 +34,6 @@ use crate::compiler_frontend::compiler_errors::{
 };
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidConfigView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
@@ -1422,14 +1421,6 @@ pub(super) fn successful_compilation_value<T>(result: CompilationResult<T>) -> T
             panic!("expected compilation success, got infrastructure errors: {errors:?}")
         }
     }
-}
-
-fn first_invalid_config<T>(result: &CompilationResult<T>) -> InvalidConfigView {
-    let diagnostic = first_error_diagnostic(result);
-    assert_eq!(diagnostic.descriptor().code, "MOTH-CONFIG-0001");
-    diagnostic
-        .family_view::<InvalidConfigView>()
-        .expect("expected typed invalid-config facts")
 }
 
 fn discover_modules_for_test_messages(

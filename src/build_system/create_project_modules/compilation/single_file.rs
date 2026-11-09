@@ -72,7 +72,8 @@ use super::super::module_preparation::{
 use super::super::prepared_module::PreparedModule;
 use super::super::project_module_graph::ProjectModuleGraph;
 use super::super::project_structure_diagnostics::{
-    config_diagnostic, invalid_module_root_file_name_error, non_utf8_filesystem_name_error, path_id,
+    invalid_module_root_file_name_error, non_utf8_filesystem_name_error, path_id,
+    project_structure_diagnostic,
 };
 use super::super::resource_inputs::ResourceInputRegistry;
 use super::super::source_discovery;
@@ -573,14 +574,10 @@ fn compile_single_file_frontend_with_target(
             && graph.entry_modules().is_empty()
         {
             let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-            let diagnostic = config_diagnostic(
-                config,
-                "entry_root",
-                InvalidConfigReason::NoRootModuleEntries {
+            let diagnostic =
+                project_structure_diagnostic(InvalidConfigReason::NoRootModuleEntries {
                     entry_root: path_id(&source_root, &mut diagnostic_strings),
-                },
-                &mut diagnostic_strings,
-            );
+                });
             let table = string_table.take_for_handoff();
             return Err(BoundaryPremergeFailure::from(PreparedFailure::Diagnosed(
                 PreparedDiagnosticBatch::capture_from_bag(

@@ -17,20 +17,8 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticBag, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::projects::settings::Config;
 
 use std::path::Path;
-
-/// Build an invalid-config diagnostic tied to a specific config key.
-pub(super) fn config_diagnostic(
-    config: &Config,
-    key: &str,
-    reason: InvalidConfigReason,
-    strings: &mut DiagnosticStringBuilder<'_>,
-) -> DiagnosticDraft {
-    let key_id = strings.intern(key);
-    project_config::invalid_config_reason(Some(key_id), reason, config.setting_span(key))
-}
 
 /// Build an invalid-project-structure diagnostic for path or generated infrastructure.
 ///

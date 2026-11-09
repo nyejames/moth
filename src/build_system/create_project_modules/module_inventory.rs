@@ -54,7 +54,7 @@ use super::module_preparation::{
 };
 use super::prepared_module::PreparedModule;
 use super::project_module_graph::ProjectModuleGraph;
-use super::project_structure_diagnostics::{config_diagnostic, path_id};
+use super::project_structure_diagnostics::{path_id, project_structure_diagnostic};
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery::{
     BoundaryProviderSources, ExternalImportDiscoveryState, ResolvedDependencyEdge,
@@ -730,14 +730,9 @@ fn discover_all_modules_in_boundary(
         // Diagnostic identities intern through the narrow builder; the table then moves to the
         // diagnosed batch for the final boundary handoff.
         let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-        let diagnostic = config_diagnostic(
-            config,
-            "entry_root",
-            InvalidConfigReason::NoRootModuleEntries {
-                entry_root: path_id(project_path_resolver.entry_root(), &mut diagnostic_strings),
-            },
-            &mut diagnostic_strings,
-        );
+        let diagnostic = project_structure_diagnostic(InvalidConfigReason::NoRootModuleEntries {
+            entry_root: path_id(project_path_resolver.entry_root(), &mut diagnostic_strings),
+        });
         let table = string_table.take_for_handoff();
         return Err(PreparedFailure::Diagnosed(
             PreparedDiagnosticBatch::capture_from_bag(
