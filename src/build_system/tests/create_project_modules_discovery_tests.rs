@@ -33,8 +33,8 @@ fn discover_modules_uses_reachable_files_only() {
     )
     .expect("should write config");
     fs::create_dir_all(src.join("errors")).expect("should create errors folder");
-    fs::write(src.join("@page.moth"), "@libs/html basic\n#[:ok]\n").expect("should write entry");
-    fs::write(src.join("errors/@404.moth"), "#[:404]\n").expect("should write 404");
+    fs::write(src.join("@entry.moth"), "@libs/html basic\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("errors/@entry.moth"), "#[:404]\n").expect("should write 404");
     fs::write(src.join("libs/html.moth"), "basic #= [:basic]\n").expect("should write lib");
     fs::write(src.join("styles/docs.moth"), "navbar #= [:nav]\n").expect("should write style");
     fs::write(src.join("docs/outdated.moth"), "this is invalid syntax")
@@ -60,13 +60,8 @@ fn discover_modules_uses_reachable_files_only() {
 
     let page_module = modules
         .iter()
-        .find(|module| {
-            prepared_entry_file_path(&module.prepared.semantic)
-                .expect("prepared module retains its entry file identity")
-                .file_name()
-                == Some(OsStr::new("@page.moth"))
-        })
-        .expect("should include #page module");
+        .find(|module| module_prepared_source_names(module).contains(&"html.moth".to_owned()))
+        .expect("should include the page module that reaches html.moth");
     assert_eq!(
         page_module.prepared.semantic.source_file_count, 2,
         "frontend preparation should retain only the reachable entry and provider sources"
@@ -75,7 +70,7 @@ fn discover_modules_uses_reachable_files_only() {
         .into_iter()
         .collect();
 
-    assert!(page_paths.contains("@page.moth"));
+    assert!(page_paths.contains("@entry.moth"));
     assert!(page_paths.contains("html.moth"));
     assert!(!page_paths.contains("outdated.moth"));
 }
@@ -93,7 +88,7 @@ fn discover_modules_resolves_relative_child_dependencies() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@components/widget\nio.line([: [\"page\"]])\n",
     )
     .expect("should write page");
@@ -127,7 +122,7 @@ fn discover_modules_resolves_relative_child_dependencies() {
         .into_iter()
         .collect();
 
-    assert!(discovered.contains("@page.moth"));
+    assert!(discovered.contains("@entry.moth"));
     assert!(discovered.contains("widget.moth"));
     assert!(discovered.contains("common.moth"));
 }
@@ -145,7 +140,7 @@ fn dependency_clause_keeps_one_cross_module_edge_for_multiple_selections() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@child greet, farewell\nio.line([: [\"page\"]])\n",
     )
     .expect("should write page");
@@ -209,7 +204,7 @@ fn module_root_relative_dependency_resolves_from_the_entry_root() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@helpers/theme\nio.line([: [\"page\"]])\n",
     )
     .expect("should write page");
@@ -267,7 +262,7 @@ fn synthetic_module_root_resolution_prefers_owning_nested_module() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "io.line([: [\"page\"]])\n")
+    fs::write(src.join("@entry.moth"), "io.line([: [\"page\"]])\n")
         .expect("should write entry module root");
     fs::write(src.join("helpers.moth"), "").expect("should write entry-root namesake");
     fs::write(child.join("@mod.moth"), "").expect("should write nested module root");
@@ -348,7 +343,7 @@ fn synthetic_module_root_resolution_prefers_owning_nested_module() {
 }
 
 #[test]
-fn discover_all_modules_finds_normal_roots_across_multiple_directories() {
+fn discover_all_modules_finds_entry_roots_across_multiple_directories() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let src = root.join("src");
@@ -359,15 +354,15 @@ fn discover_all_modules_finds_normal_roots_across_multiple_directories() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "io.line([: [\"page\"]])\n")
+    fs::write(src.join("@entry.moth"), "io.line([: [\"page\"]])\n")
         .expect("should write entry normal root");
     fs::create_dir_all(src.join("layout")).expect("should create layout folder");
     fs::write(
-        src.join("layout/@layout.moth"),
+        src.join("layout/@entry.moth"),
         "io.line([: [\"layout\"]])\n",
     )
     .expect("should write layout normal root");
-    fs::write(src.join("nested/@lib.moth"), "io.line([: [\"lib\"]])\n")
+    fs::write(src.join("nested/@entry.moth"), "io.line([: [\"lib\"]])\n")
         .expect("should write nested normal root");
     fs::write(src.join("nested/file.moth"), "io.line([: [\"regular\"]])\n")
         .expect("should write regular");
@@ -402,9 +397,11 @@ fn discover_all_modules_finds_normal_roots_across_multiple_directories() {
         })
         .collect::<HashSet<_>>();
 
-    assert!(entry_names.contains("@page.moth"));
-    assert!(entry_names.contains("@layout.moth"));
-    assert!(entry_names.contains("@lib.moth"));
+    assert_eq!(
+        entry_names,
+        HashSet::from(["@entry.moth".to_owned()]),
+        "every module's root file uses the one closed entry filename"
+    );
 }
 
 #[test]
@@ -419,7 +416,7 @@ fn directory_stage0_resolves_resource_from_consuming_module_root() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "unused #= @assets/logo.svg\n#[:ok]\n",
     )
     .expect("should write entry");
@@ -448,7 +445,7 @@ fn directory_stage0_resolves_resource_from_consuming_module_root() {
             prepared_entry_file_path(&module.prepared.semantic)
                 .expect("entry identity should be retained")
                 .file_name()
-                .is_some_and(|name| name == "@page.moth")
+                .is_some_and(|name| name == "@entry.moth")
         })
         .expect("entry module should be discovered");
 
@@ -476,7 +473,7 @@ fn directory_stage0_retains_missing_resource_diagnostic_without_aborting_discove
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "unused #= @assets/missing.svg\n#[:ok]\n",
     )
     .expect("should write entry");
@@ -502,7 +499,7 @@ fn directory_stage0_retains_missing_resource_diagnostic_without_aborting_discove
             prepared_entry_file_path(&module.prepared.semantic)
                 .expect("entry identity should be retained")
                 .file_name()
-                .is_some_and(|name| name == "@page.moth")
+                .is_some_and(|name| name == "@entry.moth")
         })
         .expect("entry module should be discovered");
     let references = module
@@ -517,7 +514,7 @@ fn directory_stage0_retains_missing_resource_diagnostic_without_aborting_discove
     };
     let source_id = source_files
         .get_by_canonical_path(
-            &fs::canonicalize(src.join("@page.moth"))
+            &fs::canonicalize(src.join("@entry.moth"))
                 .expect("entry source path should canonicalize"),
         )
         .expect("entry source should remain in the source database")
@@ -556,7 +553,7 @@ fn directory_stage0_identifies_moth_value_without_preparing_it() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "helpers = @missing.moth\n#[:ok]\n")
+    fs::write(src.join("@entry.moth"), "helpers = @missing.moth\n#[:ok]\n")
         .expect("should write entry");
 
     let mut config = Config::new(root.clone());
@@ -582,10 +579,10 @@ fn directory_stage0_identifies_moth_value_without_preparing_it() {
             prepared_entry_file_path(&module.prepared.semantic)
                 .expect("entry identity should be retained")
                 .file_name()
-                .is_some_and(|name| name == "@page.moth")
+                .is_some_and(|name| name == "@entry.moth")
         })
         .expect("entry module should be discovered");
-    assert_eq!(module_prepared_source_names(module), vec!["@page.moth"]);
+    assert_eq!(module_prepared_source_names(module), vec!["@entry.moth"]);
     let references = module
         .prepared
         .semantic
@@ -611,7 +608,7 @@ fn directory_stage0_classifies_not_a_directory_as_typed_path_failure() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "value #= @not_a_directory/value.mtf\n#[:ok]\n",
     )
     .expect("should write entry");
@@ -642,7 +639,7 @@ fn directory_stage0_classifies_not_a_directory_as_typed_path_failure() {
             prepared_entry_file_path(&module.prepared.semantic)
                 .expect("entry identity should be retained")
                 .file_name()
-                .is_some_and(|name| name == "@page.moth")
+                .is_some_and(|name| name == "@entry.moth")
         })
         .expect("entry module should be discovered");
     let references = module
@@ -674,7 +671,7 @@ fn directory_stage0_rejects_missing_targets_under_child_module_roots_without_wat
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "child_missing #= @child/missing.svg\nchild_existing #= @child/existing.svg\nsupport_missing #= @support/missing.svg\nsupport_existing #= @support/existing.svg\n#[:ok]\n",
     )
     .expect("should write entry");
@@ -682,9 +679,9 @@ fn directory_stage0_rejects_missing_targets_under_child_module_roots_without_wat
         .expect("should write child resource");
     fs::write(src.join("support/existing.svg"), "support resource")
         .expect("should write support resource");
-    fs::write(src.join("child/@child.moth"), "#[:ok]\n").expect("should write child root");
+    fs::write(src.join("child/@entry.moth"), "#[:ok]\n").expect("should write child root");
     fs::write(
-        src.join("support/+support.moth"),
+        src.join("support/@package.moth"),
         "export:\n    render || -> String:\n        return \"support\"\n    ;\n;\n",
     )
     .expect("should write support root");
@@ -709,7 +706,7 @@ fn directory_stage0_rejects_missing_targets_under_child_module_roots_without_wat
             prepared_entry_file_path(&module.prepared.semantic)
                 .expect("entry identity should be retained")
                 .file_name()
-                .is_some_and(|name| name == "@page.moth")
+                .is_some_and(|name| name == "@entry.moth")
         })
         .expect("entry module should be discovered");
     let reasons = module
@@ -753,13 +750,13 @@ fn directory_stage0_rejects_missing_symlink_ancestors_without_watch() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "external #= @external-alias/missing.svg\nchild #= @child-alias/missing.svg\nsupport #= @support-alias/missing.svg\ndangling_external #= @dangling-external/missing.svg\ndangling_child #= @dangling-child/missing.svg\ndangling_support #= @dangling-support/missing.svg\n#[:ok]\n",
     )
     .expect("should write entry");
-    fs::write(child.join("@child.moth"), "#[:ok]\n").expect("should write child root");
+    fs::write(child.join("@entry.moth"), "#[:ok]\n").expect("should write child root");
     fs::write(
-        support.join("+support.moth"),
+        support.join("@package.moth"),
         "export:\n    render || -> String:\n        return \"support\"\n    ;\n;\n",
     )
     .expect("should write support root");
@@ -797,7 +794,7 @@ fn directory_stage0_rejects_missing_symlink_ancestors_without_watch() {
             prepared_entry_file_path(&module.prepared.semantic)
                 .expect("entry identity should be retained")
                 .file_name()
-                .is_some_and(|name| name == "@page.moth")
+                .is_some_and(|name| name == "@entry.moth")
         })
         .expect("entry module should be discovered");
     let reasons = module
@@ -836,9 +833,9 @@ fn multi_module_retained_path_diagnostic_keeps_its_module_string_table() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@a.moth"), "#[:ok]\n").expect("should write first root");
+    fs::write(src.join("@entry.moth"), "#[:ok]\n").expect("should write first root");
     fs::write(
-        nested.join("@b.moth"),
+        nested.join("@entry.moth"),
         "asset #= @Assets/logo.svg\n#[:ok]\n",
     )
     .expect("should write second root");
@@ -863,12 +860,15 @@ fn multi_module_retained_path_diagnostic_keeps_its_module_string_table() {
         .iter()
         .flatten()
         .find(|module| {
-            prepared_entry_file_path(&module.prepared.semantic)
-                .expect("entry identity should be retained")
-                .file_name()
-                .is_some_and(|name| name == "@b.moth")
+            module
+                .prepared
+                .semantic
+                .resolved_file_references
+                .iter()
+                .next()
+                .is_some()
         })
-        .expect("nested module should be discovered");
+        .expect("the nested module with the resource reference should be discovered");
     let reference = module
         .prepared
         .semantic
@@ -1064,10 +1064,10 @@ fn ordinary_synthetic_stage0_rejects_child_and_support_boundaries() {
         "child_content #= @child/existing.mtf\nsupport_resource #= @support/existing.svg\nchild_missing #= @child/missing.mtf\nsupport_missing #= @support/missing.svg\n",
     )
     .expect("should write synthetic entry");
-    fs::write(child.join("@child.moth"), "#[:ok]\n").expect("should write child root");
+    fs::write(child.join("@entry.moth"), "#[:ok]\n").expect("should write child root");
     fs::write(child.join("existing.mtf"), "template body\n").expect("should write child content");
     fs::write(
-        support.join("+support.moth"),
+        support.join("@package.moth"),
         "export:\n    render || -> String:\n        return \"support\"\n    ;\n;\n",
     )
     .expect("should write support root");
@@ -1150,10 +1150,10 @@ fn compile_single_file_frontend_retains_ordinary_boundary_registry() {
         "child_content #= @child/existing.mtf\nsupport_resource #= @support/existing.svg\nchild_missing #= @child/missing.mtf\nsupport_missing #= @support/missing.svg\n#[:ok]\n",
     )
     .expect("should write synthetic entry");
-    fs::write(child.join("@child.moth"), "#[:ok]\n").expect("should write child root");
+    fs::write(child.join("@entry.moth"), "#[:ok]\n").expect("should write child root");
     fs::write(child.join("existing.mtf"), "template body\n").expect("should write child content");
     fs::write(
-        support.join("+support.moth"),
+        support.join("@package.moth"),
         "export:\n    render || -> String:\n        return \"support\"\n    ;\n;\n",
     )
     .expect("should write support root");
@@ -1208,7 +1208,7 @@ fn directory_stage0_reaches_content_reference_fixed_point() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "unused #= @docs/one.mtf\n#[:ok]\n")
+    fs::write(src.join("@entry.moth"), "unused #= @docs/one.mtf\n#[:ok]\n")
         .expect("should write entry");
     fs::write(
         src.join("docs/one.mtf"),
@@ -1244,12 +1244,12 @@ fn directory_stage0_reaches_content_reference_fixed_point() {
             prepared_entry_file_path(&module.prepared.semantic)
                 .expect("entry identity should be retained")
                 .file_name()
-                .is_some_and(|name| name == "@page.moth")
+                .is_some_and(|name| name == "@entry.moth")
         })
         .expect("entry module should be discovered");
 
     let prepared_sources = module_prepared_source_names(module);
-    assert!(prepared_sources.contains(&"@page.moth".to_owned()));
+    assert!(prepared_sources.contains(&"@entry.moth".to_owned()));
     assert!(prepared_sources.contains(&"one.mtf".to_owned()));
     assert!(
         prepared_sources.contains(&"two.mtf".to_owned()),

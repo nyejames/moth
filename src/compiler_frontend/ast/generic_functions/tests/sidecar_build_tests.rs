@@ -34,7 +34,7 @@ fn requester_template_contract_slots_use_nonidentity_generated_domain_remap() {
             "main".to_owned(),
             ModuleRootRole::Normal,
         ),
-        "@page.moth".to_owned(),
+        "@entry.moth".to_owned(),
         ModulePrivateExecutableCategory::GenericFunction,
         "probe".to_owned(),
         None,

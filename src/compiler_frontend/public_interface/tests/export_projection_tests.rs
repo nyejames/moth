@@ -57,9 +57,17 @@ fn parse_single_file_headers_with_fork(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> BoundModuleHeaders {
-    let file_path = PathBuf::from("src/@page.moth");
-    let (output, _span_builder) =
-        prepare_single_file_with_fork(source, &file_path, &file_path, string_table, path_fork);
+    let file_path = PathBuf::from("src/@mod.moth");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let output = prepare_active_root_with_role(
+        source,
+        &file_path,
+        ModuleRootRole::Normal,
+        string_table,
+        &mut span_builder,
+        path_fork,
+    )
+    .expect("a normal facade fixture should accept its export block");
     let mut prepared_outputs = vec![output];
     let prepared = prepare_header_syntax(
         &mut prepared_outputs,
@@ -98,7 +106,7 @@ fn build_seed_for_project(source: &str, project_name: &str) -> DirectExportSeed 
     // Build a source file table for the single synthetic test file and set the retained
     // file identity on every header so the origin projection can resolve the active root
     // from the per-file source-origin table.
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@mod.moth");
     let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
         &file_path,
@@ -170,15 +178,30 @@ fn build_reexport_fixture_with_shared_sources(
 
     for (path, source) in sources {
         let path = PathBuf::from(path);
-        let (output, builder) = prepare_single_file_with_fork(
-            source,
-            &path,
-            &active_path,
-            &mut string_table,
-            &mut path_fork,
-        );
-        prepared_outputs.push(output);
-        span_builders.push(builder);
+        if path == active_path {
+            let mut builder = ExtendedSpanBuilder::new();
+            let output = prepare_active_root_with_role(
+                source,
+                &path,
+                ModuleRootRole::Normal,
+                &mut string_table,
+                &mut builder,
+                &mut path_fork,
+            )
+            .expect("the active normal facade fixture should accept its export block");
+            prepared_outputs.push(output);
+            span_builders.push(builder);
+        } else {
+            let (output, builder) = prepare_single_file_with_fork(
+                source,
+                &path,
+                &active_path,
+                &mut string_table,
+                &mut path_fork,
+            );
+            prepared_outputs.push(output);
+            span_builders.push(builder);
+        }
         canonical_paths.push(path);
     }
 
@@ -279,7 +302,7 @@ fn authored_span(source: &str, public_name: &str) -> Option<SourceSpan> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let headers = parse_single_file_headers_with_fork(source, &mut string_table, &mut path_fork);
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@mod.moth");
     let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
         &file_path,
@@ -394,7 +417,7 @@ fn directly_defined_public_exports_retain_authored_diagnostic_provenance() {
 fn same_module_reexport_preserves_alias_origin_and_authored_provenance() {
     let mut fixture = build_reexport_fixture(
         &[
-            ("src/@page.moth", "placeholder #= 1\n"),
+            ("src/@mod.moth", "placeholder #= 1\n"),
             ("src/impl.moth", "value #= 1\n"),
         ],
         "same-module-reexport",
@@ -464,7 +487,7 @@ fn same_module_reexport_preserves_alias_origin_and_authored_provenance() {
 fn helper_reexport_preserves_role_neutral_defining_origin() {
     let mut fixture = build_reexport_fixture_with_shared_sources(
         &[
-            ("src/@page.moth", "placeholder #= 1\n"),
+            ("src/@mod.moth", "placeholder #= 1\n"),
             ("src/impl.moth", "value #= 1\n"),
         ],
         "shared-helper-reexport",
@@ -537,7 +560,7 @@ fn helper_reexport_preserves_role_neutral_defining_origin() {
 #[test]
 fn provider_reexport_preserves_alias_and_provider_provenance() {
     let mut fixture = build_reexport_fixture(
-        &[("src/@page.moth", "placeholder #= 1\n")],
+        &[("src/@mod.moth", "placeholder #= 1\n")],
         "provider-reexport",
     );
     let target_path = fixture
@@ -657,7 +680,7 @@ fn external_binding_export_identity_resolves_in_independent_registry() {
     assert_ne!(consumer_length, decoy_id);
 
     let mut fixture = build_reexport_fixture(
-        &[("src/@page.moth", "placeholder #= 1\n")],
+        &[("src/@mod.moth", "placeholder #= 1\n")],
         "external-binding-reexport",
     );
     let export_name = fixture.string_table.intern("PublicLength");
@@ -714,9 +737,9 @@ fn external_binding_export_identity_resolves_in_independent_registry() {
 }
 
 #[test]
-fn private_declarations_and_implicit_start_are_excluded() {
-    // `helper` and `Inner` are private; the compiler-owned entry is always present for an
-    // active module root. Only the public `public_fn` must be recorded.
+fn private_declarations_and_non_export_headers_are_excluded() {
+    // `helper` and `Inner` are private; the compiler-owned start never exists on an API facade.
+    // Only the public `public_fn` must be recorded.
     let source = "\
 helper |value I32| -> I32:\n\
     return value\n\
@@ -733,7 +756,7 @@ export:\n\
     assert_eq!(
         binding_names(&seed),
         vec!["public_fn"],
-        "private declarations and the compiler-owned entry must be excluded"
+        "private declarations and non-export headers must be excluded"
     );
 }
 
@@ -800,7 +823,7 @@ fn active_origin_missing_from_table_fails_internally() {
         &mut path_fork,
     );
 
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@mod.moth");
     let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
         &file_path,
@@ -855,7 +878,7 @@ fn out_of_range_active_root_file_id_fails_internally() {
         &mut path_fork,
     );
 
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@mod.moth");
     let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
         &file_path,
@@ -910,7 +933,7 @@ fn zero_public_exports_still_validates_active_origin() {
     let mut path_fork = PathInternerFork::empty();
     let headers = parse_single_file_headers_with_fork("", &mut string_table, &mut path_fork);
 
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@mod.moth");
     let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
         &file_path,
@@ -1053,18 +1076,21 @@ fn add_source_package_export_target(
 fn public_source_nominal_origin_index_includes_imported_provider_origin() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let active_path = PathBuf::from("src/@page.moth");
-    let imported_path = PathBuf::from("src/@mod.moth");
+    let active_path = PathBuf::from("src/@mod.moth");
+    let imported_path = PathBuf::from("provider/@mod.moth");
 
     // The active root is the entry file; the imported root is a normal module-root file compiled only to
     // validate its public declaration surface.
-    let (active_output, _span_builder) = prepare_single_file_with_fork(
+    let mut active_span_builder = ExtendedSpanBuilder::new();
+    let active_output = prepare_active_root_with_role(
         "export:\n    Local = | value I32 |\n;\n",
         &active_path,
-        &active_path,
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut active_span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("a normal facade fixture should accept its export block");
     let mut imported_span_builder = ExtendedSpanBuilder::new();
     let imported_output = prepare_active_root_with_role(
         "export:\n    Imported = | value I32 |\n;\n",
@@ -1076,7 +1102,10 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
     )
     .expect("a normal facade fixture should accept its export block");
 
-    assert_eq!(active_output.file_role, FileRole::LegacyCombinedRoot);
+    assert_eq!(
+        active_output.file_role,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal)
+    );
     assert_eq!(
         imported_output.file_role,
         FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal)
@@ -1174,16 +1203,19 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
 fn public_source_nominal_origin_index_rejects_compilation_root_file_id() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let active_path = PathBuf::from("src/@page.moth");
-    let imported_path = PathBuf::from("src/@mod.moth");
+    let active_path = PathBuf::from("src/@mod.moth");
+    let imported_path = PathBuf::from("provider/@mod.moth");
 
-    let (active_output, _span_builder) = prepare_single_file_with_fork(
+    let mut active_span_builder = ExtendedSpanBuilder::new();
+    let active_output = prepare_active_root_with_role(
         "export:\n    Local = | value I32 |\n;\n",
         &active_path,
-        &active_path,
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut active_span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("a normal facade fixture should accept its export block");
     let mut imported_span_builder = ExtendedSpanBuilder::new();
     let imported_output = prepare_active_root_with_role(
         "export:\n    Imported = | value I32 |\n;\n",
@@ -1262,16 +1294,19 @@ fn public_source_nominal_origin_index_rejects_compilation_root_file_id() {
 fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let active_path = PathBuf::from("src/@page.moth");
-    let package_path = PathBuf::from("src/@pkg.moth");
+    let active_path = PathBuf::from("src/@mod.moth");
+    let package_path = PathBuf::from("packages/pkg/@mod.moth");
 
-    let (active_output, _span_builder) = prepare_single_file_with_fork(
+    let mut active_span_builder = ExtendedSpanBuilder::new();
+    let active_output = prepare_active_root_with_role(
         "export:\n    Local = | value I32 |\n;\n",
         &active_path,
-        &active_path,
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut active_span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("a normal facade fixture should accept its export block");
     // A source-package module root not owned by the project graph: deliberately absent from the
     // origin map, so its table entry is None.
     let mut package_span_builder = ExtendedSpanBuilder::new();
@@ -1367,20 +1402,23 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
 fn public_source_nominal_origin_index_includes_alias_targeted_normal_file_nominal() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let active_path = PathBuf::from("src/@page.moth");
+    let active_path = PathBuf::from("src/@mod.moth");
     let impl_path = PathBuf::from("src/impl.moth");
 
     // The active module root carries an unrelated public constant; `Counter` is authored as a
     // private struct in the normal file `impl.moth` and has no public export of its own. A
     // module-root public alias (`PublicCounter as Counter`) re-exports it, so the retained
     // module-root public export entry targets `Counter`'s canonical source path.
-    let (active_output, _span_builder) = prepare_single_file_with_fork(
+    let mut active_span_builder = ExtendedSpanBuilder::new();
+    let active_output = prepare_active_root_with_role(
         "export:\n    placeholder #= 1\n;\n",
         &active_path,
-        &active_path,
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut active_span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("a normal facade fixture should accept its export block");
     let (impl_output, _span_builder) = prepare_single_file_with_fork(
         "Counter = | count I32 |\n",
         &impl_path,
@@ -1388,7 +1426,10 @@ fn public_source_nominal_origin_index_includes_alias_targeted_normal_file_nomina
         &mut string_table,
         &mut path_fork,
     );
-    assert_eq!(active_output.file_role, FileRole::LegacyCombinedRoot);
+    assert_eq!(
+        active_output.file_role,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal)
+    );
     assert_eq!(impl_output.file_role, FileRole::Normal);
 
     let source_files = SourceDatabase::build(
@@ -1464,18 +1505,21 @@ fn public_source_nominal_origin_index_includes_alias_targeted_normal_file_nomina
 fn public_source_nominal_origin_index_excludes_private_normal_file_nominal_without_target() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let active_path = PathBuf::from("src/@page.moth");
+    let active_path = PathBuf::from("src/@mod.moth");
     let impl_path = PathBuf::from("src/impl.moth");
 
     // The active root exports `Local` publicly; `Counter` is a private struct in the normal file
     // with no public export targeting it.
-    let (active_output, _span_builder) = prepare_single_file_with_fork(
+    let mut active_span_builder = ExtendedSpanBuilder::new();
+    let active_output = prepare_active_root_with_role(
         "export:\n    Local = | value I32 |\n;\n",
         &active_path,
-        &active_path,
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut active_span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("a normal facade fixture should accept its export block");
     let (impl_output, _span_builder) = prepare_single_file_with_fork(
         "Counter = | count I32 |\n",
         &impl_path,
@@ -1558,14 +1602,17 @@ fn public_source_nominal_origin_index_excludes_private_normal_file_nominal_witho
 fn public_source_trait_origin_index_includes_directly_defined_trait() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
-    let (output, _span_builder) = prepare_single_file_with_fork(
+    let file_path = PathBuf::from("src/@mod.moth");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let output = prepare_active_root_with_role(
         "export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n",
         &file_path,
-        &file_path,
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("a normal facade fixture should accept its export block");
     let mut headers: Vec<Header> = output.headers;
     let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
@@ -1619,16 +1666,19 @@ fn public_source_trait_origin_index_includes_directly_defined_trait() {
 fn public_source_trait_origin_index_includes_imported_provider_trait() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let active_path = PathBuf::from("src/@page.moth");
-    let imported_path = PathBuf::from("src/@mod.moth");
+    let active_path = PathBuf::from("src/@mod.moth");
+    let imported_path = PathBuf::from("provider/@mod.moth");
 
-    let (active_output, _span_builder) = prepare_single_file_with_fork(
+    let mut active_span_builder = ExtendedSpanBuilder::new();
+    let active_output = prepare_active_root_with_role(
         "export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n",
         &active_path,
-        &active_path,
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut active_span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("a normal facade fixture should accept its export block");
     let mut imported_span_builder = ExtendedSpanBuilder::new();
     let imported_output = prepare_active_root_with_role(
         "export:\n    IMPORTED_TRAIT must:\n        show |This| -> String\n    ;\n;\n",
@@ -1720,19 +1770,22 @@ fn public_source_trait_origin_index_includes_imported_provider_trait() {
 fn public_source_trait_origin_index_includes_alias_targeted_normal_file_trait() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let active_path = PathBuf::from("src/@page.moth");
+    let active_path = PathBuf::from("src/@mod.moth");
     let impl_path = PathBuf::from("src/impl.moth");
 
     // The active root carries an unrelated public constant; `DRAWABLE` is a private trait in the
     // normal file with no public export of its own. A module-root public alias targets it, so the
     // retained module-root public export entry targets `DRAWABLE`'s canonical source path.
-    let (active_output, _span_builder) = prepare_single_file_with_fork(
+    let mut active_span_builder = ExtendedSpanBuilder::new();
+    let active_output = prepare_active_root_with_role(
         "export:\n    placeholder #= 1\n;\n",
         &active_path,
-        &active_path,
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut active_span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("a normal facade fixture should accept its export block");
     let (impl_output, _span_builder) = prepare_single_file_with_fork(
         "DRAWABLE must:\n    draw |This| -> String\n;\n",
         &impl_path,
@@ -1740,7 +1793,10 @@ fn public_source_trait_origin_index_includes_alias_targeted_normal_file_trait() 
         &mut string_table,
         &mut path_fork,
     );
-    assert_eq!(active_output.file_role, FileRole::LegacyCombinedRoot);
+    assert_eq!(
+        active_output.file_role,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal)
+    );
     assert_eq!(impl_output.file_role, FileRole::Normal);
 
     let source_files = SourceDatabase::build(
@@ -1808,7 +1864,7 @@ fn public_source_trait_origin_index_includes_alias_targeted_normal_file_trait() 
 fn public_source_trait_origin_index_excludes_unexported_private_trait() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@mod.moth");
 
     let (output, _span_builder) = prepare_single_file_with_fork(
         "RENDERABLE must:\n    show |This| -> String\n;\n",
@@ -1868,15 +1924,18 @@ fn public_source_trait_origin_index_excludes_unexported_private_trait() {
 fn public_source_trait_origin_index_skips_unowned_source_package_trait() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let package_path = PathBuf::from("src/@pkg.moth");
+    let package_path = PathBuf::from("packages/pkg/@mod.moth");
 
-    let (output, _span_builder) = prepare_single_file_with_fork(
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let output = prepare_active_root_with_role(
         "export:\n    PKG_TRAIT must:\n        show |This| -> String\n    ;\n;\n",
         &package_path,
-        &package_path,
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("a normal facade fixture should accept its export block");
 
     let source_files = SourceDatabase::build(
         std::iter::once(package_path.clone()),
@@ -1929,14 +1988,17 @@ fn public_source_trait_origin_index_skips_unowned_source_package_trait() {
 fn public_source_trait_origin_index_rejects_unowned_source_identity() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
-    let (output, _span_builder) = prepare_single_file_with_fork(
+    let file_path = PathBuf::from("src/@mod.moth");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let output = prepare_active_root_with_role(
         "export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n",
         &file_path,
-        &file_path,
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("a normal facade fixture should accept its export block");
     let mut headers: Vec<Header> = output.headers;
     let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),

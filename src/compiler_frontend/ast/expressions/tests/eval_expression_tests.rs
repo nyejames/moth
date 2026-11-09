@@ -220,7 +220,7 @@ fn ordinary_expression_rejects_path_string_concatenation() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_scope = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test path fits");
     let context = ScopeContext::new_for_tests(
         ContextKind::Template,
@@ -291,7 +291,7 @@ fn structural_string_equality_is_refused_only_in_a_constant_context() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_scope = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test path fits");
     let context = |kind| {
         ScopeContext::new_for_tests(

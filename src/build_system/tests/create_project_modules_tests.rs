@@ -443,7 +443,7 @@ fn prepared_entry_file_path(
         .find_map(|(source_file, role)| {
             if matches!(
                 *role,
-                FileRole::LegacyCombinedRoot | FileRole::ActiveApiOnlyModuleRoot(_)
+                FileRole::ActiveApiOnlyModuleRoot(_) | FileRole::ActiveEntryRoot
             ) {
                 Some(prepared.path_fork.render_native(
                     *source_file,
@@ -1413,7 +1413,10 @@ pub(super) fn successful_compilation_value<T>(result: CompilationResult<T>) -> T
     match result {
         Ok(CompilationOutcome::Success { value, .. }) => value,
         Ok(CompilationOutcome::Diagnosed(reports)) => {
-            panic!("expected compilation success, got diagnostics: {reports:?}")
+            panic!(
+                "expected compilation success, got diagnostics:\n{}",
+                crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_reports(&reports).join("\n")
+            )
         }
         Err(errors) => {
             panic!("expected compilation success, got infrastructure errors: {errors:?}")
@@ -1687,8 +1690,8 @@ fn write_cross_module_project(
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(module_a.join("@pageA.moth"), "@module_b\n#[:pageA]\n").expect("should write pageA");
-    fs::write(module_b.join("@api.moth"), "export:\n    b #= 1\n;\n")
+    fs::write(module_a.join("@entry.moth"), "@module_b\n#[:pageA]\n").expect("should write pageA");
+    fs::write(module_b.join("@mod.moth"), "export:\n    b #= 1\n;\n")
         .expect("should write module_b root");
     fs::write(module_b.join("impl.moth"), "impl #= 1\n").expect("should write module_b impl");
 
@@ -1728,12 +1731,9 @@ pub(super) fn compiled_package(prefix: &str) -> CompiledSourcePackage {
         ModuleRootRole::Normal,
     );
     let root_path = PathBuf::from(format!("{prefix}/@mod.moth"));
-    let graph = ProjectModuleGraph::from_normal_roots(vec![(origin.clone(), root_path)]);
-    let root_module_id = graph
-        .entry_modules()
-        .first()
-        .copied()
-        .expect("one entry module");
+    let graph = ProjectModuleGraph::from_standalone_roots(vec![(origin.clone(), root_path)]);
+    // A source package root is an API facade, never a project entry.
+    let root_module_id = ModuleId::from_index(0);
 
     let mut modules = ModuleArtifactStore::new(1);
     modules
@@ -1810,7 +1810,7 @@ fn direct_selection_resolves_cross_module_child_facade() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@child greet\n#[:entry]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@child greet\n#[:entry]\n").expect("should write entry");
     fs::write(
         src.join("child/@mod.moth"),
         "export:\n    greet || -> String:\n        return \"hi\"\n    ;\n;\n",
@@ -1827,7 +1827,7 @@ fn direct_selection_resolves_cross_module_child_facade() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
     let declaring_source =
-        fs::canonicalize(src.join("@page.moth")).expect("declaring_source should canonicalize");
+        fs::canonicalize(src.join("@entry.moth")).expect("declaring_source should canonicalize");
 
     with_namespace_resolution(
         &config,
@@ -2030,7 +2030,7 @@ fn direct_selection_resolves_source_package_facade() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@helper add\n#[:entry]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@helper add\n#[:entry]\n").expect("should write entry");
     fs::write(
         package_root.join("@mod.moth"),
         "export:\n    add |a I32, b I32| -> I32:\n        return a + b\n    ;\n;\n",
@@ -2052,7 +2052,7 @@ fn direct_selection_resolves_source_package_facade() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
     let declaring_source =
-        fs::canonicalize(src.join("@page.moth")).expect("declaring_source should canonicalize");
+        fs::canonicalize(src.join("@entry.moth")).expect("declaring_source should canonicalize");
 
     with_namespace_resolution(
         &config,
@@ -2098,7 +2098,7 @@ fn underscore_prefixed_source_package_prefix_precedes_hidden_directory_rejection
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@_vendor/toolkit add\n#[:entry]\n")
+    fs::write(src.join("@entry.moth"), "@_vendor/toolkit add\n#[:entry]\n")
         .expect("should write entry");
     fs::write(
         package_root.join("@mod.moth"),
@@ -2121,7 +2121,7 @@ fn underscore_prefixed_source_package_prefix_precedes_hidden_directory_rejection
     .expect("config should parse");
     let resolver = configured_resolver(&config);
     let declaring_source =
-        fs::canonicalize(src.join("@page.moth")).expect("declaring_source should canonicalize");
+        fs::canonicalize(src.join("@entry.moth")).expect("declaring_source should canonicalize");
 
     with_namespace_resolution(
         &config,

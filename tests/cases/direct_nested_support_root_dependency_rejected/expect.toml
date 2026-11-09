@@ -4,4 +4,4 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-IMPORT-0008"]
-message_contains = ["support package `@tools/helpers`"]
+message_contains = ["@package.moth", "module directory `@tools/helpers`"]

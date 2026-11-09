@@ -185,9 +185,9 @@ pub(super) fn prepare_file_value_bundle(
         })?;
     let discovery_options = HeaderParseOptions {
         root_file_ids: Default::default(),
-        // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): the standalone HTML
-        // template entry is one synthetic normal root with today's combined behaviour.
-        selected_file: Some((entry_file_id, FileRole::LegacyCombinedRoot)),
+        // The standalone HTML template entry is an ordinary content source: it publishes no
+        // facade and owns no entry start.
+        selected_file: Some((entry_file_id, FileRole::Normal)),
         reached_root_roles: &[],
     };
 

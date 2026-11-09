@@ -1,0 +1,5 @@
+@provider DISPLAY_TEXT
+
+identity type T is DISPLAY_TEXT |value T| -> String:
+    return value.display()
+;

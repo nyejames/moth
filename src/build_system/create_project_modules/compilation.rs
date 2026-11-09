@@ -1651,7 +1651,7 @@ pub(super) fn compile_directory_frontend_in_premerge_lane(
                 &mut external_imports,
                 directory_dependency_resolution,
                 &mut resource_inputs,
-                mode.requires_normal_entry(),
+                mode.requires_entry(),
                 mode.includes_check_only(),
                 &mut selected_source_texts,
                 string_table,

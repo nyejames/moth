@@ -172,8 +172,9 @@ pub(crate) struct ModuleLinkFacts {
 ///      typed absence for API-only and support-only modules, so no consumer can mistake the
 ///      preparation anchor for an executable entry.
 pub(crate) struct ModuleCompilerMetadata {
-    /// Start-bearing root metadata. Present exactly when this module owns an entry root or a
-    /// legacy combined normal root; `None` for API-only and support-only modules.
+    /// Start-bearing root metadata. Present exactly when this module owns an entry root or an
+    /// explicitly selected synthetic application source; `None` for API-only and support-only
+    /// modules.
     pub(crate) entry: Option<EntryRootMetadata>,
     #[allow(dead_code)] // Retained for deferred documentation-metadata consumers.
     pub(crate) doc_fragments: Vec<ModuleDocFragment>,
@@ -191,8 +192,8 @@ pub(crate) struct ModuleCompilerMetadata {
 /// WHY: an entryless module has no dormant start, no entry fragment schedule and no entry path,
 ///      so these facts live behind one typed presence rather than as empty placeholders.
 pub(crate) struct EntryRootMetadata {
-    /// Canonical entry file: `@entry.moth`, or the legacy combined normal root under the
-    /// migration bridge.
+    /// Canonical entry file: a project-local `@entry.moth`, or the explicitly selected source of
+    /// a synthetic single-file compilation.
     pub(crate) entry_point: PathBuf,
     pub(crate) const_top_level_fragments: Vec<ResolvedConstFragment>,
     pub(crate) root_activity: ModuleRootActivity,
@@ -238,25 +239,14 @@ impl ModuleCompilerMetadata {
     }
 }
 
-/// Header-derived root activity metadata passed to backend builders.
+/// Header-derived runtime-fragment metadata for one compiled entry root.
 ///
-/// WHAT: records the builder-relevant dormant activity of one compiled module root.
-/// WHY: header parsing already classifies root bodies and page fragments, so builders can apply
-///      artifact policy without scanning tokens or HIR for the same facts.
+/// WHAT: records how many runtime fragments the entry root contributes.
+/// WHY: the HTML JS and Wasm emitters stage runtime fragments by insertion count, so the count
+///      travels from header preparation instead of being rescanned from tokens or HIR.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ModuleRootActivity {
-    pub(crate) has_non_trivial_root_body: bool,
-    pub(crate) const_fragment_count: usize,
     pub(crate) runtime_fragment_count: usize,
-}
-
-impl ModuleRootActivity {
-    /// Return whether the HTML builder has any root activity from which to assemble a page.
-    pub(crate) fn has_html_artifact_activity(&self) -> bool {
-        self.has_non_trivial_root_body
-            || self.const_fragment_count > 0
-            || self.runtime_fragment_count > 0
-    }
 }
 
 /// A resolved const top-level fragment: an owned folded string, its destination, its authored

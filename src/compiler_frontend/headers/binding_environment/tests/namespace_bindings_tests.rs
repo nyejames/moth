@@ -255,7 +255,7 @@ fn namespace_dependency_default_rejects_keyword_shadow_name_variants() {
 
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+        let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
         let dependency_path =
             intern_path(&["test", &provider_name], &mut string_table, &mut path_fork);
         let dependency = test_dependency(dependency_path);
@@ -295,7 +295,7 @@ fn namespace_dependency_alias_rejects_keyword_shadow_name_variants() {
 
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+        let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
         let dependency_path = intern_path(
             &["test", "namespace_alias"],
             &mut string_table,
@@ -341,7 +341,7 @@ fn namespace_dependency_alias_collision_retains_exact_alias_span() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let dependency_path = intern_path(
         &["test", "namespace_alias_collision"],
         &mut string_table,
@@ -419,7 +419,7 @@ fn namespace_dependency_alias_collision_retains_exact_alias_span() {
 fn explicit_moth_extension_diagnostic_retains_dependency_path_span() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let dependency_path = intern_path(&["helper.moth"], &mut string_table, &mut path_fork);
     let mut dependency = test_dependency(dependency_path);
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -473,7 +473,7 @@ fn selected_dependency_unaliased_name_rejects_keyword_shadow_variants() {
 
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+        let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
         let dependency_path = intern_path(
             &["test", &format!("selected_unaliased_{index}")],
             &mut string_table,
@@ -531,7 +531,7 @@ fn selected_dependency_alias_rejects_keyword_shadow_name_variants() {
 
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+        let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
         let dependency_path = intern_path(
             &["test", &format!("selected_alias_{index}")],
             &mut string_table,
@@ -594,7 +594,7 @@ fn source_selection_binding_rejects_keyword_shadow_names_before_source_validatio
     for (source_name, local_alias) in cases {
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+        let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
         let symbol_path = intern_path(&["helper", source_name], &mut string_table, &mut path_fork);
         let dependency_path = intern_path(&["helper"], &mut string_table, &mut path_fork);
         let mut dependency = test_dependency(dependency_path);
@@ -655,7 +655,7 @@ fn provider_declaration_selection_rejects_keyword_shadow_names_before_provider_r
     for (source_name, local_alias) in cases {
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+        let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
         let mut dependency = test_dependency(intern_path(
             &["provider"],
             &mut string_table,
@@ -756,7 +756,7 @@ fn binding_counters_separate_namespace_clauses_from_selected_names() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let namespace_path = intern_path(&["test", "namespace"], &mut string_table, &mut path_fork);
     let selection_path = intern_path(&["test", "selections"], &mut string_table, &mut path_fork);
     let namespace_clause = test_dependency(namespace_path);
@@ -872,7 +872,7 @@ fn external_nested_namespace_tree_builds_correctly() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let dependency_path = intern_path(&["test", "path"], &mut string_table, &mut path_fork);
     let dependency = test_dependency(dependency_path);
 
@@ -952,7 +952,7 @@ fn external_nested_namespace_tree_builds_correctly() {
 fn duplicate_external_namespace_value_and_type_slot_is_rejected() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let span = location_for(&["src", "@page.moth"], &mut string_table);
+    let span = location_for(&["src", "@entry.moth"], &mut string_table);
     let surface_path = intern_path(&["test", "path"], &mut string_table, &mut path_fork);
     let test_package = string_table.intern("@test");
     let mut record = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(test_package));
@@ -988,7 +988,7 @@ fn duplicate_external_namespace_value_and_type_slot_is_rejected() {
 fn duplicate_external_namespace_and_value_slot_is_rejected() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let span = location_for(&["src", "@page.moth"], &mut string_table);
+    let span = location_for(&["src", "@entry.moth"], &mut string_table);
     let surface_path = intern_path(&["test", "path"], &mut string_table, &mut path_fork);
     let test_package = string_table.intern("@test");
     let mut record = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(test_package));
@@ -1024,7 +1024,7 @@ fn duplicate_external_namespace_and_value_slot_is_rejected() {
 fn duplicate_external_namespace_and_type_slot_is_rejected() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let span = location_for(&["src", "@page.moth"], &mut string_table);
+    let span = location_for(&["src", "@entry.moth"], &mut string_table);
     let surface_path = intern_path(&["test", "path"], &mut string_table, &mut path_fork);
     let test_package = string_table.intern("@test");
     let mut record = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(test_package));
@@ -1066,7 +1066,7 @@ fn source_receiver_methods_remain_absent_from_namespace_records() {
     let method_path = path_fork
         .try_intern_portable_path("src/helper/tick", &mut string_table)
         .expect("test path fits");
-    let span = location_for(&["src", "@page.moth"], &mut string_table);
+    let span = location_for(&["src", "@entry.moth"], &mut string_table);
     let method_name = path_fork
         .component(method_path)
         .expect("method path should have a leaf name");
@@ -1138,7 +1138,7 @@ fn unique_namespace_with_value_member_is_none_when_ambiguous() {
     let other_alias = string_table.intern("other");
     let package = string_table.intern("@core/math");
     let other_package = string_table.intern("@other/math");
-    let file_path = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let file_path = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
 
     let mut math = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(package));
     math.value_members.insert(
@@ -1288,8 +1288,12 @@ fn missing_package_symbol_multi_component_path_has_no_candidates() {
 fn module_root_namespace_uses_prepared_root_file_identity() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
-    let root_file = intern_path(&["helper", "@home.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
+    let root_file = intern_path(
+        &["helper", "@entry.moth"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let dependency = test_dependency(intern_path(&["helper"], &mut string_table, &mut path_fork));
     let module_root = dependency.dependency.path;
 
@@ -1365,7 +1369,7 @@ fn prelude_symbol_visibility_has_no_authored_span() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let mut module_symbols = ModuleSymbols::empty();
     module_symbols.module_file_paths.insert(source_file);
 
@@ -1417,8 +1421,8 @@ fn explicit_external_symbol_binding_retains_authored_span() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
-    let dependency_span = location_for(&["src", "@page.moth"], &mut string_table);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
+    let dependency_span = location_for(&["src", "@entry.moth"], &mut string_table);
     let provider = RetainedDependencyPath {
         span: dependency_span,
         path: intern_path(
@@ -1509,7 +1513,7 @@ fn prelude_namespace_alias_injects_unshadowed_record() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
 
     let mut module_symbols = ModuleSymbols::empty();
     module_symbols.module_file_paths.insert(source_file);
@@ -1560,7 +1564,7 @@ fn prelude_namespace_alias_collides_with_same_file_declaration() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let declaration_path = intern_path(&["src", "prelude_ns"], &mut string_table, &mut path_fork);
 
     let mut declared_paths = FxHashSet::default();
@@ -1621,7 +1625,7 @@ fn prelude_namespace_alias_coexists_with_explicit_dependency_of_same_target() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let dependency_path = intern_path(&["test", "prelude_ns"], &mut string_table, &mut path_fork);
     let provider = RetainedDependencyPath {
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
@@ -1756,7 +1760,7 @@ fn provider_semantics_bind_once_across_many_shells() {
 
     // Ten authored shells reference the same provider, one direct constant selection each.
     let mut module_symbols = ModuleSymbols::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     module_symbols.module_file_paths.insert(source_file);
     let mut dependency_selections = Vec::new();
     let dependencies = names
@@ -2016,7 +2020,7 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
         });
 
     let mut module_symbols = ModuleSymbols::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     module_symbols.module_file_paths.insert(source_file);
     let mut dependency_selections = Vec::new();
     let mut alpha_dependency =
@@ -2330,7 +2334,7 @@ fn single_file_module_symbols(
     path_fork: &mut PathInternerFork,
 ) -> ModuleSymbols {
     let mut module_symbols = ModuleSymbols::empty();
-    let source_file = intern_path(&["src", "@page.moth"], string_table, path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], string_table, path_fork);
     module_symbols.module_file_paths.insert(source_file);
     module_symbols
         .file_dependency_clauses_by_source
@@ -2365,9 +2369,13 @@ fn bind_environment(
 fn provider_selection_public_namespace_member_joins_declaration_surface() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let root_file = intern_path(&["facade", "@page.moth"], &mut string_table, &mut path_fork);
+    let root_file = intern_path(
+        &["facade", "@entry.moth"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let diagnostic_path = intern_path(&["provider", "CONST_0"], &mut string_table, &mut path_fork);
-    let location = location_for(&["facade", "@page.moth"], &mut string_table);
+    let location = location_for(&["facade", "@entry.moth"], &mut string_table);
     let export_name = string_table.intern("PUBLIC_CONST");
     let source_name = string_table.intern("CONST_0");
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
@@ -2434,9 +2442,13 @@ fn provider_selection_public_namespace_member_joins_declaration_surface() {
 fn provider_selection_namespace_prefers_source_name_over_facade_alias() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let root_file = intern_path(&["facade", "@page.moth"], &mut string_table, &mut path_fork);
+    let root_file = intern_path(
+        &["facade", "@entry.moth"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let diagnostic_path = intern_path(&["provider", "SOURCE"], &mut string_table, &mut path_fork);
-    let location = location_for(&["facade", "@page.moth"], &mut string_table);
+    let location = location_for(&["facade", "@entry.moth"], &mut string_table);
     let export_name = string_table.intern("ALIAS");
     let source_name = string_table.intern("SOURCE");
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
@@ -2495,9 +2507,13 @@ fn provider_selection_namespace_prefers_source_name_over_facade_alias() {
 fn provider_selection_public_namespace_member_joins_binding_surface() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let root_file = intern_path(&["facade", "@page.moth"], &mut string_table, &mut path_fork);
+    let root_file = intern_path(
+        &["facade", "@entry.moth"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let diagnostic_path = intern_path(&["provider", "BOUND"], &mut string_table, &mut path_fork);
-    let location = location_for(&["facade", "@page.moth"], &mut string_table);
+    let location = location_for(&["facade", "@entry.moth"], &mut string_table);
     let export_name = string_table.intern("PUBLIC_BOUND");
     let source_name = string_table.intern("BOUND");
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
@@ -2552,9 +2568,13 @@ fn provider_selection_public_namespace_member_joins_binding_surface() {
 fn provider_selection_namespace_binding_prefers_source_name_over_facade_alias() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let root_file = intern_path(&["facade", "@page.moth"], &mut string_table, &mut path_fork);
+    let root_file = intern_path(
+        &["facade", "@entry.moth"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let diagnostic_path = intern_path(&["provider", "SOURCE"], &mut string_table, &mut path_fork);
-    let location = location_for(&["facade", "@page.moth"], &mut string_table);
+    let location = location_for(&["facade", "@entry.moth"], &mut string_table);
     let export_name = string_table.intern("ALIAS");
     let source_name = string_table.intern("SOURCE");
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
@@ -2610,9 +2630,13 @@ fn provider_selection_namespace_binding_prefers_source_name_over_facade_alias() 
 fn provider_selection_public_namespace_member_rejects_missing_shell() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let root_file = intern_path(&["facade", "@page.moth"], &mut string_table, &mut path_fork);
+    let root_file = intern_path(
+        &["facade", "@entry.moth"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let diagnostic_path = intern_path(&["provider", "CONST_0"], &mut string_table, &mut path_fork);
-    let location = location_for(&["facade", "@page.moth"], &mut string_table);
+    let location = location_for(&["facade", "@entry.moth"], &mut string_table);
     let export_name = string_table.intern("PUBLIC_CONST");
     let source_name = string_table.intern("CONST_0");
     let shell = DependencyShellId::new(SourceId::from_index(0), 7);
@@ -2663,9 +2687,13 @@ fn provider_selection_public_namespace_member_rejects_missing_shell() {
 fn provider_selection_public_namespace_member_rejects_missing_member() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let root_file = intern_path(&["facade", "@page.moth"], &mut string_table, &mut path_fork);
+    let root_file = intern_path(
+        &["facade", "@entry.moth"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let diagnostic_path = intern_path(&["provider", "MISSING"], &mut string_table, &mut path_fork);
-    let location = location_for(&["facade", "@page.moth"], &mut string_table);
+    let location = location_for(&["facade", "@entry.moth"], &mut string_table);
     let export_name = string_table.intern("PUBLIC_CONST");
     let source_name = string_table.intern("MISSING");
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
@@ -2944,7 +2972,7 @@ fn single_file_occurrences(
     path_fork: &mut PathInternerFork,
 ) -> (ModuleSymbols, PathId) {
     let mut module_symbols = ModuleSymbols::empty();
-    let source_file = intern_path(&["src", "@page.moth"], string_table, path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], string_table, path_fork);
     module_symbols.module_file_paths.insert(source_file);
     module_symbols
         .qualified_references_by_source
@@ -3509,7 +3537,7 @@ fn occupied_agreement_insertion_borrows_without_cloning() {
 fn retained_local_source_edge_must_reference_prepared_compiler_slot() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let dependency_path = intern_path(&["helper"], &mut string_table, &mut path_fork);
     let mut dependency = test_dependency(dependency_path);
     dependency.dependency.local_source_id = Some(SourceId::from_index(1));
@@ -3541,7 +3569,7 @@ fn retained_local_source_edge_must_reference_prepared_compiler_slot() {
 
 #[test]
 fn retained_local_source_edge_rejects_wrong_valid_in_module_identity() {
-    let page_path = std::path::PathBuf::from("/project/src/@page.moth");
+    let page_path = std::path::PathBuf::from("/project/src/@entry.moth");
     let helper_path = std::path::PathBuf::from("/project/src/helper.moth");
     let other_path = std::path::PathBuf::from("/project/src/other.moth");
     let mut string_table = StringTable::new();

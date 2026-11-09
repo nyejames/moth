@@ -300,9 +300,9 @@ impl ModuleSymbols {
     /// The active root role that owns `file`, when its authored declarations are root-local.
     ///
     /// WHAT: `Some(role)` only for a root file of the module currently being compiled.
-    /// WHY: declarations authored directly in `@mod.moth`, `@package.moth`, `@entry.moth` or a
-    ///      legacy combined root belong to that file alone; a reached foreign facade keeps the
-    ///      ordinary public-surface rules of its own module.
+    /// WHY: declarations authored directly in `@mod.moth`, `@package.moth` or `@entry.moth`
+    ///      belong to that file alone; a reached foreign facade keeps the ordinary public-surface
+    ///      rules of its own module.
     pub(crate) fn active_root_file_role(&self, file: &PathId) -> Option<FileRole> {
         self.file_roles_by_source
             .get(file)

@@ -48,7 +48,7 @@ fn duplicate_materialisation_identity() -> GeneratedDeclarationIdentity {
             "main".to_owned(),
             ModuleRootRole::Normal,
         ),
-        "@page.moth".to_owned(),
+        "@entry.moth".to_owned(),
         ModulePrivateExecutableCategory::GenericFunction,
         "duplicate".to_owned(),
         None,

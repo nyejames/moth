@@ -3,33 +3,46 @@ use super::*;
 #[test]
 fn legacy_import_clause_reports_dedicated_migration_with_flat_replacements() {
     let cases = [
-        ("import @core/math\n", "@core/math", "import @core/math"),
         (
+            "src/@entry.moth",
+            "import @core/math\n",
+            "@core/math",
+            "import @core/math",
+        ),
+        (
+            "src/@entry.moth",
             "import @core/math as maths\n",
             "@core/math as maths",
             "import @core/math as maths",
         ),
         (
+            "src/@entry.moth",
             "import @core/math { sin, cos }\n",
             "@core/math sin, cos",
             "import @core/math { sin, cos }",
         ),
         (
+            // `export:` is legal only in an API facade, not in an entry root.
+            "src/@mod.moth",
             "export:\n    import @core/math { sin }\n;\n",
             "@core/math sin",
             "import @core/math { sin }",
         ),
     ];
 
-    for (source, expected_replacement, expected_clause) in cases {
-        let result =
-            parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
+    for (file_path, source, expected_replacement, expected_clause) in cases {
+        let result = parse_single_file_headers_with_entry(source, file_path, "src/@entry.moth");
         let errors = expect_header_error(result, "legacy import syntax should be diagnosed");
         let diagnostic = errors
             .diagnostics
             .first()
             .expect("expected legacy dependency diagnostic");
-        assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0035");
+        assert_eq!(
+            diagnostic.descriptor().code,
+            "MOTH-SYNTAX-0035",
+            "source {source:?} in {file_path} produced {}",
+            diagnostic.descriptor().code
+        );
         let replacement = diagnostic
             .family_view::<project_config::LegacyDependencyClauseView>()
             .expect("expected a legacy dependency-clause view")
@@ -54,7 +67,7 @@ fn legacy_filtered_or_nested_import_has_no_automatic_replacement() {
         "import @html { tables { row } }\n",
     ] {
         let errors = expect_header_error(
-            parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth"),
+            parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
             "ambiguous legacy import syntax should be diagnosed",
         );
         assert!(
@@ -72,10 +85,10 @@ fn legacy_filtered_or_nested_import_has_no_automatic_replacement() {
 #[test]
 fn legacy_quoted_path_and_config_import_have_no_automatic_replacement() {
     for (source, file_path) in [
-        ("import @docs/\"my file.md\"\n", "src/@page.moth"),
-        ("import @\"@tools\"\n", "src/@page.moth"),
-        ("import @\"semi;colon\"\n", "src/@page.moth"),
-        ("import @/\n", "src/@page.moth"),
+        ("import @docs/\"my file.md\"\n", "src/@entry.moth"),
+        ("import @\"@tools\"\n", "src/@entry.moth"),
+        ("import @\"semi;colon\"\n", "src/@entry.moth"),
+        ("import @/\n", "src/@entry.moth"),
         ("import @core/math\n", "config.moth"),
     ] {
         let errors = expect_header_error(
@@ -97,28 +110,43 @@ fn legacy_quoted_path_and_config_import_have_no_automatic_replacement() {
 #[test]
 fn legacy_multiline_import_clause_reports_migration_with_flat_replacement() {
     let cases = [
-        ("import\n\n\n    @core/math { sin }\n", "@core/math sin"),
         (
+            "src/@entry.moth",
+            "import\n\n\n    @core/math { sin }\n",
+            "@core/math sin",
+        ),
+        (
+            // `export:` is legal only in an API facade, not in an entry root.
+            "src/@mod.moth",
             "export:\n    import\n        @core/math { sin }\n;\n",
             "@core/math sin",
         ),
-        ("import\n    @core/math as maths\n", "@core/math as maths"),
         (
+            "src/@entry.moth",
+            "import\n    @core/math as maths\n",
+            "@core/math as maths",
+        ),
+        (
+            "src/@entry.moth",
             "import\n    @core/math { sin as sine }\n",
             "@core/math sin as sine",
         ),
     ];
 
-    for (source, expected_replacement) in cases {
-        let result =
-            parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
+    for (file_path, source, expected_replacement) in cases {
+        let result = parse_single_file_headers_with_entry(source, file_path, "src/@entry.moth");
         let errors =
             expect_header_error(result, "legacy multiline import syntax should be diagnosed");
         let diagnostic = errors
             .diagnostics
             .first()
             .expect("expected legacy dependency diagnostic");
-        assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0035");
+        assert_eq!(
+            diagnostic.descriptor().code,
+            "MOTH-SYNTAX-0035",
+            "source {source:?} in {file_path} produced {}",
+            diagnostic.descriptor().code
+        );
         let replacement = diagnostic
             .family_view::<project_config::LegacyDependencyClauseView>()
             .expect("expected a legacy dependency-clause view")
@@ -135,7 +163,7 @@ fn legacy_multiline_import_clause_reports_migration_with_flat_replacement() {
 fn legacy_dependency_comment_between_keyword_and_path_reports_migration() {
     let source = "import -- keep the old clause visible\n    @core/math { sin }\n";
     let errors = expect_header_error(
-        parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth"),
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
         "a comment between import and the path must still be a legacy clause",
     );
     let diagnostic = errors
@@ -159,7 +187,7 @@ fn legacy_dependency_comment_between_keyword_and_path_reports_migration() {
 fn legacy_dependency_span_covers_import_through_closing_brace() {
     let source = "import @core/math { sin }\n";
     let errors = expect_header_error(
-        parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth"),
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
         "legacy import syntax should be diagnosed",
     );
     let close_brace = source
@@ -227,7 +255,7 @@ fn legacy_joined_clause_span_keeps_full_multibyte_extended_range() {
     let mut spans = ExtendedSpanBuilder::new();
     let options = HeaderParseOptions::default();
     let styles = StyleDirectiveRegistry::built_ins();
-    let path = Path::new("src/@page.moth");
+    let path = Path::new("src/@entry.moth");
     let context = HeaderTestPrepareContext {
         source_id: SourceId::COMPILATION_ROOT,
         options: &options,

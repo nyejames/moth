@@ -51,9 +51,9 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
     let source = format!("value = \"{quoted}\"\n");
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let options = crate::compiler_frontend::tests::parse_support::legacy_single_root_options(
+    let options = crate::compiler_frontend::tests::parse_support::synthetic_entry_options(
         SourceId::COMPILATION_ROOT,
     );
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -133,7 +133,7 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
         format!("helper ||:\n    value = \"{quoted}\"\n    setting #Config of I32 = 1\n;\n");
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let mut span_builder = ExtendedSpanBuilder::new();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let interned_path = path_fork
@@ -249,7 +249,7 @@ fn aggregation_diagnostics_keep_distinct_source_ids_in_authored_order() {
             prepare_test_source_file(
                 source,
                 Path::new(if index == 0 {
-                    "src/@page.moth"
+                    "src/@entry.moth"
                 } else {
                     "src/helper.moth"
                 }),
@@ -300,7 +300,7 @@ fn preparation_related_labels_keep_the_continuation_comma_and_name() {
     let mut spans = ExtendedSpanBuilder::new();
     let options = HeaderParseOptions::default();
     let styles = StyleDirectiveRegistry::built_ins();
-    let path = Path::new("src/@page.moth");
+    let path = Path::new("src/@entry.moth");
     let context = HeaderTestPrepareContext {
         source_id: SourceId::from_index(4),
         options: &options,
@@ -347,7 +347,7 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
     let source = format!("value = \"{quoted}\"\nexport:\n;\n");
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let interned_path = path_fork
         .try_intern_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");
@@ -434,7 +434,7 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
 fn dependency_shell_with_compilation_root_identity_prepares() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let interned_path = path_fork
         .try_intern_filesystem_path(&file_path, &mut string_table)
         .expect("test path should be UTF-8");

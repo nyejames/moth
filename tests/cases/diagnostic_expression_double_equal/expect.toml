@@ -6,5 +6,5 @@ diagnostic_codes = ["MOTH-SYNTAX-0031"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0031"
 reason = "common_syntax_mistake.equality_operator"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 3

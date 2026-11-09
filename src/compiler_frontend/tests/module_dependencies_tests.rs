@@ -106,7 +106,7 @@ fn parse_module_headers(
         .expect("tokenization should succeed");
         let owner = SourceTokenOwner::new(lexed.tokens);
         let path_syntax = lexed.path_syntax;
-        let options = crate::compiler_frontend::tests::parse_support::legacy_fixture_file_role(
+        let options = crate::compiler_frontend::tests::parse_support::fixture_file_role(
             &path_buf,
             &entry_path_buf,
         )
@@ -231,8 +231,6 @@ fn dependency_sort_preserves_root_activity_metadata() {
     )
     .expect("dependency sorting should preserve root activity metadata");
 
-    assert!(sorted.has_non_trivial_root_body);
-    assert_eq!(sorted.const_fragment_count, 1);
     assert_eq!(sorted.entry_runtime_fragment_count, 1);
 }
 
@@ -1216,7 +1214,7 @@ fn parse_module_headers_with_content_sources(
         .expect("tokenization should succeed");
         let owner = SourceTokenOwner::new(lexed.tokens);
         let path_syntax = lexed.path_syntax;
-        let options = crate::compiler_frontend::tests::parse_support::legacy_fixture_file_role(
+        let options = crate::compiler_frontend::tests::parse_support::fixture_file_role(
             &path_buf,
             &entry_path_buf,
         )
@@ -1392,7 +1390,7 @@ fn content_value_in_parameter_and_field_defaults_orders_before_consumers() {
     let (headers, content_source_targets, mut string_table, mut path_fork) =
         parse_module_headers_with_content_sources(
             &[(
-                "@page.moth",
+                "@entry.moth",
                 "render |header String = [: [@docs/intro.mtf] ]| -> String:\n\
                  \x20   return header\n\
                  ;\n\
@@ -1402,7 +1400,7 @@ fn content_value_in_parameter_and_field_defaults_orders_before_consumers() {
             )],
             &[("docs/intro.mtf", "intro template body")],
             &[("legal/notice.md", "# Notice")],
-            "@page.moth",
+            "@entry.moth",
         );
 
     let sorted = resolve_module_dependencies(
@@ -1413,8 +1411,9 @@ fn content_value_in_parameter_and_field_defaults_orders_before_consumers() {
     )
     .expect("content ordering should resolve without cycles");
 
-    let render_index = sorted_header_index(&sorted, "@page.moth/render", &string_table, &path_fork);
-    let card_index = sorted_header_index(&sorted, "@page.moth/Card", &string_table, &path_fork);
+    let render_index =
+        sorted_header_index(&sorted, "@entry.moth/render", &string_table, &path_fork);
+    let card_index = sorted_header_index(&sorted, "@entry.moth/Card", &string_table, &path_fork);
     let intro_content_index =
         sorted_header_index(&sorted, "docs/intro.mtf/content", &string_table, &path_fork);
     let notice_content_index = sorted_header_index(
@@ -1438,10 +1437,10 @@ fn content_value_in_parameter_and_field_defaults_orders_before_consumers() {
 fn repeated_content_value_occurrences_share_one_resolved_graph_edge() {
     let (parsed, content_source_targets, string_table, path_fork) =
         parse_module_headers_with_content_sources(
-            &[("@page.moth", "#[: [@docs/intro.mtf] [@docs/intro.mtf]]\n")],
+            &[("@entry.moth", "#[: [@docs/intro.mtf] [@docs/intro.mtf]]\n")],
             &[("docs/intro.mtf", "intro template body")],
             &[],
-            "@page.moth",
+            "@entry.moth",
         );
 
     let BoundModuleHeaders {
@@ -1488,7 +1487,7 @@ fn content_dependency_cycle_is_diagnosed_by_the_ordering_authority() {
     let (headers, content_source_targets, mut string_table, mut path_fork) =
         parse_module_headers_with_content_sources(
             &[(
-                "@page.moth",
+                "@entry.moth",
                 "intro #= @docs/intro.mtf\nlicense #= @legal/license.mtf\n",
             )],
             &[
@@ -1496,7 +1495,7 @@ fn content_dependency_cycle_is_diagnosed_by_the_ordering_authority() {
                 ("legal/license.mtf", "[@docs/intro.mtf]"),
             ],
             &[],
-            "@page.moth",
+            "@entry.moth",
         );
 
     let boundary = diagnosed_result(
@@ -1539,7 +1538,7 @@ fn content_dependency_cycle_is_diagnosed_by_the_ordering_authority() {
 }
 #[test]
 fn nested_module_content_reference_orders_through_resolved_targets() {
-    // A nested module root (its own @page.moth below the entry root) compiles with entry-root-
+    // A nested module root (its own @entry.moth below the entry root) compiles with entry-root-
     // relative header keys while its authored @-paths are module-root-relative. Stage 3 resolves
     // the content edge through the Stage 0 resolved target, so the ordering edge still lands on
     // the canonical content constant instead of deferring on a spelling mismatch.
@@ -1549,7 +1548,7 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
     let options = HeaderParseOptions::default();
 
     let project_root = PathBuf::from("project-root");
-    let root_file = project_root.join("components/@page.moth");
+    let root_file = project_root.join("components/@entry.moth");
     let icon_template = project_root.join("components/icon.mtf");
     let source_files = SourceDatabase::build(
         [&root_file, &icon_template],
@@ -1646,7 +1645,7 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
     prepared_outputs.push(icon_output);
 
     // Simulate Stage 0 for the nested module: the module-relative authored occurrence inside
-    // `components/@page.moth` resolves to the icon template's canonical identity.
+    // `components/@entry.moth` resolves to the icon template's canonical identity.
     let mut resolved_references = ResolvedFileReferenceTable::new();
     let content_row = prepared_outputs[0]
         .structural_file_references
@@ -1712,7 +1711,7 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
     );
     let icon_declaration_index = sorted_header_index(
         &sorted,
-        "components/@page.moth/icon",
+        "components/@entry.moth/icon",
         &string_table,
         &path_fork,
     );
@@ -1730,10 +1729,10 @@ fn missing_content_target_defers_to_the_stage0_diagnostic_lane() {
     // so the resolved-reference lane keeps ownership of the user-facing diagnostic.
     let (headers, _content_source_targets, mut string_table, mut path_fork) =
         parse_module_headers_with_content_sources(
-            &[("@page.moth", "unused #= @docs/intro.mtf\n")],
+            &[("@entry.moth", "unused #= @docs/intro.mtf\n")],
             &[],
             &[],
-            "@page.moth",
+            "@entry.moth",
         );
 
     let sorted = resolve_module_dependencies(
@@ -1758,12 +1757,12 @@ fn qualified_template_content_cycle_reports_circular_dependency() {
     let (headers, content_source_targets, mut string_table, mut path_fork) =
         parse_module_headers_with_content_sources(
             &[
-                ("@page.moth", "unused #= 0\n"),
+                ("@entry.moth", "unused #= 0\n"),
                 ("settings.moth", "title #= @intro.mtf\n"),
             ],
             &[("intro.mtf", "# [@settings title]\n")],
             &[],
-            "@page.moth",
+            "@entry.moth",
         );
 
     let failure = resolve_module_dependencies(
@@ -1813,7 +1812,7 @@ fn qualified_template_content_orders_after_its_selected_constant() {
     let (headers, content_source_targets, mut string_table, mut path_fork) =
         parse_module_headers_with_content_sources(
             &[
-                ("@page.moth", "unused #= 0\n"),
+                ("@entry.moth", "unused #= 0\n"),
                 (
                     "settings.moth",
                     "title #= \"Title\"\nfrom_file #= @intro.mtf\nfrom_qualified #= @intro content\n",
@@ -1821,7 +1820,7 @@ fn qualified_template_content_orders_after_its_selected_constant() {
             ],
             &[("intro.mtf", "# [@settings title]\n")],
             &[],
-            "@page.moth",
+            "@entry.moth",
         );
 
     let sorted = resolve_module_dependencies(

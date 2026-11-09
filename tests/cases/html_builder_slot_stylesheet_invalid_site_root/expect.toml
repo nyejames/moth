@@ -8,7 +8,7 @@ diagnostic_codes = ["MOTH-RULE-0061"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0061"
 reason = "invalid_html_slot_contribution.site_root"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 2
 
 [backends.html_wasm]
@@ -19,5 +19,5 @@ diagnostic_codes = ["MOTH-RULE-0061"]
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0061"
 reason = "invalid_html_slot_contribution.site_root"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 2

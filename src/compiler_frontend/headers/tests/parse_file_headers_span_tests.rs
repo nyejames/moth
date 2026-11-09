@@ -199,7 +199,7 @@ fn declaration_initializer_reference_member_return_and_variant_spans_retain_orig
     .expect("source should tokenize");
     let (owner, path_syntax) = super::canonical_handoff(tokens);
     let options =
-        crate::compiler_frontend::tests::parse_support::legacy_single_root_options(source_id);
+        crate::compiler_frontend::tests::parse_support::synthetic_entry_options(source_id);
     let mut prepared = parse_file_headers_with_table(
         owner,
         scope,
@@ -432,7 +432,7 @@ fn declaration_initializer_reference_member_return_and_variant_spans_retain_orig
 #[test]
 fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
     let source = "release_version #Config of I32 = 1\n#[if show_banner: Hello]\n";
-    let canonical = PathBuf::from("src/@page.moth");
+    let canonical = PathBuf::from("src/@entry.moth");
     let mut strings = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
@@ -458,7 +458,7 @@ fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
     .expect("source should tokenize");
     let (owner, path_syntax) = super::canonical_handoff(tokens);
     let options =
-        crate::compiler_frontend::tests::parse_support::legacy_single_root_options(source_id);
+        crate::compiler_frontend::tests::parse_support::synthetic_entry_options(source_id);
     let mut prepared = parse_file_headers_with_table(
         owner,
         scope,
@@ -551,7 +551,7 @@ fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
         "the finalized source identity should change"
     );
     let final_path = remapped_path_fork
-        .try_intern_portable_path("src/@page.moth", &mut merged)
+        .try_intern_portable_path("src/@entry.moth", &mut merged)
         .expect("test path fits");
     prepared
         .rebind_source_identity(final_id, final_path, &mut remapped_path_fork)

@@ -7,7 +7,7 @@ message_contains = ["Match arm uses qualifier 'RightStatus', but the scrutinee i
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0049"
 reason = "invalid_match_pattern.qualifier_does_not_match_scrutinee"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 10
 column = 26
 count = 1

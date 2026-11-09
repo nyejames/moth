@@ -32,7 +32,7 @@ fn prepare_source(
 ) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = Path::new("@page.moth");
+    let file_path = Path::new("@entry.moth");
     let interned_path = path_fork
         .try_intern_filesystem_path(file_path, &mut string_table)
         .expect("test path should be UTF-8");
@@ -49,7 +49,7 @@ fn prepare_source(
     )
     .expect("source should tokenize");
     let owner = SourceTokenOwner::new(lexed.tokens);
-    let options = crate::compiler_frontend::tests::parse_support::legacy_single_root_options(
+    let options = crate::compiler_frontend::tests::parse_support::synthetic_entry_options(
         SourceId::COMPILATION_ROOT,
     );
     let output = prepare_file_from_tokens(

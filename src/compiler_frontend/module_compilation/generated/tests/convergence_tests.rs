@@ -71,7 +71,7 @@ fn generated_identity(name: &str) -> GeneratedFunctionIdentity {
     GeneratedFunctionIdentity::new(
         GeneratedDeclarationIdentity::ModulePrivate(ModulePrivateExecutableIdentity::new(
             module_origin(),
-            "@page.moth".to_owned(),
+            "@entry.moth".to_owned(),
             ModulePrivateExecutableCategory::GenericFunction,
             name.to_owned(),
             None,
@@ -86,7 +86,7 @@ fn generated_identity(name: &str) -> GeneratedFunctionIdentity {
 fn private_identity(name: &str) -> ModulePrivateExecutableIdentity {
     ModulePrivateExecutableIdentity::new(
         module_origin(),
-        "@page.moth".to_owned(),
+        "@entry.moth".to_owned(),
         ModulePrivateExecutableCategory::FreeFunction,
         name.to_owned(),
         None,
@@ -1846,7 +1846,7 @@ fn compile_owned_service_fixture(
     let directory = tempfile::tempdir().expect("the service fixture directory should exist");
     let source_root = directory.path().join("src");
     fs::create_dir_all(&source_root).expect("the service source root should exist");
-    let source_path = source_root.join("@page.moth");
+    let source_path = source_root.join("@entry.moth");
     fs::write(&source_path, source).expect("the retained-fact fixture should be written");
     fs::write(
         directory.path().join("config.moth"),

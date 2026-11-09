@@ -50,10 +50,7 @@ use crate::compiler_frontend::source::test_support::TestSourceContext;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceId, SourceSpan,
 };
-use crate::compiler_frontend::source_packages::root_file::{
-    PreparedSourcePackageRoots, file_name_is_normal_module_root_file,
-    file_name_is_support_root_file,
-};
+use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -76,50 +73,35 @@ pub(crate) fn test_project_path_resolver() -> ProjectPathResolver {
     )
 }
 
-/// Header options for one single-file fixture that models today's legacy normal root.
-///
-/// LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): the fixture file both publishes a
-/// normal surface and owns the top-level runtime body. Phase 4 fixtures split that role into
-/// `@mod.moth` and `@entry.moth`.
-pub(crate) fn legacy_single_root_options(file_id: SourceId) -> HeaderParseOptions<'static> {
+/// Header options for one single-file fixture selected as its synthetic entry root.
+pub(crate) fn synthetic_entry_options(file_id: SourceId) -> HeaderParseOptions<'static> {
     HeaderParseOptions {
         root_file_ids: Default::default(),
-        selected_file: Some((file_id, FileRole::LegacyCombinedRoot)),
+        selected_file: Some((file_id, FileRole::ActiveEntryRoot)),
         reached_root_roles: &[],
     }
 }
 
-/// Header role for one file in a legacy single-module header fixture.
+/// Header role for one file in a single-module header fixture.
 ///
-/// WHAT: maps the fixture's authored entry path to the legacy combined root, the canonical
-///       `@entry.moth`/`@package.moth` spellings to their Stage 0 roles and every other root-named
-///       file to its API-only facade role. Returns `None` for ordinary sources so the caller
-///       keeps [`HeaderParseOptions::default`].
-/// WHY: legacy fixtures prepare several root-named files in one set and identify the executable
-///       root by path. Production derives roles from Stage 0's root inventory instead; this
-///       helper keeps the pre-cutover fixture shape in the one test-only owner.
-pub(crate) fn legacy_fixture_file_role(
-    file_path: &Path,
-    entry_file_path: &Path,
-) -> Option<FileRole> {
-    let file_name = file_path.file_name()?.to_str()?;
-    // The canonical role spellings classify exactly as Stage 0 does under the migration bridge.
-    // `@package.moth` is the support facade and `@entry.moth` is the start-bearing entry root,
-    // regardless of which path the legacy fixture names as its executable root.
-    if file_name == "@entry.moth" {
+/// WHAT: maps the fixture's explicitly selected executable path and the canonical `@entry.moth`
+///       spelling to the entry root, and the two API-facade spellings to their active facade
+///       roles. Returns `None` for ordinary sources so the caller keeps
+///       [`HeaderParseOptions::default`].
+/// WHY: test fixtures prepare several root-named files in one set and identify the executable root
+///       by path. Production derives roles from Stage 0's root inventory and the explicit
+///       synthetic selection instead; this helper keeps that shape in the one test-only owner.
+pub(crate) fn fixture_file_role(file_path: &Path, entry_file_path: &Path) -> Option<FileRole> {
+    if entry_file_path == file_path {
         return Some(FileRole::ActiveEntryRoot);
     }
-    if file_name == "@package.moth" {
-        return Some(FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Support));
+    let file_name = file_path.file_name()?.to_str()?;
+    match file_name {
+        "@entry.moth" => Some(FileRole::ActiveEntryRoot),
+        "@package.moth" => Some(FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Support)),
+        "@mod.moth" => Some(FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal)),
+        _ => None,
     }
-    if entry_file_path == file_path {
-        return Some(FileRole::LegacyCombinedRoot);
-    }
-    if file_name_is_support_root_file(file_name) {
-        return Some(FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Support));
-    }
-    file_name_is_normal_module_root_file(file_name)
-        .then_some(FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal))
 }
 
 /// Build deterministic Stage 0 facts for parser tests without reading the filesystem.
@@ -220,6 +202,19 @@ pub(crate) fn parse_single_file_ast_build_result(
     parse_single_file_ast_build_result_with_registry(source, ExternalPackageRegistry::new())
 }
 
+/// Parse one single-file fixture whose authored filename selects its root role.
+pub(crate) fn parse_single_file_ast_build_result_with_path(
+    source: &str,
+    path: &str,
+) -> Result<(AstBuildResult, PathInternerFork, StringTable), PreparedFailure> {
+    parse_single_file_ast_build_result_inner(
+        source,
+        path,
+        ExternalPackageRegistry::new(),
+        AstRecoveryPolicy::configured_defaults(),
+    )
+}
+
 pub(crate) fn parse_single_file_ast_build_result_with_registry(
     source: &str,
     registry: ExternalPackageRegistry,
@@ -236,7 +231,16 @@ pub(crate) fn parse_single_file_ast_build_result_with_recovery_policy(
     registry: ExternalPackageRegistry,
     recovery_policy: AstRecoveryPolicy,
 ) -> Result<(AstBuildResult, PathInternerFork, StringTable), PreparedFailure> {
-    let mut source_context = TestSourceContext::new("@page.moth");
+    parse_single_file_ast_build_result_inner(source, "@entry.moth", registry, recovery_policy)
+}
+
+fn parse_single_file_ast_build_result_inner(
+    source: &str,
+    path: &str,
+    registry: ExternalPackageRegistry,
+    recovery_policy: AstRecoveryPolicy,
+) -> Result<(AstBuildResult, PathInternerFork, StringTable), PreparedFailure> {
+    let mut source_context = TestSourceContext::new(path);
 
     let mut path_fork = PathInternerFork::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -267,9 +271,25 @@ pub(crate) fn parse_single_file_ast_build_result_with_recovery_policy(
     let path_syntax = lexed.path_syntax;
     let (string_table, span_builder) = source_context.preparation_parts();
 
-    // The single-file fixture models today's legacy normal root: one file publishes the normal
-    // surface and owns the top-level runtime body.
-    let options = legacy_single_root_options(file_id);
+    // The single-file fixture role follows its authored root filename; ordinary names are
+    // explicitly selected entry roots.
+    let selected_role = Path::new(path)
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .and_then(
+            crate::compiler_frontend::source_packages::root_file::module_root_role_for_file_name,
+        )
+        .map_or(FileRole::ActiveEntryRoot, |role| match role {
+            crate::compiler_frontend::semantic_identity::ModuleRootRole::Entry => {
+                FileRole::ActiveEntryRoot
+            }
+            role => FileRole::ActiveApiOnlyModuleRoot(role),
+        });
+    let options = HeaderParseOptions {
+        root_file_ids: Default::default(),
+        selected_file: Some((file_id, selected_role)),
+        reached_root_roles: &[],
+    };
 
     let output = match prepare_file_from_tokens(
         owner,
@@ -356,7 +376,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_recovery_policy(
     };
 
     let entry_path = path_fork
-        .try_intern_portable_path("@page.moth", string_table)
+        .try_intern_portable_path("@entry.moth", string_table)
         .expect("test entry path fits");
     let build_result = Ast::new(
         AstBuildInput {
@@ -369,7 +389,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_recovery_policy(
             source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
-            synthesizes_entry_start: true,
+            synthesizes_entry_start: selected_role.synthesizes_entry_start(),
             external_package_registry,
             style_directives: &style_directives,
             path_fork: &mut path_fork,
@@ -400,7 +420,16 @@ pub(crate) fn parse_single_file_ast_result(
 }
 
 pub(crate) fn parse_single_file_ast(source: &str) -> (Ast, PathInternerFork, StringTable) {
-    parse_single_file_ast_result(source).expect("source should parse into AST")
+    match parse_single_file_ast_result(source) {
+        Ok(parsed) => parsed,
+        Err(failure) => {
+            let frozen = freeze_ast_diagnostic_failure(failure);
+            panic!(
+                "source should parse into AST: {}",
+                crate::compiler_frontend::compiler_messages::render::terse::format_terse_compilation_result(&frozen).join("\n")
+            )
+        }
+    }
 }
 
 pub(crate) fn parse_single_file_ast_diagnostic(source: &str) -> CompilationResult<()> {

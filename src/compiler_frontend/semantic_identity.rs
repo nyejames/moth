@@ -280,16 +280,6 @@ impl<T> ModuleRootFiles<T> {
             .or(self.entry.as_ref())
     }
 
-    /// Whether a normal root still acts as today's legacy combined root.
-    ///
-    /// LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): a normal root in a module
-    /// without an entry root keeps today's implicit start and root runtime. Header-role
-    /// classification and prepared-module start synthesis both read this one decision, so the
-    /// Phase 4 cutover deletes it in one place.
-    pub(crate) fn normal_root_is_legacy_combined(&self) -> bool {
-        self.normal.is_some() && self.entry.is_none()
-    }
-
     /// Present roots in the fixed normal, support, entry order.
     pub(crate) fn present(&self) -> impl Iterator<Item = (ModuleRootRole, &T)> {
         [
@@ -484,7 +474,7 @@ pub(crate) fn portable_relative_logical_path_from(
 /// `PathId`, dense `SourceId`, traversal index, `SourceDatabase` or absolute filesystem path,
 /// so identity is stable across checkout roots and traversal order. The module-relative source
 /// path intentionally includes the actual root filename, so renaming the root file (for example
-/// `@page.moth` to `@pages.moth`) changes the owned-source identity even though the module origin
+/// `@entry.moth` to `@mod.moth`) changes the owned-source identity even though the module origin
 /// remains stable.
 /// WHY: the source tree index records this identity as the logical identity of every owned source
 /// file (`SourceLogicalIdentity::Owned`). Keeping the dense

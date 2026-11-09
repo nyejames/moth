@@ -14,7 +14,7 @@ message_contains = [
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0022"
 reason = "invalid_template_structure.builder_root_slot_not_registered"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 2
 
 [backends.html_wasm]
@@ -31,5 +31,5 @@ message_contains = [
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0022"
 reason = "invalid_template_structure.builder_root_slot_not_registered"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 2

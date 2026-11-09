@@ -7,7 +7,7 @@ diagnostic_codes = ["MOTH-SYNTAX-0029", "MOTH-SYNTAX-0029", "MOTH-SYNTAX-0029", 
 code = "MOTH-SYNTAX-0029"
 reason = "invalid_loop_header.bare_dual_binding"
 occurrence = 1
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 2
 column = 12
 
@@ -15,7 +15,7 @@ column = 12
 code = "MOTH-SYNTAX-0029"
 reason = "invalid_loop_header.missing_binding_comma"
 occurrence = 2
-path = "input/missing_comma/@mod.moth"
+path = "input/missing_comma/@entry.moth"
 line = 3
 column = 18
 
@@ -23,7 +23,7 @@ column = 18
 code = "MOTH-SYNTAX-0029"
 reason = "invalid_loop_header.missing_closing_pipe"
 occurrence = 3
-path = "input/missing_pipe/@mod.moth"
+path = "input/missing_pipe/@entry.moth"
 line = 3
 column = 13
 
@@ -31,13 +31,13 @@ column = 13
 code = "MOTH-SYNTAX-0029"
 reason = "invalid_loop_header.trailing_binding_comma"
 occurrence = 4
-path = "input/trailing_comma/@mod.moth"
+path = "input/trailing_comma/@entry.moth"
 line = 3
 column = 17
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0039"
 occurrence = 1
-path = "input/reserved_name/@mod.moth"
+path = "input/reserved_name/@entry.moth"
 line = 3
 column = 13

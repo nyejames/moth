@@ -30,7 +30,6 @@ use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnos
 use crate::compiler_frontend::compiler_messages::{
     CompilerStage, DiagnosticBag, InvalidConfigReason, NamingConvention, PreparedFailure,
 };
-use crate::compiler_frontend::module_compilation::ModuleRootActivity;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -164,32 +163,6 @@ fn html_cleanup_policy() -> CleanupPolicy {
 
 fn generic_cleanup_policy() -> CleanupPolicy {
     CleanupPolicy::generic([".html", ".js", ".wasm"])
-}
-
-#[test]
-fn module_root_activity_html_policy_requires_any_root_activity() {
-    assert!(!ModuleRootActivity::default().has_html_artifact_activity());
-    assert!(
-        ModuleRootActivity {
-            has_non_trivial_root_body: true,
-            ..ModuleRootActivity::default()
-        }
-        .has_html_artifact_activity()
-    );
-    assert!(
-        ModuleRootActivity {
-            const_fragment_count: 1,
-            ..ModuleRootActivity::default()
-        }
-        .has_html_artifact_activity()
-    );
-    assert!(
-        ModuleRootActivity {
-            runtime_fragment_count: 1,
-            ..ModuleRootActivity::default()
-        }
-        .has_html_artifact_activity()
-    );
 }
 
 fn write_project_outputs(
@@ -531,8 +504,8 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
             .modules()
             .find(|module| {
                 module.metadata.entry.as_ref().is_some_and(|entry| {
-                    entry.entry_point.ends_with("@page.moth")
-                        && !entry.entry_point.ends_with("docs/@page.moth")
+                    entry.entry_point.ends_with("@entry.moth")
+                        && !entry.entry_point.ends_with("docs/@entry.moth")
                 })
             })
             .expect("directory build should discover homepage module");
@@ -543,7 +516,7 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
                     .metadata
                     .entry
                     .as_ref()
-                    .is_some_and(|entry| entry.entry_point.ends_with("docs/@page.moth"))
+                    .is_some_and(|entry| entry.entry_point.ends_with("docs/@entry.moth"))
             })
             .expect("directory build should discover docs module");
 

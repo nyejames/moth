@@ -6,8 +6,8 @@ use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, Token
 fn function_signature_reports_missing_arrow_before_return_type() {
     let result = parse_single_file_headers_with_entry(
         "f|x I32| I32:\n;\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     assert!(
         matches!(&result, HeaderTestOutcome::Diagnostics(_)),
@@ -25,8 +25,11 @@ fn function_signature_reports_missing_arrow_before_return_type() {
 
 #[test]
 fn function_signature_reports_missing_colon_after_return_list() {
-    let result =
-        parse_single_file_headers_with_entry("f|| -> I32\n;\n", "src/@page.moth", "src/@page.moth");
+    let result = parse_single_file_headers_with_entry(
+        "f|| -> I32\n;\n",
+        "src/@entry.moth",
+        "src/@entry.moth",
+    );
     assert!(
         matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "missing ':' after return declarations must fail"
@@ -48,7 +51,7 @@ fn function_signature_reports_missing_return_type_after_arrow_colon() {
     // parser owns this boundary and must report `MissingReturnType` at the colon rather
     // than the function name or parameter list.
     let result =
-        parse_single_file_headers_with_entry("f|| -> :\n;\n", "src/@page.moth", "src/@page.moth");
+        parse_single_file_headers_with_entry("f|| -> :\n;\n", "src/@entry.moth", "src/@entry.moth");
     assert!(
         matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "an arrow immediately followed by ':' must fail"
@@ -68,7 +71,7 @@ fn function_signature_reports_missing_return_type_after_arrow_newline() {
     // A newline immediately after `->` is a missing-return-type boundary, not a valid
     // empty return list. The signature parser reports `MissingReturnType` at the newline.
     let result =
-        parse_single_file_headers_with_entry("f|| ->\n;\n", "src/@page.moth", "src/@page.moth");
+        parse_single_file_headers_with_entry("f|| ->\n;\n", "src/@entry.moth", "src/@entry.moth");
     assert!(
         matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "an arrow immediately followed by a newline must fail"
@@ -91,7 +94,7 @@ fn trait_requirement_reports_missing_return_type_after_arrow_colon() {
     // the function-body `:` terminator. The diagnostic points at the first missing-type
     // boundary after the arrow, not at the requirement name or `This` receiver.
     let source = "DISPLAYABLE must:\n    display |This| -> :\n;\n";
-    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
+    let result = parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
     assert!(
         matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "a trait requirement arrow followed by ':' must fail"
@@ -123,7 +126,7 @@ fn trait_requirement_reports_missing_return_type_after_arrow_newline() {
     // The requirement-specific reason is used so the guidance never suggests the function
     // body `:` terminator.
     let source = "DISPLAYABLE must:\n    display |This| ->\n;\n";
-    let result = parse_single_file_headers_with_entry(source, "src/@page.moth", "src/@page.moth");
+    let result = parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth");
     assert!(
         matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "a trait requirement arrow followed by a newline must fail"
@@ -158,8 +161,8 @@ fn duplicate_top_level_function_names_error_during_header_parsing() {
          simple_function |value I32| -> I32:\n\
              return value + 2\n\
          ;\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
 
     assert!(
@@ -250,8 +253,8 @@ fn choice_headers_parse_unit_variants_in_declaration_order() {
 fn choice_headers_reject_duplicate_variants() {
     let result = parse_single_file_headers_with_entry(
         "Status :: Ready, Ready;\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     assert!(
         matches!(&result, HeaderTestOutcome::Diagnostics(_)),
@@ -271,8 +274,8 @@ fn choice_headers_reject_invalid_payload_forms() {
     // Shorthand payload is invalid by design (not deferred).
     let payload_shorthand_result = parse_single_file_headers_with_entry(
         "Status :: Ready String;\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     assert!(
         matches!(&payload_shorthand_result, HeaderTestOutcome::Diagnostics(_)),
@@ -292,8 +295,8 @@ fn choice_headers_reject_invalid_payload_forms() {
     // Constructor-style declarations are invalid by design.
     let payload_paren_result = parse_single_file_headers_with_entry(
         "Status :: Ready(String);\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     assert!(
         matches!(&payload_paren_result, HeaderTestOutcome::Diagnostics(_)),
@@ -313,8 +316,8 @@ fn choice_headers_reject_invalid_payload_forms() {
     // Default values remain deferred.
     let defaults_result = parse_single_file_headers_with_entry(
         "Status :: Ready = true;\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
     assert!(
         matches!(&defaults_result, HeaderTestOutcome::Diagnostics(_)),
@@ -392,7 +395,7 @@ fn header_parsing_emits_naming_warnings_for_non_camel_type_like_symbols() {
 #[test]
 fn header_parsing_rejects_keyword_shadow_constant_name() {
     let result =
-        parse_single_file_headers_with_entry("FALSE #= 1\n", "src/@page.moth", "src/@page.moth");
+        parse_single_file_headers_with_entry("FALSE #= 1\n", "src/@entry.moth", "src/@entry.moth");
     assert!(
         matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "keyword-shadow top-level constants must fail during header parsing"
@@ -423,8 +426,8 @@ fn trait_declarations_using_must_parse_as_trait_headers() {
 fn generic_type_aliases_are_rejected_during_header_parsing() {
     let result = parse_single_file_headers_with_entry(
         "Response type T as ResultShape of T, Error\n",
-        "src/@page.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
+        "src/@entry.moth",
     );
 
     assert!(

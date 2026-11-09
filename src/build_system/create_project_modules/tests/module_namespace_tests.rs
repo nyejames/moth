@@ -24,7 +24,7 @@ fn record(
         PathBuf::from(root),
         ModuleRootFiles::new(
             normal.then(|| PathBuf::from(format!("{root}/@root.moth"))),
-            support.then(|| PathBuf::from(format!("{root}/+root.moth"))),
+            support.then(|| PathBuf::from(format!("{root}/@package.moth"))),
             None,
         ),
         PathBuf::from(logical),

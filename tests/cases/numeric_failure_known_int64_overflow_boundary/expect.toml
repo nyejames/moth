@@ -9,7 +9,7 @@ diagnostic_codes = ["MOTH-RULE-0053", "MOTH-RULE-0053"]
 code = "MOTH-RULE-0053"
 occurrence = 1
 reason = "compile_time_evaluation_error.integer_overflow"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 4
 column = 22
 

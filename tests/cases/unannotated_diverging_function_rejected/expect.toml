@@ -11,6 +11,6 @@ message_contains = [
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0055"
 reason = "invalid_return_shape.unannotated_function_always_diverges"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1
 column = 1

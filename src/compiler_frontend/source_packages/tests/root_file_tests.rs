@@ -1,9 +1,9 @@
 use super::root_file::{
-    PreparedSourcePackageRoots, dependency_component_is_support_root_file,
-    dependency_path_references_config_file, dependency_path_references_support_root_file,
-    file_name_is_config_file, file_name_is_legacy_hash_root_file, file_name_is_module_root_file,
-    file_name_is_normal_module_root_file, file_name_is_support_root_file,
+    PreparedSourcePackageRoots, dependency_component_is_legacy_support_marker,
+    dependency_path_references_config_file, dependency_path_references_legacy_support_marker,
+    file_name_is_config_file, file_name_is_module_root_file, module_root_role_for_file_name,
 };
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::path::PathBuf;
@@ -20,31 +20,79 @@ fn path(
 }
 
 #[test]
-fn classifies_only_at_prefixed_moth_root_filenames() {
-    assert!(file_name_is_normal_module_root_file("@home.moth"));
-    assert!(file_name_is_normal_module_root_file("@anything.moth"));
-    assert!(!file_name_is_normal_module_root_file("home.moth"));
-    assert!(!file_name_is_normal_module_root_file("@home.js"));
-    assert!(!file_name_is_normal_module_root_file("@.moth"));
+fn classifies_only_the_fixed_root_filenames() {
+    assert_eq!(
+        module_root_role_for_file_name("@mod.moth"),
+        Some(ModuleRootRole::Normal)
+    );
+    assert_eq!(
+        module_root_role_for_file_name("@package.moth"),
+        Some(ModuleRootRole::Support)
+    );
+    assert_eq!(
+        module_root_role_for_file_name("@entry.moth"),
+        Some(ModuleRootRole::Entry)
+    );
+    for stale in [
+        "@page.moth",
+        "@home.moth",
+        "@site.moth",
+        "@api.moth",
+        "@config.moth",
+        "@anything.moth",
+        "+pkg.moth",
+        "#pkg.moth",
+        "package.moth",
+        "mod.moth",
+        "@mod.js",
+        "@package.js",
+        "@.moth",
+        "@Entry.moth",
+    ] {
+        assert_eq!(
+            module_root_role_for_file_name(stale),
+            None,
+            "{stale} is not one of the three fixed root filenames"
+        );
+    }
     assert!(file_name_is_config_file("config.moth"));
     assert!(!file_name_is_config_file("config"));
 }
 
 #[test]
-fn classifies_legacy_hash_prefixed_moth_root_filenames() {
-    assert!(file_name_is_legacy_hash_root_file("#home.moth"));
-    assert!(file_name_is_legacy_hash_root_file("#anything.moth"));
-    assert!(!file_name_is_legacy_hash_root_file("home.moth"));
-    assert!(!file_name_is_legacy_hash_root_file("#home.js"));
-    assert!(!file_name_is_legacy_hash_root_file("#.moth"));
+fn classifies_the_closed_three_role_root_filenames() {
+    assert!(file_name_is_module_root_file("@mod.moth"));
+    assert!(file_name_is_module_root_file("@package.moth"));
+    assert!(file_name_is_module_root_file("@entry.moth"));
+    for stale in [
+        "@page.moth",
+        "@home.moth",
+        "@site.moth",
+        "@api.moth",
+        "@config.moth",
+        "@anything.moth",
+        "+pkg.moth",
+        "#pkg.moth",
+        "page.moth",
+        "config.moth",
+    ] {
+        assert!(
+            !file_name_is_module_root_file(stale),
+            "{stale} is not one of the three closed root filenames"
+        );
+    }
 }
 
 #[test]
-fn dependency_components_identify_support_roots() {
-    assert!(dependency_component_is_support_root_file("+pkg"));
-    assert!(dependency_component_is_support_root_file("+pkg.moth"));
-    assert!(!dependency_component_is_support_root_file("pkg"));
-    assert!(!dependency_component_is_support_root_file("+pkg.js"));
+fn legacy_support_marker_dependency_components_are_flagged() {
+    assert!(dependency_component_is_legacy_support_marker("+pkg"));
+    assert!(dependency_component_is_legacy_support_marker("+pkg.moth"));
+    assert!(!dependency_component_is_legacy_support_marker("pkg"));
+    assert!(!dependency_component_is_legacy_support_marker("@package"));
+    assert!(!dependency_component_is_legacy_support_marker(
+        "@package.moth"
+    ));
+    assert!(dependency_component_is_legacy_support_marker("+pkg.js"));
 }
 
 #[test]
@@ -79,13 +127,13 @@ fn config_dependency_classification_uses_the_source_component() {
 }
 
 #[test]
-fn support_root_dependency_classification_uses_the_source_component() {
+fn legacy_support_marker_dependency_paths_are_flagged() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
 
-    let bare_support_root = path(&["modules", "+pkg"], &mut string_table, &mut path_fork);
-    assert!(dependency_path_references_support_root_file(
-        bare_support_root,
+    let bare_support_marker = path(&["modules", "+pkg"], &mut string_table, &mut path_fork);
+    assert!(dependency_path_references_legacy_support_marker(
+        bare_support_marker,
         &path_fork,
         &string_table
     ));
@@ -95,18 +143,21 @@ fn support_root_dependency_classification_uses_the_source_component() {
         &mut string_table,
         &mut path_fork,
     );
-    assert!(!dependency_path_references_support_root_file(
+    assert!(!dependency_path_references_legacy_support_marker(
         ordinary_module,
         &path_fork,
         &string_table
     ));
 
     let ordinary_plus_extension = path(&["modules", "+pkg.js"], &mut string_table, &mut path_fork);
-    assert!(!dependency_path_references_support_root_file(
-        ordinary_plus_extension,
-        &path_fork,
-        &string_table
-    ));
+    assert!(
+        dependency_path_references_legacy_support_marker(
+            ordinary_plus_extension,
+            &path_fork,
+            &string_table
+        ),
+        "any + component is a retired support marker, regardless of its extension"
+    );
 }
 
 #[test]
@@ -139,29 +190,12 @@ fn prepared_roots_preserve_canonical_prefix_order() {
 }
 
 #[test]
-fn classifies_only_plus_prefixed_moth_filenames_as_support_roots() {
-    assert!(file_name_is_support_root_file("+pkg.moth"));
-    assert!(file_name_is_support_root_file("+anything.moth"));
-    assert!(!file_name_is_support_root_file("@home.moth"));
-    assert!(!file_name_is_support_root_file("pkg.moth"));
-    assert!(!file_name_is_support_root_file("+pkg.js"));
-    assert!(!file_name_is_support_root_file("+.moth"));
-    assert!(file_name_is_module_root_file("@home.moth"));
-    assert!(file_name_is_module_root_file("+pkg.moth"));
-    assert!(!file_name_is_module_root_file("home.moth"));
-}
-
-#[test]
-fn config_file_distinct_from_module_and_legacy_roots() {
+fn config_file_is_distinct_from_the_fixed_roots() {
     assert!(file_name_is_config_file("config.moth"));
-    assert!(!file_name_is_normal_module_root_file("config.moth"));
-    assert!(!file_name_is_legacy_hash_root_file("config.moth"));
+    assert!(!file_name_is_module_root_file("config.moth"));
 
-    assert!(file_name_is_normal_module_root_file("@config.moth"));
+    // `@config.moth` is not the build-only config file and is not a root role; Stage 0 rejects it
+    // with the closed-vocabulary source-structure diagnostic.
     assert!(!file_name_is_config_file("@config.moth"));
-    assert!(!file_name_is_legacy_hash_root_file("@config.moth"));
-
-    assert!(file_name_is_legacy_hash_root_file("#config.moth"));
-    assert!(!file_name_is_config_file("#config.moth"));
-    assert!(!file_name_is_normal_module_root_file("#config.moth"));
+    assert!(!file_name_is_module_root_file("@config.moth"));
 }

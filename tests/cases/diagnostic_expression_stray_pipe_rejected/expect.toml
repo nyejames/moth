@@ -6,13 +6,13 @@ diagnostic_codes = ["MOTH-SYNTAX-0002", "MOTH-SYNTAX-0002"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0002"
 occurrence = 1
-path = "input/plain_initializer/@mod.moth"
+path = "input/plain_initializer/@entry.moth"
 line = 2
 column = 12
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0002"
 occurrence = 2
-path = "input/retained_value_block/@mod.moth"
+path = "input/retained_value_block/@entry.moth"
 line = 4
 column = 46

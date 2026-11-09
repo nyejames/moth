@@ -9,5 +9,5 @@ message_contains = ["2 authored success return slots"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0051"
 reason = "invalid_fallible_handling.function_has_multiple_success_returns"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 7

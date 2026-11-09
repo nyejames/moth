@@ -7,7 +7,7 @@ diagnostic_codes = ["MOTH-SYNTAX-0029", "MOTH-SYNTAX-0029", "MOTH-SYNTAX-0029", 
 code = "MOTH-SYNTAX-0029"
 reason = "invalid_loop_header.misplaced_loop_step"
 occurrence = 1
-path = "input/misplaced_by/@mod.moth"
+path = "input/misplaced_by/@entry.moth"
 line = 3
 column = 12
 
@@ -15,7 +15,7 @@ column = 12
 code = "MOTH-SYNTAX-0029"
 reason = "invalid_loop_header.missing_range_step"
 occurrence = 2
-path = "input/missing_value/@mod.moth"
+path = "input/missing_value/@entry.moth"
 line = 3
 column = 18
 
@@ -23,7 +23,7 @@ column = 18
 code = "MOTH-SYNTAX-0029"
 reason = "invalid_loop_header.repeated_loop_step"
 occurrence = 3
-path = "input/repeated_by/@mod.moth"
+path = "input/repeated_by/@entry.moth"
 line = 3
 column = 23
 
@@ -31,6 +31,6 @@ column = 23
 code = "MOTH-RULE-0059"
 reason = "invalid_loop_operand.step_not_signed_integer"
 occurrence = 1
-path = "input/unsigned_step/@mod.moth"
+path = "input/unsigned_step/@entry.moth"
 line = 4
 column = 21

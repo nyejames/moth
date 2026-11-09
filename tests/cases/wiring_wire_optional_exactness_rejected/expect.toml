@@ -11,6 +11,6 @@ diagnostic_codes = ["MOTH-TYPE-0001"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 7
 count = 1

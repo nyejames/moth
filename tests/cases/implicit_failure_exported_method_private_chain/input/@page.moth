@@ -1,6 +1,0 @@
-export:
-    @counter Counter
-;
-
-counter = Counter(2)
-ignored = counter.scaled(3)

@@ -12,7 +12,7 @@ fn header_parsing_rejects_core_cast_trait_source_declaration() {
     ] {
         let source = format!("{trait_name} must:\n    {method_name} |This| -> {return_types}\n;\n");
         let result =
-            parse_single_file_headers_with_entry(&source, "src/@page.moth", "src/@page.moth");
+            parse_single_file_headers_with_entry(&source, "src/@entry.moth", "src/@entry.moth");
         let error_message =
             format!("source declaration of {trait_name} must be rejected as a core cast trait");
         let errors = expect_header_error(result, &error_message);
@@ -69,12 +69,12 @@ fn header_parsing_rejects_selection_alias_to_core_cast_trait_name() {
         ),
         (
             "@helper USER_TRAIT as TRY_CASTABLE_TO_F64\n".to_owned(),
-            "src/@page.moth".to_owned(),
+            "src/@entry.moth".to_owned(),
         ),
     ];
 
     let (result, _warnings, _string_table) =
-        parse_multi_file_headers_with_result(&sources, "src/@page.moth");
+        parse_multi_file_headers_with_result(&sources, "src/@entry.moth");
     assert!(
         result.is_err(),
         "a dependency selection alias to a core cast trait name must be rejected"
@@ -99,11 +99,11 @@ fn header_parsing_rejects_module_public_surface_re_export_with_core_cast_trait_n
             "export:\n    @helper USER_TRAIT as CASTABLE_TO_STRING\n;\n".to_owned(),
             "src/@mod.moth".to_owned(),
         ),
-        ("@helper\n".to_owned(), "src/@page.moth".to_owned()),
+        ("@helper\n".to_owned(), "src/@entry.moth".to_owned()),
     ];
 
     let (result, _warnings, _string_table) =
-        parse_multi_file_headers_with_result(&sources, "src/@page.moth");
+        parse_multi_file_headers_with_result(&sources, "src/@entry.moth");
     assert!(
         result.is_err(),
         "module public-surface re-export under a core cast trait name must be rejected"

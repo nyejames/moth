@@ -56,26 +56,6 @@ fn assert_source_file_folder_collision(failure: PreparedFailure) {
     );
 }
 
-fn assert_multiple_module_roots(failure: PreparedFailure, expected_directory: &Path) {
-    let boundary = diagnosed_reports(failure);
-    let (report, diagnostic) = first_invalid_config(&boundary);
-    let facts = diagnostic
-        .family_view::<InvalidConfigView>()
-        .expect("config failure should retain typed facts");
-    assert_eq!(facts.reason, InvalidConfigCode::MultipleModuleRootFiles);
-
-    let strings = diagnostic.string_ids();
-    assert_eq!(
-        strings.len(),
-        3,
-        "directory plus two candidates should be retained"
-    );
-    assert_eq!(
-        report.context().strings().resolve(strings[0]),
-        expected_directory.display().to_string()
-    );
-}
-
 #[test]
 fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -94,7 +74,7 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
     ] {
         let directory = entry_root.join(directory_name);
         fs::create_dir_all(&directory).expect("should create skipped directory");
-        fs::write(directory.join("@skipped.moth"), "").expect("should write skipped root");
+        fs::write(directory.join("@entry.moth"), "").expect("should write skipped root");
         fs::write(directory.join("page.mtf"), "").expect("should write skipped mtf");
         fs::write(directory.join("note.md"), "").expect("should write skipped markdown");
         fs::write(directory.join("data.mon"), "").expect("should write skipped mon");
@@ -105,17 +85,16 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
     // directories and configured output roots stay excluded.
     let visible = entry_root.join("dev");
     fs::create_dir_all(&visible).expect("should create visible module directory");
-    fs::write(visible.join("@dev.moth"), "").expect("should write visible root");
+    fs::write(visible.join("@entry.moth"), "").expect("should write visible root");
 
     // A visible `release` directory is ordinary source, not a generated-output skip.
     let visible_release = entry_root.join("release");
     fs::create_dir_all(&visible_release).expect("should create visible release source directory");
-    fs::write(visible_release.join("@release.moth"), "")
-        .expect("should write visible release root");
+    fs::write(visible_release.join("@entry.moth"), "").expect("should write visible release root");
 
-    fs::write(entry_root.join("@home.moth"), "").expect("should write entry root");
+    fs::write(entry_root.join("@entry.moth"), "").expect("should write entry root");
     fs::write(entry_root.join("ordinary.moth"), "").expect("should write ordinary source");
-    fs::write(nested.join("@nested.moth"), "").expect("should write nested root");
+    fs::write(nested.join("@entry.moth"), "").expect("should write nested root");
     fs::write(nested.join("config.moth"), "not source").expect("should write nested config");
 
     let mut config = Config::new(root.clone());
@@ -167,14 +146,15 @@ fn source_tree_index_collects_one_scan_and_applies_skip_policy() {
         .map(|module_id| graph.node(*module_id).root_file().to_path_buf())
         .collect();
     assert_eq!(entry_root_files.len(), 4);
-    assert!(entry_root_files[0].ends_with("@home.moth"));
-    assert!(entry_root_files[1].ends_with("dev/@dev.moth"));
-    assert!(entry_root_files[2].ends_with("nested/@nested.moth"));
-    assert!(entry_root_files[3].ends_with("release/@release.moth"));
+    assert!(entry_root_files[0].ends_with("@entry.moth"));
+    assert!(entry_root_files[1].ends_with("dev/@entry.moth"));
+    assert!(entry_root_files[2].ends_with("nested/@entry.moth"));
+    assert!(entry_root_files[3].ends_with("release/@entry.moth"));
     assert_eq!(index.stats().dirs_visited, 4);
     assert_eq!(index.stats().dirs_skipped, 6);
     assert_eq!(index.stats().files_seen, 6);
-    assert_eq!(index.stats().normal_root_files_seen, 4);
+    assert_eq!(index.stats().normal_root_files_seen, 0);
+    assert_eq!(index.stats().entry_root_files_seen, 4);
     assert_eq!(index.stats().module_roots_found, 4);
     assert!(
         index.sources().iter().all(|source| {
@@ -214,8 +194,8 @@ fn source_tree_index_ignores_collision_in_fixed_skipped_directory() {
     // Real module root that should be discovered.
     let nested = entry_root.join("nested");
     fs::create_dir_all(&nested).expect("should create nested module");
-    fs::write(entry_root.join("@home.moth"), "").expect("should write entry root");
-    fs::write(nested.join("@nested.moth"), "").expect("should write nested root");
+    fs::write(entry_root.join("@entry.moth"), "").expect("should write entry root");
+    fs::write(nested.join("@entry.moth"), "").expect("should write nested root");
     fs::write(nested.join("config.moth"), "not source").expect("should write nested config");
 
     let config = Config::new(root.clone());
@@ -253,7 +233,7 @@ fn source_tree_index_ignores_package_prefix_collision_in_skipped_directory() {
     // Fixed-skipped directory whose name matches a source-backed package prefix.
     // Under the skip policy this folder is not dependency-bindable, so no prefix collision.
     fs::create_dir_all(entry_root.join("target")).expect("should create target folder");
-    fs::write(entry_root.join("@home.moth"), "").expect("should write entry root");
+    fs::write(entry_root.join("@entry.moth"), "").expect("should write entry root");
 
     let config = Config::new(root.clone());
     let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
@@ -291,7 +271,7 @@ fn source_tree_index_rejects_exact_nested_package_path_but_allows_ancestor() {
     let root = fs::canonicalize(temp.path()).expect("should canonicalize temp dir");
     let entry = root.join("src");
     fs::create_dir_all(entry.join("web")).expect("should create ancestor folder");
-    fs::write(entry.join("@home.moth"), "").expect("should write entry root");
+    fs::write(entry.join("@entry.moth"), "").expect("should write entry root");
     let config = Config::new(root.clone());
     let mut packages = crate::builder_surface::SourcePackageRegistry::default();
     packages
@@ -371,7 +351,7 @@ fn source_tree_index_detects_collision_in_non_skipped_directory() {
     let entry_root = root.join("src");
     fs::create_dir_all(entry_root.join("helper")).expect("should create helper folder");
     fs::write(entry_root.join("helper.moth"), "x ~= 1\n").expect("should write colliding file");
-    fs::write(entry_root.join("@home.moth"), "").expect("should write entry root");
+    fs::write(entry_root.join("@entry.moth"), "").expect("should write entry root");
 
     let config = Config::new(root.clone());
     let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
@@ -408,12 +388,12 @@ fn bounded_module_roots_for_single_file_indexes_nested_roots_with_ignored_direct
     fs::create_dir_all(target_dir.join("helper")).expect("should create target/helper");
     fs::write(target_dir.join("helper.moth"), "x ~= 1\n").expect("should write colliding file");
 
-    fs::write(module_dir.join("@home.moth"), "").expect("should write entry root");
-    fs::write(nested.join("@nested.moth"), "").expect("should write nested root");
+    fs::write(module_dir.join("@entry.moth"), "").expect("should write entry root");
+    fs::write(nested.join("@entry.moth"), "").expect("should write nested root");
     fs::write(nested.join("config.moth"), "not source").expect("should write nested config");
 
     let config = Config::new(root.clone());
-    let entry_file = fs::canonicalize(module_dir.join("@home.moth")).unwrap();
+    let entry_file = fs::canonicalize(module_dir.join("@entry.moth")).unwrap();
     let mut string_table = StringTable::new();
 
     let module_roots =
@@ -437,15 +417,13 @@ fn bounded_module_roots_for_single_file_indexes_nested_roots_with_ignored_direct
 }
 
 #[test]
-fn bounded_module_roots_for_single_file_accepts_every_authored_root_spelling() {
+fn bounded_module_roots_for_single_file_accepts_each_fixed_root_role() {
     use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 
     for (root_file_name, expected_role) in [
         ("@mod.moth", ModuleRootRole::Normal),
         ("@package.moth", ModuleRootRole::Support),
         ("@entry.moth", ModuleRootRole::Entry),
-        // LEGACY ROOT MIGRATION BRIDGE names remain selectable until the Phase 4 cutover.
-        ("@page.moth", ModuleRootRole::Normal),
     ] {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
@@ -502,10 +480,10 @@ fn bounded_module_roots_for_single_file_rejects_dependency_name_collisions() {
     fs::create_dir_all(module_dir.join("helper")).expect("should create helper directory");
     fs::write(module_dir.join("helper.moth"), "helper #= 1\n")
         .expect("should write colliding source file");
-    fs::write(module_dir.join("@home.moth"), "").expect("should write entry root");
+    fs::write(module_dir.join("@entry.moth"), "").expect("should write entry root");
 
     let config = Config::new(root.clone());
-    let entry_file = fs::canonicalize(module_dir.join("@home.moth")).unwrap();
+    let entry_file = fs::canonicalize(module_dir.join("@entry.moth")).unwrap();
     let mut string_table = StringTable::new();
 
     let failure = super::source_tree_index::SourceTreeIndex::bounded_module_roots_for_single_file(
@@ -521,13 +499,13 @@ fn bounded_module_roots_for_single_file_rejects_dependency_name_collisions() {
 }
 
 #[test]
-fn source_tree_index_rejects_duplicate_normal_module_root_files() {
+fn legacy_normal_root_beside_canonical_facade_is_rejected() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let entry_root = root.join("src");
     fs::create_dir_all(&entry_root).expect("should create entry root");
-    fs::write(entry_root.join("@home.moth"), "").expect("should write page root");
-    fs::write(entry_root.join("@layout.moth"), "").expect("should write layout root");
+    fs::write(entry_root.join("@mod.moth"), "").expect("should write canonical facade root");
+    fs::write(entry_root.join("@page.moth"), "").expect("should write stale root filename");
 
     let config = Config::new(root.clone());
     let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
@@ -546,8 +524,13 @@ fn source_tree_index_rejects_duplicate_normal_module_root_files() {
         &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
         &mut string_table,
     )
-    .expect_err("a module directory may contain only one normal module root");
-    assert_multiple_module_roots(failure, &fs::canonicalize(&entry_root).unwrap());
+    .expect_err("a stale @page.moth root is rejected by the closed vocabulary");
+    let boundary = diagnosed_reports(failure);
+    let (_report, diagnostic) = first_invalid_config(&boundary);
+    let facts = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("config failure should retain typed facts");
+    assert_eq!(facts.reason, InvalidConfigCode::InvalidModuleRootFileName);
 }
 
 #[test]
@@ -557,10 +540,10 @@ fn explicitly_selected_hidden_root_compiles_but_nested_hidden_descendants_do_not
     let selected = project_root.join("_prototype");
     fs::create_dir_all(selected.join("_private")).expect("should create hidden descendant");
     fs::create_dir_all(selected.join("visible")).expect("should create visible descendant");
-    fs::write(selected.join("@site.moth"), "").expect("should write selected root");
+    fs::write(selected.join("@entry.moth"), "").expect("should write selected root");
     fs::write(selected.join("helper.moth"), "").expect("should write selected helper");
-    fs::write(selected.join("_private/@hidden.moth"), "").expect("should write hidden descendant");
-    fs::write(selected.join("visible/@visible.moth"), "").expect("should write visible descendant");
+    fs::write(selected.join("_private/@entry.moth"), "").expect("should write hidden descendant");
+    fs::write(selected.join("visible/@entry.moth"), "").expect("should write visible descendant");
 
     let config = Config::new(selected.clone());
     let canonical_project_root =
@@ -590,7 +573,7 @@ fn explicitly_selected_hidden_root_compiles_but_nested_hidden_descendants_do_not
     assert!(
         paths
             .iter()
-            .any(|path| path.ends_with("_prototype/@site.moth"))
+            .any(|path| path.ends_with("_prototype/@entry.moth"))
     );
     assert!(
         paths
@@ -600,7 +583,7 @@ fn explicitly_selected_hidden_root_compiles_but_nested_hidden_descendants_do_not
     assert!(
         paths
             .iter()
-            .any(|path| path.ends_with("_prototype/visible/@visible.moth"))
+            .any(|path| path.ends_with("_prototype/visible/@entry.moth"))
     );
     assert!(
         paths
@@ -619,8 +602,8 @@ fn directory_alias_into_hidden_tree_creates_no_namespace_or_collision() {
     let root = _tmp_root.path().to_path_buf();
     let hidden = root.join("_generated");
     fs::create_dir_all(&hidden).expect("should create hidden directory");
-    fs::write(hidden.join("@generated.moth"), "").expect("should write hidden root");
-    fs::write(root.join("@home.moth"), "").expect("should write entry root");
+    fs::write(hidden.join("@entry.moth"), "").expect("should write hidden root");
+    fs::write(root.join("@entry.moth"), "").expect("should write entry root");
     fs::write(root.join("helper.moth"), "").expect("should write colliding file");
     symlink(&hidden, root.join("helper")).expect("should create hidden directory alias");
 
@@ -673,8 +656,8 @@ fn directory_alias_into_fixed_skipped_descendant_is_excluded() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     fs::create_dir_all(root.join("target/nested")).expect("should create skipped descendant");
-    fs::write(root.join("target/nested/@nested.moth"), "").expect("should write skipped root");
-    fs::write(root.join("@home.moth"), "").expect("should write entry root");
+    fs::write(root.join("target/nested/@entry.moth"), "").expect("should write skipped root");
+    fs::write(root.join("@entry.moth"), "").expect("should write entry root");
     symlink(root.join("target/nested"), root.join("visible"))
         .expect("should create fixed-skipped descendant alias");
 
@@ -717,8 +700,8 @@ fn directory_alias_outside_entry_root_does_not_create_a_folder_claim() {
     let outside = project_root.join("outside");
     fs::create_dir_all(&entry_root).expect("should create selected source root");
     fs::create_dir_all(&outside).expect("should create external directory");
-    fs::write(outside.join("@outside.moth"), "").expect("should write external root");
-    fs::write(entry_root.join("@home.moth"), "").expect("should write entry root");
+    fs::write(outside.join("@entry.moth"), "").expect("should write external root");
+    fs::write(entry_root.join("@entry.moth"), "").expect("should write entry root");
     fs::write(entry_root.join("helper.moth"), "").expect("should write colliding file");
     symlink(&outside, entry_root.join("helper")).expect("should create external directory alias");
 
@@ -757,13 +740,13 @@ fn directory_alias_outside_entry_root_does_not_create_a_folder_claim() {
 fn single_file_dependency_keys_exclude_hidden_and_fixed_directories() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
-    fs::write(root.join("@home.moth"), "").expect("should write entry root");
+    fs::write(root.join("@entry.moth"), "").expect("should write entry root");
     fs::write(root.join("helper.moth"), "").expect("should write ordinary source");
     fs::write(root.join("_helper.moth"), "").expect("should write underscore source");
     fs::create_dir_all(root.join("_hidden")).expect("should create hidden directory");
-    fs::write(root.join("_hidden/@hidden.moth"), "").expect("should write hidden root");
+    fs::write(root.join("_hidden/@entry.moth"), "").expect("should write hidden root");
     fs::create_dir_all(root.join("target")).expect("should create fixed-skipped directory");
-    fs::write(root.join("target/@target.moth"), "").expect("should write fixed-skipped root");
+    fs::write(root.join("target/@entry.moth"), "").expect("should write fixed-skipped root");
     fs::create_dir_all(root.join("visible")).expect("should create visible directory");
 
     let canonical_root = fs::canonicalize(&root).expect("source root should canonicalize");
@@ -792,7 +775,7 @@ fn single_file_dependency_keys_exclude_alias_targets_by_physical_ancestry() {
     fs::create_dir_all(source_root.join("target/nested"))
         .expect("should create fixed-skipped descendant");
     fs::create_dir_all(&outside).expect("should create external directory");
-    fs::write(source_root.join("@home.moth"), "").expect("should write entry root");
+    fs::write(source_root.join("@entry.moth"), "").expect("should write entry root");
     fs::write(source_root.join("helper.moth"), "").expect("should write ordinary source");
     fs::write(source_root.join("_helper.moth"), "").expect("should write underscore source");
     fs::write(source_root.join("_hidden/helper.moth"), "").expect("should write hidden source");
@@ -850,7 +833,7 @@ fn source_tree_index_excludes_file_symlinks_into_hidden_directories() {
     let root = _tmp_root.path().to_path_buf();
     let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
 
-    fs::write(root.join("@home.moth"), "").expect("should write entry root");
+    fs::write(root.join("@entry.moth"), "").expect("should write entry root");
     fs::write(root.join("_helper.moth"), "").expect("underscore file remains eligible");
     let hidden = root.join("_private");
     fs::create_dir_all(&hidden).expect("should create hidden directory");

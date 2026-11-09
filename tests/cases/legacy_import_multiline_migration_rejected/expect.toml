@@ -9,6 +9,6 @@ message_contains = ["@core/math sin"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0035"
 reason = "legacy_dependency_clause.import_keyword"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1
 count = 1

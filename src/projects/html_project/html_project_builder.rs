@@ -1,6 +1,6 @@
 //! HTML project builder orchestration.
 //!
-//! WHAT: coordinates module output-path resolution, homepage checks, and backend selection.
+//! WHAT: coordinates module output-path resolution, entry route selection, and backend selection.
 //! WHY: project builders own artifact assembly policy while compiler backends stay generic.
 use crate::backends::backend_feature_validation::{
     BackendFeatureValidationInput, validate_hir_backend_feature_support,
@@ -26,7 +26,6 @@ use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
 use crate::compiler_frontend::compiler_messages::{DiagnosticDraft, PreparedFailure};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::module::HirModule;
@@ -55,7 +54,7 @@ use crate::projects::html_project::external_js::runtime_glue::{
 use crate::projects::html_project::html_slot_plan::plan_html_entry_slots;
 use crate::projects::html_project::js_path::{HtmlJsCompileInput, compile_html_module_js};
 use crate::projects::html_project::output_plan::{
-    LogicalHtmlPathError, derive_logical_html_path, plan_wasm_output_from_route,
+    derive_logical_html_path, plan_wasm_output_from_route,
 };
 use crate::projects::html_project::path_policy::HtmlEntryPathPlan;
 use crate::projects::html_project::resource_output_plan::{
@@ -195,7 +194,10 @@ impl BackendBuilder for HtmlProjectBuilder {
         let mut output_path_owners: HashMap<PathBuf, (PathBuf, usize)> = HashMap::new();
         let mut resource_output_plan = HtmlResourceOutputPlan::new(config.project_name.as_str());
         let mut entry_page_rel = None;
-        let mut has_directory_homepage = false;
+        // Directory dev launch uses the real homepage when one exists, otherwise the
+        // lexicographically first existing route. It must never invent a homepage output.
+        let mut homepage_rel = None;
+        let mut first_route_rel: Option<PathBuf> = None;
         let artifact_entries = project_compilation.entries();
         // Build the owned runtime plan before consuming the entry views. It owns its asset and
         // specifier facts, so the loop can move each entry instead of cloning the view.
@@ -209,29 +211,10 @@ impl BackendBuilder for HtmlProjectBuilder {
                 .require_entry("HTML entry artefact planning")?;
             // Derive the canonical page route once. JS-only and HTML+Wasm output modes consume
             // projections from this same value — downstream code must not re-derive route semantics.
-            let route = match derive_logical_html_path(
+            let route = derive_logical_html_path(
                 &entry_metadata.entry_point,
                 entry_paths.resolved_source_root.as_deref(),
-            ) {
-                Ok(route) => route,
-                Err(LogicalHtmlPathError::Infrastructure(error)) => return Err(error.into()),
-                Err(LogicalHtmlPathError::EmptyRouteName(entry_point)) => {
-                    let mut diagnostic_strings = backend_context.diagnostic_strings();
-                    let entry_path = crate::compiler_frontend::utilities::basic::portable_path_text(
-                        &entry_point,
-                    );
-                    let entry_path_id = diagnostic_strings.intern(&entry_path);
-                    let diagnostic =
-                        project_config::html_single_file_route_name_empty(entry_path_id, None);
-                    return Err(capture_html_diagnostic(
-                        diagnostic,
-                        diagnostic_strings.strings(),
-                        None,
-                        || None,
-                    )
-                    .into());
-                }
-            };
+            )?;
             let wasm_route_plan = wasm_enabled.then(|| plan_wasm_output_from_route(&route));
             let planned_html_output_path = wasm_route_plan
                 .as_ref()
@@ -342,19 +325,20 @@ impl BackendBuilder for HtmlProjectBuilder {
             }
 
             if entry_paths.is_homepage_entry(&entry_metadata.entry_point) {
-                has_directory_homepage = true;
-                entry_page_rel = Some(html_output_path.clone());
-            } else if !entry_paths.is_directory_build() && entry_page_rel.is_none() {
+                homepage_rel = Some(html_output_path);
+            } else if entry_paths.is_directory_build() {
+                if first_route_rel
+                    .as_ref()
+                    .is_none_or(|first| &html_output_path < first)
+                {
+                    first_route_rel = Some(html_output_path);
+                }
+            } else if entry_page_rel.is_none() {
                 entry_page_rel = Some(html_output_path);
             }
         }
-
-        {
-            let mut diagnostic_strings = backend_context.diagnostic_strings();
-            entry_paths.require_homepage_if_directory_build(
-                has_directory_homepage,
-                &mut diagnostic_strings,
-            )?;
+        if entry_paths.is_directory_build() {
+            entry_page_rel = homepage_rel.or(first_route_rel);
         }
 
         // Provider JS assets become deferred resource outputs. Their canonical byte sources

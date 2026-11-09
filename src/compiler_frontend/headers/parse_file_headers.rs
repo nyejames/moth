@@ -77,13 +77,7 @@ fn root_inventory_file_role(
         return Some(FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Support));
     }
     if root_file_ids.normal == Some(file_id) {
-        // The legacy-combined decision is owned by `ModuleRootFiles` so prepared-module start
-        // synthesis and this header role cannot drift.
-        return Some(if root_file_ids.normal_root_is_legacy_combined() {
-            FileRole::LegacyCombinedRoot
-        } else {
-            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal)
-        });
+        return Some(FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal));
     }
     None
 }
@@ -352,7 +346,6 @@ pub fn prepare_header_syntax(
         FxHashMap::default();
     let mut top_level_const_fragments = Vec::new();
     let mut runtime_fragment_count = 0usize;
-    let mut has_non_trivial_root_body = false;
     let mut token_stats = TokenStats::default();
 
     for output in prepared_files {
@@ -382,7 +375,6 @@ pub fn prepare_header_syntax(
                     .into(),
                 )
             })?;
-        has_non_trivial_root_body |= output.has_non_trivial_root_body;
     }
 
     let header_stats = HeaderStats::from_headers_and_symbols(&headers, &module_symbols);
@@ -395,7 +387,6 @@ pub fn prepare_header_syntax(
         top_level_const_fragments,
         entry_runtime_fragment_count: runtime_fragment_count,
         const_fragment_count,
-        has_non_trivial_root_body,
         token_stats,
         header_stats,
         module_symbols,
@@ -775,7 +766,6 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         top_level_const_fragments,
         entry_runtime_fragment_count,
         const_fragment_count,
-        has_non_trivial_root_body,
         token_stats,
         header_stats,
         mut module_symbols,
@@ -852,7 +842,6 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         top_level_const_fragments,
         entry_runtime_fragment_count,
         const_fragment_count,
-        has_non_trivial_root_body,
         token_stats,
         header_stats,
         module_symbols,

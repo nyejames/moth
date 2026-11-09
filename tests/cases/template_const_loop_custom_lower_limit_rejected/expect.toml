@@ -9,6 +9,6 @@ diagnostic_codes = ["MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022"]
 code = "MOTH-SYNTAX-0022"
 occurrence = 2
 reason = "invalid_template_structure.template_const_loop_expansion_limit_exceeded"
-path = "input/collection/@mod.moth"
+path = "input/collection/@entry.moth"
 line = 2
 column = 3

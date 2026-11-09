@@ -87,7 +87,7 @@ fn lookup_receiver_method_prefers_exact_source_file_before_catalog_fallback() {
     let method_name = string_table.intern("reset");
     let receiver = ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Char);
     let key = (receiver.to_owned(), method_name);
-    let local_source = interned_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let local_source = interned_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let package_source = interned_path(&["lib", "shared.moth"], &mut string_table, &mut path_fork);
     assert_ne!(
         local_source, package_source,
@@ -131,7 +131,7 @@ fn production_lookup_rejects_provider_private_entry_through_value_carried_fallba
     let method_name = string_table.intern("reset");
     let receiver = ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Char);
     let key = (receiver.to_owned(), method_name);
-    let source_file = interned_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = interned_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let function_path = interned_path(&["src", "reset"], &mut string_table, &mut path_fork);
 
     let public_entry = empty_receiver_entry(function_path, source_file, receiver.to_owned());
@@ -175,7 +175,7 @@ fn visible_method_lookup_prefers_same_file_before_catalog_fallback() {
     let mut path_fork = PathInternerFork::empty();
     let method_name = string_table.intern("render");
 
-    let local_source = interned_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let local_source = interned_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let exported_source = interned_path(&["lib", "shared.moth"], &mut string_table, &mut path_fork);
     assert_ne!(
         local_source, exported_source,
@@ -217,7 +217,7 @@ fn visible_method_lookup_uses_stable_catalog_fallback_order() {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let method_name = string_table.intern("render");
-    let context_source = interned_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let context_source = interned_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
 
     let first_entry = empty_receiver_entry(
         interned_path(&["lib", "a_render"], &mut string_table, &mut path_fork),

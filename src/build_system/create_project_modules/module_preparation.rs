@@ -258,9 +258,7 @@ fn resolve_root_file_ids(
 /// Resolve Stage 0's bounded root inventory into reached-root roles for a flattened synthetic unit.
 ///
 /// WHAT: every normal or support root present in the unit, other than the standalone selection,
-///       becomes an export-capable but non-active reached root role. A normal root keeps
-///       `FileRole::ReachedLegacyCombinedRoot` while its own module has no entry root; otherwise,
-///       and for every support root, it becomes `FileRole::ReachedApiFacadeRoot`. An entry root
+///       becomes an export-capable but non-active `FileRole::ReachedApiFacadeRoot`. An entry root
 ///       publishes no importable surface, so it stays an ordinary source. Roots absent from the
 ///       source database were never reached and contribute no header role.
 /// WHY: synthetic single-file compilation follows dependency clauses into other directories and
@@ -281,7 +279,7 @@ fn resolve_reached_root_roles(
             continue;
         }
 
-        let Some(file_role) = reached_root_file_role(module_roots, role, root_path) else {
+        let Some(file_role) = reached_root_file_role(role) else {
             continue;
         };
 
@@ -295,36 +293,14 @@ fn resolve_reached_root_roles(
 
 /// The header role for one foreign module root reached by a flattened synthetic unit.
 ///
-/// WHAT: a support root is always an API-only reached facade. A normal root is an API-only reached
-///       facade only when its own module also owns `@entry.moth`; otherwise it is the legacy
-///       combined normal root and keeps the pre-Phase-3 capture-and-discard handling.
-/// WHY: the rejecting reached-facade role is correct for an API-only root but would reject the
-///      dormant runtime of a legacy combined root and make single-file builds disagree with
-///      directory builds. Entry, shared and synthetic roots never occupy a reached facade slot.
-///
-/// LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): once every executable fixture
-/// authors `@entry.moth`, every reached normal root is API-only and the legacy arm disappears.
-pub(super) fn reached_root_file_role(
-    module_roots: &ModuleRootTable,
-    role: ModuleRootRole,
-    root_path: &Path,
-) -> Option<FileRole> {
+/// WHAT: every reached normal or support facade root is an API-only reached facade. Entry roots
+///       publish no importable surface and shared/synthetic roles have no reached facade slot.
+/// WHY: a reached facade keeps its declaration surface but owns no start or root runtime in this
+///      compilation; root runtime and fragments are rejected rather than silently discarded.
+pub(super) fn reached_root_file_role(role: ModuleRootRole) -> Option<FileRole> {
     match role {
-        ModuleRootRole::Support => Some(FileRole::ReachedApiFacadeRoot(role)),
-        ModuleRootRole::Normal => {
-            let has_entry_root =
-                module_roots
-                    .module_root_for_file(root_path)
-                    .is_some_and(|directory| {
-                        module_roots
-                            .root_file_for_directory_surface(&directory, ModuleRootRole::Entry)
-                            .is_some()
-                    });
-            if has_entry_root {
-                Some(FileRole::ReachedApiFacadeRoot(role))
-            } else {
-                Some(FileRole::ReachedLegacyCombinedRoot)
-            }
+        ModuleRootRole::Normal | ModuleRootRole::Support => {
+            Some(FileRole::ReachedApiFacadeRoot(role))
         }
         ModuleRootRole::Entry
         | ModuleRootRole::Shared

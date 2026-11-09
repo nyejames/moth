@@ -71,7 +71,7 @@ fn assert_config_input_overflow_build(
     let consumer_source = format!(
         "@facade {imported_name}\n\noverflow || -> I32, Error!:\n    return {expression}\n;\n"
     );
-    let consumer_path = root.join("@page.moth");
+    let consumer_path = root.join("@entry.moth");
     fs::write(&consumer_path, consumer_source).expect("should write consumer source");
     let facade_path = facade_directory.join("@mod.moth");
     fs::write(

@@ -8,4 +8,4 @@ diagnostic_codes = ["MOTH-SYNTAX-0022"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0022"
 reason = "invalid_template_structure.unsupported_type_in_template_head"
-path = "input/@page.moth"
+path = "input/@entry.moth"

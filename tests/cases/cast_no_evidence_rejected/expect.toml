@@ -6,5 +6,5 @@ diagnostic_codes = ["MOTH-RULE-0083"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0083"
 reason = "invalid_cast.no_evidence"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 2

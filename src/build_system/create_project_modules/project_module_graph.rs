@@ -3,8 +3,8 @@
 //! WHAT: owns the deterministic project-module graph built directly from the Stage 0
 //! [`SourceTreeIndex`]. Each canonical module becomes one node carrying its `ModuleId`,
 //! stable origin, root role, root files, nearest structural parent and structural dependency
-//! edges. The graph classifies normal entry candidates and the project package support surface,
-//! encodes strict scoped-support visibility as a query, and exposes deterministic dependency-edge
+//! edges. The graph classifies `@entry.moth` entry candidates and the project package support
+//! surface, encodes strict scoped-support visibility as a query, and exposes deterministic dependency-edge
 //! insertion, an explicit construction-to-completion phase transition that freezes
 //! provider/consumer adjacency into sorted `Vec<ModuleId>` storage, and topological compile waves
 //! over those frozen provider-before-consumer edges. Source records and ownership remain in
@@ -22,7 +22,7 @@
 //!
 //! Production wiring: Stage 0 constructs the graph once from the [`SourceTreeIndex`] in
 //! `project_roots` and retains it as the structural owner. `compile_waves` and `entry_modules`
-//! drive deterministic entry selection in `module_inventory`, so graph construction, wave
+//! drive deterministic entry selection in `module_inventory` and `build.rs`, so graph construction, wave
 //! scheduling and dependency-edge insertion are genuine production paths. The
 //! namespace builder consumes the scoped-support-visibility surface for project and package
 //! boundaries.
@@ -229,9 +229,10 @@ enum ProjectModuleDependencies {
 /// The canonical structural project module graph for one build boundary.
 ///
 /// Built directly from a [`SourceTreeIndex`] without filesystem IO or a second identity/topology
-/// table. Nodes are stored in deterministic `ModuleId` order. Normal modules are entry
-/// candidates; support roots are never entries; a project-root support surface is an ordinary
-/// structural module. Edge insertion and compile-wave scheduling are separated by
+/// table. Nodes are stored in deterministic `ModuleId` order. Only a module with a project-local
+/// `@entry.moth` is an entry candidate; API facade roots are never entries and a project-root
+/// support surface is an ordinary structural module. Edge insertion and compile-wave scheduling
+/// are separated by
 /// one explicit [`ProjectModuleDependencies`] transition: edges are inserted while the graph is
 /// under construction, then [`ProjectModuleGraph::complete`] freezes adjacency into sorted
 /// `Vec<ModuleId>` storage before [`ProjectModuleGraph::compile_waves`] consumes it.
@@ -242,29 +243,58 @@ pub(crate) struct ProjectModuleGraph {
 }
 
 impl ProjectModuleGraph {
-    /// Build a synthetic graph from explicit normal module roots.
+    /// Build a synthetic graph from explicit standalone module roots.
     ///
-    /// WHAT: creates one frozen `Normal` node per `(stable origin, root file)` in the given order
-    /// with dense `ModuleId` values starting at zero and no dependency edges.
+    /// WHAT: creates one frozen node per `(stable origin, root file)` in the given order with
+    /// dense `ModuleId` values starting at zero and no dependency edges. Each node's root file and
+    /// surface origin occupy the slot named by the origin's role, so an explicitly selected
+    /// synthetic entry publishes no facade interface. Only `Entry`-role origins are executable;
+    /// a supplied `Normal` or `Support` origin stays an API-only facade.
     /// WHY: single-file compilation is a synthetic-module mode with no `SourceTreeIndex`, and
     /// focused tests need real graph boundaries without filesystem discovery. The graph keeps
     /// the same frozen adjacency contract as discovery-built graphs.
-    pub(crate) fn from_normal_roots(roots: Vec<(StableModuleOriginIdentity, PathBuf)>) -> Self {
+    pub(crate) fn from_standalone_roots(roots: Vec<(StableModuleOriginIdentity, PathBuf)>) -> Self {
         let node_count = roots.len();
         let nodes = roots
             .into_iter()
             .enumerate()
-            .map(
-                |(index, (stable_origin, root_file))| ProjectModuleGraphNode {
+            .map(|(index, (stable_origin, root_file))| {
+                let (normal_root, support_root, entry_root) = match stable_origin.role() {
+                    ModuleRootRole::Normal => (Some(root_file), None, None),
+                    ModuleRootRole::Support => (None, Some(root_file), None),
+                    ModuleRootRole::Entry => (None, None, Some(root_file)),
+                    ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => {
+                        (None, None, None)
+                    }
+                };
+                let surface_origins = match stable_origin.role() {
+                    ModuleRootRole::Normal => {
+                        ModuleRootFiles::new(Some(stable_origin.clone()), None, None)
+                    }
+                    ModuleRootRole::Support => {
+                        ModuleRootFiles::new(None, Some(stable_origin.clone()), None)
+                    }
+                    ModuleRootRole::Entry => {
+                        ModuleRootFiles::new(None, None, Some(stable_origin.clone()))
+                    }
+                    ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => {
+                        ModuleRootFiles::new(None, None, None)
+                    }
+                };
+                ProjectModuleGraphNode {
                     module_id: ModuleId::from_index(index),
-                    shared_origin: stable_origin.clone(),
-                    surface_origins: ModuleRootFiles::new(Some(stable_origin), None, None),
-                    root_files: ModuleRootFiles::new(Some(root_file), None, None),
+                    shared_origin: stable_origin,
+                    surface_origins,
+                    root_files: ModuleRootFiles::new(normal_root, support_root, entry_root),
                     nearest_parent: None,
-                },
-            )
+                }
+            })
             .collect::<Vec<_>>();
-        let entry_modules = nodes.iter().map(|node| node.module_id).collect();
+        let entry_modules = nodes
+            .iter()
+            .filter(|node| node.shared_origin.role() == ModuleRootRole::Entry)
+            .map(|node| node.module_id)
+            .collect();
 
         Self {
             nodes,
@@ -280,9 +310,9 @@ impl ProjectModuleGraph {
     ///
     /// Consumes the index's identity table rather than recomputing it. Source ownership remains
     /// in the retained index and is not copied into graph nodes.
-    /// Each module becomes one node in deterministic `ModuleId` order. Normal modules are
-    /// classified as entry candidates; project-root support surfaces remain ordinary structural
-    /// modules.
+    /// Each module becomes one node in deterministic `ModuleId` order. Only a project-local
+    /// `@entry.moth` is an executable entry; normal and support facades remain ordinary
+    /// structural modules.
     pub(crate) fn from_source_tree_index(source_tree_index: &SourceTreeIndex) -> Self {
         let identities = source_tree_index.module_identities();
         let module_ids: Vec<ModuleId> = identities.module_ids().collect();
@@ -307,10 +337,9 @@ impl ProjectModuleGraph {
                 nearest_parent,
             });
 
-            // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): an ordinary normal root
-            // is still a legacy combined root (`Normal` surface plus start) and therefore an
-            // entry candidate until fixtures migrate to `@entry.moth`.
-            if record.has_entry_root() || record.has_normal_root() {
+            // Only a project-local `@entry.moth` is an executable entry. An API facade root
+            // publishes a surface and never activates a start.
+            if record.has_entry_root() {
                 entry_modules.push(*module_id);
             }
         }
@@ -360,9 +389,7 @@ impl ProjectModuleGraph {
                 nearest_parent: None,
             });
 
-            // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): see
-            // `from_source_tree_index`.
-            if record.has_entry_root() || record.has_normal_root() {
+            if record.has_entry_root() {
                 entry_modules.push(*module_id);
             }
         }
@@ -400,9 +427,11 @@ impl ProjectModuleGraph {
         &self.nodes[module_id.index()]
     }
 
-    /// Normal entry-candidate modules in deterministic `ModuleId` order.
+    /// Entry-candidate modules in deterministic `ModuleId` order.
     ///
-    /// Support roots are never entry candidates.
+    /// A directory graph derives them only from present `@entry.moth` roots; the synthetic
+    /// single-file graph contains exactly its explicitly selected root. API facade roots and
+    /// separately compiled dependency entries are never candidates.
     pub(crate) fn entry_modules(&self) -> &[ModuleId] {
         &self.entry_modules
     }

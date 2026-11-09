@@ -57,7 +57,7 @@ fn local_dependency_edge_is_recorded_provider_before_consumer() {
                 prepared_entry_file_path(&module.prepared.semantic)
                     .expect("prepared module retains its entry file identity")
                     .file_name()
-                    == Some(OsStr::new("@api.moth"))
+                    == Some(OsStr::new("@mod.moth"))
             })
         })
         .expect("module_b should appear in a compile wave");
@@ -68,7 +68,7 @@ fn local_dependency_edge_is_recorded_provider_before_consumer() {
                 prepared_entry_file_path(&module.prepared.semantic)
                     .expect("prepared module retains its entry file identity")
                     .file_name()
-                    == Some(OsStr::new("@pageA.moth"))
+                    == Some(OsStr::new("@entry.moth"))
             })
         })
         .expect("module_a should appear in a compile wave");
@@ -101,7 +101,7 @@ fn same_module_dependency_creates_no_project_graph_edge() {
     )
     .expect("should write config");
     // The single entry module depends on a sibling file inside its own module root.
-    fs::write(src.join("@page.moth"), "@helper\n#[:page]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@helper\n#[:page]\n").expect("should write entry");
     fs::write(src.join("helper.moth"), "value #= 1\n").expect("should write helper");
 
     let mut config = Config::new(root.clone());
@@ -183,8 +183,8 @@ fn independent_no_edge_entries_are_grouped_in_one_ready_wave() {
     )
     .expect("should write config");
     // Two independent entry modules with no cross-module dependencies.
-    fs::write(module_a.join("@pageA.moth"), "#[:pageA]\n").expect("should write pageA");
-    fs::write(module_b.join("@pageB.moth"), "#[:pageB]\n").expect("should write pageB");
+    fs::write(module_a.join("@entry.moth"), "#[:pageA]\n").expect("should write pageA");
+    fs::write(module_b.join("@entry.moth"), "#[:pageB]\n").expect("should write pageB");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -225,7 +225,8 @@ fn independent_no_edge_entries_are_grouped_in_one_ready_wave() {
             graph
                 .node(*module_id)
                 .root_file()
-                .file_name()
+                .parent()
+                .and_then(|directory| directory.file_name())
                 .unwrap()
                 .to_string_lossy()
                 .to_string()
@@ -236,7 +237,8 @@ fn independent_no_edge_entries_are_grouped_in_one_ready_wave() {
         .map(|module| {
             prepared_entry_file_path(&module.prepared.semantic)
                 .expect("prepared module retains its entry file identity")
-                .file_name()
+                .parent()
+                .and_then(|directory| directory.file_name())
                 .unwrap()
                 .to_string_lossy()
                 .to_string()
@@ -266,11 +268,11 @@ fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
     // The consumer depends on its direct child twice, so the duplicate observation must be
     // idempotent.
     fs::write(
-        module_a.join("@pageA.moth"),
+        module_a.join("@entry.moth"),
         "@module_b\n@module_b\n#[:pageA]\n",
     )
     .expect("should write pageA");
-    fs::write(module_b.join("@api.moth"), "export:\n    b #= 1\n;\n")
+    fs::write(module_b.join("@mod.moth"), "export:\n    b #= 1\n;\n")
         .expect("should write module_b root");
     fs::write(module_b.join("impl.moth"), "impl #= 1\n").expect("should write module_b impl");
 
@@ -333,7 +335,7 @@ fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
         prepared_entry_file_path(&inventory_waves[0][0].prepared.semantic)
             .expect("prepared module retains its entry file identity")
             .file_name()
-            .is_some_and(|name| name == "@api.moth"),
+            .is_some_and(|name| name == "@mod.moth"),
         "module_b is the provider in the first wave"
     );
     assert_eq!(
@@ -345,7 +347,7 @@ fn duplicate_dependency_deduplicates_edge_and_orders_provider_first() {
         prepared_entry_file_path(&inventory_waves[1][0].prepared.semantic)
             .expect("prepared module retains its entry file identity")
             .file_name()
-            .is_some_and(|name| name == "@pageA.moth"),
+            .is_some_and(|name| name == "@entry.moth"),
         "module_a is the consumer in the second wave"
     );
 }
@@ -555,12 +557,12 @@ fn canonical_module_job_excludes_cross_module_donor_sources() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@z_local\n@a_provider value\n#[:entry]\n",
     )
     .expect("should write consumer root");
     fs::write(src.join("z_local.moth"), "local #= 1\n").expect("should write local source");
-    fs::write(provider.join("@api.moth"), "export:\n    value #= 1\n;\n")
+    fs::write(provider.join("@mod.moth"), "export:\n    value #= 1\n;\n")
         .expect("should write provider root");
 
     let mut config = Config::new(root.clone());
@@ -586,14 +588,14 @@ fn canonical_module_job_excludes_cross_module_donor_sources() {
             prepared_entry_file_path(&module.prepared.semantic)
                 .expect("prepared module retains its entry file identity")
                 .file_name()
-                == Some(OsStr::new("@page.moth"))
+                == Some(OsStr::new("@entry.moth"))
         })
         .expect("consumer module should be discovered");
     let input_names = module_prepared_source_names(consumer);
 
     assert_eq!(
         input_names,
-        vec!["@page.moth", "z_local.moth"],
+        vec!["@entry.moth", "z_local.moth"],
         "the consumer job must contain only its canonical prepared sources; the provider reaches binding through its completed interface"
     );
 }
@@ -613,7 +615,7 @@ fn indexed_namespace_rejects_direct_entry_root_dependency() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@@page symbol\n#[:page]\n")
+    fs::write(src.join("@entry.moth"), "@@page symbol\n#[:page]\n")
         .expect("should write entry root");
 
     let mut config = Config::new(root.clone());
@@ -646,9 +648,9 @@ fn indexed_namespace_rejects_direct_nested_child_root_dependency() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@child/@home symbol\n#[:page]\n")
+    fs::write(src.join("@entry.moth"), "@child/@home symbol\n#[:page]\n")
         .expect("should write parent root");
-    fs::write(child.join("@home.moth"), "export:\n    symbol #= 1\n;\n")
+    fs::write(child.join("@entry.moth"), "export:\n    symbol #= 1\n;\n")
         .expect("should write child root");
 
     let mut config = Config::new(root.clone());
@@ -744,7 +746,7 @@ fn qualified_occurrence_queues_same_module_helper_source() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "message = @helper answer\n#[:entry]\n",
     )
     .expect("should write entry");
@@ -766,7 +768,7 @@ fn qualified_occurrence_queues_same_module_helper_source() {
     assert_eq!(modules.len(), 1, "one entry module owns both sources");
     assert_eq!(
         module_prepared_source_names(modules[0]),
-        vec!["@page.moth", "helper.moth"],
+        vec!["@entry.moth", "helper.moth"],
         "the helper is reachable only through the qualified occurrence and must be prepared"
     );
 
@@ -819,7 +821,7 @@ fn qualified_occurrence_in_moth_template_queues_same_module_helper_source() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "title #= @intro.mtf\n#[:entry]\n")
+    fs::write(src.join("@entry.moth"), "title #= @intro.mtf\n#[:entry]\n")
         .expect("should write entry");
     // The `.mtf` body selects a private same-module helper constant from a template head.
     fs::write(src.join("intro.mtf"), "# [@settings site_name]\n").expect("should write template");
@@ -843,7 +845,7 @@ fn qualified_occurrence_in_moth_template_queues_same_module_helper_source() {
     assert_eq!(modules.len(), 1, "one entry module owns both sources");
     assert_eq!(
         module_prepared_source_names(modules[0]),
-        vec!["@page.moth", "intro.mtf", "settings.moth"],
+        vec!["@entry.moth", "intro.mtf", "settings.moth"],
         "the helper is reachable only through the `.mtf` head occurrence and must be prepared"
     );
 
@@ -905,7 +907,7 @@ fn qualified_occurrence_in_moth_source_queues_moth_template_content_source() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "message = @intro content\n#[:entry]\n",
     )
     .expect("should write entry");
@@ -929,7 +931,7 @@ fn qualified_occurrence_in_moth_source_queues_moth_template_content_source() {
     assert_eq!(modules.len(), 1, "one entry module owns both sources");
     assert_eq!(
         module_prepared_source_names(modules[0]),
-        vec!["@page.moth", "intro.mtf"],
+        vec!["@entry.moth", "intro.mtf"],
         "the `.mtf` provider is reachable only through the `.moth` occurrence"
     );
 
@@ -985,7 +987,7 @@ fn qualified_occurrence_creates_one_cross_module_graph_edge() {
         write_cross_module_project(&root);
     // Replace the authored namespace clause with an expression-qualified occurrence.
     fs::write(
-        module_a_root.join("@pageA.moth"),
+        module_a_root.join("@entry.moth"),
         "value = @module_b b\n#[:pageA]\n",
     )
     .expect("should write pageA");
@@ -1049,7 +1051,7 @@ fn duplicate_qualified_occurrences_share_one_provider_edge_and_preparation() {
     let (config, resolver, style_directives, module_a_root, module_b_root) =
         write_cross_module_project(&root);
     fs::write(
-        module_a_root.join("@pageA.moth"),
+        module_a_root.join("@entry.moth"),
         "first = @module_b b\nsecond = @module_b b\n#[:pageA]\n",
     )
     .expect("should write pageA");
@@ -1121,7 +1123,7 @@ fn duplicate_qualified_occurrences_share_one_provider_edge_and_preparation() {
             prepared_entry_file_path(&module.prepared.semantic)
                 .expect("prepared module retains its entry file identity")
                 .file_name()
-                == Some(OsStr::new("@api.moth"))
+                == Some(OsStr::new("@mod.moth"))
         })
         .collect();
     assert_eq!(
@@ -1131,7 +1133,7 @@ fn duplicate_qualified_occurrences_share_one_provider_edge_and_preparation() {
     );
     assert_eq!(
         module_prepared_source_names(provider_jobs[0]),
-        vec!["@api.moth"],
+        vec!["@mod.moth"],
         "the provider module prepares its reached root once"
     );
 
@@ -1171,7 +1173,7 @@ fn qualified_occurrence_in_unused_function_body_reaches_provider() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "unused || -> I32:\n    value = @helper answer\n    return value\n;\n#[:entry]\n",
     )
     .expect("should write entry");
@@ -1193,7 +1195,7 @@ fn qualified_occurrence_in_unused_function_body_reaches_provider() {
     assert_eq!(modules.len(), 1);
     assert_eq!(
         module_prepared_source_names(modules[0]),
-        vec!["@page.moth", "helper.moth"],
+        vec!["@entry.moth", "helper.moth"],
         "an occurrence in an unused function body is still a Stage 0 provider fact"
     );
     let local_source_ids: Vec<_> = modules[0]

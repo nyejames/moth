@@ -6,6 +6,6 @@ message_contains = ["module.js/missing"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-IMPORT-0005"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1
 count = 1

@@ -175,11 +175,6 @@ pub struct PreparedHeaderSyntax {
     pub entry_runtime_fragment_count: usize,
     /// Number of top-level const fragments in the active module root.
     pub const_fragment_count: usize,
-    /// Whether the active module root contains non-trivial top-level root/start code.
-    ///
-    /// WHY: header parsing is the first stage that can classify root activity without asking
-    /// AST or a builder to rediscover it from tokens or HIR.
-    pub has_non_trivial_root_body: bool,
     /// Aggregate cheap token classification for this module.
     ///
     /// WHAT: the sum of per-file `TokenStats` gathered during tokenization.
@@ -218,7 +213,6 @@ pub struct BoundModuleHeaders {
     pub top_level_const_fragments: Vec<TopLevelConstFragment>,
     pub entry_runtime_fragment_count: usize,
     pub const_fragment_count: usize,
-    pub has_non_trivial_root_body: bool,
     pub token_stats: TokenStats,
     pub header_stats: HeaderStats,
     pub module_symbols: ModuleSymbols,
@@ -1468,14 +1462,9 @@ impl RetainedDependencyClause {
 ///       The role is derived from Stage 0's root inventory, never from the file name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileRole {
-    /// A normal root in a module without an entry root. This is the legacy combined root: it
-    /// publishes the normal surface and still owns today's implicit start and root runtime.
-    ///
-    /// LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): once every executable fixture
-    /// authors `@entry.moth`, a normal root no longer contributes start or root runtime.
-    LegacyCombinedRoot,
     /// The entry root. It owns the implicit start, root runtime and direct output, and it never
-    /// publishes an export surface.
+    /// publishes an export surface. A standalone synthetic application selection also takes this
+    /// role because the selected file is that unit's explicit entry.
     ActiveEntryRoot,
     /// An API-only facade root in the module currently being compiled. The carried role is any
     /// non-entry module root role.
@@ -1493,16 +1482,6 @@ pub enum FileRole {
     /// `Normal` or `Support` and comes from Stage 0's bounded root inventory, never from the
     /// filename.
     ReachedApiFacadeRoot(ModuleRootRole),
-    /// A legacy combined normal root of another structural module reached inside a flattened
-    /// synthetic unit.
-    ///
-    /// LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): until every executable fixture
-    /// authors `@entry.moth`, a reached normal root whose module has no entry root still owns the
-    /// combined export/start role inside its own module. This compilation does not activate that
-    /// module, so its root runtime and fragments keep the pre-Phase-3 capture-and-discard
-    /// handling instead of being rejected as an API-only facade. It publishes no interface and
-    /// owns no start here.
-    ReachedLegacyCombinedRoot,
     /// The self-contained `config.moth` bootstrap unit.
     ///
     /// It is deliberately not a module root: the fixed build-only file creates no structural
@@ -1518,34 +1497,28 @@ impl FileRole {
     /// Whether this file is a structural module root, including a foreign root reached by a
     /// flattened synthetic unit.
     pub(crate) fn is_module_root(self) -> bool {
-        self.is_active_module_root()
-            || matches!(
-                self,
-                Self::ReachedApiFacadeRoot(_) | Self::ReachedLegacyCombinedRoot
-            )
+        self.is_active_module_root() || matches!(self, Self::ReachedApiFacadeRoot(_))
     }
 
     /// Whether this root belongs to the module currently being compiled.
     pub(crate) fn is_active_module_root(self) -> bool {
         matches!(
             self,
-            Self::LegacyCombinedRoot | Self::ActiveEntryRoot | Self::ActiveApiOnlyModuleRoot(_)
+            Self::ActiveEntryRoot | Self::ActiveApiOnlyModuleRoot(_)
         )
     }
 
     /// Whether this root may author an export surface.
     ///
     /// WHAT: only the normal (`@mod.moth`) and support (`@package.moth`) API facades own one,
-    ///       together with the legacy combined normal root and a reached foreign facade.
+    ///       including a facade reached by a flattened synthetic unit.
     /// WHY: `@entry.moth` owns start/runtime and publishes no importable surface; a synthetic
     ///      project-context root projects no surface at all.
     pub(crate) fn is_export_capable(self) -> bool {
         matches!(
             self,
-            Self::LegacyCombinedRoot
-                | Self::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal | ModuleRootRole::Support)
+            Self::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal | ModuleRootRole::Support)
                 | Self::ReachedApiFacadeRoot(ModuleRootRole::Normal | ModuleRootRole::Support)
-                | Self::ReachedLegacyCombinedRoot
         )
     }
 
@@ -1555,16 +1528,12 @@ impl FileRole {
     /// statements through the same start-shaped body lane before applying its own dialect
     /// validator. It publishes no executable entry.
     pub(crate) fn synthesizes_entry_start(self) -> bool {
-        matches!(
-            self,
-            Self::LegacyCombinedRoot | Self::ActiveEntryRoot | Self::ConfigBootstrap
-        )
+        matches!(self, Self::ActiveEntryRoot | Self::ConfigBootstrap)
     }
 
     /// The active public surface this file role declares, when it declares one.
     pub(crate) fn active_surface(self) -> Option<ModuleRootRole> {
         match self {
-            Self::LegacyCombinedRoot => Some(ModuleRootRole::Normal),
             Self::ActiveApiOnlyModuleRoot(role) => match role {
                 ModuleRootRole::Normal | ModuleRootRole::Support => Some(role),
                 ModuleRootRole::Entry
@@ -1574,7 +1543,6 @@ impl FileRole {
             // A reached foreign facade belongs to another structural module, so this compilation
             // never projects it as its own public surface.
             Self::ReachedApiFacadeRoot(_)
-            | Self::ReachedLegacyCombinedRoot
             | Self::ActiveEntryRoot
             | Self::ConfigBootstrap
             | Self::Normal => None,
@@ -1591,10 +1559,7 @@ impl FileRole {
     ///      surface.
     pub(crate) fn consumer_surface(self) -> Option<ModuleRootRole> {
         match self {
-            Self::LegacyCombinedRoot
-            | Self::ActiveEntryRoot
-            | Self::ReachedLegacyCombinedRoot
-            | Self::Normal => Some(ModuleRootRole::Normal),
+            Self::ActiveEntryRoot | Self::Normal => Some(ModuleRootRole::Normal),
             Self::ActiveApiOnlyModuleRoot(role) | Self::ReachedApiFacadeRoot(role) => match role {
                 ModuleRootRole::Normal | ModuleRootRole::Support => Some(role),
                 ModuleRootRole::Entry
@@ -1606,15 +1571,19 @@ impl FileRole {
     }
 
     /// The role used for a standalone source compiled as its own synthetic module root.
+    ///
+    /// WHAT: an ordinary explicitly selected file takes the entry role because the single-file
+    ///       application command selected it as that unit's executable output. A selected
+    ///       canonical root keeps its authored facade role instead.
+    /// WHY: single-file compilation has no authored root inventory, so the synthetic selection
+    ///      contract is the source of entry eligibility. A selected `@mod.moth`, `@package.moth`
+    ///      or project-context root stays API-only and publishes no start.
     pub(crate) fn for_standalone_root(role: ModuleRootRole) -> Option<Self> {
         match role {
-            // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): a standalone normal
-            // root keeps today's combined export/start behaviour.
-            ModuleRootRole::Normal => Some(Self::LegacyCombinedRoot),
             ModuleRootRole::Entry => Some(Self::ActiveEntryRoot),
-            ModuleRootRole::Support | ModuleRootRole::SyntheticProjectContext => {
-                Some(Self::ActiveApiOnlyModuleRoot(role))
-            }
+            ModuleRootRole::Normal
+            | ModuleRootRole::Support
+            | ModuleRootRole::SyntheticProjectContext => Some(Self::ActiveApiOnlyModuleRoot(role)),
             ModuleRootRole::Shared => None,
         }
     }
@@ -1684,8 +1653,6 @@ pub struct FileFrontendPrepareOutput {
     pub const_template_count: usize,
     /// Number of runtime fragments contributed by this file.
     pub runtime_fragment_count: usize,
-    /// Whether this file is the active root and contains non-trivial top-level root/start code.
-    pub has_non_trivial_root_body: bool,
     /// Names and authored spans of bindings introduced by this file's entry body.
     ///
     /// WHY: header parsing owns runtime-root symbol discovery. Later constant-context lookup

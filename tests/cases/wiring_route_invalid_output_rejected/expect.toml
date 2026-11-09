@@ -8,6 +8,6 @@ diagnostic_codes = ["MOTH-TYPE-0006"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0006"
 reason = "invalid_route_output.not_choice_or_generic"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1
 column = 22

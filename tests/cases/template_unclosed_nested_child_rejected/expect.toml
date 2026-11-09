@@ -7,13 +7,13 @@ message_contains = ["This template is not closed before the end of the file. Add
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0022"
 reason = "invalid_template_structure.missing_closing_bracket"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 3
 column = 47
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 3
 column = 5
 

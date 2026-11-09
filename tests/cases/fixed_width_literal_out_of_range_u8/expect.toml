@@ -6,6 +6,6 @@ diagnostic_codes = ["MOTH-SYNTAX-0008"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0008"
 reason = "invalid_number_literal.outside_fixed_scalar_range"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 2
 column = 12

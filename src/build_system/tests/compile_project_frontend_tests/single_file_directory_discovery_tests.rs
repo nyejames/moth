@@ -247,8 +247,8 @@ fn directory_project_discovers_multiple_entry_modules() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(dir.join("page/@page.moth"), "x ~= 10\n").expect("should write page");
-    fs::write(dir.join("layout/@layout.moth"), "y ~= 20\n").expect("should write layout");
+    fs::write(dir.join("page/@entry.moth"), "x ~= 10\n").expect("should write page");
+    fs::write(dir.join("layout/@entry.moth"), "y ~= 20\n").expect("should write layout");
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -292,12 +292,12 @@ fn directory_project_remaps_delta_collisions_across_modules() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("first/@a.moth"),
+        dir.join("first/@entry.moth"),
         "Item = |\n    shared I32,\n    first_only String,\n|\nitem = Item(1, \"first\")\n",
     )
     .expect("should write first entry");
     fs::write(
-        dir.join("second/@b.moth"),
+        dir.join("second/@entry.moth"),
         "Item = |\n    shared I32,\n    second_only String,\n|\nitem = Item(1, \"second\")\n",
     )
     .expect("should write second entry");
@@ -323,11 +323,9 @@ fn directory_project_remaps_delta_collisions_across_modules() {
                 .metadata
                 .entry
                 .as_ref()
-                .and_then(|entry| entry.entry_point.file_name())
-                .and_then(|name| name.to_str())
-                == Some("@b.moth")
+                .is_some_and(|entry| entry.entry_point.ends_with("second/@entry.moth"))
         })
-        .expect("expected @b.moth module");
+        .expect("expected @entry.moth module");
     let item_path = (0..second_module.executable.path_table.len())
         .filter_map(PathId::try_from_index)
         .find(|path| {
@@ -335,7 +333,7 @@ fn directory_project_remaps_delta_collisions_across_modules() {
                 *path,
                 warning_owner.string_table(),
                 &mut Vec::new(),
-            ) == "second/@b.moth/Item"
+            ) == "second/@entry.moth/Item"
         })
         .expect("Item path should exist in the published path table");
     let nominal_id = second_module

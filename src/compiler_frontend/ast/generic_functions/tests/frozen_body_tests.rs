@@ -1597,7 +1597,7 @@ fn generated_identity(name: &str) -> GeneratedFunctionIdentity {
     GeneratedFunctionIdentity::new(
         GeneratedDeclarationIdentity::ModulePrivate(ModulePrivateExecutableIdentity::new(
             origin,
-            "@main.moth".to_owned(),
+            "main.moth".to_owned(),
             ModulePrivateExecutableCategory::GenericFunction,
             name.to_owned(),
             None,
@@ -2056,7 +2056,7 @@ fn resource_default_materialisation_fixture(
     let declaration_identity =
         GeneratedDeclarationIdentity::ModulePrivate(ModulePrivateExecutableIdentity::new(
             module_origin.clone(),
-            "@page.moth".to_owned(),
+            "@entry.moth".to_owned(),
             ModulePrivateExecutableCategory::GenericFunction,
             "draw".to_owned(),
             None,
@@ -2196,7 +2196,7 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
     let declaration_identity =
         GeneratedDeclarationIdentity::ModulePrivate(ModulePrivateExecutableIdentity::new(
             module_origin.clone(),
-            "@page.moth".to_owned(),
+            "@entry.moth".to_owned(),
             ModulePrivateExecutableCategory::GenericFunction,
             "draw".to_owned(),
             None,
@@ -2720,7 +2720,7 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
         let mut source_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
         let source_file = path_fork
-            .try_intern_portable_path("@body.moth", &mut source_table)
+            .try_intern_portable_path("body.moth", &mut source_table)
             .expect("test path fits");
         let path_span = token_span();
         let mut path_syntax = PathSyntaxTable::with_source(SourceId::COMPILATION_ROOT);
@@ -2807,7 +2807,7 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
         let (mut path_fork, mut generated_table) =
             generated_materialisation_domain(&owner_path_fork, &owner_string_table);
         let generated_source_file = path_fork
-            .try_intern_portable_path("@body.moth", &mut generated_table)
+            .try_intern_portable_path("body.moth", &mut generated_table)
             .expect("test path fits");
         let materialised = frozen
             .materialise(
@@ -4040,7 +4040,7 @@ fn parse_closure_files(files: &[(&str, &str)]) -> (AstBuildResult, PathInternerF
     let options = HeaderParseOptions {
         selected_file: sources
             .get_by_canonical_path(entry)
-            .map(|source| (source.id, FileRole::LegacyCombinedRoot)),
+            .map(|source| (source.id, FileRole::ActiveEntryRoot)),
         ..Default::default()
     };
     let mut outputs = Vec::new();
@@ -4125,7 +4125,7 @@ fn parse_closure_files(files: &[(&str, &str)]) -> (AstBuildResult, PathInternerF
 #[test]
 fn nested_template_retains_distinct_source_dependency_visibility() {
     let (build_result, paths, strings) = parse_closure_files(&[
-        ("@page.moth", "@outer outer\n"),
+        ("@entry.moth", "@outer outer\n"),
         (
             "outer.moth",
             "@inner inner\nouter type T |value T| -> String:\n    return inner(value)\n;\n",
@@ -4208,7 +4208,7 @@ fn callable_only_choice_signature_retains_private_hir_shell() {
 fn repeated_bounded_forwarding_preserves_bodyless_receiver_parameter_owner() {
     let (mut build_result, mut path_fork, mut strings) = parse_closure_files(&[
         (
-            "@page.moth",
+            "@entry.moth",
             concat!(
                 "@label DISPLAY_TEXT, Label\n@box Box\n",
                 "LabelBox as Box of Label\n",

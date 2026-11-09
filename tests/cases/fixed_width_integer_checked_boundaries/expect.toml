@@ -13,6 +13,6 @@ diagnostic_codes = ["MOTH-RULE-0064"]
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0064"
 reason = "unsupported_backend_feature.recoverable_numeric_failure"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 117
 column = 18

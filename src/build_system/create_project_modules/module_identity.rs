@@ -20,28 +20,17 @@ use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRoot
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootFiles, ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use crate::compiler_frontend::source_packages::root_file::{
-    file_name_is_normal_module_root_file, file_name_is_support_root_file,
-};
 
 use rustc_hash::FxHashMap;
 
 use std::path::{Path, PathBuf};
 
-/// The canonical authored root filenames that classify to their final roles.
-///
-/// Other `@*.moth` names map to `Normal` and `+*.moth` names map to `Support` through the legacy
-/// root migration bridge below.
-const NORMAL_ROOT_FILE_NAME: &str = "@mod.moth";
-const SUPPORT_ROOT_FILE_NAME: &str = "@package.moth";
-const ENTRY_ROOT_FILE_NAME: &str = "@entry.moth";
-
 /// Dense deterministic handle for one structural module inside one build boundary.
 ///
 /// `ModuleId` is the build-local index assigned by sorting canonical logical module paths, so
 /// it is independent of traversal completion order and cosmetic root filename suffixes
-/// (`@mod.moth` and `@page.moth` in the same directory collapse to one structural module whose
-/// identity comes from the directory, not the filename).
+/// (every present root in one directory collapses to one structural module whose identity
+/// comes from the directory, not the filename).
 ///
 /// It is deliberately not the persistent semantic identity: its numeric value is a build-local
 /// table slot that may cross stages inside that build boundary but must not identify a module
@@ -56,33 +45,6 @@ impl ModuleId {
 
     pub(crate) fn index(self) -> usize {
         self.0
-    }
-}
-
-/// The fixed root role implied by a canonical root filename, or `None` for non-root files.
-///
-/// The three canonical spellings classify directly. Any other `@*.moth` is still a normal root
-/// and any `+*.moth` is still a support root while the authored vocabulary is being migrated.
-pub(crate) fn module_root_role_for_file_name(file_name: &str) -> Option<ModuleRootRole> {
-    if file_name == ENTRY_ROOT_FILE_NAME {
-        return Some(ModuleRootRole::Entry);
-    }
-    if file_name == SUPPORT_ROOT_FILE_NAME {
-        return Some(ModuleRootRole::Support);
-    }
-    if file_name == NORMAL_ROOT_FILE_NAME {
-        return Some(ModuleRootRole::Normal);
-    }
-
-    // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): arbitrary `@*.moth` roots are
-    // normal roots and `+*.moth` roots are support roots until the fixture and vocabulary
-    // migration lands.
-    if file_name_is_normal_module_root_file(file_name) {
-        Some(ModuleRootRole::Normal)
-    } else if file_name_is_support_root_file(file_name) {
-        Some(ModuleRootRole::Support)
-    } else {
-        None
     }
 }
 

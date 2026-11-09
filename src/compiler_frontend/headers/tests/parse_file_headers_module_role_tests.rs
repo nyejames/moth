@@ -9,8 +9,8 @@ fn api_only_normal_root_keeps_exportable_headers_and_rejects_runtime_body() {
     let errors = expect_header_error(
         parse_single_file_headers_with_entry(
             "export:\n    Button = | label String |\n;\n[ Button(\"ignored\") ]\n",
-            "src/@components.moth",
-            "src/@page.moth",
+            "src/@mod.moth",
+            "src/@entry.moth",
         ),
         "an API-only normal root must reject its top-level runtime body",
     );
@@ -28,8 +28,8 @@ fn api_only_normal_root_keeps_exportable_headers_and_rejects_runtime_body() {
     let headers = expect_header_success(
         parse_single_file_headers_with_entry(
             "export:\n    Button = | label String |\n;\n",
-            "src/@components.moth",
-            "src/@page.moth",
+            "src/@mod.moth",
+            "src/@entry.moth",
         ),
         "API-only normal roots should parse their declaration surface",
     );
@@ -43,7 +43,6 @@ fn api_only_normal_root_keeps_exportable_headers_and_rejects_runtime_body() {
         "API-only roots must not produce an entry header"
     );
     assert_eq!(headers.entry_runtime_fragment_count, 0);
-    assert!(!headers.has_non_trivial_root_body);
     assert!(headers.headers.iter().any(|header| {
         matches!(header.kind, HeaderKind::Struct { .. })
             && header.export_mode == HeaderExportMode::Public
@@ -51,10 +50,10 @@ fn api_only_normal_root_keeps_exportable_headers_and_rejects_runtime_body() {
 
     // API-only roots have no start-body AST consumer, so preparation must diagnose an
     // unclosed runtime template while rejecting the body, including inside a collection.
-    for file_path in ["src/@components.moth", "src/@page.moth"] {
+    for file_path in ["src/@mod.moth", "src/@entry.moth"] {
         for source in ["[: broken", "values = {\n[: broken"] {
             let errors = expect_header_error(
-                parse_single_file_headers_with_entry(source, file_path, "src/@page.moth"),
+                parse_single_file_headers_with_entry(source, file_path, "src/@entry.moth"),
                 &format!(
                     "unterminated runtime template must fail preparation: {file_path}: {source:?}"
                 ),
@@ -99,8 +98,8 @@ fn api_only_normal_root_rejects_const_root_fragments() {
     let errors = expect_header_error(
         parse_single_file_headers_with_entry(
             "#[html.head: [\"ignored\"]]\n",
-            "src/@components.moth",
-            "src/@page.moth",
+            "src/@mod.moth",
+            "src/@entry.moth",
         ),
         "API-only roots must reject top-level const fragments",
     );
@@ -138,7 +137,6 @@ fn reached_root_keeps_export_surface_without_start() {
         "a reached facade must not produce an entry header"
     );
     assert_eq!(headers.entry_runtime_fragment_count, 0);
-    assert!(!headers.has_non_trivial_root_body);
     assert!(
         headers.headers.iter().any(|header| {
             matches!(header.kind, HeaderKind::Struct { .. })
@@ -238,7 +236,6 @@ fn entry_root_synthesizes_start_without_export_surface() {
         "an entry root owns exactly one start function"
     );
     assert_eq!(headers.entry_runtime_fragment_count, 1);
-    assert!(headers.has_non_trivial_root_body);
     assert!(
         headers.headers.iter().all(|header| {
             !matches!(header.kind, HeaderKind::StartFunction)
@@ -270,7 +267,6 @@ fn empty_entry_root_keeps_one_start_and_no_fragments() {
     );
     assert_eq!(headers.entry_runtime_fragment_count, 0);
     assert_eq!(headers.const_fragment_count, 0);
-    assert!(!headers.has_non_trivial_root_body);
 }
 
 #[test]
@@ -297,9 +293,8 @@ fn metadata_only_entry_root_keeps_start_and_const_fragment() {
         headers.const_fragment_count, 1,
         "the direct builder slot is the entry's only const fragment"
     );
-    assert_eq!(headers.entry_runtime_fragment_count, 0);
-    assert!(
-        !headers.has_non_trivial_root_body,
+    assert_eq!(
+        headers.entry_runtime_fragment_count, 0,
         "metadata alone must not fabricate runtime body facts"
     );
 }
@@ -560,39 +555,6 @@ fn normal_root_export_cannot_reexport_a_support_facade_declaration() {
 }
 
 #[test]
-fn helper_file_cannot_resolve_a_legacy_combined_root_declaration() {
-    let sources = [
-        (
-            "theme #= \"dark\"\n".to_owned(),
-            "src/@page.moth".to_owned(),
-        ),
-        (
-            "@\"@page\" theme\nhelper_copy #= theme\n".to_owned(),
-            "src/helper.moth".to_owned(),
-        ),
-    ];
-
-    let (result, _warnings, _string_table, _path_fork) =
-        parse_multi_file_headers_with_path(&sources, "src/@page.moth");
-    let bag = match result {
-        Ok(_) => panic!("a helper read of a legacy combined root must be rejected"),
-        Err(bag) => bag,
-    };
-    let diagnostics = compact_bag_for_test(bag, None);
-    assert_eq!(diagnostics.len(), 1);
-    let diagnostic = diagnostics.first().expect("the bag holds its diagnostic");
-    assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0030");
-    let view = diagnostic
-        .family_view::<imports::RootLocalDeclarationNotVisibleView>()
-        .expect("the legacy-root read keeps the root-local family");
-    assert_eq!(
-        view.root_role,
-        crate::compiler_frontend::compiler_messages::RootLocalDeclarationRole::LegacyCombinedRoot,
-        "the diagnostic keeps the bridge role until Phase 4 migrates the root spelling"
-    );
-}
-
-#[test]
 fn one_helper_declaration_binds_from_all_three_root_roles() {
     let sources = [
         (
@@ -749,7 +711,7 @@ fn struct_fields_retain_local_ordering_hints_for_named_field_types() {
     // resolves so the named type is sorted before the struct that depends on it.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     // WHY: `parse_single_file_headers_with_table` discards the `PathInternerFork` that owns the
     // retained `PathId`s, so this fixture prepares through the fork-owning helper instead. The
     // fixture selects the file as its own legacy combined root, whose headers keep the root

@@ -6,6 +6,6 @@ message_contains = ["String?", "I32"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1
 column = 24

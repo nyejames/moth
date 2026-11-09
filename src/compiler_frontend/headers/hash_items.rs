@@ -134,14 +134,7 @@ fn handle_top_level_const_template(
     // A reached foreign facade keeps its declaration surface but owns no start or root runtime
     // in this compilation. Reject its const templates, after validating that no misplaced
     // `#Config` marker hides inside the range so the specific config diagnostic wins.
-    //
-    // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): a reached legacy combined normal
-    // root still owns root output inside its own module, so this compilation keeps the pre-Phase-3
-    // capture-and-discard handling instead of rejecting the template.
-    if matches!(
-        context.file_role,
-        FileRole::ReachedApiFacadeRoot(_) | FileRole::ReachedLegacyCombinedRoot
-    ) {
+    if matches!(context.file_role, FileRole::ReachedApiFacadeRoot(_)) {
         let opening = cursor.current().ok_or_else(|| {
             HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
                 CompilerStage::HeaderParsing,
@@ -180,9 +173,6 @@ fn handle_top_level_const_template(
                 )
             };
             return Err(diagnostic.into());
-        }
-        if context.file_role == FileRole::ReachedLegacyCombinedRoot {
-            return Ok(());
         }
         return Err(
             names_declarations::invalid_top_level_runtime_statement(Some(current_span)).into(),

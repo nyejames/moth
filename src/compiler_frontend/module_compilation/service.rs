@@ -468,8 +468,6 @@ fn run_semantic_stages(
     )?;
 
     let root_activity = ModuleRootActivity {
-        has_non_trivial_root_body: sorted.has_non_trivial_root_body,
-        const_fragment_count: sorted.const_fragment_count,
         runtime_fragment_count: sorted.entry_runtime_fragment_count,
     };
 

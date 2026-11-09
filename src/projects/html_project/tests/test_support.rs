@@ -119,8 +119,7 @@ pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut String
                 entry_point,
                 const_top_level_fragments: vec![],
                 root_activity: ModuleRootActivity {
-                    has_non_trivial_root_body: true,
-                    ..ModuleRootActivity::default()
+                    runtime_fragment_count: 1,
                 },
             }),
             doc_fragments: vec![],

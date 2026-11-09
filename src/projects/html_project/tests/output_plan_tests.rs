@@ -16,16 +16,6 @@ fn single_file_route_uses_exact_utf8_stem() {
 }
 
 #[test]
-fn single_file_hash_prefix_strips_cosmetic_hash() {
-    let route = derive_logical_html_path(Path::new("@about.moth"), None)
-        .expect("root-file route (@about.moth) should resolve");
-
-    assert_eq!(route.logical_html_path, PathBuf::from("about.html"));
-    assert_eq!(route.route_base, PathBuf::from("about"));
-    assert_eq!(route.route_segment.as_deref(), Some(OsStr::new("about")));
-}
-
-#[test]
 fn single_file_index_route_uses_homepage_projections() {
     let route = derive_logical_html_path(Path::new("index.moth"), None)
         .expect("index single-file route should resolve");
@@ -40,9 +30,6 @@ fn single_file_missing_stem_is_rejected_not_main() {
     let error = derive_logical_html_path(Path::new("."), None)
         .expect_err("missing single-file stem should be rejected, never fall back to main");
 
-    let LogicalHtmlPathError::Infrastructure(error) = error else {
-        panic!("a missing stem must remain a filesystem failure");
-    };
     assert_eq!(
         error.kind,
         InfrastructureFailureKind::Filesystem,
@@ -53,7 +40,7 @@ fn single_file_missing_stem_is_rejected_not_main() {
 #[test]
 fn directory_route_records_folder_and_title_projections() {
     let route = derive_logical_html_path(
-        Path::new("src/docs/basics/@page.moth"),
+        Path::new("src/docs/basics/@entry.moth"),
         Some(Path::new("src")),
     )
     .expect("nested directory route should resolve");
@@ -77,24 +64,9 @@ fn single_file_non_utf8_stem_is_rejected() {
     let error = derive_logical_html_path(&entry, None)
         .expect_err("non-UTF-8 single-file stems must remain filesystem failures");
 
-    let LogicalHtmlPathError::Infrastructure(error) = error else {
-        panic!("a non-UTF-8 stem must remain a filesystem failure");
-    };
-
     assert_eq!(
         error.kind,
         InfrastructureFailureKind::Filesystem,
         "non-UTF-8 stem should surface as a File infrastructure error"
-    );
-}
-
-#[test]
-fn single_file_at_only_stem_is_a_diagnostic() {
-    let error = derive_logical_html_path(Path::new("@.moth"), None)
-        .expect_err("an at-only stem must not produce an empty route name");
-
-    assert!(
-        matches!(error, LogicalHtmlPathError::EmptyRouteName(_)),
-        "an authored empty route name must be a diagnostic, not infrastructure"
     );
 }

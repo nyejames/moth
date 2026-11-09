@@ -830,9 +830,9 @@ fn prepare_template_source(
 ) -> SourcePreparationDelta {
     let options = HeaderParseOptions {
         root_file_ids: Default::default(),
-        // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): a standalone Moth template
-        // is one synthetic normal root that owns today's combined export/start behaviour.
-        selected_file: Some((entry_file_id, FileRole::LegacyCombinedRoot)),
+        // A standalone Moth template is an ordinary content source: it publishes no facade and
+        // owns no entry start.
+        selected_file: Some((entry_file_id, FileRole::Normal)),
         reached_root_roles: &[],
     };
     let context = FrontendFilePrepareContext {

@@ -14,5 +14,5 @@ message_contains = ["constructor routes"]
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0064"
 reason = "unsupported_backend_feature.constructor_routes"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 9

@@ -7,7 +7,7 @@ diagnostic_codes = ["MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022", "MOTH-SYNTAX-0022"]
 code = "MOTH-SYNTAX-0022"
 reason = "invalid_template_structure.template_loop_step_not_const"
 occurrence = 1
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 4
 column = 40
 

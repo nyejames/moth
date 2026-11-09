@@ -1,0 +1,8 @@
+@impl mixed_add, narrow_add
+
+mixed_min = mixed_add(-128, 0)
+mixed_max = mixed_add(127, 255)
+narrow_safe = narrow_add(200, 55)
+narrow_overflow = narrow_add(255, 1)
+
+[:full domain catch mixed=[mixed_min]/[mixed_max] narrow=[narrow_safe]/[narrow_overflow]]

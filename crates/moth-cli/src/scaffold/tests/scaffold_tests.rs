@@ -78,7 +78,7 @@ fn find_scaffold_conflicts_reports_exact_owned_set_and_excludes_unowned_director
     let project_dir = temp.path().to_path_buf();
 
     // Scaffold-owned files are the exact conflict set, in declared order.
-    for file in ["config.moth", "@page.moth"] {
+    for file in ["config.moth", "@entry.moth"] {
         fs::write(project_dir.join(file), b"old").unwrap();
     }
     assert_eq!(
@@ -87,7 +87,7 @@ fn find_scaffold_conflicts_reports_exact_owned_set_and_excludes_unowned_director
             .iter()
             .map(|conflict| conflict.relative)
             .collect::<Vec<_>>(),
-        vec!["config.moth", "@page.moth",]
+        vec!["config.moth", "@entry.moth",]
     );
 
     // Generated output directories and a user .gitignore are never conflicts.
@@ -228,11 +228,11 @@ fn write_scaffold_rechecks_symlinks_after_preflight() {
 
     let outside = temp.path().join("outside.moth");
     fs::write(&outside, b"keep me").unwrap();
-    symlink(&outside, project_dir.join("@page.moth")).unwrap();
+    symlink(&outside, project_dir.join("@entry.moth")).unwrap();
 
     let mut prompt = ScriptedPrompt::new(Vec::new());
     let error = write_scaffold(&target, false, &mut prompt).unwrap_err();
-    assert!(error.contains("@page.moth") && error.contains("symbolic link"));
+    assert!(error.contains("@entry.moth") && error.contains("symbolic link"));
     assert_eq!(fs::read(&outside).unwrap(), b"keep me");
 }
 
@@ -282,7 +282,7 @@ fn write_scaffold_refuses_gitignore_symlinks() {
 
 #[test]
 fn preflight_rejects_directory_scaffold_paths_even_with_force() {
-    for relative in ["config.moth", "@page.moth"] {
+    for relative in ["config.moth", "@entry.moth"] {
         for force in [false, true] {
             let temp = tempfile::tempdir().unwrap();
             let project_dir = temp.path().to_path_buf();
@@ -327,7 +327,7 @@ fn preflight_rejects_gitignore_directory_before_writes() {
             "force={force}: {error}"
         );
         assert!(!project_dir.join("config.moth").exists());
-        assert!(!project_dir.join("@page.moth").exists());
+        assert!(!project_dir.join("@entry.moth").exists());
     }
 }
 
@@ -352,7 +352,7 @@ fn preflight_rejects_gitignore_special_entry_before_writes() {
         );
         assert!(prompt.messages.is_empty());
         assert!(!project_dir.join("config.moth").exists());
-        assert!(!project_dir.join("@page.moth").exists());
+        assert!(!project_dir.join("@entry.moth").exists());
     }
 }
 
@@ -398,7 +398,7 @@ fn preflight_rejects_gitignore_symlink_before_writes() {
         );
         assert_eq!(fs::read(&outside).unwrap(), b"custom\n");
         assert!(!project_dir.join("config.moth").exists());
-        assert!(!project_dir.join("@page.moth").exists());
+        assert!(!project_dir.join("@entry.moth").exists());
     }
 }
 
@@ -442,7 +442,7 @@ fn end_to_end_conflict_without_force_performs_no_writes() {
 
 #[test]
 fn end_to_end_directory_scaffold_paths_block_before_writes() {
-    for relative in ["config.moth", "@page.moth"] {
+    for relative in ["config.moth", "@entry.moth"] {
         for force in [false, true] {
             let temp = tempfile::tempdir().unwrap();
             let project_dir = temp.path().to_path_buf();
@@ -462,13 +462,13 @@ fn end_to_end_directory_scaffold_paths_block_before_writes() {
             assert!(project_dir.join(relative).is_dir());
             if relative == "config.moth" {
                 assert!(
-                    !project_dir.join("@page.moth").exists(),
+                    !project_dir.join("@entry.moth").exists(),
                     "no later scaffold file may be written after a config.moth kind error"
                 );
             } else {
                 assert!(
                     !project_dir.join("config.moth").exists(),
-                    "config.moth must not be created when @page.moth is a directory"
+                    "config.moth must not be created when @entry.moth is a directory"
                 );
             }
         }
@@ -490,7 +490,7 @@ fn end_to_end_gitignore_directory_blocks_before_scaffold_writes() {
     let error = create_html_project_template_with_prompt(options, &mut prompt).unwrap_err();
     assert!(error.contains(".gitignore") && error.contains("directory"));
     assert!(!project_dir.join("config.moth").exists());
-    assert!(!project_dir.join("@page.moth").exists());
+    assert!(!project_dir.join("@entry.moth").exists());
     assert!(project_dir.join(".gitignore").is_dir());
 }
 
@@ -515,7 +515,7 @@ fn end_to_end_gitignore_symlink_blocks_before_scaffold_writes() {
     assert!(error.contains(".gitignore") && error.contains("symbolic link"));
     assert_eq!(fs::read(&outside).unwrap(), b"custom\n");
     assert!(!project_dir.join("config.moth").exists());
-    assert!(!project_dir.join("@page.moth").exists());
+    assert!(!project_dir.join("@entry.moth").exists());
 }
 
 #[test]
@@ -524,7 +524,7 @@ fn end_to_end_non_utf8_gitignore_blocks_before_any_scaffold_writes() {
         let temp = tempfile::tempdir().unwrap();
         let project_dir = temp.path().to_path_buf();
         let config = project_dir.join("config.moth");
-        let page = project_dir.join("@page.moth");
+        let page = project_dir.join("@entry.moth");
         let gitignore = project_dir.join(".gitignore");
         fs::write(&config, b"old config").unwrap();
         fs::write(&page, b"old page").unwrap();
@@ -602,13 +602,13 @@ fn creates_full_default_scaffold_and_reports_every_path() {
 
     // Every scaffold-owned path exists on disk.
     assert!(project_dir.join("config.moth").exists());
-    assert!(project_dir.join("@page.moth").exists());
+    assert!(project_dir.join("@entry.moth").exists());
     assert!(!project_dir.join("src").exists());
     assert!(!project_dir.join("_dev").exists());
     assert!(!project_dir.join("_release").exists());
 
     assert!(report.created.contains(&PathBuf::from("config.moth")));
-    assert!(report.created.contains(&PathBuf::from("@page.moth")));
+    assert!(report.created.contains(&PathBuf::from("@entry.moth")));
     assert!(!report.created.contains(&PathBuf::from("src")));
     assert!(report.created.contains(&PathBuf::from(".gitignore")));
     assert!(report.replaced.is_empty());
@@ -633,7 +633,7 @@ fn generated_files_exactly_match_templates() {
         start_page_scaffolding::config_template("Test_Site").unwrap()
     );
     assert_eq!(
-        fs::read_to_string(project_dir.join("@page.moth")).unwrap(),
+        fs::read_to_string(project_dir.join("@entry.moth")).unwrap(),
         start_page_scaffolding::page_template()
     );
 }
@@ -816,7 +816,7 @@ fn write_scaffold_directly_refuses_regular_replacement_without_force() {
         b"original"
     );
     assert!(
-        !project_dir.join("@page.moth").exists(),
+        !project_dir.join("@entry.moth").exists(),
         "the direct writer must stop before writing the later scaffold file"
     );
 }
@@ -829,7 +829,7 @@ fn force_replaces_scaffold_owned_files_only() {
     fs::create_dir(project_dir.join("_dev")).unwrap();
     fs::create_dir(project_dir.join("_release")).unwrap();
     fs::write(project_dir.join("config.moth"), b"old config").unwrap();
-    fs::write(project_dir.join("@page.moth"), b"old page").unwrap();
+    fs::write(project_dir.join("@entry.moth"), b"old page").unwrap();
     fs::write(project_dir.join("_dev/user-output.js"), b"old dev output").unwrap();
     fs::write(
         project_dir.join("_release/user-output.js"),
@@ -844,13 +844,13 @@ fn force_replaces_scaffold_owned_files_only() {
     let report = write_scaffold(&target, true, &mut prompt).unwrap();
 
     assert!(report.replaced.contains(&PathBuf::from("config.moth")));
-    assert!(report.replaced.contains(&PathBuf::from("@page.moth")));
+    assert!(report.replaced.contains(&PathBuf::from("@entry.moth")));
     assert_eq!(
         fs::read_to_string(project_dir.join("config.moth")).unwrap(),
         start_page_scaffolding::config_template("Test_Site").unwrap()
     );
     assert_eq!(
-        fs::read_to_string(project_dir.join("@page.moth")).unwrap(),
+        fs::read_to_string(project_dir.join("@entry.moth")).unwrap(),
         start_page_scaffolding::page_template()
     );
     assert_eq!(
@@ -877,7 +877,7 @@ fn force_replacement_breaks_hard_links_without_touching_external_files() {
     fs::write(&outside_config, b"outside config").unwrap();
     fs::write(&outside_page, b"outside page").unwrap();
     fs::hard_link(&outside_config, project_dir.join("config.moth")).unwrap();
-    fs::hard_link(&outside_page, project_dir.join("@page.moth")).unwrap();
+    fs::hard_link(&outside_page, project_dir.join("@entry.moth")).unwrap();
 
     let target = named_target(project_dir.clone(), "Test_Site", true);
     let mut prompt = ScriptedPrompt::new(vec![String::from("n")]);
@@ -885,13 +885,13 @@ fn force_replacement_breaks_hard_links_without_touching_external_files() {
     let report = write_scaffold(&target, true, &mut prompt).unwrap();
 
     assert!(report.replaced.contains(&PathBuf::from("config.moth")));
-    assert!(report.replaced.contains(&PathBuf::from("@page.moth")));
+    assert!(report.replaced.contains(&PathBuf::from("@entry.moth")));
     assert_eq!(
         fs::read_to_string(project_dir.join("config.moth")).unwrap(),
         start_page_scaffolding::config_template("Test_Site").unwrap()
     );
     assert_eq!(
-        fs::read_to_string(project_dir.join("@page.moth")).unwrap(),
+        fs::read_to_string(project_dir.join("@entry.moth")).unwrap(),
         start_page_scaffolding::page_template()
     );
     assert_eq!(

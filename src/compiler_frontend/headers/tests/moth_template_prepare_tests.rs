@@ -209,7 +209,7 @@ fn config_marked_moth_template_paths_stay_out_of_structural_references() {
 fn prepare_via_pipeline(source: &str) -> SourcePreparationDelta {
     let mut source_files = SourceDatabase::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let entry_file_path = PathBuf::from("src/@page.moth");
+    let entry_file_path = PathBuf::from("src/@entry.moth");
     let options = HeaderParseOptions::default();
     let input_path = PathBuf::from("src/intro.mtf");
     let mut string_table = StringTable::new();
@@ -286,7 +286,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
         .map(|identity| identity.id)
         .expect("standalone Moth template source identity was not registered");
     let options = HeaderParseOptions {
-        selected_file: Some((entry_file_id, FileRole::LegacyCombinedRoot)),
+        selected_file: Some((entry_file_id, FileRole::ActiveEntryRoot)),
         ..Default::default()
     };
     let context = FrontendFilePrepareContext {
@@ -348,7 +348,7 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
     )
     .expect("headers should sort");
     let entry_dir = path_fork
-        .try_intern_portable_path("src/@page.moth", &mut string_table)
+        .try_intern_portable_path("src/@entry.moth", &mut string_table)
         .expect("test path fits");
 
     let ast = Ast::new(
@@ -484,7 +484,7 @@ impl MothTemplateScopeFixture {
         );
 
         let mut string_table = StringTable::new();
-        let entry_file_path = entry_root.join("@page.moth");
+        let entry_file_path = entry_root.join("@entry.moth");
         let source_files = SourceDatabase::build(
             canonical_files.iter(),
             &entry_file_path,
@@ -735,7 +735,7 @@ impl MothTemplateScopeFixture {
                 .id;
             // The fixture prepares several root-named files in one set; select each file's
             // fixture role through the shared single-module mapping.
-            let options = crate::compiler_frontend::tests::parse_support::legacy_fixture_file_role(
+            let options = crate::compiler_frontend::tests::parse_support::fixture_file_role(
                 &source_path,
                 &self.entry_file_path,
             )
@@ -1009,7 +1009,7 @@ fn prepare_moth_source(
     )
     .expect("Moth source should tokenize");
     let owner = SourceTokenOwner::new(lexed.tokens);
-    let options = crate::compiler_frontend::tests::parse_support::legacy_fixture_file_role(
+    let options = crate::compiler_frontend::tests::parse_support::fixture_file_role(
         file_path,
         entry_file_path,
     )
@@ -1383,7 +1383,7 @@ fn module_root_export_syntax_can_target_moth_template_content() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let root_file_path = PathBuf::from("src/@mod.moth");
-    let entry_path = PathBuf::from("src/@page.moth");
+    let entry_path = PathBuf::from("src/@entry.moth");
 
     let (root_output, _span_builder) = prepare_moth_source(
         "export:\n    @intro content as intro\n;\n",
@@ -1692,7 +1692,7 @@ fn generated_self_content_is_not_visible_to_moth_template_body() {
 #[test]
 fn moth_dependency_binds_template_content_as_folded_string_constant() {
     let fixture = MothTemplateScopeFixture::new(&[
-        ("src/@page.moth", ""),
+        ("src/@entry.moth", ""),
         (
             "src/main.moth",
             "@intro content as intro_content\nfrom_intro #String = intro_content\n",
@@ -1704,7 +1704,7 @@ fn moth_dependency_binds_template_content_as_folded_string_constant() {
             "@html/@mod.moth",
             "src/intro.mtf",
             "src/main.moth",
-            "src/@page.moth",
+            "src/@entry.moth",
         ])
         .expect("module using imported Moth template content should compile through AST");
 
@@ -1717,7 +1717,7 @@ fn moth_dependency_binds_template_content_as_folded_string_constant() {
 #[test]
 fn moth_namespace_dependency_binds_template_content_as_folded_string_constant() {
     let fixture = MothTemplateScopeFixture::new(&[
-        ("src/@page.moth", ""),
+        ("src/@entry.moth", ""),
         (
             "src/main.moth",
             "@intro\nfrom_intro #String = intro.content\n",
@@ -1728,7 +1728,7 @@ fn moth_namespace_dependency_binds_template_content_as_folded_string_constant() 
         .compile_module_ast(&[
             "@html/@mod.moth",
             "src/main.moth",
-            "src/@page.moth",
+            "src/@entry.moth",
             "src/intro.mtf",
         ])
         .expect("module using namespace-imported Moth template content should compile through AST");
@@ -1742,7 +1742,7 @@ fn moth_namespace_dependency_binds_template_content_as_folded_string_constant() 
 #[test]
 fn imported_bd_file_produces_no_runtime_or_start_behavior() {
     let fixture = MothTemplateScopeFixture::new(&[
-        ("src/@page.moth", ""),
+        ("src/@entry.moth", ""),
         (
             "src/main.moth",
             "@intro\nfrom_intro #String = intro.content\n",
@@ -1755,7 +1755,7 @@ fn imported_bd_file_produces_no_runtime_or_start_behavior() {
             "@html/@mod.moth",
             "src/intro.mtf",
             "src/main.moth",
-            "src/@page.moth",
+            "src/@entry.moth",
         ])
         .expect("headers should parse");
 
@@ -1795,7 +1795,7 @@ fn imported_bd_file_produces_no_runtime_or_start_behavior() {
             "@html/@mod.moth",
             "src/intro.mtf",
             "src/main.moth",
-            "src/@page.moth",
+            "src/@entry.moth",
         ])
         .expect("module AST should build");
 
@@ -1904,7 +1904,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/content.moth");
-    let entry_file_path = PathBuf::from("src/@page.moth");
+    let entry_file_path = PathBuf::from("src/@entry.moth");
     let (prepared_file, _) = prepare_moth_source(
         &format!("content #= [$md: {source}]"),
         &file_path,
@@ -1953,7 +1953,7 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
     )
     .expect("headers should sort");
     let entry_dir = path_fork
-        .try_intern_portable_path("src/@page.moth", &mut string_table)
+        .try_intern_portable_path("src/@entry.moth", &mut string_table)
         .expect("test path fits");
 
     let authored_ast = Ast::new(

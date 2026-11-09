@@ -6,7 +6,7 @@ diagnostic_codes = ["MOTH-RULE-0052"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0052"
 reason = "invalid_template_slot.insert_targets_unknown_named_slot"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 18
 
 [backends.html_wasm]
@@ -17,5 +17,5 @@ diagnostic_codes = ["MOTH-RULE-0052"]
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0052"
 reason = "invalid_template_slot.insert_targets_unknown_named_slot"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 18

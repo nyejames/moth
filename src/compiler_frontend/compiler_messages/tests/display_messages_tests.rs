@@ -39,7 +39,7 @@ fn guidance_lines_name_the_stage_without_details() {
 }
 
 #[test]
-fn special_file_renderer_names_support_roots() {
+fn special_file_renderer_names_retired_support_markers() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let extensionless_path = path_fork
@@ -53,13 +53,13 @@ fn special_file_renderer_names_support_roots() {
     );
 
     let explicit_path = path_fork
-        .try_intern_portable_path("input/+pkg.moth", &mut string_table)
+        .try_intern_portable_path("input/@package.moth", &mut string_table)
         .expect("test path fits");
     let context = DiagnosticRenderContext::new(&string_table).with_path_fork(&path_fork);
 
     assert_eq!(
         special_file_name_from_path(explicit_path, context),
-        "+pkg.moth"
+        "special file"
     );
 }
 
@@ -74,7 +74,7 @@ fn support_root_renderer_suggests_containing_package_directory() {
 
     assert_eq!(
         support_root_import_suggestion(path, context),
-        " Bind the support package `@tools/helpers` instead of the root file."
+        " Bind the module directory `@tools/helpers` instead of the special file."
     );
 }
 

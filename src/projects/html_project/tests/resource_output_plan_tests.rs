@@ -737,7 +737,7 @@ fn live_resource_use_spans_override_intern_span() {
     //      than the HIR expression that keeps the resource live.
     let mut string_table = StringTable::new();
     let mut module = crate::projects::html_project::tests::test_support::create_test_module(
-        PathBuf::from("@page.moth"),
+        PathBuf::from("@entry.moth"),
         &mut string_table,
     );
     let origin = module_resource_origin("app", "", "assets/logo.svg");
@@ -861,7 +861,7 @@ fn later_live_use_replaces_intern_fallback_span() {
 fn fragment_and_metadata_uses_keep_authored_spans_with_hir_use() {
     let mut string_table = StringTable::new();
     let mut module = crate::projects::html_project::tests::test_support::create_test_module(
-        PathBuf::from("@page.moth"),
+        PathBuf::from("@entry.moth"),
         &mut string_table,
     );
     let origin = module_resource_origin("app", "", "assets/logo.svg");

@@ -7,6 +7,6 @@ diagnostic_codes = ["MOTH-IMPORT-0013"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-IMPORT-0013"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1
 column = 15

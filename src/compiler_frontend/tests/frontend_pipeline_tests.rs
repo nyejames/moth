@@ -84,6 +84,7 @@ use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan,
 };
@@ -343,6 +344,7 @@ struct FrontendProject {
     files: Vec<PathBuf>,
     frontend: FrontendServices,
     builder_root_slots: Option<BuilderRootSlotSchema>,
+    entry_role: FileRole,
 }
 
 impl FrontendProject {
@@ -350,6 +352,20 @@ impl FrontendProject {
         files: &[(&str, &str)],
         entry_relative_path: &str,
         style_directives: StyleDirectiveRegistry,
+    ) -> Self {
+        Self::new_with_role(
+            files,
+            entry_relative_path,
+            style_directives,
+            FileRole::ActiveEntryRoot,
+        )
+    }
+
+    fn new_with_role(
+        files: &[(&str, &str)],
+        entry_relative_path: &str,
+        style_directives: StyleDirectiveRegistry,
+        entry_role: FileRole,
     ) -> Self {
         let temp_dir = tempfile::tempdir().expect("should create temp dir");
         let project_root = temp_dir.path().join("project");
@@ -412,6 +428,7 @@ impl FrontendProject {
             files: canonical_files,
             frontend,
             builder_root_slots: None,
+            entry_role,
         }
     }
 
@@ -457,7 +474,7 @@ impl FrontendProject {
             .map(|identity| identity.id);
 
         let options = HeaderParseOptions {
-            selected_file: entry_file_id.map(|id| (id, FileRole::LegacyCombinedRoot)),
+            selected_file: entry_file_id.map(|id| (id, self.entry_role)),
             ..Default::default()
         };
 
@@ -522,7 +539,7 @@ impl FrontendProject {
                 AstBuildRequest {
                     sorted,
                     module_anchor_path: &self.entry_file,
-                    synthesizes_entry_start: true,
+                    synthesizes_entry_start: matches!(self.entry_role, FileRole::ActiveEntryRoot),
                     build_profile: FrontendBuildProfile::Dev,
                     capacity_estimate: Default::default(),
                     resolved_file_references: ResolvedFileReferenceTable::default(),
@@ -725,10 +742,10 @@ fn assert_report_describes_module(hir: &HirModule, report: &BorrowCheckReport) {
 fn compiles_single_file_program_through_borrow_check() {
     let mut project = FrontendProject::new(
         &[(
-            "src/@page.moth",
+            "src/@entry.moth",
             "Point = |\n    value I32,\n|\npoint = Point(1)\nloop 0 to 2 |i|:\n    io.line([: [point.value]])\n;\n",
         )],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -788,10 +805,10 @@ fn direct_root_named_insert_routes_to_registered_builder_slot() {
 
     let mut project = FrontendProject::new(
         &[(
-            "src/@page.moth",
+            "src/@entry.moth",
             "#[$in sidebar: Sidebar]\n#[: <main>Body</main>]\n#[$in sidebar: Tail]\n#[$in sidebar:]\n",
         )],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     )
     .with_builder_root_slots(schema);
@@ -840,8 +857,8 @@ fn unregistered_direct_root_builder_slot_diagnoses_at_authored_site() {
     schema.register("sidebar");
 
     let mut project = FrontendProject::new(
-        &[("src/@page.moth", "#[$in title: Title]\n#[: body]\n")],
-        "src/@page.moth",
+        &[("src/@entry.moth", "#[$in title: Title]\n#[: body]\n")],
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     )
     .with_builder_root_slots(schema);
@@ -867,10 +884,10 @@ fn runtime_direct_root_builder_slot_contribution_is_not_folded() {
 
     let mut project = FrontendProject::new(
         &[(
-            "src/@page.moth",
+            "src/@entry.moth",
             "runtime_value || -> String:\n    return \"runtime\"\n;\n#[$in sidebar: [runtime_value()]]\n",
         )],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     )
     .with_builder_root_slots(schema);
@@ -892,10 +909,10 @@ fn nested_insert_in_ordinary_root_fragment_stays_an_ordinary_helper() {
 
     let mut project = FrontendProject::new(
         &[(
-            "src/@page.moth",
+            "src/@entry.moth",
             "#[: before [$in sidebar: Nested] after]\n",
         )],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     )
     .with_builder_root_slots(schema);
@@ -916,10 +933,10 @@ fn root_builder_insert_rejects_unresolved_template_slots() {
     schema.register("sidebar");
     let mut project = FrontendProject::new(
         &[(
-            "src/@page.moth",
+            "src/@entry.moth",
             "card #= [:<h1>[$slot title]</h1>]\n#[$in sidebar: [card]]\n",
         )],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     )
     .with_builder_root_slots(schema);
@@ -938,8 +955,8 @@ fn aliased_root_insert_is_not_a_builder_message() {
     let mut schema = BuilderRootSlotSchema::default();
     schema.register("sidebar");
     let mut project = FrontendProject::new(
-        &[("src/@page.moth", "part #= [$in sidebar: X]\n#[part]\n")],
-        "src/@page.moth",
+        &[("src/@entry.moth", "part #= [$in sidebar: X]\n#[part]\n")],
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     )
     .with_builder_root_slots(schema);
@@ -958,7 +975,7 @@ fn compiles_multi_file_dependency_program_through_borrow_check() {
     let mut project = FrontendProject::new(
         &[
             (
-                "src/@page.moth",
+                "src/@entry.moth",
                 "@helper add\nresult = add(1, 2)\nio.line([: [result]])\n",
             ),
             (
@@ -966,7 +983,7 @@ fn compiles_multi_file_dependency_program_through_borrow_check() {
                 "add|left I32, right I32| -> I32:\n    return left + right\n;\n",
             ),
         ],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -1004,8 +1021,8 @@ fn compiles_multi_file_dependency_program_through_borrow_check() {
 #[test]
 fn frontend_diagnostics_preserve_source_spans() {
     let mut project = FrontendProject::new(
-        &[("src/@page.moth", "bad #= io.line(\"runtime host call\")\n")],
-        "src/@page.moth",
+        &[("src/@entry.moth", "bad #= io.line(\"runtime host call\")\n")],
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
     let failure = project
@@ -1019,10 +1036,10 @@ fn frontend_diagnostics_preserve_source_spans() {
 
     let mut project = FrontendProject::new(
         &[(
-            "src/@page.moth",
+            "src/@entry.moth",
             "data ~= [\"shared data\"]\nref1 ~= data\nref2 ~= data\nresult = [ref1, ref2]\n",
         )],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -1073,8 +1090,8 @@ fn html_style_directive_available_during_header_parsing() {
         .expect("merged directive registry should build");
 
     let mut project = FrontendProject::new(
-        &[("src/@page.moth", "head #= [$html: <div>Hello</div>]\n")],
-        "src/@page.moth",
+        &[("src/@entry.moth", "head #= [$html: <div>Hello</div>]\n")],
+        "src/@entry.moth",
         directives,
     );
 
@@ -1113,10 +1130,10 @@ fn branch_terminator_count(hir: &HirModule) -> usize {
 fn runtime_bool_condition_lowers_one_branch_diamond() {
     let mut project = FrontendProject::new(
         &[(
-            "src/@page.moth",
+            "src/@entry.moth",
             "threshold ~= 4\nresult ~= 0\nif threshold > 1:\n    ~result = 1\nelse\n    ~result = 2\n;\nio.line([: [result]])\n",
         )],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -1133,10 +1150,10 @@ fn runtime_bool_condition_lowers_one_branch_diamond() {
 fn compile_time_true_condition_reaches_hir_without_a_branch() {
     let mut project = FrontendProject::new(
         &[(
-            "src/@page.moth",
+            "src/@entry.moth",
             "enabled #= true\nresult ~= 0\nif enabled:\n    ~result = 1\nelse\n    ~result = 2\n;\nio.line([: [result]])\n",
         )],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -1153,10 +1170,10 @@ fn compile_time_true_condition_reaches_hir_without_a_branch() {
 fn compile_time_false_condition_without_else_lowers_no_branch_body() {
     let mut project = FrontendProject::new(
         &[(
-            "src/@page.moth",
+            "src/@entry.moth",
             "disabled #= false\nresult ~= 0\nif disabled:\n    ~result = 1\n;\nio.line([: [result]])\n",
         )],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -1173,10 +1190,10 @@ fn compile_time_false_condition_without_else_lowers_no_branch_body() {
 fn terminality_observes_the_selected_branch() {
     let mut project = FrontendProject::new(
         &[(
-            "src/@page.moth",
+            "src/@entry.moth",
             "enabled #= true\nchoose || -> I32:\n    if enabled:\n        return 1\n    ;\n;\nio.line([: [choose()]])\n",
         )],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -1195,10 +1212,10 @@ fn terminality_observes_the_selected_branch() {
 fn never_body_ignores_return_in_inactive_static_branch() {
     let mut project = FrontendProject::new(
         &[(
-            "src/@page.moth",
+            "src/@entry.moth",
             "disabled #= false\nstop || -> !:\n    if disabled:\n        return\n    ;\n    assert(false, \"stop\")\n;\n",
         )],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -1222,7 +1239,7 @@ fn cross_module_never_call_is_accepted_as_a_standalone_statement() {
     let mut project = FrontendProject::new(
         &[
             (
-                "src/@page.moth",
+                "src/@entry.moth",
                 "@helper stop\nrun || -> !:\n    stop()\n;\n",
             ),
             (
@@ -1230,7 +1247,7 @@ fn cross_module_never_call_is_accepted_as_a_standalone_statement() {
                 "stop || -> !:\n    assert(false, \"stop\")\n;\n",
             ),
         ],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -1253,7 +1270,7 @@ fn cross_module_never_call_is_rejected_in_value_position() {
     let mut project = FrontendProject::new(
         &[
             (
-                "src/@page.moth",
+                "src/@entry.moth",
                 "@helper stop\nrun || -> I32:\n    return stop()\n;\n",
             ),
             (
@@ -1261,7 +1278,7 @@ fn cross_module_never_call_is_rejected_in_value_position() {
                 "stop || -> !:\n    assert(false, \"stop\")\n;\n",
             ),
         ],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -1279,10 +1296,10 @@ fn cross_module_never_call_is_rejected_in_value_position() {
 fn inactive_static_branch_still_reports_type_errors_before_never_validation() {
     let mut project = FrontendProject::new(
         &[(
-            "src/@page.moth",
+            "src/@entry.moth",
             "disabled #= false\nstop || -> !:\n    if disabled:\n        broken I32 = \"not a number\"\n    ;\n    assert(false, \"stop\")\n;\n",
         )],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -1295,8 +1312,11 @@ fn inactive_static_branch_still_reports_type_errors_before_never_validation() {
 #[test]
 fn unannotated_function_with_diverging_entry_body_is_exempt() {
     let mut project = FrontendProject::new(
-        &[("src/@page.moth", "assert(false, \"entry never returns\")\n")],
-        "src/@page.moth",
+        &[(
+            "src/@entry.moth",
+            "assert(false, \"entry never returns\")\n",
+        )],
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -1314,10 +1334,10 @@ fn unannotated_function_with_diverging_entry_body_is_exempt() {
 fn explicitly_typed_placeholder_may_diverge_in_ast_finalisation() {
     let mut project = FrontendProject::new(
         &[(
-            "src/@page.moth",
+            "src/@entry.moth",
             "placeholder || -> I32:\n    assert(false, \"not implemented\")\n;\ncleanup || -> Error!:\n    assert(false, \"not implemented\")\n;\n",
         )],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -1328,10 +1348,10 @@ fn explicitly_typed_placeholder_may_diverge_in_ast_finalisation() {
 fn selected_terminating_value_if_body_replaces_its_receiver_before_hir() {
     let mut project = FrontendProject::new(
         &[(
-            "src/@page.moth",
+            "src/@entry.moth",
             "enabled #= true\ndisabled #= false\nchoose_then || -> I32:\n    return if enabled:\n        return 1\n    else\n        then 2\n    ;\n;\nchoose_else || -> I32:\n    return if disabled:\n        then 1\n    else\n        return 2\n    ;\n;\nio.line([: [choose_then()]-[choose_else()]])\n",
         )],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -1348,10 +1368,10 @@ fn selected_terminating_value_if_body_replaces_its_receiver_before_hir() {
 fn selected_statement_branch_keeps_its_immediate_scope_before_nested_control_flow() {
     let mut project = FrontendProject::new(
         &[(
-            "src/@page.moth",
+            "src/@entry.moth",
             "enabled #= false\nruntime ~= true\nif enabled:\n    then_value = 1\nelse\n    if runtime:\n        nested_value = 2\n    ;\n;\n",
         )],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
 
@@ -1386,9 +1406,19 @@ fn selected_statement_branch_keeps_its_immediate_scope_before_nested_control_flo
 
 fn failure_project(source: &str) -> FrontendProject {
     FrontendProject::new(
-        &[("src/@page.moth", source)],
-        "src/@page.moth",
+        &[("src/@entry.moth", source)],
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
+    )
+}
+
+/// A single-file fixture whose root owns an `export:` surface and no runtime body.
+fn failure_api_project(source: &str) -> FrontendProject {
+    FrontendProject::new_with_role(
+        &[("src/@mod.moth", source)],
+        "src/@mod.moth",
+        StyleDirectiveRegistry::built_ins(),
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
     )
 }
 
@@ -3758,7 +3788,7 @@ fn implicit_failure_catch_remains_ineligible_for_literal_or_infallible_call() {
     for prefix in ["", "export:\n"] {
         let closing_export = if prefix.is_empty() { "" } else { ";\n" };
         for expression in ["3", "identity(value)"] {
-            let mut project = failure_project(&format!(
+            let mut project = failure_api_project(&format!(
                 "{prefix}    identity |value I32| -> I32:\n        return value\n    ;\n{closing_export}\
                  bad |value I32| -> I32:\n    return {expression} catch then 0\n;\n"
             ));
@@ -4072,7 +4102,7 @@ fn implicit_failure_assertion_message_rejects_template_range_runtime_step() {
 #[test]
 fn implicit_failure_dormant_generic_assertion_message_rejects_private_failure() {
     for error_slot in ["", " -> Error!"] {
-        let mut project = failure_project(&format!(
+        let mut project = failure_api_project(&format!(
             "message |left I32, right I32| -> String:\n    value = left * right\n    return [value]\n;\n\
              export:\n    validate type T |marker T, left I32, right I32, ready Bool|{error_slot}:\n\
                  assert(ready, message(left, right))\n    ;\n;\n"
@@ -4149,7 +4179,7 @@ fn implicit_failure_cannot_escape_dormant_generic_never_body() {
 
 #[test]
 fn implicit_failure_dormant_generic_contracts_validate_before_instantiation() {
-    let mut project = failure_project(
+    let mut project = failure_api_project(
         "export:\n    product type T |marker T, left I32, right I32| -> I32:\n\
                  return left * right\n    ;\n;\n",
     );
@@ -4169,7 +4199,7 @@ fn implicit_failure_dormant_generic_contracts_validate_before_instantiation() {
         "a direct numeric producer should be the sole retained boundary label"
     );
 
-    let mut project = failure_project(
+    let mut project = failure_api_project(
         "Failure = | message String |\n\
          product type T |marker T, left I32, right I32| -> I32, Failure!:\n\
              return left * right\n;\n",
@@ -4188,7 +4218,7 @@ fn implicit_failure_dormant_generic_contracts_validate_before_instantiation() {
 
     for (prefix, error_slot) in [("export:\n", ", Error!"), ("", "")] {
         let closing_export = if prefix.is_empty() { "" } else { ";\n" };
-        let mut project = failure_project(&format!(
+        let mut project = failure_api_project(&format!(
             "{prefix}    product type T |marker T, left I32, right I32| -> I32{error_slot}:\n\
                  return left * right\n    ;\n{closing_export}"
         ));
@@ -4215,7 +4245,7 @@ fn implicit_failure_dormant_generic_contracts_validate_before_instantiation() {
 fn implicit_failure_range_loop_witnesses_retain_origin_labels() {
     for (scalar, end, zero) in [("I32", "10", "0"), ("F64", "10.0", "0.0")] {
         // Converged boundary: a custom error slot sees the HIR-projected contributor.
-        let mut project = failure_project(&format!(
+        let mut project = failure_api_project(&format!(
             "Failure = | message String |\n\
              walk |start {scalar}, step {scalar}| -> {scalar}, Failure!:\n\
                  loop start to {end} by step |value|:\n        return value\n    ;\n\
@@ -4244,7 +4274,7 @@ fn implicit_failure_range_loop_witnesses_retain_origin_labels() {
         assert_eq!(frozen_elided_call_hops(&messages), Some(0));
 
         // Dormant generic boundary: the finalizer reads the AST contributor directly.
-        let mut project = failure_project(&format!(
+        let mut project = failure_api_project(&format!(
             "export:\n    walk type T |marker T, start {scalar}, step {scalar}| -> {scalar}:\n\
                      loop start to {end} by step |value|:\n            return value\n        ;\n\
                      return {zero}\n    ;\n;\n"
@@ -4272,7 +4302,7 @@ fn implicit_failure_range_loop_witnesses_retain_origin_labels() {
 
 #[test]
 fn implicit_failure_dormant_complete_recursive_graph_without_numeric_origin_is_infallible() {
-    let mut project = failure_project(
+    let mut project = failure_api_project(
         "identity |value I32| -> I32:\n    return identity(value)\n;\n\
          export:\n    wrapper type T |marker T, value I32| -> I32:\n\
                  return identity(value)\n    ;\n;\n",
@@ -4302,7 +4332,7 @@ fn implicit_failure_dormant_private_generic_identity_and_transitive_chain_are_in
             } else {
                 format!("{wrapper}{helpers}")
             };
-            let mut project = failure_project(&source);
+            let mut project = failure_api_project(&source);
             let ast = project.ast();
             assert!(
                 !ast.nodes.iter().any(|node| match &node.kind {
@@ -4323,7 +4353,7 @@ fn implicit_failure_dormant_private_generic_identity_and_transitive_chain_are_in
 
 #[test]
 fn implicit_failure_dormant_private_numeric_helper_retains_active_numeric_witness() {
-    let mut project = failure_project(
+    let mut project = failure_api_project(
         "identity type U |value U| -> U:\n    return value\n;\n\
          multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\
          private_product type U |marker U, left I32, right I32| -> I32:\n\
@@ -4353,7 +4383,7 @@ fn implicit_failure_dormant_private_numeric_helper_retains_active_numeric_witnes
 
 #[test]
 fn implicit_failure_dormant_recursive_chain_with_numeric_origin_is_rejected() {
-    let mut project = failure_project(
+    let mut project = failure_api_project(
         "recursive |value I32, ready Bool| -> I32:\n\
              if ready:\n        return value * 2\n    ;\n    return recursive(value, ready)\n;\n\
          export:\n    wrapper type T |marker T, value I32, ready Bool| -> I32:\n\
@@ -4533,7 +4563,7 @@ fn implicit_failure_self_recursive_back_edge_keeps_overflow_origin_at_both_bound
     // The concrete boundary exercises HIR summary convergence through a custom error slot.
     // The harness lowers plain exports without public origins, so the slot carries the
     // concrete contract here; the witness walker under test is the same HIR one.
-    let mut project = failure_project(&concrete_source);
+    let mut project = failure_api_project(&concrete_source);
     let messages = project
         .failure_contract_boundary_result()
         .expect_diagnosed("escaping overflow must be rejected at the concrete boundary");
@@ -4541,7 +4571,7 @@ fn implicit_failure_self_recursive_back_edge_keeps_overflow_origin_at_both_bound
     assert_recursive_witness_fixture_sites(&witness, &concrete_source, "helper");
 
     // The dormant generic boundary exercises the AST finalizer over the same helper shape.
-    let mut project = failure_project(&format!(
+    let mut project = failure_api_project(&format!(
         "{HELPER}export:\n    wrapper type T |marker T, value I32, ready Bool| -> I32:\nreturn helper(value, ready)\n    ;\n;\n"
     ));
     let failure = project
@@ -4559,7 +4589,7 @@ fn implicit_failure_self_recursive_back_edge_keeps_overflow_origin_at_both_bound
     assert_eq!(frozen_elided_call_hops(&failure), Some(0));
 
     // Repeated runs produce the same compact witness.
-    let mut project = failure_project(&concrete_source);
+    let mut project = failure_api_project(&concrete_source);
     let messages = project
         .failure_contract_boundary_result()
         .expect_diagnosed("the repeated run must reject the same boundary");
@@ -4575,14 +4605,14 @@ fn implicit_failure_mutual_recursive_back_edge_keeps_overflow_origin_at_both_bou
     let concrete_source = format!(
         "{FAILURE}{HELPERS}boundary |value I32, ready Bool| -> I32, Failure!:\n    return first(value, ready)\n;\n"
     );
-    let mut project = failure_project(&concrete_source);
+    let mut project = failure_api_project(&concrete_source);
     let messages = project
         .failure_contract_boundary_result()
         .expect_diagnosed("escaping overflow must be rejected at the concrete boundary");
     let witness = boundary_failure_witness(&messages);
     assert_recursive_witness_fixture_sites(&witness, &concrete_source, "first");
 
-    let mut project = failure_project(&format!(
+    let mut project = failure_api_project(&format!(
         "{HELPERS}export:\n    wrapper type T |marker T, value I32, ready Bool| -> I32:\nreturn first(value, ready)\n    ;\n;\n"
     ));
     let failure = project
@@ -4599,7 +4629,7 @@ fn implicit_failure_mutual_recursive_back_edge_keeps_overflow_origin_at_both_bou
     );
     assert_eq!(frozen_elided_call_hops(&failure), Some(0));
 
-    let mut project = failure_project(&concrete_source);
+    let mut project = failure_api_project(&concrete_source);
     let messages = project
         .failure_contract_boundary_result()
         .expect_diagnosed("the repeated run must reject the same boundary");
@@ -4932,7 +4962,7 @@ fn implicit_failure_rhs_caught_compound_update_reports_writeback_origin() {
                  total ~U8 = 250\n        ~total += risky(extra) catch then extra\n        return total\n    ;\n;\n";
     const AST_SOURCE: &str = "risky |amount U16| -> U16, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
          bump |extra U16| -> U8:\n    total ~U8 = 250\n    ~total += risky(extra) catch then extra\n    return total\n;\n";
-    let mut project = failure_project(ESCAPING_SOURCE);
+    let mut project = failure_api_project(ESCAPING_SOURCE);
     let failure = project
         .ast_result()
         .expect_ast_failure("the write-back into the compound target must still escape");
@@ -4955,7 +4985,7 @@ fn implicit_failure_rhs_caught_compound_update_reports_writeback_origin() {
     let SiteRef::Local(origin_span) = labels[0].site else {
         panic!("the write-back producer keeps its local target span");
     };
-    let mut project = failure_project(AST_SOURCE);
+    let mut project = failure_api_project(AST_SOURCE);
     let ast = project.ast();
     let body = named_function_body(&project, &ast, "bump");
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
@@ -4998,7 +5028,7 @@ fn implicit_failure_rhs_caught_compound_update_reports_writeback_origin() {
 
 #[test]
 fn implicit_failure_uncaught_compound_update_reports_writeback_origin() {
-    let mut project = failure_project(
+    let mut project = failure_api_project(
         // `y` is a genuinely wider U16 so the uncaught write-back stays a mixed-domain
         // conversion with its own compound write-back producer.
         "export:\n    bump type T |marker T, x U8, y U16| -> U8:\n\
@@ -5018,7 +5048,7 @@ fn implicit_failure_uncaught_compound_update_reports_writeback_origin() {
 
 #[test]
 fn implicit_failure_plain_return_arithmetic_keeps_operation_origin() {
-    let mut project = failure_project(
+    let mut project = failure_api_project(
         "export:\n    bump type T |marker T, x I32, y I32| -> I32:\n\
                  return x + y\n    ;\n;\n",
     );
@@ -5489,7 +5519,7 @@ fn implicit_failure_same_module_cross_file_call_keeps_canonical_private_failure_
     let mut project = FrontendProject::new(
         &[
             (
-                "src/@page.moth",
+                "src/@entry.moth",
                 "@helpers multiply\n\
                  safe_product |left I32, right I32| -> I32, Error!:\n\
                      return multiply(left, right)\n;\n",
@@ -5499,7 +5529,7 @@ fn implicit_failure_same_module_cross_file_call_keeps_canonical_private_failure_
                 "multiply |left I32, right I32| -> I32:\n    return left * right\n;\n",
             ),
         ],
-        "src/@page.moth",
+        "src/@entry.moth",
         StyleDirectiveRegistry::built_ins(),
     );
     let ast = project.ast();

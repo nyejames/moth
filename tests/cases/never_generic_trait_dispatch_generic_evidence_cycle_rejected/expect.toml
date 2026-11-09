@@ -9,6 +9,6 @@ message_contains = [
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0055"
 reason = "invalid_return_shape.never_proof_depends_on_cycle"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 8
 column = 1

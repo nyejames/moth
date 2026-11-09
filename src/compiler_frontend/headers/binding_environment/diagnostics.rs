@@ -89,9 +89,6 @@ pub(super) fn direct_special_file_dependency(
 /// Map an active root file role to the authored root role a diagnostic names.
 fn root_local_declaration_role(role: FileRole) -> RootLocalDeclarationRole {
     match role {
-        // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): until every executable
-        // fixture authors `@entry.moth`, a lone normal root keeps the combined export/start role.
-        FileRole::LegacyCombinedRoot => RootLocalDeclarationRole::LegacyCombinedRoot,
         FileRole::ActiveEntryRoot => RootLocalDeclarationRole::EntryRoot,
         FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal) => {
             RootLocalDeclarationRole::NormalFacade
@@ -108,7 +105,6 @@ fn root_local_declaration_role(role: FileRole) -> RootLocalDeclarationRole {
             | ModuleRootRole::SyntheticProjectContext,
         )
         | FileRole::ReachedApiFacadeRoot(_)
-        | FileRole::ReachedLegacyCombinedRoot
         | FileRole::ConfigBootstrap
         | FileRole::Normal => crate::compiler_bug!(
             CompilerStage::HeaderParsing,

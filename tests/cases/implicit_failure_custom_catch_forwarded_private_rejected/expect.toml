@@ -6,18 +6,18 @@ diagnostic_codes = ["MOTH-RULE-0051"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0051"
 reason = "invalid_fallible_handling.custom_error_mixed_with_implicit_failure"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 10
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 10
 column = 12
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 2
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 10
 column = 28
 
@@ -30,17 +30,17 @@ diagnostic_codes = ["MOTH-RULE-0051"]
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0051"
 reason = "invalid_fallible_handling.custom_error_mixed_with_implicit_failure"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 10
 
 [[backends.html_wasm.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 10
 column = 12
 
 [[backends.html_wasm.diagnostic_assertions.secondary_labels]]
 occurrence = 2
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 10
 column = 28

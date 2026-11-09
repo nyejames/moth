@@ -208,7 +208,7 @@ fn validate_path_component(
     // Reject a path component that starts with `@` after the path introducer was consumed.
     // WHAT: the leading `@` in `@path` is the path introducer consumed by the lexer. A second
     //      `@` starting any component (such as `@@pages` or `@helper/@home`) is not a valid
-    //      module name. Normal module-root filenames are cosmetic filesystem markers.
+    //      module name. Root filenames are fixed structural markers, not dependency names.
     if !was_quoted && component.starts_with('@') {
         return Err(token_lexical::invalid_path(
             PathKind::LeadingAtInPathComponent,

@@ -48,9 +48,6 @@ unit_code! {
         NormalFacade = 1,
         SupportFacade = 2,
         EntryRoot = 3,
-        // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): the variant and this unit
-        // code exist only while a lone normal root still owns the combined export/start role.
-        LegacyCombinedRoot = 4,
     }
 }
 unit_code! {

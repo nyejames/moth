@@ -87,7 +87,7 @@ use crate::compiler_frontend::datatypes::display::{
 };
 use crate::compiler_frontend::datatypes::numeric_operators::common_fixed_integer;
 use crate::compiler_frontend::source_packages::root_file::{
-    dependency_component_is_config_file, dependency_component_is_support_root_file,
+    dependency_component_is_config_file, dependency_component_is_legacy_support_marker,
 };
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
@@ -1215,19 +1215,19 @@ pub(crate) fn invalid_expression_message(reason: InvalidExpressionReason) -> Str
 
 /// Determine which special file name is referenced by a dependency path.
 ///
-/// WHAT: inspects path components to find a support-root or canonical config reference.
-/// WHY: the direct-special-file diagnostic covers support roots and config files, and
-/// renderers should name the specific file when possible so the author knows which file
-/// to avoid binding directly. Normal `@*.moth` root references are caught earlier by
-/// the path parser's `LeadingAtInPathComponent` rejection.
+/// WHAT: inspects path components to find a retired `+` marker or a canonical config reference.
+/// WHY: the direct-special-file diagnostic covers legacy support markers and config files, and
+/// renderers should name the specific file when possible so the author knows which spelling to
+/// stop binding directly. `@` root references are caught earlier by the path parser's
+/// `LeadingAtInPathComponent` rejection.
 pub(crate) fn special_file_name_from_path(
     path: PathId,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
-    // Support-root markers (`+`) are unambiguous even when an earlier folder shares a name.
+    // Legacy `+` support markers are unambiguous even when an earlier folder shares a name.
     let path_text = context.render_path(path);
     for segment in path_text.split('/') {
-        if dependency_component_is_support_root_file(segment) {
+        if dependency_component_is_legacy_support_marker(segment) {
             let suffix = if segment.contains('.') { "" } else { ".moth" };
             return format!("{segment}{suffix}");
         }
@@ -1250,13 +1250,13 @@ fn named_value_or_default(
         .unwrap_or_else(|| fallback.to_string())
 }
 
-/// Build a human-facing suggestion for a direct support-root-file dependency.
+/// Build a human-facing suggestion for a retired `+` dependency component.
 ///
-/// WHAT: inspects the dependency path and produces a hint that names the package directory the
-/// author should bind instead of the support root file.
-/// WHY: the `+` prefix on support root filenames is cosmetic and does not appear in dependency
-///      paths. Authors who write `@helper/+page symbol` should be told to use
-///      `@helper symbol` instead.
+/// WHAT: inspects the dependency path and produces a hint that names the module directory the
+/// author should bind instead of the retired special filename.
+/// WHY: support facades are published by `@package.moth` files but dependency identities always
+///      come from the containing module directory. Authors who write `@helper/+page symbol`
+///      should be told to use `@helper symbol` instead.
 pub(crate) fn support_root_import_suggestion(
     path: PathId,
     context: DiagnosticRenderContext<'_>,
@@ -1266,7 +1266,7 @@ pub(crate) fn support_root_import_suggestion(
     let mut found_root_component = false;
 
     for segment in path_text.split('/') {
-        if dependency_component_is_support_root_file(segment) {
+        if dependency_component_is_legacy_support_marker(segment) {
             found_root_component = true;
             continue;
         }
@@ -1279,9 +1279,9 @@ pub(crate) fn support_root_import_suggestion(
 
     let directory = suggestion_path.join("/");
     if directory.is_empty() {
-        " Bind the support package directory instead of the root file.".to_owned()
+        " Bind the module directory instead of the special file.".to_owned()
     } else {
-        format!(" Bind the support package `@{directory}` instead of the root file.")
+        format!(" Bind the module directory `@{directory}` instead of the special file.")
     }
 }
 

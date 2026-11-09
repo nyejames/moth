@@ -216,8 +216,6 @@ impl HeaderFileParseState {
         file_role: FileRole,
     ) -> FileFrontendPrepareOutput {
         let file_id = owner.source_id();
-        // This path only receives API-only or ordinary files; neither owns a start body.
-        let has_non_trivial_root_body = false;
         let token_stats = owner.token_stats();
         let source_token_stream = owner.into_tokens();
         FileFrontendPrepareOutput {
@@ -236,7 +234,6 @@ impl HeaderFileParseState {
             source_token_stream: Some(source_token_stream),
             const_template_count: self.const_template_count,
             runtime_fragment_count: self.runtime_fragment_count,
-            has_non_trivial_root_body,
             start_body_binding_spans: self.start_body_binding_spans,
             warnings: self.warnings,
         }
@@ -251,7 +248,6 @@ impl HeaderFileParseState {
         file_role: FileRole,
     ) -> Result<FileFrontendPrepareOutput, InfrastructureFailure> {
         let file_id = owner.source_id();
-        let has_non_trivial_root_body = self.has_non_trivial_start_body();
         use crate::compiler_frontend::headers::types::HeaderExportMode;
 
         // The start-bearing root publishes its source-owned start sequence for later AST body
@@ -292,7 +288,6 @@ impl HeaderFileParseState {
             top_level_const_fragments: self.top_level_const_fragments,
             const_template_count: self.const_template_count,
             runtime_fragment_count: self.runtime_fragment_count,
-            has_non_trivial_root_body,
             start_body_binding_spans: self.start_body_binding_spans,
             warnings: self.warnings,
         })

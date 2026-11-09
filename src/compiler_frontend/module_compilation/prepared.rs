@@ -162,19 +162,15 @@ impl PreparedModuleInput {
 
     /// The one source that owns the synthesized `start`, when this module has one.
     ///
-    /// A directory module is start-bearing when it owns an entry root, or when a normal root
-    /// still acts as today's legacy combined root. A standalone selection declares the same fact
-    /// through its explicit file role.
+    /// A directory module is start-bearing exactly when it owns an `@entry.moth` root. A
+    /// standalone selection declares the same fact through its explicit entry role; an API-only
+    /// facade root never supplies a start.
     pub(crate) fn entry_root_source(&self) -> Option<SourceId> {
-        if let Some(entry_root) = self.root_file_ids.entry {
-            return Some(entry_root);
-        }
-        if self.root_file_ids.normal_root_is_legacy_combined() {
-            return self.root_file_ids.normal;
-        }
-        self.selected_file
-            .filter(|(_, role)| role.synthesizes_entry_start())
-            .map(|(source_id, _)| source_id)
+        self.root_file_ids.entry.or_else(|| {
+            self.selected_file
+                .filter(|(_, role)| role.synthesizes_entry_start())
+                .map(|(source_id, _)| source_id)
+        })
     }
 
     /// The canonical path of the executable entry root, or `None` for an entryless module.

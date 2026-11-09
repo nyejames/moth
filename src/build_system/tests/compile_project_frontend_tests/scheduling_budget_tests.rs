@@ -320,8 +320,8 @@ fn diagnostic_recovery_project_soft_cutoff() {
         root,
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n",
         &[
-            ("src/first/@first.moth", THREE_FAILING_BODIES),
-            ("src/second/@second.moth", ONE_FAILING_BODY),
+            ("src/first/@entry.moth", THREE_FAILING_BODIES),
+            ("src/second/@entry.moth", ONE_FAILING_BODY),
         ],
     );
 
@@ -391,14 +391,13 @@ fn diagnostic_recovery_project_soft_cutoff() {
     assert!(
         rendered
             .iter()
-            .any(|line| line.contains("first/@first.moth")),
+            .any(|line| line.contains("first/@entry.moth")),
         "the admitted module's diagnostics must stay rendered: {rendered:?}"
     );
     assert!(
-        rendered
-            .iter()
-            .all(|line| !line.contains("second/@second.moth")
-                && !line.contains("only_second_module")),
+        rendered.iter().all(
+            |line| !line.contains("second/@entry.moth") && !line.contains("only_second_module")
+        ),
         "the refused module must not contribute diagnostics: {rendered:?}"
     );
 
@@ -422,8 +421,8 @@ fn diagnostic_recovery_project_soft_cutoff_none_compiles_every_module() {
         root,
         "project_error_limit #I32? = none\nproject #= (\n    name = \"docs\",\n        max_errors_per_project = project_error_limit,\n)\nhtml #= ()\n",
         &[
-            ("src/first/@first.moth", THREE_FAILING_BODIES),
-            ("src/second/@second.moth", ONE_FAILING_BODY),
+            ("src/first/@entry.moth", THREE_FAILING_BODIES),
+            ("src/second/@entry.moth", ONE_FAILING_BODY),
         ],
     );
 
@@ -460,12 +459,12 @@ fn diagnostic_recovery_project_soft_cutoff_on_last_module_records_no_stop() {
         root,
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 3,\n)\nhtml #= ()\n",
         &[
-            ("src/@page.moth", "#[:site]\n"),
+            ("src/@entry.moth", "#[:site]\n"),
             (
-                "src/first/@first.moth",
+                "src/first/@entry.moth",
                 "answer || -> I32:\n    return 1\n;\n",
             ),
-            ("src/second/@second.moth", THREE_FAILING_BODIES),
+            ("src/second/@entry.moth", THREE_FAILING_BODIES),
         ],
     );
 
@@ -507,7 +506,7 @@ fn diagnostic_recovery_project_soft_cutoff_counts_shared_provider_once() {
         root,
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n",
         &[
-            ("src/@page.moth", "@shared broken\n#[:site]\n"),
+            ("src/@entry.moth", "@shared broken\n#[:site]\n"),
             (
                 "src/shared/@mod.moth",
                 "export:\n    broken || -> I32:\n        return shared_missing_one\n    ;\n\n\
@@ -576,7 +575,7 @@ fn diagnostic_recovery_check_only_units_share_owner_allowance() {
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 30,\n    max_errors_per_module = 2,\n)\nhtml #= ()\n",
         &[
             (
-                "src/first/@first.moth",
+                "src/first/@entry.moth",
                 "owner || -> I32:\n    return 1\n;\n",
             ),
             (
@@ -632,7 +631,7 @@ fn diagnostic_recovery_check_only_allowance_subtracts_owner_errors() {
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 30,\n    max_errors_per_module = 2,\n)\nhtml #= ()\n",
         &[
             (
-                "src/first/@first.moth",
+                "src/first/@entry.moth",
                 "owner || -> I32:\n    return owner_missing\n;\n",
             ),
             (
@@ -695,10 +694,10 @@ fn diagnostic_recovery_project_budget_spans_source_package_work() {
         root,
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n",
         &[
-            ("src/a/@page.moth", "owner_missing\n#[:site]\n"),
-            ("src/b/@page.moth", "second_missing\n#[:site]\n"),
+            ("src/a/@entry.moth", "owner_missing\n#[:site]\n"),
+            ("src/b/@entry.moth", "second_missing\n#[:site]\n"),
             (
-                "src/uses/@page.moth",
+                "src/uses/@entry.moth",
                 "@shared render\nvalue = render() catch:\n    then \"\"\n;\n#[:site]\n",
             ),
             (
@@ -764,7 +763,7 @@ fn diagnostic_recovery_stopped_check_only_unit_treats_unvisited_provider_as_stop
         "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n",
         &[
             (
-                "src/first/@first.moth",
+                "src/first/@entry.moth",
                 "a || -> I32:\n    return first_missing_one\n;\n\n\
                  b || -> I32:\n    return first_missing_two\n;\n\n\
                  c || -> I32:\n    return first_missing_three\n;\n",
@@ -835,11 +834,11 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
         root,
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
         &[
-            ("src/@page.moth", "#[:site]\n"),
-            ("src/broken/@broken.moth", RESOURCE_FAILING_MODULE_ROOT),
+            ("src/@entry.moth", "#[:site]\n"),
+            ("src/broken/@mod.moth", RESOURCE_FAILING_MODULE_ROOT),
             ("src/broken/extra.moth", RESOURCE_FAILING_MODULE_EXTRA),
             (
-                "src/ok/@ok.moth",
+                "src/ok/@mod.moth",
                 "export:\n    greeting || -> String:\n        logo = @assets/ok.svg\n        return logo\n    ;\n;\n",
             ),
             ("src/broken/assets/broken.svg", "<svg/>"),
@@ -889,13 +888,11 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
         frontend
             .project
             .successful_artefacts_in_module_id_order()
-            .all(|artifact| artifact
-                .normal_interface
-                .as_ref()
-                .expect("the successful artefact carries its normal facade")
-                .module_origin
-                .logical_module_path()
-                != Path::new("broken")),
+            .all(
+                |artifact| artifact.normal_interface.as_ref().is_none_or(|interface| {
+                    interface.module_origin.logical_module_path() != Path::new("broken")
+                })
+            ),
         "a diagnosed module never publishes an artefact"
     );
     assert_slot_is_successful(&frontend, "ok");
@@ -938,13 +935,9 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
         .project
         .successful_artefacts_in_module_id_order()
         .find(|artifact| {
-            artifact
-                .normal_interface
-                .as_ref()
-                .expect("the successful artefact carries its normal facade")
-                .module_origin
-                .logical_module_path()
-                == Path::new("ok")
+            artifact.normal_interface.as_ref().is_some_and(|interface| {
+                interface.module_origin.logical_module_path() == Path::new("ok")
+            })
         })
         .expect("the clean module should publish an artefact");
     let ok_origins = ok_artefact.module.executable.resource_table.origins();
@@ -987,7 +980,7 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
         .collect::<Vec<_>>();
     let root_site = sites
         .iter()
-        .find(|(path, ..)| path.ends_with("broken/@broken.moth"))
+        .find(|(path, ..)| path.ends_with("broken/@mod.moth"))
         .expect("the first body error keeps its authored file");
     assert_eq!(
         root_site.1,
@@ -1010,11 +1003,8 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
 
     // Repairing both bodies on the same root proves the repaired source compiles and now
     // publishes the association; each lane run builds fresh registries.
-    fs::write(
-        root.join("broken/@broken.moth"),
-        RESOURCE_REPAIRED_MODULE_ROOT,
-    )
-    .expect("the repaired root source should be written");
+    fs::write(root.join("broken/@mod.moth"), RESOURCE_REPAIRED_MODULE_ROOT)
+        .expect("the repaired root source should be written");
     fs::write(
         root.join("broken/extra.moth"),
         RESOURCE_REPAIRED_MODULE_EXTRA,
@@ -1067,7 +1057,7 @@ fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
         PROJECT_ERROR_LIMIT_TWO,
         &[
             (
-                "src/@page.moth",
+                "src/@entry.moth",
                 "@shared render\nvalue = render() catch:\n    then 0\n;\n#[:site]\n",
             ),
             (
@@ -1075,11 +1065,11 @@ fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
                 "@helper value\nexport:\n    render || -> I32:\n        return value()\n    ;\n;\n",
             ),
             (
-                "packages/shared/helper/@helper.moth",
+                "packages/shared/helper/@mod.moth",
                 "export:\n    value || -> I32:\n        return 1\n    ;\n;\n",
             ),
             (
-                "packages/shared/z_broken/@z_broken.moth",
+                "packages/shared/z_broken/@entry.moth",
                 "a || -> I32:\n    return pkg_missing_one\n;\n\n\
                  b || -> I32:\n    return pkg_missing_two\n;\n",
             ),
@@ -1170,7 +1160,7 @@ fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
             .site_position(view.primary_site())
             .expect("the frozen package diagnostic keeps its authored site");
         assert!(
-            position.path.ends_with("z_broken/@z_broken.moth"),
+            position.path.ends_with("z_broken/@entry.moth"),
             "the retained diagnostic must keep its package-logical source identity: {:?}",
             position.path
         );
@@ -1185,7 +1175,7 @@ fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
     assert!(
         rendered
             .iter()
-            .all(|line| line.contains("z_broken/@z_broken.moth")),
+            .all(|line| line.contains("z_broken/@entry.moth")),
         "only the admitted module may render diagnostics: {rendered:?}"
     );
 }
@@ -1202,7 +1192,7 @@ fn diagnostic_recovery_package_cutoff_can_diagnose_its_own_root() {
         PROJECT_ERROR_LIMIT_TWO,
         &[
             (
-                "src/@page.moth",
+                "src/@entry.moth",
                 "@shared a\nvalue = a() catch:\n    then 0\n;\n#[:site]\n",
             ),
             (
@@ -1211,7 +1201,7 @@ fn diagnostic_recovery_package_cutoff_can_diagnose_its_own_root() {
                  b || -> I32:\n        return root_missing_two\n    ;\n;\n",
             ),
             (
-                "packages/shared/later/@later.moth",
+                "packages/shared/later/@mod.moth",
                 "export:\n    value || -> I32:\n        return 1\n    ;\n;\n",
             ),
         ],
@@ -1290,7 +1280,7 @@ fn write_deferred_check_only_package_project(
         &config,
         &[
             (
-                "src/@page.moth",
+                "src/@entry.moth",
                 "@shared render\nvalue = render() catch:\n    then 0\n;\n#[:site]\n",
             ),
             (
@@ -1298,12 +1288,12 @@ fn write_deferred_check_only_package_project(
                 "export:\n    render || -> I32:\n        return 7\n    ;\n;\n",
             ),
             (
-                "packages/shared/broken/@broken.moth",
+                "packages/shared/broken/@entry.moth",
                 "a || -> I32:\n    return pkg_missing_one\n;\n\n\
                  b || -> I32:\n    return pkg_missing_two\n;\n",
             ),
             (
-                "packages/shared/z_late/@z_late.moth",
+                "packages/shared/z_late/@mod.moth",
                 "export:\n    late_value || -> I32:\n        return 1\n    ;\n;\n",
             ),
             ("packages/shared/a_orphan.moth", first_orphan),

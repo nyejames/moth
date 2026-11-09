@@ -111,7 +111,7 @@ pub(crate) fn generated_identity(name: &str) -> GeneratedFunctionIdentity {
     GeneratedFunctionIdentity::new(
         GeneratedDeclarationIdentity::ModulePrivate(ModulePrivateExecutableIdentity::new(
             module_origin(),
-            "@page.moth".to_owned(),
+            "@entry.moth".to_owned(),
             ModulePrivateExecutableCategory::GenericFunction,
             name.to_owned(),
             None,

@@ -68,7 +68,7 @@ fn relative_url_path_shared_prefix() {
 #[test]
 fn generate_module_glue_returns_empty_when_no_external_exports() {
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     let referenced = HashSet::new();
     let registry = ExternalPackageRegistry::new();
 
@@ -90,7 +90,7 @@ fn generate_module_glue_returns_empty_when_no_external_exports() {
 #[test]
 fn generate_module_glue_empty_when_export_registered_but_not_referenced() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
@@ -126,7 +126,7 @@ fn generate_module_glue_empty_when_export_registered_but_not_referenced() {
 #[test]
 fn generate_module_glue_rejects_unknown_functions_in_deterministic_order() {
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     let first_function_id = ExternalFunctionId::Synthetic(404);
     let second_function_id = ExternalFunctionId::Synthetic(405);
     let registry = ExternalPackageRegistry::new();
@@ -150,7 +150,7 @@ fn generate_module_glue_rejects_unknown_functions_in_deterministic_order() {
         for detail in [
             "HTML JS glue preparation",
             "validated runtime metadata is inconsistent",
-            "@page.moth",
+            "@entry.moth",
             "Synthetic(404)",
             "no definition in the supplied registry",
         ] {
@@ -167,7 +167,7 @@ fn generate_module_glue_rejects_unknown_functions_in_deterministic_order() {
 #[test]
 fn generate_module_glue_rejects_missing_js_lowering_but_accepts_nonmodule_lowerings() {
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
 
     for lowering in [
         None,
@@ -205,7 +205,7 @@ fn generate_module_glue_rejects_missing_js_lowering_but_accepts_nonmodule_loweri
             for detail in [
                 "HTML JS glue preparation",
                 "validated runtime metadata is inconsistent",
-                "@page.moth",
+                "@entry.moth",
                 "get_value",
                 "@test/default",
                 "no applicable JavaScript lowering",
@@ -229,7 +229,7 @@ fn generate_module_glue_rejects_missing_js_lowering_but_accepts_nonmodule_loweri
 #[test]
 fn generate_module_glue_rejects_incomplete_selected_runtime_metadata() {
     let mut string_table = StringTable::new();
-    let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     let (mut registry, function_id, package_id) =
         create_registry_with_export("get_value", "getValue");
     let other_package_id = registry
@@ -282,7 +282,7 @@ fn generate_module_glue_rejects_incomplete_selected_runtime_metadata() {
         for detail in [
             "HTML JS glue preparation",
             "validated runtime metadata is inconsistent",
-            "@page.moth",
+            "@entry.moth",
             "get_value",
             "getValue",
             "test/pkg",
@@ -306,7 +306,7 @@ fn generate_module_glue_rejects_incomplete_selected_runtime_metadata() {
 #[test]
 fn generate_module_glue_emits_glue_file_for_referenced_export() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
@@ -359,7 +359,7 @@ fn generate_module_glue_emits_glue_file_for_referenced_export() {
 #[test]
 fn generate_module_glue_nested_html_output_path() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
@@ -396,7 +396,7 @@ fn generate_module_glue_nested_html_output_path() {
 #[test]
 fn generate_module_glue_asset_import_relative_to_glue_module() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
@@ -523,7 +523,7 @@ assert.equal(calls, 1);
 #[test]
 fn generate_module_glue_projects_never_external_exports() {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),
@@ -1509,7 +1509,7 @@ fn build_import_map_html_deduplicates_by_specifier() {
 
 fn create_module_with_runtime_requirement() -> Module {
     let mut string_table = StringTable::new();
-    let mut module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let mut module = create_test_module(PathBuf::from("@entry.moth"), &mut string_table);
     module.link_facts.external_import_candidates.push(
         crate::compiler_frontend::module_compilation::ModuleExternalImport {
             package_id: ExternalPackageId(0),

@@ -15,6 +15,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderExportMode, HeaderKind,
 };
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -152,14 +153,14 @@ fn retains_directly_authored_active_root_public_source_traits_in_order() {
     let headers = vec![
         trait_header(
             "Alpha",
-            FileRole::LegacyCombinedRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
         ),
         trait_header(
             "Beta",
-            FileRole::LegacyCombinedRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -218,14 +219,14 @@ fn excludes_private_traits() {
     let headers = vec![
         trait_header(
             "Public",
-            FileRole::LegacyCombinedRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
         ),
         trait_header(
             "Private",
-            FileRole::LegacyCombinedRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Private,
             &mut string_table,
             &mut path_fork,
@@ -276,7 +277,7 @@ fn excludes_imported_and_non_active_root_traits() {
     let headers = vec![
         trait_header(
             "Local",
-            FileRole::LegacyCombinedRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -323,7 +324,7 @@ fn rejects_source_trait_header_resolving_to_compiler_owned_core_trait() {
     // deliberately resolves to the registered core definition to exercise that invariant.
     let mut headers = vec![trait_header(
         "DISPLAYABLE",
-        FileRole::LegacyCombinedRoot,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
         HeaderExportMode::Public,
         &mut string_table,
         &mut path_fork,
@@ -368,14 +369,14 @@ fn excludes_non_trait_declarations() {
     let headers = vec![
         function_header(
             "render",
-            FileRole::LegacyCombinedRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
         ),
         trait_header(
             "Shape",
-            FileRole::LegacyCombinedRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -408,7 +409,7 @@ fn missing_trait_definition_is_infrastructure_failure() {
 
     let headers = vec![trait_header(
         "Orphan",
-        FileRole::LegacyCombinedRoot,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
         HeaderExportMode::Public,
         &mut string_table,
         &mut path_fork,
@@ -475,14 +476,14 @@ fn retains_public_incompatibilities_symmetrically_for_direct_public_traits() {
     let headers = vec![
         trait_header(
             "Alpha",
-            FileRole::LegacyCombinedRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
         ),
         trait_header(
             "Beta",
-            FileRole::LegacyCombinedRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
@@ -550,14 +551,14 @@ fn private_incompatibility_relation_is_absent_from_trait_roots() {
     let headers = vec![
         trait_header(
             "Alpha",
-            FileRole::LegacyCombinedRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,
         ),
         trait_header(
             "Beta",
-            FileRole::LegacyCombinedRoot,
+            FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
             HeaderExportMode::Public,
             &mut string_table,
             &mut path_fork,

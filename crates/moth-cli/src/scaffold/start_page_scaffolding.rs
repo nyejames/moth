@@ -1,6 +1,6 @@
 //! Scaffold templates for `moth new html`.
 //!
-//! WHAT: Owns the generated content for `config.moth`, the root-level `@page.moth`, and
+//! WHAT: Owns the generated content for `config.moth`, the root-level `@entry.moth`, and
 //!       `.gitignore`.
 //! WHY: Centralises template strings so they are not scattered through write logic.
 
@@ -24,7 +24,7 @@ html #= ()
     ))
 }
 
-/// Return the exact starter content for the root-level `@page.moth`.
+/// Return the exact starter content for the root-level `@entry.moth`.
 pub fn page_template() -> &'static str {
     r#"#[$in title:Welcome]
 starter_head #= [$html:

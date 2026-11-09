@@ -1,0 +1,27 @@
+entry = "page.moth"
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]
+message_contains = ["Type mismatch in declaration"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+path = "input/page.moth"
+line = 1
+column = 13
+count = 1
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]
+message_contains = ["Type mismatch in declaration"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+path = "input/page.moth"
+line = 1
+column = 13
+count = 1

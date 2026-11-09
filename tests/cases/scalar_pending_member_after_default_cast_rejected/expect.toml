@@ -9,7 +9,7 @@ message_contains = ["'I32'"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0048"
 reason = "invalid_field_access.unknown_member"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 5
 
 [backends.html_wasm]
@@ -21,5 +21,5 @@ message_contains = ["'I32'"]
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0048"
 reason = "invalid_field_access.unknown_member"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 5

@@ -3597,13 +3597,6 @@ contract = "language.bindings.disjoint_field_borrows_allowed"
 role = "primary"
 
 [[case]]
-id = "duplicate_module_root_files_rejected"
-path = "duplicate_module_root_files_rejected"
-tags = ["integration", "project-structure", "diagnostics"]
-contract = "language.modules.duplicate_root_files_rejected"
-role = "primary"
-
-[[case]]
 id = "duplicate_function_names"
 path = "duplicate_function_names"
 tags = ["integration", "functions", "diagnostics"]
@@ -3982,24 +3975,17 @@ contract = "backend.html.builder_wasm_script_placement"
 role = "primary"
 
 [[case]]
-id = "html_duplicate_route_reports_config_error"
-path = "html_duplicate_route_reports_config_error"
-tags = ["integration", "html", "diagnostics"]
-contract = "backend.html.duplicate_route_config_error"
+id = "html_descendant_only_entry_builds"
+path = "html_descendant_only_entry_builds"
+tags = ["integration", "html", "entry-start", "root-roles"]
+contract = "backend.html.descendant_only_entry_builds_without_homepage"
 role = "primary"
 
 [[case]]
-id = "html_missing_homepage_reports_config_error"
-path = "html_missing_homepage_reports_config_error"
-tags = ["integration", "html", "diagnostics"]
-contract = "backend.html.missing_homepage_config_error"
-role = "primary"
-
-[[case]]
-id = "html_api_only_directory_missing_homepage"
-path = "html_api_only_directory_missing_homepage"
-tags = ["integration", "html", "diagnostics"]
-contract = "backend.html.missing_homepage_config_error"
+id = "html_api_only_directory_no_entry_rejected"
+path = "html_api_only_directory_no_entry_rejected"
+tags = ["integration", "html", "diagnostics", "root-roles"]
+contract = "backend.html.api_only_directory_reports_no_entry"
 role = "boundary"
 
 [[case]]
@@ -14351,13 +14337,6 @@ contract = "language.dependencies.moth_template_explicit_helper_constant_accepta
 role = "primary"
 
 [[case]]
-id = "normal_module_root_config_namesake_is_module_root"
-path = "normal_module_root_config_namesake_is_module_root"
-tags = ["integration", "config", "html", "module-roots"]
-contract = "language.modules.normal_module_root_config_namesake_is_module_root_acceptance"
-role = "primary"
-
-[[case]]
 id = "if_missing_condition_rejected"
 path = "if_missing_condition_rejected"
 tags = ["integration", "diagnostics", "control-flow"]
@@ -18783,11 +18762,11 @@ contract = "compiler.import.public_selection_must_be_exported"
 role = "adversarial"
 
 [[case]]
-id = "html_single_file_empty_route_name_rejected"
-path = "html_single_file_empty_route_name_rejected"
-tags = ["adversarial", "bug-hunt"]
-contract = "backend.html.single_file_route_name_must_not_be_empty"
-role = "adversarial"
+id = "closed_root_single_file_marker_only_rejected"
+path = "closed_root_single_file_marker_only_rejected"
+tags = ["integration", "project-structure", "diagnostics", "root-roles", "single-file"]
+contract = "language.modules.single_file_invalid_root_filename_rejected"
+role = "primary"
 
 [[case]]
 id = "missing_js_provider_prefix_rejected"
@@ -19426,3 +19405,67 @@ path = "qe_root_local_qualified_reference_rejected"
 tags = ["integration", "language", "templates", "dependencies", "diagnostics", "expression-qualified"]
 contract = "language.dependencies.root_roots_are_not_same_module_namespace_entries"
 role = "primary"
+
+[[case]]
+id = "closed_root_arbitrary_filename_rejected"
+path = "closed_root_arbitrary_filename_rejected"
+tags = ["integration", "project-structure", "diagnostics", "root-roles"]
+contract = "language.modules.arbitrary_at_root_filename_rejected"
+role = "primary"
+
+[[case]]
+id = "closed_root_plus_filename_rejected"
+path = "closed_root_plus_filename_rejected"
+tags = ["integration", "project-structure", "diagnostics", "root-roles"]
+contract = "language.modules.plus_root_filename_rejected"
+role = "primary"
+
+[[case]]
+id = "closed_root_build_config_filename_rejected"
+path = "closed_root_build_config_filename_rejected"
+tags = ["integration", "project-structure", "diagnostics", "root-roles"]
+contract = "language.modules.at_config_root_filename_rejected"
+role = "primary"
+
+[[case]]
+id = "closed_root_case_variant_entry_rejected"
+path = "closed_root_case_variant_entry_rejected"
+tags = ["integration", "project-structure", "diagnostics", "root-roles"]
+contract = "language.modules.case_variant_root_filename_rejected"
+role = "primary"
+
+[[case]]
+id = "closed_root_retired_name_directory_rejected"
+path = "closed_root_retired_name_directory_rejected"
+tags = ["integration", "project-structure", "diagnostics", "root-roles"]
+contract = "language.modules.retired_root_filename_directory_rejected"
+role = "boundary"
+
+[[case]]
+id = "normal_root_runtime_statement_rejected"
+path = "normal_root_runtime_statement_rejected"
+tags = ["integration", "project-structure", "diagnostics", "root-roles"]
+contract = "language.modules.normal_root_rejects_runtime_statements"
+role = "primary"
+
+[[case]]
+id = "empty_entry_produces_homepage"
+path = "empty_entry_produces_homepage"
+tags = ["integration", "html", "entry-start", "root-roles"]
+contract = "language.entry.empty_entry_presence_selects_homepage"
+role = "primary"
+
+[[case]]
+id = "synthetic_single_file_non_special_name_builds"
+path = "synthetic_single_file_non_special_name_builds"
+tags = ["integration", "html", "single-file", "root-roles"]
+contract = "language.entry.explicit_single_file_selection_accepts_any_moth_file"
+role = "primary"
+
+[[case]]
+id = "synthetic_entry_file_maps_to_homepage"
+path = "synthetic_entry_file_maps_to_homepage"
+tags = ["integration", "html", "single-file", "root-roles"]
+contract = "language.entry.synthetic_entry_file_maps_to_homepage"
+role = "primary"
+

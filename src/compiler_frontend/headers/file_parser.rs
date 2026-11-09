@@ -1194,17 +1194,15 @@ pub(super) fn finish_file_output(
     state: HeaderFileParseState,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let canonical = owner.tokens_ref();
-    if matches!(
-        context.file_role,
-        FileRole::ReachedApiFacadeRoot(_) | FileRole::ReachedLegacyCombinedRoot
-    ) && let Some((marker_span, adjacent)) = find_config_marker_in_start_ranges(
-        &state,
-        canonical,
-        file_id,
-        context.string_table,
-        context.span_builder,
-    )
-    .map_err(FileFrontendPrepareFailure::Infrastructure)?
+    if matches!(context.file_role, FileRole::ReachedApiFacadeRoot(_))
+        && let Some((marker_span, adjacent)) = find_config_marker_in_start_ranges(
+            &state,
+            canonical,
+            file_id,
+            context.string_table,
+            context.span_builder,
+        )
+        .map_err(FileFrontendPrepareFailure::Infrastructure)?
     {
         let diagnostic = if adjacent {
             project_config::invalid_config_reason(

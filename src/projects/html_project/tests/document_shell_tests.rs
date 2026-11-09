@@ -10,7 +10,7 @@ use crate::projects::html_project::tests::test_support::{
 use std::path::Path;
 
 fn root_route() -> CanonicalPageRoute {
-    derive_logical_html_path(Path::new("@page.moth"), None).expect("root route should resolve")
+    derive_logical_html_path(Path::new("@entry.moth"), None).expect("root route should resolve")
 }
 
 fn render_shell(
@@ -62,7 +62,7 @@ fn renderer_uses_route_title_fallback_before_project_name() {
         &HtmlDocumentConfig::default(),
         &HtmlSlotPlan::default(),
         &derive_logical_html_path(
-            Path::new("src/docs/basics/@page.moth"),
+            Path::new("src/docs/basics/@entry.moth"),
             Some(Path::new("src")),
         )
         .expect("nested route should resolve"),

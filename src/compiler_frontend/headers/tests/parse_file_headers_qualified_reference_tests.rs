@@ -41,7 +41,7 @@ fn constant_initializer_records_one_occurrence_with_exact_spans() {
     let (output, _span_builder) = prepare_single_file(
         source,
         &PathBuf::from("src/helper.moth"),
-        &PathBuf::from("src/@page.moth"),
+        &PathBuf::from("src/@entry.moth"),
         &mut string_table,
     );
 
@@ -86,7 +86,7 @@ fn quoted_path_component_and_tabs_record_one_occurrence() {
     let (output, span_builder) = prepare_single_file(
         source,
         &PathBuf::from("src/helper.moth"),
-        &PathBuf::from("src/@page.moth"),
+        &PathBuf::from("src/@entry.moth"),
         &mut string_table,
     );
 
@@ -115,7 +115,7 @@ fn newline_between_path_and_symbol_records_no_occurrence() {
     let (output, _span_builder) = prepare_single_file(
         source,
         &PathBuf::from("src/helper.moth"),
-        &PathBuf::from("src/@page.moth"),
+        &PathBuf::from("src/@entry.moth"),
         &mut string_table,
     );
 
@@ -131,8 +131,8 @@ fn top_level_statement_path_stays_a_dependency_clause() {
     let mut string_table = StringTable::new();
     let (output, _span_builder) = prepare_single_file(
         source,
-        &PathBuf::from("src/@page.moth"),
-        &PathBuf::from("src/@page.moth"),
+        &PathBuf::from("src/@entry.moth"),
+        &PathBuf::from("src/@entry.moth"),
         &mut string_table,
     );
 
@@ -162,7 +162,7 @@ fn content_source_file_value_without_a_selected_symbol_is_unchanged() {
     let (output, _span_builder) = prepare_single_file(
         source,
         &PathBuf::from("src/helper.moth"),
-        &PathBuf::from("src/@page.moth"),
+        &PathBuf::from("src/@entry.moth"),
         &mut string_table,
     );
 
@@ -189,7 +189,7 @@ fn explicit_extension_path_with_a_following_symbol_is_an_occurrence() {
     let (output, _span_builder) = prepare_single_file(
         source,
         &PathBuf::from("src/helper.moth"),
-        &PathBuf::from("src/@page.moth"),
+        &PathBuf::from("src/@entry.moth"),
         &mut string_table,
     );
 
@@ -209,7 +209,7 @@ fn occurrence_shells_follow_clause_shells_without_reusing_an_ordinal() {
     let (output, _span_builder) = prepare_single_file(
         source,
         &PathBuf::from("src/helper.moth"),
-        &PathBuf::from("src/@page.moth"),
+        &PathBuf::from("src/@entry.moth"),
         &mut string_table,
     );
 
@@ -244,7 +244,7 @@ fn selected_symbol_is_not_reported_as_an_initializer_reference() {
     let (output, _span_builder) = prepare_single_file(
         source,
         &PathBuf::from("src/helper.moth"),
-        &PathBuf::from("src/@page.moth"),
+        &PathBuf::from("src/@entry.moth"),
         &mut string_table,
     );
 
@@ -262,7 +262,8 @@ fn selected_symbol_is_not_reported_as_an_initializer_reference() {
 #[test]
 fn alias_after_a_selected_symbol_is_reported_at_the_alias() {
     let source = "value #= @math square as squared\n";
-    let outcome = parse_single_file_headers_with_entry(source, "src/helper.moth", "src/@page.moth");
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/helper.moth", "src/@entry.moth");
     let errors = expect_header_error(outcome, "an expression alias must be rejected");
     let diagnostic = find_diagnostic_family::<CommonSyntaxMistakeView>(&errors.diagnostics)
         .expect("expected the common-syntax-mistake diagnostic");
@@ -298,7 +299,7 @@ fn occurrence_paths_reuse_dependency_clause_path_diagnostics() {
         ),
     ] {
         let outcome =
-            parse_single_file_headers_with_entry(source, "src/helper.moth", "src/@page.moth");
+            parse_single_file_headers_with_entry(source, "src/helper.moth", "src/@entry.moth");
         let errors = expect_header_error(
             outcome,
             "an invalid qualified-reference path must be rejected like a clause path",
@@ -320,7 +321,8 @@ fn occurrence_paths_reuse_dependency_clause_path_diagnostics() {
 #[test]
 fn occurrence_with_an_authored_moth_extension_keeps_the_source_extension_diagnostic() {
     let source = "value #= @helper.moth name\n";
-    let outcome = parse_single_file_headers_with_entry(source, "src/helper.moth", "src/@page.moth");
+    let outcome =
+        parse_single_file_headers_with_entry(source, "src/helper.moth", "src/@entry.moth");
     let errors = expect_header_error(
         outcome,
         "an explicit .moth path must be rejected in expression position",
@@ -341,7 +343,7 @@ fn call_argument_commas_separate_two_occurrences() {
     let (output, _span_builder) = prepare_single_file(
         source,
         &PathBuf::from("src/helper.moth"),
-        &PathBuf::from("src/@page.moth"),
+        &PathBuf::from("src/@entry.moth"),
         &mut string_table,
     );
 

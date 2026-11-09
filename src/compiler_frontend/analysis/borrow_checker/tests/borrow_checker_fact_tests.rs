@@ -114,7 +114,7 @@ fn shared_expression_row_merges_branch_roots_in_either_successor_order() {
     for reverse_successor_visit in [false, true] {
         let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
         let entry_path = path_fork
-            .try_intern_portable_path("@page.moth", &mut string_table)
+            .try_intern_portable_path("@entry.moth", &mut string_table)
             .expect("test entry path fits");
         let wrapper_name = path_fork
             .try_intern_child(entry_path, string_table.intern("wrapper"))
@@ -2412,7 +2412,7 @@ return identity(load_user()!)
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(

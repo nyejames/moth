@@ -102,17 +102,17 @@ impl ProjectBuilder for PackageFacadeBuilder {
 }
 
 /// Writes a one-page project whose page holds `page_source` and, when requested, its
-/// `+package.moth` facade beside `config.moth`.
+/// `@package.moth` facade beside `config.moth`.
 fn write_project(project_root: &Path, page_source: &str, with_facade: bool) {
     fs::write(
         project_root.join("config.moth"),
         "project #= (\n    name = \"docs\",\n)\n",
     )
     .expect("should write config");
-    fs::write(project_root.join("@page.moth"), page_source).expect("should write page");
+    fs::write(project_root.join("@entry.moth"), page_source).expect("should write page");
     if with_facade {
         fs::write(
-            project_root.join("+package.moth"),
+            project_root.join("@package.moth"),
             "export:\n    label #= \"facade\"\n;\n",
         )
         .expect("should write package facade");
@@ -281,7 +281,7 @@ fn write_ui_paired_package(package_root: &Path) {
     )
     .expect("should write normal package root");
     fs::write(
-        package_root.join("+package.moth"),
+        package_root.join("@package.moth"),
         "export:\n    @impl greeting\n;\n",
     )
     .expect("should write support package facade");
@@ -292,7 +292,7 @@ fn write_ui_paired_package(package_root: &Path) {
 /// Writes a support-only `@ui` package root that re-exports shared helper declarations.
 fn write_ui_support_package(package_root: &Path) {
     fs::write(
-        package_root.join("+package.moth"),
+        package_root.join("@package.moth"),
         "export:\n    @impl value, Message\n;\n",
     )
     .expect("should write support package facade");
@@ -329,7 +329,7 @@ fn invalid_source_returns_compilation_error_without_building() {
         "the builder must not run when compilation fails"
     );
     let rendered_lines = error.messages().join("\n");
-    assert!(rendered_lines.contains("@page.moth"), "{rendered_lines}");
+    assert!(rendered_lines.contains("@entry.moth"), "{rendered_lines}");
 }
 
 #[test]

@@ -9,7 +9,7 @@ diagnostic_codes = ["MOTH-RULE-0083", "MOTH-RULE-0083"]
 code = "MOTH-RULE-0083"
 reason = "invalid_cast.same_source_and_target"
 occurrence = 1
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 13
 column = 33
 
@@ -17,7 +17,7 @@ column = 33
 code = "MOTH-RULE-0083"
 reason = "invalid_cast.same_source_and_target"
 occurrence = 2
-path = "input/exponent/@mod.moth"
+path = "input/exponent/@entry.moth"
 line = 2
 column = 17
 
@@ -30,7 +30,7 @@ diagnostic_codes = ["MOTH-RULE-0083", "MOTH-RULE-0083"]
 code = "MOTH-RULE-0083"
 reason = "invalid_cast.same_source_and_target"
 occurrence = 1
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 13
 column = 33
 
@@ -38,6 +38,6 @@ column = 33
 code = "MOTH-RULE-0083"
 reason = "invalid_cast.same_source_and_target"
 occurrence = 2
-path = "input/exponent/@mod.moth"
+path = "input/exponent/@entry.moth"
 line = 2
 column = 17

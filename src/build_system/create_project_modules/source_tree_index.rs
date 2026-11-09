@@ -3,7 +3,7 @@
 //! WHAT: performs one deterministic traversal per project or source-package boundary, preparing
 //! canonical module identities, source ownership and sibling dependency-name collision facts. Project
 //! boundaries also own entry/package-prefix collisions;
-//! package boundaries own their required public normal-root validation. Each rooted directory gets
+//! package boundaries own their required public API-facade validation. Each rooted directory gets
 //! one deterministic `ModuleId`, explicit normal/support surface facts and one boundary-relative
 //! logical module path; shared helpers belong to that one structural module.
 //! WHY: filesystem discovery belongs to Stage 0. Keeping it here prevents the frontend resolver,
@@ -14,9 +14,7 @@
 //! unrooted collections store only those handles, so the index is the sole source
 //! inventory/ownership owner and later consumers resolve source data through it rather than
 //! through duplicated per-module records.
-use super::module_identity::{
-    ModuleId, ModuleIdentityRecord, ModuleIdentityTable, module_root_role_for_file_name,
-};
+use super::module_identity::{ModuleId, ModuleIdentityRecord, ModuleIdentityTable};
 use crate::build_system::output::ValidatedDirectoryOutputSettings;
 use crate::builder_surface::external_import_providers::provider::ExternalFileExtension;
 use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
@@ -35,8 +33,8 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::source::{SourceKind, SourceRegistrationIndex};
 use crate::compiler_frontend::source_packages::root_file::{
-    file_name_is_config_file, file_name_is_legacy_hash_root_file, file_name_is_module_root_file,
-    file_name_is_normal_module_root_file,
+    file_name_is_config_file, file_name_is_module_root_file,
+    invalid_module_root_file_name_suggestion, module_root_role_for_file_name,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::counter_observation;
@@ -49,7 +47,8 @@ use std::path::{Path, PathBuf};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::project_structure_diagnostics::{
-    non_utf8_filesystem_name_error, path_id, project_structure_diagnostic,
+    invalid_module_root_file_name_error, non_utf8_filesystem_name_error, path_id,
+    project_structure_diagnostic,
 };
 
 /// Directory names that are never source regardless of configuration.
@@ -513,13 +512,14 @@ impl SourceTreeIndex {
     /// boundary descriptor and delegates to it. Package-boundary sibling collisions and root
     /// discovery are owned by the same traversal via [`SourceTreeIndex::discover_package`].
     ///
-    /// Each source directory may contain one `@*.moth` normal root or one `+*.moth` support root.
-    /// Multiple or mixed roots in one directory are rejected through the existing structured config
-    /// diagnostic lane. Legacy `#*.moth` root-like filenames are rejected with a structured
-    /// diagnostic that tells the author to rename to `@*.moth`. Normal roots carry the `Normal`
-    /// role used by the project module graph to classify entry modules; the graph, not this index,
-    /// owns entry selection. A project-root support root is an ordinary structural module when it
-    /// lies inside the selected directory; it is never an entry candidate.
+    /// Each source directory may contain one `@mod.moth`, one `@package.moth` and one
+    /// `@entry.moth` root. Aliased or multiply-claimed roots are rejected through
+    /// the existing structured config diagnostic lane. Every other `@*.moth`, `+*.moth` and legacy
+    /// `#*.moth` marker is rejected with a structured diagnostic that names the canonical
+    /// replacement. Entry roots carry the `Entry` role used by the project module graph to select
+    /// entries; the graph, not this index, owns that selection. A project-root support root is an
+    /// ordinary structural module when it lies inside the selected directory; it is never an entry
+    /// candidate.
     ///
     /// The same traversal inventories every compiler-recognized source candidate (`.moth`,
     /// `.mtf` and `.md`) and every explicit
@@ -659,17 +659,25 @@ impl SourceTreeIndex {
                 if is_dir {
                     // Root markers are reserved source filenames. A directory or directory
                     // symlink reachable under one of those names is a malformed authored root,
-                    // not a traversable module directory.
-                    if let Some(file_name) = path.file_name().and_then(|name| name.to_str())
-                        && file_name_is_module_root_file(file_name)
-                    {
-                        let canonical_target = canonicalize_source_path(&path)?;
-                        return Err(module_root_not_regular_file_error(
-                            &directory,
-                            &path,
-                            &canonical_target,
-                            string_table,
-                        ));
+                    // not a traversable module directory. A retired marker name stays a closed
+                    // vocabulary error even when it is not a regular file.
+                    if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
+                        if invalid_module_root_file_name_suggestion(file_name).is_some() {
+                            return Err(invalid_module_root_file_name_error(
+                                &directory,
+                                file_name,
+                                string_table,
+                            ));
+                        }
+                        if file_name_is_module_root_file(file_name) {
+                            let canonical_target = canonicalize_source_path(&path)?;
+                            return Err(module_root_not_regular_file_error(
+                                &directory,
+                                &path,
+                                &canonical_target,
+                                string_table,
+                            ));
+                        }
                     }
 
                     // A directory alias must be classified by its physical destination before it
@@ -713,18 +721,25 @@ impl SourceTreeIndex {
                     // non-regular entries. A reserved root-marker name in any existing form is an
                     // authored root, so canonicalize it and reject it instead of silently dropping
                     // the required root. A dangling marker symlink still fails canonicalization.
-                    let is_root_marker = path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .is_some_and(file_name_is_module_root_file);
-                    if is_root_marker {
-                        let canonical_target = canonicalize_source_path(&path)?;
-                        return Err(module_root_not_regular_file_error(
-                            &directory,
-                            &path,
-                            &canonical_target,
-                            string_table,
-                        ));
+                    // A retired marker spelling is a closed-vocabulary error without resolving the
+                    // link, so a dangling retired-name symlink is still visible to the author.
+                    if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
+                        if invalid_module_root_file_name_suggestion(file_name).is_some() {
+                            return Err(invalid_module_root_file_name_error(
+                                &directory,
+                                file_name,
+                                string_table,
+                            ));
+                        }
+                        if file_name_is_module_root_file(file_name) {
+                            let canonical_target = canonicalize_source_path(&path)?;
+                            return Err(module_root_not_regular_file_error(
+                                &directory,
+                                &path,
+                                &canonical_target,
+                                string_table,
+                            ));
+                        }
                     }
                     continue;
                 }
@@ -764,24 +779,14 @@ impl SourceTreeIndex {
                     ));
                 }
 
-                // Legacy `#*.moth` root-like filenames are invalid; roots use the `@` prefix.
-                // Reject them with a structured diagnostic before any other classification so
-                // they are never treated as ordinary source files or silently ignored.
-                if file_name_is_legacy_hash_root_file(file_name) {
-                    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-                    let reason = InvalidConfigReason::LegacyModuleRootFileName {
-                        file_name: diagnostic_strings.intern(file_name),
-                        directory: path_id(&directory, &mut diagnostic_strings),
-                    };
-                    let diagnostic = project_structure_diagnostic(reason);
-                    let table = string_table.take_for_handoff();
-                    return Err(PreparedFailure::Diagnosed(
-                        PreparedDiagnosticBatch::capture_from_bag(
-                            DiagnosticBag::from(diagnostic),
-                            table,
-                            None,
-                            None,
-                        ),
+                // The authored root vocabulary is closed: only `@mod.moth`, `@package.moth` and
+                // `@entry.moth` are roots. Retired `@*.moth`, `+*.moth` and legacy `#*.moth`
+                // markers are authored structure errors, never ordinary helpers or no-ops.
+                if invalid_module_root_file_name_suggestion(file_name).is_some() {
+                    return Err(invalid_module_root_file_name_error(
+                        &directory,
+                        file_name,
+                        string_table,
                     ));
                 }
 
@@ -996,7 +1001,7 @@ impl SourceTreeIndex {
                     )?
                 }
                 SourceTreeBoundaryKind::Project { .. } | SourceTreeBoundaryKind::Package { .. } => {
-                    classify_directory_root(&directory, &mut directory_roots, string_table)?
+                    classify_directory_root(&mut directory_roots, string_table)?
                 }
             };
             let ClassifiedDirectoryRoots { roots } = directory_root;
@@ -1158,10 +1163,8 @@ impl SourceTreeIndex {
             .file_name()
             .and_then(|name| name.to_str())
             .ok_or_else(|| non_utf8_filesystem_name_error(entry_file, "single-file entry name"))?;
-        // `@mod.moth`, `@package.moth` and `@entry.moth` all carry the `@` prefix, so the
-        // normal-root predicate already admits every fixed root spelling. A legacy `+*.moth`
-        // selection keeps an empty table, as before the role split.
-        if !file_name_is_normal_module_root_file(file_name) {
+        // Only the three fixed root spellings own a bounded Stage 0 inventory.
+        if !file_name_is_module_root_file(file_name) {
             return Ok(ModuleRootTable::empty());
         }
 
@@ -1340,12 +1343,10 @@ fn canonicalize_source_path(path: &Path) -> Result<PathBuf, InfrastructureFailur
 
 /// Classify one rooted directory's fixed role-keyed root inventory.
 ///
-/// At most one root per role is allowed. Two roots of the same role are rejected with the
-/// existing candidate-listing diagnostic. Any two present roots that resolve to one physical
-/// file are rejected because each role needs its own authored root scope. A directory with no
-/// roots is not a structural module.
+/// The closed filename vocabulary yields at most one root per role. Any two present roots that
+/// resolve to one physical file are rejected because each role needs its own authored root
+/// scope. A directory with no roots is not a structural module.
 fn classify_directory_root(
-    directory: &Path,
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
     string_table: &mut StringTable,
 ) -> Result<ClassifiedDirectoryRoots, PreparedFailure> {
@@ -1368,19 +1369,6 @@ fn classify_directory_root(
         }
     }
 
-    for roots in [&normal, &support, &entry] {
-        if roots.len() > 1 {
-            return Err(multiple_same_role_roots_error(
-                directory,
-                roots
-                    .iter()
-                    .map(|root| root.visible_root_file.clone())
-                    .collect(),
-                string_table,
-            ));
-        }
-    }
-
     // Every present root must resolve to a distinct physical file so each role owns a separate
     // authored scope. A visible symlink's name decided its role above; this rejects two roles
     // that alias the same canonical target.
@@ -1393,9 +1381,9 @@ fn classify_directory_root(
         for right in present_roots.iter().skip(index + 1) {
             if left.root_file == right.root_file {
                 return Err(aliased_root_files_error(
-                    directory,
                     left.visible_root_file.clone(),
                     right.visible_root_file.clone(),
+                    left.root_file.clone(),
                     string_table,
                 ));
             }
@@ -1552,42 +1540,16 @@ fn module_root_not_regular_file_error(
 /// file would collapse them into one source identity, so the filesystem structure fails before
 /// module identity or semantic preparation begins.
 fn aliased_root_files_error(
-    directory: &Path,
     left_root_file: PathBuf,
     right_root_file: PathBuf,
+    target: PathBuf,
     string_table: &mut StringTable,
 ) -> PreparedFailure {
     let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-    let diagnostic = project_structure_diagnostic(InvalidConfigReason::MultipleModuleRootFiles {
-        directory: path_id(directory, &mut diagnostic_strings),
-        candidates: vec![
-            path_id(&left_root_file, &mut diagnostic_strings),
-            path_id(&right_root_file, &mut diagnostic_strings),
-        ],
-    });
-    let table = string_table.take_for_handoff();
-    PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
-        DiagnosticBag::from(diagnostic),
-        table,
-        None,
-        None,
-    ))
-}
-
-fn multiple_same_role_roots_error(
-    directory: &Path,
-    mut candidates: Vec<PathBuf>,
-    string_table: &mut StringTable,
-) -> PreparedFailure {
-    candidates.sort();
-    let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-    let candidates = candidates
-        .iter()
-        .map(|root| path_id(root, &mut diagnostic_strings))
-        .collect();
-    let diagnostic = project_structure_diagnostic(InvalidConfigReason::MultipleModuleRootFiles {
-        directory: path_id(directory, &mut diagnostic_strings),
-        candidates,
+    let diagnostic = project_structure_diagnostic(InvalidConfigReason::AliasedModuleRootFiles {
+        first_root: path_id(&left_root_file, &mut diagnostic_strings),
+        second_root: path_id(&right_root_file, &mut diagnostic_strings),
+        target: path_id(&target, &mut diagnostic_strings),
     });
     let table = string_table.take_for_handoff();
     PreparedFailure::Diagnosed(PreparedDiagnosticBatch::capture_from_bag(
@@ -1602,8 +1564,8 @@ fn multiple_same_role_roots_error(
 ///
 /// A package may carry any combination of normal, support and entry roots, but it needs at
 /// least one API facade root. A support root beside a normal root is the external package
-/// surface; the normal root remains the internal interface. Missing roots, duplicate roles and
-/// aliased roots keep package-specific typed diagnostics.
+/// surface; the normal root remains the internal interface. Missing roots and aliased roots keep
+/// package-specific typed diagnostics.
 fn classify_package_root_directory(
     directory: &Path,
     directory_roots: &mut Vec<DiscoveredDirectoryRoot>,
@@ -1636,37 +1598,6 @@ fn classify_package_root_directory(
         .iter()
         .filter(|root| root.role == ModuleRootRole::Support)
         .count();
-    let entry_count = directory_roots
-        .iter()
-        .filter(|root| root.role == ModuleRootRole::Entry)
-        .count();
-    if normal_count > 1 || support_count > 1 || entry_count > 1 {
-        let mut candidate_paths = directory_roots
-            .iter()
-            .map(|root| &root.visible_root_file)
-            .collect::<Vec<_>>();
-        candidate_paths.sort();
-        let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
-        let candidates = candidate_paths
-            .into_iter()
-            .map(|path| path_id(path, &mut diagnostic_strings))
-            .collect();
-        let diagnostic =
-            project_structure_diagnostic(InvalidConfigReason::SourcePackageMultipleRoots {
-                prefix: diagnostic_strings.intern(package_prefix),
-                root: path_id(directory, &mut diagnostic_strings),
-                candidates,
-            });
-        let table = string_table.take_for_handoff();
-        return Err(PreparedFailure::Diagnosed(
-            PreparedDiagnosticBatch::capture_from_bag(
-                DiagnosticBag::from(diagnostic),
-                table,
-                None,
-                None,
-            ),
-        ));
-    }
 
     // A registered source package is importable, so it needs at least one API facade root.
     // An entry-only package root has no public surface and cannot satisfy the package contract.
@@ -1688,7 +1619,7 @@ fn classify_package_root_directory(
         ));
     }
 
-    classify_directory_root(directory, directory_roots, string_table)
+    classify_directory_root(directory_roots, string_table)
 }
 
 /// Compute the source-relative logical module path for a canonical root directory.

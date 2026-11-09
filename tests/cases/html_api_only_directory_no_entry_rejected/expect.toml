@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-CONFIG-0001"]
+message_contains = ["No executable entry root", "@entry.moth"]
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-CONFIG-0001"]
+message_contains = ["No executable entry root", "@entry.moth"]

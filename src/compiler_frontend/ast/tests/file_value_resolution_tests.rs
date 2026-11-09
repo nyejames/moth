@@ -75,7 +75,7 @@ use std::sync::Arc;
 #[test]
 fn moth_file_value_from_module_root_folds_to_target_content_constant() {
     let (ast, string_table, path_fork) =
-        compile_fixture(&[("@page.moth", "intro #= @docs/intro.mtf\n")], &[]);
+        compile_fixture(&[("@entry.moth", "intro #= @docs/intro.mtf\n")], &[]);
 
     assert_file_value_reuses_content(&ast, &string_table, &path_fork, "docs/intro.mtf/content");
 }
@@ -84,7 +84,7 @@ fn moth_file_value_from_module_root_folds_to_target_content_constant() {
 fn moth_file_value_from_same_module_source_folds_to_target_content_constant() {
     let (ast, string_table, path_fork) = compile_fixture(
         &[
-            ("@page.moth", ""),
+            ("@entry.moth", ""),
             ("helper.moth", "intro #= @docs/intro.mtf\n"),
         ],
         &[],
@@ -96,7 +96,7 @@ fn moth_file_value_from_same_module_source_folds_to_target_content_constant() {
 #[test]
 fn markdown_file_value_folds_to_target_content_constant() {
     let (ast, string_table, path_fork) = compile_fixture(
-        &[("@page.moth", "intro #= @docs/intro.md\n")],
+        &[("@entry.moth", "intro #= @docs/intro.md\n")],
         &[("docs/intro.md", "# Intro\n\nRendered markdown body.\n")],
     );
 
@@ -178,7 +178,7 @@ fn rooted_file_value_with_suffix_reports_only_root_slash_diagnostic() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let source_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test path fits");
     let mut span_builder = ExtendedSpanBuilder::new();
     let error = match tokenize(
@@ -210,7 +210,7 @@ fn rooted_file_value_with_suffix_reports_only_root_slash_diagnostic() {
 fn resource_file_value_in_struct_field_default_resolves_to_one_resource_piece() {
     let (ast, string_table, path_fork) = compile_fixture(
         &[(
-            "@page.moth",
+            "@entry.moth",
             "Drawing = |\n    drawing_url String = @vendor/drawing.js,\n|\nvalue #= Drawing()\n",
         )],
         &[],
@@ -259,7 +259,7 @@ fn resource_file_value_in_struct_field_default_resolves_to_one_resource_piece() 
 fn resource_file_value_in_function_parameter_default_resolves_through_stage_zero() {
     let (ast, string_table, path_fork) = compile_fixture(
         &[(
-            "@page.moth",
+            "@entry.moth",
             "draw |drawing_url String = @vendor/drawing.js| -> String:\n    return \"ok\"\n;\n",
         )],
         &[],
@@ -361,7 +361,7 @@ fn compile_fixture(
     markdown_files: &[(&str, &str)],
 ) -> (Ast, StringTable, PathInternerFork) {
     let templates = [("docs/intro.mtf", "shared body")];
-    let entry_path = PathBuf::from("@page.moth");
+    let entry_path = PathBuf::from("@entry.moth");
 
     let all_paths = moth_files
         .iter()
@@ -385,7 +385,7 @@ fn compile_fixture(
 
     let style_directives = StyleDirectiveRegistry::built_ins();
     let options = HeaderParseOptions {
-        selected_file: Some((file_id_for("@page.moth"), FileRole::LegacyCombinedRoot)),
+        selected_file: Some((file_id_for("@entry.moth"), FileRole::ActiveEntryRoot)),
         ..Default::default()
     };
     let mut prepared_outputs =
@@ -660,7 +660,7 @@ fn resolve_file_value_fixture(
     outcome: ResolvedFileReferenceOutcome,
 ) -> Result<FileValueFixtureOutput, ExpressionParseError> {
     let mut string_table = StringTable::new();
-    let source_path_buf = PathBuf::from("@page.moth");
+    let source_path_buf = PathBuf::from("@entry.moth");
     let source_files = Arc::new(
         SourceDatabase::build(
             std::iter::once(&source_path_buf),

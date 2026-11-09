@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-CONFIG-0001"]
+message_contains = ["Invalid module root filename", "@config.moth", "Rename '@config.moth' to '@entry.moth' for runtime work or '@mod.moth' for exported API"]
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-CONFIG-0001"]
+message_contains = ["Invalid module root filename", "@config.moth", "Rename '@config.moth' to '@entry.moth' for runtime work or '@mod.moth' for exported API"]

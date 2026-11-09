@@ -273,13 +273,6 @@ pub enum RootLocalDeclarationRole {
     SupportFacade,
     /// The declaration is authored in `@entry.moth`, the start-bearing entry root.
     EntryRoot,
-    /// The declaration is authored in a legacy combined normal root.
-    ///
-    /// LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): before the cutover a normal
-    /// root without a co-located `@entry.moth` still owns the combined export/start role. The
-    /// diagnostic names the actual root file as the normal root file; Phase 4 renames or splits
-    /// every legacy root into `@mod.moth` and `@entry.moth`.
-    LegacyCombinedRoot,
 }
 
 /// Why an authored `export:` clause is rejected for its file role.
@@ -465,9 +458,6 @@ pub enum InvalidConfigReason {
         value: StringId,
         expected: StringId,
     },
-    MissingHtmlHomepage {
-        entry_root: StringId,
-    },
     DuplicateHtmlOutputPath {
         output_path: StringId,
         entry_point: StringId,
@@ -496,17 +486,8 @@ pub enum InvalidConfigReason {
         prefix: StringId,
         root: StringId,
     },
-    SourcePackageMultipleRoots {
-        prefix: StringId,
-        root: StringId,
-        candidates: Vec<StringId>,
-    },
     NoRootModuleEntries {
         entry_root: StringId,
-    },
-    MultipleModuleRootFiles {
-        directory: StringId,
-        candidates: Vec<StringId>,
     },
     AliasedModuleRootFiles {
         first_root: StringId,
@@ -518,11 +499,12 @@ pub enum InvalidConfigReason {
         claiming_directory: StringId,
         target: StringId,
     },
-    /// A reserved `@*.moth` or `+*.moth` root marker names a directory or other non-file entry.
+    /// A canonical root filename names a directory or other non-file entry.
     ///
     /// The diagnostic keeps the authored marker, its containing directory and the canonical
     /// target so the malformed filesystem structure is visible without falling back to a
-    /// missing-root error.
+    /// missing-root error. Retired marker spellings are rejected earlier with
+    /// [`InvalidConfigReason::InvalidModuleRootFileName`].
     ModuleRootFileNotRegularFile {
         root_file: StringId,
         directory: StringId,
@@ -535,7 +517,13 @@ pub enum InvalidConfigReason {
         folder_name: StringId,
         directory: StringId,
     },
-    LegacyModuleRootFileName {
+    /// An authored `.moth` filename uses a retired special-root marker.
+    ///
+    /// The closed vocabulary is `@mod.moth`, `@package.moth` and `@entry.moth`; `config.moth`
+    /// remains the one build-only special source name. Every other `@*.moth`, `+*.moth` and
+    /// legacy `#*.moth` marker is a structure error that names the file. The renderer derives
+    /// the canonical replacement from that filename.
+    InvalidModuleRootFileName {
         file_name: StringId,
         directory: StringId,
     },
@@ -729,8 +717,8 @@ pub enum PathKind {
     ///
     /// WHAT: the first `@` introduces the dependency path. A second `@` in
     ///       any component (such as `@@pages` or `@helper/@home`) is not a valid module name.
-    /// WHY: normal module-root filenames such as `@page.moth` are cosmetic filesystem markers,
-    ///      not dependency names. The module's dependency identity comes from its directory.
+    /// WHY: module-root filenames such as `@entry.moth` are fixed structural markers, not
+    ///      dependency names. The module's dependency identity comes from its directory.
     LeadingAtInPathComponent,
 }
 

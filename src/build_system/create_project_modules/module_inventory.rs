@@ -625,7 +625,7 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
-    require_normal_entry: bool,
+    require_entry: bool,
     include_check_only: bool,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
@@ -642,7 +642,7 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
         external_imports,
         directory_dependency_resolution,
         resource_inputs,
-        require_normal_entry,
+        require_entry,
         include_check_only,
         selected_source_texts,
         string_table,
@@ -696,7 +696,7 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "boundary discovery keeps configuration, resolver, sources, directives and dependency resolution, mutable span/graph/import/resource/string/path owners, normal-entry and check-only policies, selected source texts and the timers-only boundary separate"
+    reason = "boundary discovery keeps configuration, resolver, sources, directives and dependency resolution, mutable span/graph/import/resource/string/path owners, entry and check-only policies, selected source texts and the timers-only boundary separate"
 )]
 fn discover_all_modules_in_boundary(
     config: &Config,
@@ -708,7 +708,7 @@ fn discover_all_modules_in_boundary(
     external_imports: &mut ExternalImportDiscoveryState<'_>,
     directory_dependency_resolution: DirectoryDependencyResolution<'_>,
     resource_inputs: &mut ResourceInputRegistry,
-    require_normal_entry: bool,
+    require_entry: bool,
     include_check_only: bool,
     selected_source_texts: &mut SelectedSourceTextMap,
     string_table: &mut StringTable,
@@ -726,7 +726,7 @@ fn discover_all_modules_in_boundary(
     ));
     drop(source_origin_lookup);
 
-    if require_normal_entry && project_module_graph.entry_modules().is_empty() {
+    if require_entry && project_module_graph.entry_modules().is_empty() {
         // Diagnostic identities intern through the narrow builder; the table then moves to the
         // diagnosed batch for the final boundary handoff.
         let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
@@ -1347,7 +1347,7 @@ fn cross_module_support_import_is_visible(
 
 /// Raise a compiler-bug report when the project module graph and discovered inventories disagree.
 ///
-/// Reaching this helper means the graph and discovery disagree on which normal entry roots exist,
+/// Reaching this helper means the graph and discovery disagree on which entry roots exist,
 /// which is a proven compiler invariant violation rather than a user-facing failure.
 fn graph_inventory_mismatch_error(reason: String) -> PreparedFailure {
     crate::compiler_bug!(

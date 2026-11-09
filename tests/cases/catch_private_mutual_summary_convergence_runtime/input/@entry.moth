@@ -1,0 +1,13 @@
+@impl recover, builtin_forward, custom_map, DomainError
+
+builtin_code ~U32 = 0
+builtin_value = builtin_forward("bad") catch |builtin_error|:
+    ~builtin_code = builtin_error.code
+    then -8
+;
+custom_value = custom_map("bad") catch |domain_error|:
+    assert(domain_error is DomainError::Invalid)
+    then -9
+;
+custom_success = custom_map("43") catch then -10
+[:private=[recover("bad")]/[recover("42")] builtin=[builtin_value]/[builtin_code] custom=[custom_value]/[custom_success]]

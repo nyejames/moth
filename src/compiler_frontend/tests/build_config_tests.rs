@@ -27,7 +27,7 @@ fn source_span_at(_path: &str, _string_table: &mut StringTable) -> SourceSpan {
 }
 
 fn source_span(string_table: &mut StringTable) -> SourceSpan {
-    source_span_at("src/@page.moth", string_table)
+    source_span_at("src/@entry.moth", string_table)
 }
 
 fn command_location(argument_index: usize) -> BuildConfigValueLocation {

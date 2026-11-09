@@ -961,17 +961,13 @@ fn root_local_declaration_role_text(role: RootLocalDeclarationRole) -> &'static 
         RootLocalDeclarationRole::NormalFacade => "the normal facade root file",
         RootLocalDeclarationRole::SupportFacade => "the support facade root file",
         RootLocalDeclarationRole::EntryRoot => "the entry root file",
-        // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): a lone normal root may still
-        // carry any `@*.moth` spelling today. The message names the actual file, and Phase 4
-        // migrates every such root to `@mod.moth`.
-        RootLocalDeclarationRole::LegacyCombinedRoot => "the normal root file",
     }
 }
 
 /// Renders a cross-file read of a root-local declaration from its path, role and root-file facts.
 ///
 /// WHAT: the message names the actual authored root file rather than only a role spelling. A
-///       legacy `@*.moth` normal root and a symlinked root therefore stay accurate, and a
+///       symlinked or case-variant root therefore stays accurate, and a
 ///       namespace binding that passes the root file path as its symbol path still reads
 ///       correctly because the message states where declarations are visible, not where the
 ///       selected path was authored.
@@ -1142,9 +1138,17 @@ fn direct_special_file_import_message(
     let special_file = special_file_name_from_path(path, context);
     let path_text = context.render_path(path);
     let suggestion = support_root_import_suggestion(path, context);
-    format!(
-        "Cannot depend directly on '{special_file}' via '{path_text}'. Support roots are referenced through their package directory, not by filename.{suggestion}"
-    )
+    if suggestion.is_empty() {
+        // The only non-support special file this diagnostic names is the build-only config
+        // source, which has no authored facade or importable surface.
+        format!(
+            "Cannot depend directly on '{special_file}' via '{path_text}'. `config.moth` is a build-only source and is not importable."
+        )
+    } else {
+        format!(
+            "Cannot depend directly on '{special_file}' via '{path_text}'. Support facades are authored as '@package.moth' and are referenced through their module directory, not by a special filename.{suggestion}"
+        )
+    }
 }
 
 /// Renders a direct special-file dependency from its compact path fact.

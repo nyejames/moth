@@ -17,7 +17,7 @@ column = 23
 code = "MOTH-RULE-0053"
 occurrence = 2
 reason = "compile_time_evaluation_error.integer_overflow"
-path = "input/caught_underflow/@mod.moth"
+path = "input/caught_underflow/@entry.moth"
 line = 2
 column = 15
 
@@ -49,7 +49,7 @@ column = 5
 code = "MOTH-RULE-0053"
 occurrence = 5
 reason = "compile_time_evaluation_error.integer_overflow"
-path = "input/known_catch/@mod.moth"
+path = "input/known_catch/@entry.moth"
 line = 3
 column = 21
 
@@ -88,7 +88,7 @@ column = 23
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0003"
 occurrence = 1
-path = "input/mixed_compound/@mod.moth"
+path = "input/mixed_compound/@entry.moth"
 line = 3
 column = 2
 

@@ -1252,7 +1252,7 @@ fn static_true_assertion_discards_normalized_runtime_template_message_after_vali
 // through an exported generic free function sharing `synchronize_normalized_public_defaults`.
 
 use crate::compiler_frontend::datatypes::ReceiverKey;
-use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
+use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result_with_path;
 
 fn path_display_name(
     path: PathId,
@@ -1322,8 +1322,9 @@ fn signature_parameter<'a>(
 fn finalization_synchronizes_ordinary_receiver_root_entry_with_emitted_signature() {
     // Receiver ownership publishes this private method through Counter's public surface.
     let source = "export:\n    Counter = | count I32 = 0 |\n    run || -> I32:\n        counter = Counter()\n        counter.bump()\n        return counter.count\n    ;\n;\nbump |this Counter, label String = [\"joined \", \"default\"]| -> I32:\n    return this.count\n;\n";
-    let (build_result, path_fork, mut string_table) = parse_single_file_ast_build_result(source)
-        .expect("an ordinary receiver method with a template default should finalize");
+    let (build_result, path_fork, mut string_table) =
+        parse_single_file_ast_build_result_with_path(source, "@mod.moth")
+            .expect("an ordinary receiver method with a template default should finalize");
     let nodes = &build_result.ast.nodes;
     let receiver_entries = &build_result
         .public_interface_projection_input
@@ -1445,9 +1446,10 @@ fn finalization_normalizes_generic_receiver_root_entry_and_retained_function_def
     // signatures are the retained normalization owner. Aligned generic receivers cannot yet
     // author an extra defaulted parameter, so the retained template default rides the
     // supported exported generic free function sharing `synchronize_normalized_public_defaults`.
-    let source = "export:\n    Cell type T = |\n        value T,\n    |\n    pick type T |value T, tag String = [\"joined \", \"n/a\"]| -> T:\n        return value\n    ;\n;\ncell_value type T |this Cell of T| -> T:\n    return this.value\n;\nbox = Cell(\"v\")\n";
-    let (build_result, path_fork, mut string_table) = parse_single_file_ast_build_result(source)
-        .expect("generic receiver and function roots with retained defaults should finalize");
+    let source = "export:\n    Cell type T = |\n        value T,\n    |\n    pick type T |value T, tag String = [\"joined \", \"n/a\"]| -> T:\n        return value\n    ;\n;\ncell_value type T |this Cell of T| -> T:\n    return this.value\n;\n";
+    let (build_result, path_fork, mut string_table) =
+        parse_single_file_ast_build_result_with_path(source, "@mod.moth")
+            .expect("generic receiver and function roots with retained defaults should finalize");
     let nodes = &build_result.ast.nodes;
     let root_table = &build_result.public_interface_projection_input.root_table;
 
@@ -1524,8 +1526,10 @@ fn finalization_normalizes_generic_receiver_root_entry_and_retained_function_def
 #[test]
 fn finalization_keeps_private_receiver_methods_out_of_public_roots_and_fills_call_defaults() {
     let source = "Counter = | count I32 = 0 |\nbump |this Counter, step I32 = 7| -> I32:\n    return this.count + step\n;\nexport:\n    run || -> I32:\n        counter = Counter()\n        counter.bump()\n        return counter.count\n    ;\n;\n";
-    let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(source)
-        .expect("a private receiver method on a private struct should finalize and stay callable");
+    let (build_result, path_fork, string_table) =
+        parse_single_file_ast_build_result_with_path(source, "@mod.moth").expect(
+            "a private receiver method on a private struct should finalize and stay callable",
+        );
     let nodes = &build_result.ast.nodes;
     let receiver_entries = &build_result
         .public_interface_projection_input

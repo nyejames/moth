@@ -14,6 +14,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareFailure, FileRole, HeaderParseOptions, SourcePreparationDelta,
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
+use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceKind};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -189,9 +190,16 @@ fn prepare_discovery_output(
     let (mut local_table, _) = fork_source.fork_for_module().into_parts();
     let selected_file = source_files
         .get_by_canonical_path(entry_file_path)
-        // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): a synthetic discovery unit
-        // compiles its selected file as one combined normal root.
-        .map(|identity| (identity.id, FileRole::LegacyCombinedRoot));
+        .map(|identity| {
+            // An ordinary selected file is the synthetic unit's entry root. A selected canonical
+            // root keeps its authored facade role, exactly as final module preparation classifies it.
+            let role = project_path_resolver
+                .and_then(|resolver| resolver.module_root_role_for_file(entry_file_path))
+                .unwrap_or(ModuleRootRole::Entry);
+            let file_role = FileRole::for_standalone_root(role)
+                .expect("bounded module roots never carry a shared helper role");
+            (identity.id, file_role)
+        });
     // Synthetic discovery prepares a reached Moth file before final module preparation exists.
     // Stage 0's bounded root inventory therefore supplies this file's foreign-root facade role
     // here as a one-entry lookup; the selected entry keeps its explicit standalone role.
@@ -204,11 +212,7 @@ fn prepare_discovery_output(
             .and_then(|path| {
                 let resolver = project_path_resolver?;
                 let role = resolver.module_root_role_for_file(path)?;
-                super::module_preparation::reached_root_file_role(
-                    resolver.prepared_module_roots(),
-                    role,
-                    path,
-                )
+                super::module_preparation::reached_root_file_role(role)
             })
     };
     let reached_root_roles = reached_role.map(|role| [(source_id, role)]);

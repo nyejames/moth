@@ -9,12 +9,12 @@ diagnostic_codes = ["MOTH-TYPE-0001"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 6
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 5
 
 [backends.html_wasm]
@@ -24,10 +24,10 @@ diagnostic_codes = ["MOTH-TYPE-0001"]
 
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 6
 
 [[backends.html_wasm.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 5

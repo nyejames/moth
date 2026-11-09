@@ -374,7 +374,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
         selected_file: frontend
             .source_files
             .get_by_canonical_path(&canonical_a)
-            .map(|i| (i.id, FileRole::LegacyCombinedRoot)),
+            .map(|i| (i.id, FileRole::ActiveEntryRoot)),
         reached_root_roles: &[],
     };
 
@@ -586,7 +586,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
 #[test]
 fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
-    let entry_file = temp_dir.path().join("entry.moth");
+    let entry_file = temp_dir.path().join("@mod.moth");
     let parameter_name = format!("value_{}", "x".repeat(1_500));
     let source = format!(
         "export:\n\
@@ -818,16 +818,9 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         stable_origin,
         "the semantic draft should retain the module's stable origin"
     );
-    assert_eq!(
-        draft
-            .module
-            .metadata
-            .entry
-            .as_ref()
-            .expect("the legacy combined synthetic root carries entry metadata")
-            .entry_point,
-        canonical_entry,
-        "semantic compilation should preserve the module entry point"
+    assert!(
+        draft.module.metadata.entry.is_none(),
+        "an API facade root carries no entry metadata"
     );
     let materialisation_context = draft
         .module
@@ -854,7 +847,7 @@ fn support_api_only_root_compiles_public_interface_without_hir_start() {
 
 fn compile_api_only_root_and_assert_boundary() {
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
-    let entry_file = temp_dir.path().join("+package.moth");
+    let entry_file = temp_dir.path().join("@package.moth");
     let source = "export:\n    answer #= 42\n;\n";
     fs::write(&entry_file, source).expect("test source should be written");
     let canonical_entry = fs::canonicalize(&entry_file).expect("test source should canonicalize");
@@ -1040,7 +1033,7 @@ fn compile_api_only_root_and_assert_boundary() {
 #[test]
 fn diagnostic_recovery_skips_later_stages() {
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
-    let entry_file = temp_dir.path().join("entry.moth");
+    let entry_file = temp_dir.path().join("@mod.moth");
     let source = "\
 first || -> I32:
     return missing
@@ -1452,7 +1445,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
             input_files,
             &mut span_owners.split().1,
             &Default::default(),
-            Some((canonical_a.as_path(), FileRole::LegacyCombinedRoot)),
+            Some((canonical_a.as_path(), FileRole::ActiveEntryRoot)),
             &[],
             source_byte_count,
         )
@@ -1690,7 +1683,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
             input_files,
             &mut span_owners.split().1,
             &Default::default(),
-            Some((entry_file_path.as_path(), FileRole::LegacyCombinedRoot)),
+            Some((entry_file_path.as_path(), FileRole::ActiveEntryRoot)),
             &[],
             source_byte_count,
         )
@@ -1739,7 +1732,7 @@ fn chunked_file_preparation_merges_in_source_order_after_out_of_order_completion
             .frontend
             .source_files
             .get_by_canonical_path(&fixture.entry_file_path)
-            .map(|identity| (identity.id, FileRole::LegacyCombinedRoot)),
+            .map(|identity| (identity.id, FileRole::ActiveEntryRoot)),
         reached_root_roles: &[],
     };
     let fork_source = fixture.frontend.string_table.fork_source();
@@ -1885,7 +1878,7 @@ fn prepared_file_error_allowance(
             .frontend
             .source_files
             .get_by_canonical_path(&fixture.entry_file_path)
-            .map(|identity| (identity.id, FileRole::LegacyCombinedRoot)),
+            .map(|identity| (identity.id, FileRole::ActiveEntryRoot)),
         reached_root_roles: &[],
     };
     let fork_source = fixture.frontend.string_table.fork_source();
@@ -2168,10 +2161,7 @@ fn chunked_file_preparation_remaps_non_identity_later_chunks() {
             input_files,
             &mut fixture.span_builders.split().1,
             &Default::default(),
-            Some((
-                fixture.entry_file_path.as_path(),
-                FileRole::LegacyCombinedRoot,
-            )),
+            Some((fixture.entry_file_path.as_path(), FileRole::ActiveEntryRoot)),
             &[],
             source_byte_count,
         )
@@ -2249,7 +2239,7 @@ fn every_preparation_strategy_stamps_the_registered_source_identity() {
                 .frontend
                 .source_files
                 .get_by_canonical_path(&fixture.entry_file_path)
-                .map(|record| (record.id, FileRole::LegacyCombinedRoot)),
+                .map(|record| (record.id, FileRole::ActiveEntryRoot)),
             reached_root_roles: &[],
         };
         let fork_source = fixture.frontend.string_table.fork_source();
@@ -2340,10 +2330,7 @@ fn indexed_file_preparation_returns_warnings_for_publication() {
                 source_module_origins,
             },
             Default::default(),
-            Some((
-                fixture.entry_file_path.clone(),
-                FileRole::LegacyCombinedRoot,
-            )),
+            Some((fixture.entry_file_path.clone(), FileRole::ActiveEntryRoot)),
             std::mem::take(&mut fixture.frontend.string_table),
             std::mem::replace(&mut fixture.frontend.path_fork, PathInternerFork::empty()),
             &mut selected_source_texts,
@@ -2405,10 +2392,7 @@ fn chunked_file_preparation_preserves_warning_source_order() {
             input_files,
             &mut fixture.span_builders.split().1,
             &Default::default(),
-            Some((
-                fixture.entry_file_path.as_path(),
-                FileRole::LegacyCombinedRoot,
-            )),
+            Some((fixture.entry_file_path.as_path(), FileRole::ActiveEntryRoot)),
             &[],
             source_byte_count,
         )
@@ -2464,7 +2448,7 @@ fn parsed_prepared_output(
     let path_syntax = lexed.path_syntax;
 
     let options =
-        crate::compiler_frontend::tests::parse_support::legacy_single_root_options(source_id);
+        crate::compiler_frontend::tests::parse_support::synthetic_entry_options(source_id);
     parse_file_headers_with_table(
         owner,
         source_identity,
@@ -2606,7 +2590,7 @@ fn merge_rejects_chunk_forked_from_a_foreign_path_base() {
             .frontend
             .source_files
             .get_by_canonical_path(&fixture.entry_file_path)
-            .map(|identity| (identity.id, FileRole::LegacyCombinedRoot)),
+            .map(|identity| (identity.id, FileRole::ActiveEntryRoot)),
         reached_root_roles: &[],
     };
     let fork_source = fixture.frontend.string_table.fork_source();
@@ -2841,7 +2825,7 @@ fn resolve_and_validate_preparation_anchor_rejects_mismatched_expected_origin() 
     // active origin passed by the caller is distinct origin B. Preparation must reject this
     // mismatch rather than trusting the loose expected-origin argument.
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
-    let entry_path = temp_dir.path().join("@page.moth");
+    let entry_path = temp_dir.path().join("@entry.moth");
     fs::write(&entry_path, "").expect("test source file should be written");
     let canonical_entry = fs::canonicalize(&entry_path).expect("file should canonicalize");
 
@@ -2928,10 +2912,7 @@ fn serial_chunk_local_preparation_counts_each_selected_source_once() {
             input_files,
             &mut fixture.span_builders.split().1,
             &Default::default(),
-            Some((
-                fixture.entry_file_path.as_path(),
-                FileRole::LegacyCombinedRoot,
-            )),
+            Some((fixture.entry_file_path.as_path(), FileRole::ActiveEntryRoot)),
             &[],
             source_byte_count,
         )
@@ -2984,10 +2965,7 @@ fn chunked_file_preparation_skips_identity_payload_remap() {
             input_files,
             &mut fixture.span_builders.split().1,
             &Default::default(),
-            Some((
-                fixture.entry_file_path.as_path(),
-                FileRole::LegacyCombinedRoot,
-            )),
+            Some((fixture.entry_file_path.as_path(), FileRole::ActiveEntryRoot)),
             &[],
             source_byte_count,
         )

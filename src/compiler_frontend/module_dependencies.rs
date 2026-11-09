@@ -56,8 +56,6 @@ pub(crate) struct SortedHeaders {
         Vec<crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract>,
     pub(crate) top_level_const_fragments: Vec<TopLevelConstFragment>,
     pub(crate) entry_runtime_fragment_count: usize,
-    pub(crate) const_fragment_count: usize,
-    pub(crate) has_non_trivial_root_body: bool,
     pub(crate) module_symbols: ModuleSymbols,
     pub(crate) binding_environment: HeaderBindingEnvironment,
 }
@@ -502,8 +500,6 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
-        const_fragment_count,
-        has_non_trivial_root_body,
         mut module_symbols,
         binding_environment,
         ..
@@ -607,8 +603,6 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
         source_build_config_contracts,
         top_level_const_fragments,
         entry_runtime_fragment_count,
-        const_fragment_count,
-        has_non_trivial_root_body,
         module_symbols,
         binding_environment,
     })

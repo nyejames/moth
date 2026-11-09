@@ -67,7 +67,7 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
             fs::write(&entry, consumer_source).expect("should write ordinary selected page");
             entry
         } else {
-            fs::write(source_root.join("@page.moth"), consumer_source)
+            fs::write(source_root.join("@entry.moth"), consumer_source)
                 .expect("should write directory entry page");
             source_root.clone()
         };
@@ -146,7 +146,7 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@mod.moth"),
+        src.join("@entry.moth"),
         "@config_input helper\nproject_snapshot = 1\nenabled #Config of Bool\nvalue = helper()\n",
     )
     .expect("should write project source contract");
@@ -252,7 +252,7 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project root");
+    fs::write(dir.join("@entry.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         first_package.join("@mod.moth"),
         "export:\n    first || -> I32:\n        return missing_first_package_value\n    ;\n;\n",
@@ -333,7 +333,7 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@broken run\nvalue = run()\n")
+    fs::write(src.join("@entry.moth"), "@broken run\nvalue = run()\n")
         .expect("should write blocked project consumer");
     fs::write(
         package.join("@mod.moth"),
@@ -342,11 +342,11 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
     .expect("should write diagnosed source package");
     fs::write(
         warning_package.join("@mod.moth"),
-        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n",
+        "export:\n    warn || -> String:\n        value ~= \"hello\"\n        result ~= \"unset\"\n        if value is:\n            \"one\" => ~result = \"one\"\n            \"one\" => ~result = \"one\"\n            else => ~result = \"other\"\n        ;\n        return result\n    ;\n;\n",
     )
     .expect("should write successful warning package");
 
-    for entry in [src.clone(), src.join("@page.moth")] {
+    for entry in [src.clone(), src.join("@entry.moth")] {
         let mut config = Config::new(entry);
         let style_directives = StyleDirectiveRegistry::built_ins();
         let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
@@ -397,7 +397,7 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
 
     #[cfg(feature = "boracle")]
     {
-        let config = Config::new(src.join("@page.moth"));
+        let config = Config::new(src.join("@entry.moth"));
         let mut string_table = StringTable::new();
         let mut frontend_surface = BuilderSurface::with_mandatory_core();
         frontend_surface
@@ -451,7 +451,7 @@ fn same_module_generated_sidecars_rebuild_const_templates_in_their_fresh_store()
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         r#"shell #= [:<span>[$slot]</span>]
 unused_insert #= [$in unused: unused]
 
@@ -511,16 +511,14 @@ fn generated_sidecar_refreshes_active_base_public_summary() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
-        r#"export:
-    public_helper |value ~I32| -> I32:
-        return seed_helper(~value, "seed")
-    ;
-;
-
-seed_helper type T |value ~I32, marker T| -> I32:
+        dir.join("impl.moth"),
+        r#"seed_helper type T |value ~I32, marker T| -> I32:
     ~value = 2
     return value
+;
+
+public_helper |value ~I32| -> I32:
+    return seed_helper(~value, "seed")
 ;
 
 mutating_helper type T |value ~I32, marker T| -> I32:
@@ -534,6 +532,17 @@ caller type T |value ~I32, marker T| -> I32:
 independent type T |value T| -> T:
     return value
 ;
+"#,
+    )
+    .expect("should write shared generic declarations");
+    fs::write(
+        dir.join("@mod.moth"),
+        "@impl public_helper\n\nexport:\n    @impl public_helper\n;\n",
+    )
+    .expect("should write the API facade");
+    fs::write(
+        dir.join("@entry.moth"),
+        r#"@impl caller, independent
 
 counter ~I32 = 1
 result I32 = caller(~counter, "seed")
@@ -798,7 +807,7 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
             Some(support) => {
                 fs::create_dir_all(dir.join("src/utils")).expect("should create support root");
                 fs::write(
-                    dir.join("src/utils/+package.moth"),
+                    dir.join("src/utils/@package.moth"),
                     format!("{generic_identity}{support}"),
                 )
                 .expect("should write support package");
@@ -806,7 +815,7 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
             }
             None => format!("{generic_identity}{page}"),
         };
-        fs::write(dir.join("src/@page.moth"), page).expect("should write page");
+        fs::write(dir.join("src/@entry.moth"), page).expect("should write page");
 
         let mut config = Config::new(dir.clone());
         let style_directives = StyleDirectiveRegistry::built_ins();
@@ -874,6 +883,42 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
     }
 }
 
+/// Compiles one single-facade project and returns its three-lane frontend outcome.
+fn compile_single_api_facade_project(
+    facade: &str,
+) -> CompilationResult<ProjectFrontendCompilation> {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+    fs::create_dir_all(dir.join("src")).expect("should create source root");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(dir.join("src/@mod.moth"), facade).expect("should write facade");
+    fs::write(dir.join("src/@entry.moth"), "#[:ok]\n").expect("should write entry");
+    fs::write(
+        dir.join("src/impl.moth"),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/cases/cast_wasm_unreachable_cast_ignored/input/impl.moth"
+        )),
+    )
+    .expect("should write the fixture's shared helper");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut warning_owner,
+    )
+}
+
 /// Compiles one single-page project and returns its three-lane frontend outcome.
 fn compile_single_page_project(page: &str) -> CompilationResult<ProjectFrontendCompilation> {
     let _temp = tempfile::tempdir().expect("should create temp dir");
@@ -884,7 +929,7 @@ fn compile_single_page_project(page: &str) -> CompilationResult<ProjectFrontendC
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(dir.join("src/@page.moth"), page).expect("should write page");
+    fs::write(dir.join("src/@entry.moth"), page).expect("should write page");
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -971,12 +1016,12 @@ fn pruned_catch_handler_publishes_no_materialisation_request_or_sidecar() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     // Reuse the integration scenario, but inspect publication: emitted helper absence alone
     // cannot prove that the dead handler never requested a concrete generic instance.
-    let page = include_str!(concat!(
+    let facade = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/tests/cases/cast_wasm_unreachable_cast_ignored/input/@page.moth"
+        "/tests/cases/cast_wasm_unreachable_cast_ignored/input/@mod.moth"
     ));
     let frontend = super::super::create_project_modules_tests::successful_compilation_value(
-        compile_single_page_project(page),
+        compile_single_api_facade_project(facade),
     );
 
     assert!(frontend.project.diagnosed.is_empty());
@@ -1010,7 +1055,7 @@ fn static_if_duplicate_identity_request_publishes_one_canonical_sidecar() {
     // Static-if prunes the inactive `identity(1)` request before deduplication, so the two
     // active requests must share one canonical `identity<U64>` sidecar.
     fs::write(
-        dir.join("src/@page.moth"),
+        dir.join("src/@entry.moth"),
         "enabled #= false\n\
          identity type T |value T| -> T:\n    return value\n;\n\n\
          read_u64 |value U64| -> U64:\n    return value\n;\n\n\
@@ -1123,7 +1168,7 @@ fn inactive_static_if_retained_method_on_concrete_field_publishes_no_request() {
     // The inactive `peek` call completes after its static-if range closed. Only the active
     // `get` call may publish a request, so the pruned `peek` request must not survive.
     fs::write(
-        dir.join("src/@page.moth"),
+        dir.join("src/@entry.moth"),
         "enabled #= false\n\
          Packet type T = | value T |\n\
          Outer type T = | value T, packet Packet of I32 |\n\n\
@@ -1213,7 +1258,7 @@ fn valid_identity_request_before_failed_concrete_body_publishes_nothing() {
     // `outer<U64>` passes a U64 into `inner`'s String parameter only in its concrete body, so the
     // earlier valid `identity<U64>` request must roll back with the failed transaction.
     fs::write(
-        dir.join("src/@page.moth"),
+        dir.join("src/@entry.moth"),
         "identity type T |value T| -> T:\n    return value\n;\n\n\
          inner type U |text String, result U| -> U:\n    return result\n;\n\n\
          outer type T |value T| -> T:\n    return inner(value, value)\n;\n\n\
@@ -1295,7 +1340,7 @@ fn generated_materialisation_preserves_exact_request_span_in_recursive_diagnosti
     .expect("should write generic helper");
     let entry_source =
         format!("prefix String = \"é\"\n@helpers {function_name}\nvalue = {function_name}(1)\n");
-    fs::write(dir.join("src/@page.moth"), &entry_source).expect("should write entry source");
+    fs::write(dir.join("src/@entry.moth"), &entry_source).expect("should write entry source");
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -1337,7 +1382,7 @@ fn generated_materialisation_preserves_exact_request_span_in_recursive_diagnosti
     let position = context
         .site_position(view.primary_site())
         .expect("the retained request span should resolve in its report");
-    let entry_path = fs::canonicalize(dir.join("src/@page.moth"))
+    let entry_path = fs::canonicalize(dir.join("src/@entry.moth"))
         .expect("entry source path should canonicalize");
     assert_eq!(position.host_path, Some(entry_path.as_path()));
     let range = span.byte_range(span_context);
@@ -1360,7 +1405,7 @@ fn imported_generic_materialisation_preserves_donor_identity_with_colliding_sour
     let function_name = String::from("outer");
     let inner_name = String::from("inner");
     let parameter_name = "p".repeat(1024);
-    let project_path = dir.join("src/@page.moth");
+    let project_path = dir.join("src/@entry.moth");
     let package_path = package_root.join("@mod.moth");
     fs::create_dir_all(dir.join("src")).expect("should create project source root");
 
@@ -1421,7 +1466,7 @@ html #= ()\n",
     let package_path = fs::canonicalize(package_path).expect("package path should canonicalize");
     assert_eq!(primary.host_path, Some(project_path.as_path()));
     assert!(
-        primary.path.ends_with("@page.moth"),
+        primary.path.ends_with("@entry.moth"),
         "request primary path should be the project snapshot: {}",
         primary.path.display()
     );
@@ -1526,7 +1571,7 @@ fn imported_nested_generic_materialisation_preserves_call_site_identity_with_col
     let dir = _temp.path().to_path_buf();
     let package_temp = tempfile::tempdir().expect("should create package temp dir");
     let package_root = package_temp.path().to_path_buf();
-    let project_path = dir.join("src/@page.moth");
+    let project_path = dir.join("src/@entry.moth");
     let package_path = package_root.join("@mod.moth");
     fs::create_dir_all(dir.join("src")).expect("should create project source root");
 
@@ -1642,23 +1687,31 @@ export:
     )
     .expect("should write provider");
     fs::write(
-        dir.join("@page.moth"),
-        r#"@provider forward
+        dir.join("types.moth"),
+        r#"Box type T = |
+    value T,
+|
 
-export:
-    Box type T = |
-        value T,
-    |
-
-    Maybe type T ::
-        Some | value T |,
-        Empty,
-    ;
+Maybe type T ::
+    Some | value T |,
+    Empty,
 ;
 
 PrivateBox type T = |
     value T,
 |
+"#,
+    )
+    .expect("should write shared nominal declarations");
+    fs::write(
+        dir.join("@mod.moth"),
+        "@types Box, Maybe, PrivateBox\n\nexport:\n    @types Box, Maybe\n;\n",
+    )
+    .expect("should write the API facade");
+    fs::write(
+        dir.join("@entry.moth"),
+        r#"@provider forward
+@types Box, Maybe, PrivateBox
 
 box Box of I32 = Box(42)
 same_box Box of I32 = forward(box)
@@ -1841,13 +1894,11 @@ fn requester_public_receiver_evidence_preserves_independent_declaration_bounds()
     )
     .expect("should write two-bound generic provider");
     fs::write(
-        source_root.join("@page.moth"),
-        r#"@provider LEFT_TEXT, RIGHT_TEXT, FIRST_TEXT, SECOND_TEXT, combine
+        source_root.join("impl.moth"),
+        r#"@provider LEFT_TEXT, RIGHT_TEXT, FIRST_TEXT, SECOND_TEXT
 
-export:
-    Label = |text String|
-    Box type T = |value T|
-;
+Label = |text String|
+Box type T = |value T|
 
 left_text |this Label| -> String:
     return [:left=[this.text]]
@@ -1864,6 +1915,18 @@ second_text type T is RIGHT_TEXT |this Box of T| -> String:
     return this.value.right_text()
 ;
 Box must FIRST_TEXT, SECOND_TEXT
+"#,
+    )
+    .expect("should write requester-owned public generic declarations");
+    fs::write(
+        source_root.join("@mod.moth"),
+        "@impl Label, Box\n\nexport:\n    @impl Label, Box\n;\n",
+    )
+    .expect("should write the API facade");
+    fs::write(
+        source_root.join("@entry.moth"),
+        r#"@provider LEFT_TEXT, RIGHT_TEXT, FIRST_TEXT, SECOND_TEXT, combine
+@impl Label, Box
 
 result = combine(Box(Label("payload")))
 [:result=[result]]
@@ -2003,7 +2066,7 @@ fn generated_sidecars_remap_inherited_nominals_after_multi_module_publication() 
     )
     .expect("should write provider");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         r#"@provider seed, RemoteMarker as LocalMarker
 
 inner type T |marker LocalMarker, value T| -> T:
@@ -2183,7 +2246,7 @@ fn generated_sidecars_reconstruct_hidden_facade_nominal_closure() {
     )
     .expect("should write generic provider");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         r#"@facade Wrapper, make
 @generics identity
 
@@ -2257,7 +2320,7 @@ fn implicit_failure_generated_private_helper_facts_survive_materialisation_and_c
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\
          product type T |marker T, left I32, right I32| -> I32:\n\
              return multiply(left, right)\n;\n\
@@ -2358,7 +2421,7 @@ export:
     )
     .expect("should write uninstantiated public generic and private helper");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@helper product\n\
          use_product || -> I32, Error!:\n    return product(0, 2, 3)!\n;\n\
          result = use_product() catch then 0\n",
@@ -2384,22 +2447,20 @@ export:
         "both declaring module and later requester must compile without source diagnoses",
     );
 
-    let declaring_artefact =
-        frontend
-            .project
-            .successful_artefacts_in_module_id_order()
-            .find(|artefact| {
-                artefact
-        .normal_interface
-        .as_ref()
-        .expect("the artefact publishes its normal facade").declarations.iter().any(|declaration| {
-                matches!(
-                    &declaration.origin,
-                    OriginDeclarationId::Function(origin) if origin.defining_name() == "product"
-                )
+    let declaring_artefact = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .find(|artefact| {
+            artefact.normal_interface.as_ref().is_some_and(|interface| {
+                interface.declarations.iter().any(|declaration| {
+                    matches!(
+                        &declaration.origin,
+                        OriginDeclarationId::Function(origin) if origin.defining_name() == "product"
+                    )
+                })
             })
-            })
-            .expect("declaring module should publish product");
+        })
+        .expect("declaring module should publish product");
     assert_eq!(
         declaring_artefact
             .normal_interface
@@ -2576,7 +2637,7 @@ fn assert_later_request_rejected(declaring_source: &str, requester_source: &str,
     .expect("should write config");
     fs::write(src.join("helper").join("@mod.moth"), declaring_source)
         .expect("should write declaring module");
-    fs::write(src.join("@page.moth"), requester_source).expect("should write requester");
+    fs::write(src.join("@entry.moth"), requester_source).expect("should write requester");
 
     let result = compile_later_request_rejection(temp_dir.path());
     let reports = super::super::create_project_modules_tests::diagnosed_reports(&result);
@@ -2671,7 +2732,7 @@ fn implicit_failure_private_helper_infallible_to_fallible_changes_exported_calle
     fs::write(src.join("helper").join("@mod.moth"), &infallible_source)
         .expect("should write infallible declaring module");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@helper product\n\
          use_product || -> I32:\n    return product(0, 2, 3)\n;\n\
          result = use_product()\n",
@@ -2689,22 +2750,20 @@ fn implicit_failure_private_helper_infallible_to_fallible_changes_exported_calle
         first.project.diagnosed.is_empty(),
         "the infallible helper version must publish without rejection"
     );
-    let declaring_artefact =
-        first
-            .project
-            .successful_artefacts_in_module_id_order()
-            .find(|artefact| {
-                artefact
-        .normal_interface
-        .as_ref()
-        .expect("the artefact publishes its normal facade").declarations.iter().any(|declaration| {
-                matches!(
-                    &declaration.origin,
-                    OriginDeclarationId::Function(origin) if origin.defining_name() == "product"
-                )
+    let declaring_artefact = first
+        .project
+        .successful_artefacts_in_module_id_order()
+        .find(|artefact| {
+            artefact.normal_interface.as_ref().is_some_and(|interface| {
+                interface.declarations.iter().any(|declaration| {
+                    matches!(
+                        &declaration.origin,
+                        OriginDeclarationId::Function(origin) if origin.defining_name() == "product"
+                    )
+                })
             })
-            })
-            .expect("declaring module should publish product");
+        })
+        .expect("declaring module should publish product");
     let context = declaring_artefact
         .module
         .metadata
@@ -2794,19 +2853,24 @@ fn exported_private_chain_witness_rendering_is_stable_across_repeated_compilatio
          fourth |left I32, right I32| -> I32:\n    return third(left, right)\n;\n";
     const UNRELATED_A: &str = "unrelated_a || -> I32:\n    return 1\n;\n";
     const UNRELATED_B: &str = "unrelated_b || -> I32:\n    return 2\n;\n";
+    const PRODUCT: &str =
+        "product |left I32, right I32| -> I32:\n    return fourth(left, right)\n;\n";
     fn write_chain(src: &std::path::Path, unrelated_first: &str, unrelated_second: &str) {
         fs::write(
             src.join("chain.moth"),
-            format!("{unrelated_first}\n{unrelated_second}\n{CHAIN_TAIL}"),
+            format!("{unrelated_first}\n{unrelated_second}\n{CHAIN_TAIL}{PRODUCT}"),
         )
         .expect("should write chain helpers");
     }
     write_chain(&src, UNRELATED_A, UNRELATED_B);
     fs::write(
-        src.join("@page.moth"),
-        "@chain fourth\n\
-         export:\n    product |left I32, right I32| -> I32:\n        return fourth(left, right)\n    ;\n;\n\
-         result = product(2, 3)\n",
+        src.join("@mod.moth"),
+        "@chain product\n\nexport:\n    @chain product\n;\n",
+    )
+    .expect("should write the API facade");
+    fs::write(
+        src.join("@entry.moth"),
+        "@chain product\nresult = product(2, 3)\n",
     )
     .expect("should write entry");
     fn terse_error_lines(project_dir: &std::path::Path) -> Vec<String> {
@@ -2821,7 +2885,7 @@ fn exported_private_chain_witness_rendering_is_stable_across_repeated_compilatio
         "the bounded chain must report exactly one error"
     );
     assert!(
-        first[0].starts_with("E|MOTH-RULE-0051|@page.moth|"),
+        first[0].starts_with("E|MOTH-RULE-0051|chain.moth|"),
         "the witness rejection must render its code and signature position: {}",
         first[0]
     );
@@ -2876,12 +2940,12 @@ fn source_package_warning_staged_by_frontend_outcome() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
+    fs::write(src.join("@entry.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         package.join("@mod.moth"),
-        "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n",
+        "export:\n    warn || -> String:\n        value ~= \"hello\"\n        result ~= \"unset\"\n        if value is:\n            \"one\" => ~result = \"one\"\n            \"one\" => ~result = \"one\"\n            else => ~result = \"other\"\n        ;\n        return result\n    ;\n;\n",
     )
-    .expect("should write warning package root");
+    .expect("should write warning package facade");
 
     let mut config = Config::new(dir.join("src"));
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -3006,9 +3070,9 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
     .expect("should write config");
 
     let project_text = "project_snapshot = 1\n";
-    let package_text = "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n";
-    fs::write(project_source_root.join("@mod.moth"), project_text)
-        .expect("should write project module");
+    let package_text = "export:\n    warn || -> String:\n        value ~= \"hello\"\n        result ~= \"unset\"\n        if value is:\n            \"one\" => ~result = \"one\"\n            \"one\" => ~result = \"one\"\n            else => ~result = \"other\"\n        ;\n        return result\n    ;\n;\n";
+    fs::write(project_source_root.join("@entry.moth"), project_text)
+        .expect("should write project entry module");
     fs::write(package_root.join("@mod.moth"), package_text).expect("should write package module");
 
     let builder = SuccessfulPackageWarningBuilder { package_root };
