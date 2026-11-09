@@ -1054,7 +1054,6 @@ diagnostic_family! {
 
 unit_code! {
     pub(crate) enum InvalidTraitConformanceCode {
-        // Wire value 1 is retired with the removed imported-root role.
         AliasTarget = 2,
         NonCanonicalTarget = 3,
         NonlocalSourceTarget = 4,

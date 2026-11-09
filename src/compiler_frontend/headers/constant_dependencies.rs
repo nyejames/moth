@@ -143,8 +143,10 @@ fn push_qualified_reference_diagnostics<'a>(
 /// Inline byte range for diagnostic ordering, without resolving an extended span.
 ///
 /// WHY: header binding runs before the source database installs extended-span tables, so
-///      `SourceSpan::byte_range` can panic on a span that does not fit inline. An extended span
-///      is still an authored span: keep it in the spanned group and let the path break ties.
+/// `SourceSpan::byte_range` can panic on a span that does not fit inline. An extended span
+/// stays in the spanned group. Its allocation index is not a byte offset, so two extended
+/// spans in one shell are deterministic by path, not necessarily in authored order. Restoring
+/// that order needs the preparation-time occurrence list, which this pass does not own.
 fn hint_span_order_range(span: SourceSpan) -> (u32, u32) {
     if let Some(range) = span.local().inline_range() {
         return (range.start(), range.end());
