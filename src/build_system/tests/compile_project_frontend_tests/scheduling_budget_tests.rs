@@ -683,6 +683,97 @@ fn diagnostic_recovery_check_only_allowance_subtracts_owner_errors() {
 }
 
 #[test]
+fn diagnostic_recovery_paired_roots_report_together_before_the_budget_stops_later_work() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("temp project should exist");
+    let root = temp.path();
+    // One module owns both a support facade and an entry root whose bodies fail independently.
+    // The module transaction retains both root diagnostics as one returned batch even though the
+    // batch overshoots the project threshold. Only the later module is refused, so a scheduling
+    // cutoff never suppresses a co-located root diagnostic.
+    write_project(
+        root,
+        "project #= (\n    name = \"docs\",\n    max_errors_per_project = 1,\n)\nhtml #= ()\n",
+        &[
+            (
+                "src/@package.moth",
+                "export:\n    support_value || -> I32:\n        return support_missing\n    ;\n;\n",
+            ),
+            (
+                "src/@entry.moth",
+                "entry_value || -> I32:\n    return entry_missing\n;\n",
+            ),
+            ("src/other/@entry.moth", "other_missing\n#[:site]\n"),
+        ],
+    );
+
+    let (frontend, mut warning_owner, project_source_files) =
+        run_directory_lane(root, FrontendCompilationMode::Canonical);
+    assert_eq!(
+        frontend.project.diagnosed.len(),
+        1,
+        "the paired module is the only admitted diagnosed module"
+    );
+    assert_eq!(
+        frontend.project.diagnosed[0].module_id,
+        module_id_with_path(&frontend, ""),
+        "both root diagnostics belong to the selected-root structural module"
+    );
+    assert_eq!(
+        frontend.project.diagnosed[0]
+            .diagnostics
+            .primary_error_count(),
+        2,
+        "the support facade and the entry root each keep their own retained error"
+    );
+    assert_eq!(
+        frontend
+            .project
+            .scheduling_cutoff
+            .map(|cutoff| cutoff.returned_primary_errors()),
+        Some(2),
+        "the intact batch charged both retained errors before the threshold stopped admission"
+    );
+    assert_eq!(
+        frontend
+            .project
+            .modules
+            .slot(module_id_with_path(&frontend, "other"))
+            .expect("the later module slot should resolve"),
+        ProviderSlot::Unavailable,
+        "the later module is never compiled after the project threshold is reached"
+    );
+    assert!(
+        warning_owner
+            .discovery_stops()
+            .contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF),
+        "refusing the later module records the command scheduling cutoff"
+    );
+
+    let reports = finish_diagnosed(frontend, &mut warning_owner, project_source_files);
+    assert_eq!(
+        reports.counts().errors,
+        2,
+        "a returned module batch is never truncated to the project threshold"
+    );
+    let rendered = terse::format_terse_diagnostic_reports(&reports);
+    assert!(
+        rendered.iter().any(|line| line.contains("support_missing")),
+        "the support facade error must stay: {rendered:?}"
+    );
+    assert!(
+        rendered.iter().any(|line| line.contains("entry_missing")),
+        "the entry root error must stay: {rendered:?}"
+    );
+    assert!(
+        rendered
+            .iter()
+            .all(|line| !line.contains("other_missing") && !line.contains("other/@entry.moth")),
+        "the refused module must contribute no diagnostic: {rendered:?}"
+    );
+}
+
+#[test]
 fn diagnostic_recovery_project_budget_spans_source_package_work() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let temp = tempfile::tempdir().expect("temp project should exist");

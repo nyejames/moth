@@ -48,6 +48,7 @@ fn classifies_only_the_fixed_root_filenames() {
         "@package.js",
         "@.moth",
         "@Entry.moth",
+        "@entry",
     ] {
         assert_eq!(
             module_root_role_for_file_name(stale),

@@ -238,6 +238,168 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     );
 }
 
+/// Compile one project with a registered source-backed package through the real builder frontend.
+///
+/// WHY: registered packages enter the lane only through the builder surface, so both package
+///      facade-role regressions need the same real-root registration and project entry shape.
+fn compile_registered_package_project(
+    package_prefix: &str,
+    package_files: &[(&str, &str)],
+    project_entry: &str,
+) -> CompilationResult<ProjectFrontendCompilation> {
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = temp.path().to_path_buf();
+    fs::create_dir_all(dir.join("src")).expect("should create source root");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(dir.join("src/@entry.moth"), project_entry).expect("should write project entry");
+
+    let package_root = dir.join("packages").join(package_prefix);
+    fs::create_dir_all(&package_root).expect("should create package root");
+    for (relative_path, contents) in package_files {
+        let path = package_root.join(relative_path);
+        fs::create_dir_all(path.parent().expect("package files have a parent"))
+            .expect("should create package source directory");
+        fs::write(&path, contents).expect("should write package source");
+    }
+
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface
+        .source_packages
+        .register_filesystem_root(
+            package_prefix,
+            package_root,
+            crate::builder_surface::PackageOrigin::Builder,
+        )
+        .expect("the test package root should register");
+
+    let mut config = Config::new(dir.join("src"));
+    config.project_name = "docs".to_owned();
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut warning_owner,
+    )
+}
+
+#[test]
+fn registered_support_only_package_compiles_its_external_surface() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let frontend = successful_compilation_value(compile_registered_package_project(
+        "supportpkg",
+        &[(
+            "@package.moth",
+            "export:\n    support_label #= \"support\"\n;\n",
+        )],
+        "@supportpkg support_label\n[:[support_label]]\n",
+    ));
+    assert_eq!(frontend.source_packages.len(), 1);
+    let package = frontend
+        .source_packages
+        .iter()
+        .next()
+        .expect("the imported package boundary should be retained");
+    let artifact = package
+        .boundary
+        .modules
+        .artifact(package.root_module_id)
+        .expect("the package root slot should resolve")
+        .expect("the support-only package root should compile");
+    assert!(
+        artifact.normal_interface.is_none(),
+        "a support-only package never fabricates a normal interface"
+    );
+    let support = artifact
+        .support_interface
+        .as_ref()
+        .expect("a support-only package publishes its support surface");
+    assert_eq!(
+        support.module_origin.role(),
+        crate::compiler_frontend::semantic_identity::ModuleRootRole::Support
+    );
+    assert_eq!(
+        frontend
+            .project
+            .successful_artefacts_in_module_id_order()
+            .count(),
+        1,
+        "the importing project compiles against the package surface"
+    );
+}
+
+#[test]
+fn registered_triple_root_package_keeps_its_entry_dormant() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let frontend = successful_compilation_value(compile_registered_package_project(
+        "triplepkg",
+        &[
+            ("@mod.moth", "export:\n    normal_label #= \"normal\"\n;\n"),
+            (
+                "@package.moth",
+                "export:\n    support_label #= \"support\"\n;\n",
+            ),
+            ("@entry.moth", "package_runtime ~= 1\n"),
+        ],
+        "@triplepkg support_label\n[:[support_label]]\n",
+    ));
+    assert_eq!(frontend.source_packages.len(), 1);
+    let package = frontend
+        .source_packages
+        .iter()
+        .next()
+        .expect("the imported package boundary should be retained");
+    let artifact = package
+        .boundary
+        .modules
+        .artifact(package.root_module_id)
+        .expect("the package root slot should resolve")
+        .expect("the triple-root package root should compile");
+    assert!(
+        artifact.normal_interface.is_some(),
+        "the triple-root package keeps its normal facade"
+    );
+    assert!(
+        artifact.support_interface.is_some(),
+        "the triple-root package publishes its support facade as the external surface"
+    );
+    let package_entry = artifact
+        .module
+        .metadata
+        .entry
+        .as_ref()
+        .expect("the triple-root package compiles its own entry");
+    assert!(
+        package_entry.entry_point.ends_with("@entry.moth"),
+        "the package entry stays package-owned"
+    );
+
+    let compilation = ProjectCompilation::from_frontend(frontend)
+        .expect("the successful package and project boundaries should assemble");
+    let entries = compilation.entries();
+    assert_eq!(
+        entries.len(),
+        1,
+        "importing a package never activates its package entry"
+    );
+    assert!(
+        entries[0]
+            .module
+            .metadata
+            .entry
+            .as_ref()
+            .is_some_and(|entry| entry.entry_point.ends_with("src/@entry.moth")),
+        "the only active project entry is the project's own @entry.moth"
+    );
+}
+
 #[test]
 fn directory_graph_retains_diagnostics_from_later_independent_source_packages() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();

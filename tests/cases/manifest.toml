@@ -19469,3 +19469,10 @@ tags = ["integration", "html", "single-file", "root-roles"]
 contract = "language.entry.synthetic_entry_file_maps_to_homepage"
 role = "primary"
 
+[[case]]
+id = "single_file_selected_support_facade_build_rejected"
+path = "single_file_selected_support_facade_build_rejected"
+tags = ["integration", "html", "single-file", "diagnostics", "root-roles"]
+contract = "language.entry.explicit_single_file_facade_selection_is_not_an_entry"
+role = "primary"
+

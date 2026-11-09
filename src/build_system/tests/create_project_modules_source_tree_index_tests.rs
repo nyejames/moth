@@ -473,6 +473,60 @@ fn bounded_module_roots_for_single_file_accepts_each_fixed_root_role() {
 }
 
 #[test]
+fn bounded_module_roots_for_single_file_keeps_every_triple_root_role() {
+    use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let module_dir = root.join("module");
+    fs::create_dir_all(&module_dir).expect("should create module directory");
+    for root_file_name in ["@mod.moth", "@package.moth", "@entry.moth"] {
+        fs::write(module_dir.join(root_file_name), "").expect("should write authored root");
+    }
+    fs::write(module_dir.join("helper.moth"), "").expect("should write ordinary source");
+
+    let config = Config::new(root.clone());
+    let canonical_module_dir =
+        fs::canonicalize(&module_dir).expect("module directory should canonicalize");
+    let entry_file = canonical_module_dir.join("@entry.moth");
+    let mut string_table = StringTable::new();
+
+    // An explicitly selected entry root must not collapse its bounded directory's sibling API
+    // facades. Preparation consumes this role table for every reached root file, so dropping a
+    // sibling here would silently lose its facade role.
+    let module_roots =
+        super::source_tree_index::SourceTreeIndex::bounded_module_roots_for_single_file(
+            &entry_file,
+            &config,
+            &crate::builder_surface::SourcePackageRegistry::default(),
+            &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
+            &mut string_table,
+        )
+        .expect("triple-root single-file selection should index its bounded tree");
+
+    let roles = module_roots.root_file_roles().collect::<Vec<_>>();
+    assert_eq!(
+        roles,
+        vec![
+            (
+                ModuleRootRole::Normal,
+                canonical_module_dir.join("@mod.moth").as_path()
+            ),
+            (
+                ModuleRootRole::Support,
+                canonical_module_dir.join("@package.moth").as_path()
+            ),
+            (
+                ModuleRootRole::Entry,
+                canonical_module_dir.join("@entry.moth").as_path()
+            ),
+        ],
+        "the bounded inventory keeps all three authored roles for an entry selection"
+    );
+}
+
+#[test]
 fn bounded_module_roots_for_single_file_rejects_dependency_name_collisions() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();

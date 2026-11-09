@@ -840,7 +840,11 @@ impl SourceTreeIndex {
                     continue;
                 }
 
-                if let Some(stem) = source_stem_from_file_name(file_name) {
+                // Authored module roots never supply dependency names: names come from the
+                // containing module directory or registered package identity. Registering a
+                // root's filename stem here would invent a collision with an unrelated asset
+                // directory such as `@mod`.
+                if !is_module_root && let Some(stem) = source_stem_from_file_name(file_name) {
                     source_files_by_stem.insert(stem.to_owned(), file_name.to_owned());
                 }
 

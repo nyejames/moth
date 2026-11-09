@@ -562,6 +562,72 @@ mod source_package_boundary_indexes_tests {
     }
 
     #[test]
+    fn repository_builder_packages_select_their_normal_facade() {
+        // The two repository source-backed packages publish normal `@mod.moth` facades. A
+        // registered source package never needs a support facade just because an external project
+        // package does.
+        for prefix in ["html", "web/site"] {
+            let package_root =
+                crate::builder_surface::BuilderSurface::builtin_source_package_root(prefix);
+            let normal_root = package_root.join("@mod.moth");
+            assert!(
+                normal_root.is_file(),
+                "the repository @{prefix} package should publish a normal facade"
+            );
+
+            let mut source_packages = SourcePackageRegistry::new();
+            source_packages
+                .register_filesystem_root(
+                    prefix,
+                    package_root.clone(),
+                    crate::builder_surface::PackageOrigin::Builder,
+                )
+                .expect("the repository package root should register");
+
+            let mut string_table = StringTable::new();
+            let indexes = build_indexes(&source_packages, &mut string_table)
+                .expect("a normal-only repository package should build a boundary index");
+            let (registered_prefix, index) = indexes
+                .iter()
+                .next()
+                .expect("the repository package should own one boundary index");
+            assert_eq!(registered_prefix, prefix);
+
+            let canonical_root =
+                fs::canonicalize(&package_root).expect("package root should canonicalize");
+            let canonical_normal_root =
+                fs::canonicalize(&normal_root).expect("normal facade should canonicalize");
+            let module_id = index
+                .module_identities()
+                .module_id_for_directory(&canonical_root)
+                .expect("the normal facade should define the package module");
+            let record = index.module_identities().record(module_id);
+            assert_eq!(
+                record.normal_root_file(),
+                Some(canonical_normal_root.as_path()),
+                "@{prefix} must keep its normal facade"
+            );
+            assert_eq!(
+                record.support_root_file(),
+                None,
+                "@{prefix} must not be forced to author a support facade"
+            );
+            assert_eq!(
+                record.public_surface_role(),
+                Some(ModuleRootRole::Normal),
+                "@{prefix} publishes its normal facade as the external package surface"
+            );
+
+            let prepared = indexes.prepared_source_package_roots();
+            assert_eq!(
+                prepared.root_files().get(prefix),
+                Some(&canonical_normal_root),
+                "the resolver must consume the normal facade root"
+            );
+        }
+    }
+
+    #[test]
     fn support_only_package_root_selects_the_support_public_surface() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
@@ -1381,35 +1447,71 @@ mod module_identity_tests {
     fn root_symlink_retains_the_visible_normal_surface_role() {
         use std::os::unix::fs::symlink;
 
-        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-        let root = _tmp_root.path().to_path_buf();
-        let src = root.join("src");
-        fs::create_dir_all(&src).expect("should create entry root");
-        let target = src.join("actual.moth");
-        fs::write(&target, "").expect("should write symlink target");
-        symlink(&target, src.join("@mod.moth")).expect("should create root symlink");
+        struct Case {
+            root_name: &'static str,
+            role: ModuleRootRole,
+            public_surface: Option<ModuleRootRole>,
+            is_entry: bool,
+        }
+        for Case {
+            root_name,
+            role,
+            public_surface,
+            is_entry,
+        } in [
+            Case {
+                root_name: "@mod.moth",
+                role: ModuleRootRole::Normal,
+                public_surface: Some(ModuleRootRole::Normal),
+                is_entry: false,
+            },
+            Case {
+                root_name: "@entry.moth",
+                role: ModuleRootRole::Entry,
+                public_surface: None,
+                is_entry: true,
+            },
+        ] {
+            let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+            let root = _tmp_root.path().to_path_buf();
+            let src = root.join("src");
+            fs::create_dir_all(&src).expect("should create entry root");
+            let target = src.join("actual.moth");
+            fs::write(&target, "").expect("should write symlink target");
+            symlink(&target, src.join(root_name)).expect("should create root symlink");
 
-        let (index, _project_root, entry_root) = discover_index(&root, "src");
-        let module_id = index
-            .module_identities()
-            .module_id_for_directory(&entry_root)
-            .expect("the entry root should own a structural module");
-        let record = index.module_identities().record(module_id);
-        assert_eq!(record.public_surface_role(), Some(ModuleRootRole::Normal));
+            let (index, _project_root, entry_root) = discover_index(&root, "src");
+            let module_id = index
+                .module_identities()
+                .module_id_for_directory(&entry_root)
+                .expect("the entry root should own a structural module");
+            let record = index.module_identities().record(module_id);
+            assert_eq!(
+                record.public_surface_role(),
+                public_surface,
+                "{root_name}: the visible root filename selects the public surface"
+            );
 
-        let source = index
-            .source_index_for_canonical_path(&fs::canonicalize(&target).unwrap())
-            .expect("the root target should be indexed");
-        let origin = index
-            .source(source)
-            .logical_identity()
-            .module_origin()
-            .expect("the root target should have an owned origin");
-        assert_eq!(
-            origin.role(),
-            ModuleRootRole::Normal,
-            "root role must follow the visible root entry, not the canonical target filename"
-        );
+            let source = index
+                .source_index_for_canonical_path(&fs::canonicalize(&target).unwrap())
+                .expect("the root target should be indexed");
+            let origin = index
+                .source(source)
+                .logical_identity()
+                .module_origin()
+                .expect("the root target should have an owned origin");
+            assert_eq!(
+                origin.role(),
+                role,
+                "{root_name}: root role must follow the visible root entry, not the canonical target filename"
+            );
+            let graph = ProjectModuleGraph::from_source_tree_index(&index);
+            assert_eq!(
+                graph.entry_modules().contains(&module_id),
+                is_entry,
+                "{root_name}: entry candidacy must follow the visible root filename"
+            );
+        }
     }
 
     #[test]
@@ -1884,6 +1986,68 @@ mod module_identity_tests {
                 &fs::canonicalize(&marker).expect("marker directory should canonicalize"),
             );
         }
+    }
+
+    #[test]
+    fn extensionless_directory_named_like_a_root_stem_is_not_a_dependency_collision() {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let src = root.join("src");
+        fs::create_dir_all(src.join("@mod")).expect("should create extensionless @mod directory");
+        fs::write(src.join("@mod/asset.css"), "asset").expect("should write an ordinary asset");
+        fs::write(src.join("@entry"), "extensionless asset").expect("should write asset");
+        fs::write(src.join("@package.css"), "asset").expect("should write prefixed asset");
+        fs::write(src.join("@entry.moth"), "").expect("should write the canonical entry root");
+        fs::write(src.join("@mod.moth"), "").expect("should write the canonical normal root");
+        fs::write(src.join("helper.moth"), "").expect("should write shared helper");
+
+        // Extensionless names are ordinary assets, and an authored root filename never supplies
+        // a dependency name, so an extensionless directory sharing a root stem is not a
+        // file/folder dependency collision.
+        let (index, _project_root, entry_root) = discover_index(&root, "src");
+        assert_eq!(
+            index.module_identities().module_ids().count(),
+            1,
+            "only canonical root filenames root the selected directory"
+        );
+        let module_id = index
+            .module_identities()
+            .module_id_for_directory(&entry_root)
+            .expect("the canonical roots should define one structural module");
+        let record = index.module_identities().record(module_id);
+        assert_eq!(
+            record.entry_root_file(),
+            Some(
+                fs::canonicalize(src.join("@entry.moth"))
+                    .expect("entry root should canonicalize")
+                    .as_path()
+            ),
+            "an extensionless @entry file is not an entry root"
+        );
+        assert_eq!(
+            record.normal_root_file(),
+            Some(
+                fs::canonicalize(src.join("@mod.moth"))
+                    .expect("normal root should canonicalize")
+                    .as_path()
+            ),
+            "an extensionless @mod directory is not a normal root"
+        );
+        assert_eq!(
+            record.support_root_file(),
+            None,
+            "an @-prefixed asset is not a support root"
+        );
+        assert!(
+            index
+                .module_identities()
+                .module_id_for_directory(
+                    &fs::canonicalize(src.join("@mod"))
+                        .expect("asset directory should canonicalize")
+                )
+                .is_none(),
+            "an extensionless @mod directory is not a rooted module"
+        );
     }
 
     #[cfg(unix)]
@@ -3994,6 +4158,29 @@ mod project_module_graph_tests {
             support_graph.project_package_surface(),
             Some(support_module_id),
             "a support-only selected root is still a valid project package surface"
+        );
+
+        let _normal_only = tempfile::tempdir().expect("should create temp dir");
+        let normal_only_root = _normal_only.path().to_path_buf();
+        fs::write(normal_only_root.join("@mod.moth"), "").expect("should write normal-only root");
+        let (normal_index, _project_root, _normal_entry_root) =
+            discover_index(&normal_only_root, ".");
+        let normal_graph = ProjectModuleGraph::from_source_tree_index(&normal_index);
+        assert_eq!(
+            normal_graph.project_package_surface(),
+            None,
+            "a project-root normal facade alone publishes no external project package surface"
+        );
+
+        let _entry_only = tempfile::tempdir().expect("should create temp dir");
+        let entry_only_root = _entry_only.path().to_path_buf();
+        fs::write(entry_only_root.join("@entry.moth"), "").expect("should write entry-only root");
+        let (entry_index, _project_root, _entry_entry_root) = discover_index(&entry_only_root, ".");
+        let entry_graph = ProjectModuleGraph::from_source_tree_index(&entry_index);
+        assert_eq!(
+            entry_graph.project_package_surface(),
+            None,
+            "an entry-only selected root publishes no external project package surface"
         );
     }
 

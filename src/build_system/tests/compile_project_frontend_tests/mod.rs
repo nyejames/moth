@@ -89,6 +89,8 @@ fn assert_has_diagnostic_code<T>(result: &CompilationResult<T>, expected_code: &
         "expected diagnostic code {expected_code}, got {actual_codes:?}"
     );
 }
+#[path = "entry_api_stability_tests.rs"]
+mod entry_api_stability_tests;
 #[path = "package_materialisation_tests.rs"]
 mod package_materialisation_tests;
 #[path = "provider_sources_tests.rs"]
