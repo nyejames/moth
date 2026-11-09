@@ -1411,8 +1411,12 @@ fn attach_structural_file_facts(
         // same range collection the expression lane uses instead of repeating its header match.
         let mut config_owned_ranges = Vec::new();
         push_header_expression_ranges(header, header_index, canonical, &mut config_owned_ranges)?;
-        for (_, range) in config_owned_ranges {
-            append_source_range_paths(&mut consumed_path_syntax_ids, canonical, range)?;
+        for expression_range in config_owned_ranges {
+            append_source_range_paths(
+                &mut consumed_path_syntax_ids,
+                canonical,
+                expression_range.range,
+            )?;
         }
     }
 

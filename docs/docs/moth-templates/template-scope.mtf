@@ -111,7 +111,7 @@ To output literal template delimiters, use string insertion:
 
 ### Content helpers
 
-Content helpers such as `codeblock` work only where the builder environment provides them. Do not assume arbitrary normal source dependencies are available inside `.mtf`.
+Content helpers such as `codeblock` come from the fixed `@html` prelude above, not from the active builder. A `.mtf` file can also name an ordinary helper with an explicit qualified reference. It does not gain that helper's declarations automatically.
 
 ### Concepts related to template scope
 

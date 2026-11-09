@@ -2964,6 +2964,7 @@ fn qualified_occurrence(
         dependency: clause_dependency,
         selected: string_table.intern(selected),
         selected_span: SourceSpan::new(SourceId::from_index(0), LocalSpan::source_start()),
+        const_required: true,
     }
 }
 

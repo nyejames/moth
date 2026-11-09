@@ -1,0 +1,6 @@
+-- The runtime reference brings both helper files into the module. The declarations themselves
+-- form the cycle: the record field default adds `Resource -> title`, and the constant's declared
+-- type already orders `title` after `Resource`.
+value = @settings title
+
+[: [value.title] ]

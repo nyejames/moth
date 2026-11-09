@@ -16,9 +16,11 @@ use crate::build_system::create_project_modules::module_artifact_store::Provider
 use crate::build_system::create_project_modules::module_identity::ModuleId;
 use crate::build_system::project_config::{ProjectConfigParseServices, load_project_config};
 use crate::compiler_frontend::FrontendBuildProfile;
+use crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason;
 use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_control_flow::CompileTimeEvaluationErrorView;
 use crate::compiler_frontend::compiler_messages::diagnostics::report::DiagnosticReportSet;
 use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseBuilder};
@@ -1693,5 +1695,183 @@ fn qualified_cycle_and_invalid_selection_under_project_budget_are_deterministic(
     assert_eq!(
         first, second,
         "repeated qualified failure reports must be byte-identical"
+    );
+}
+
+/// WHAT: one constant initializer contains two same-file qualified forward references; the header
+///       diagnostic pass emits them in authored span order under a one-error module allowance and
+///       under the normal allowance, and an in-process repeat retains identical facts.
+/// WHY: retained qualified hints live in a hash set used only for graph-edge deduplication.
+///      Diagnostics preserve insertion order and bounded error reporting keeps the first retained
+///      errors, so randomized hash iteration must never decide which authored occurrence reports
+///      first.
+#[test]
+fn qualified_forward_reference_diagnostics_follow_authored_span_order() {
+    const SETTINGS_SOURCE: &str =
+        "combined #= @settings last + @settings later\nlater #= 2\nlast #= 3\n";
+    const ENTRY_SOURCE: &str = "@settings combined\n#[:site]\n";
+
+    /// Exact user-facing facts retained for one error: code, typed reason, authored excerpt and
+    /// half-open line/column positions.
+    type Facts = (
+        String,
+        CompileTimeEvaluationErrorReason,
+        String,
+        (u32, u32),
+        (u32, u32),
+    );
+
+    fn compile_once(root: &Path) -> Vec<Facts> {
+        let (frontend, mut warning_owner, project_source_files) =
+            run_directory_lane(root, FrontendCompilationMode::Canonical);
+        let reports = finish_diagnosed(frontend, &mut warning_owner, project_source_files);
+        reports
+            .iter_severity(DiagnosticSeverity::Error)
+            .map(|(report, view)| {
+                let facts = view
+                    .family_view::<CompileTimeEvaluationErrorView>()
+                    .expect("the same-file qualified failure keeps compile-time evaluation facts");
+                let site = view.primary_site();
+                let context = DiagnosticRenderContext::for_report(report);
+                let position = context
+                    .site_position(site)
+                    .expect("the qualified failure keeps its authored source position");
+                let excerpt = position
+                    .line
+                    .chars()
+                    .skip(position.start.column as usize)
+                    .take((position.end.column - position.start.column) as usize)
+                    .collect::<String>();
+                (
+                    view.descriptor().code.to_owned(),
+                    facts.reason,
+                    excerpt,
+                    (position.start.line, position.start.column),
+                    (position.end.line, position.end.column),
+                )
+            })
+            .collect()
+    }
+
+    let line = SETTINGS_SOURCE
+        .lines()
+        .next()
+        .expect("settings source has a first line");
+    let expected_last_start = line.find("last").expect("first qualified selection exists") as u32;
+    let expected_later_start = line
+        .find("later")
+        .expect("second qualified selection exists") as u32;
+
+    let mut first_diagnostic_per_allowance = Vec::new();
+    for (label, limit_setting) in [
+        (
+            "one-error allowance",
+            "        max_errors_per_module = 1,\n",
+        ),
+        ("normal allowance", "        max_errors_per_module = 5,\n"),
+    ] {
+        let temp = tempfile::tempdir().expect("temp project should exist");
+        let root = temp.path();
+        let config = format!("project #= (\n    name = \"docs\",\n{limit_setting})\nhtml #= ()\n");
+        write_project(
+            root,
+            &config,
+            &[
+                ("src/@entry.moth", ENTRY_SOURCE),
+                ("src/settings.moth", SETTINGS_SOURCE),
+            ],
+        );
+
+        let first = compile_once(root);
+        let second = compile_once(root);
+        assert_eq!(
+            first, second,
+            "{label}: an in-process repeat must retain identical diagnostics, spans and codes"
+        );
+        assert!(
+            !first.is_empty(),
+            "{label}: the invalid initializer must retain a qualified forward-reference diagnostic"
+        );
+        assert_eq!(
+            first.len(),
+            2,
+            "{label}: both authored selections must be retained so their order is exercised"
+        );
+
+        for (code, reason, excerpt, start, end) in &first {
+            assert_eq!(
+                code, "MOTH-RULE-0053",
+                "{label}: qualified failures use the compile-time evaluation family"
+            );
+            assert_eq!(
+                *reason,
+                CompileTimeEvaluationErrorReason::SameFileForwardConstantReference,
+                "{label}: both authored selections are same-file forward references"
+            );
+            assert_eq!(
+                start.0, end.0,
+                "{label}: each diagnostic spans one authored line"
+            );
+            assert!(
+                excerpt == "last" || excerpt == "later",
+                "{label}: the diagnostic must underline the selected symbol, got {excerpt:?}"
+            );
+        }
+
+        let (code, reason, excerpt, start, end) = &first[0];
+        assert_eq!(code, "MOTH-RULE-0053");
+        assert_eq!(
+            *reason,
+            CompileTimeEvaluationErrorReason::SameFileForwardConstantReference
+        );
+        assert_eq!(
+            excerpt, "last",
+            "{label}: the first retained diagnostic must be the earlier authored span"
+        );
+        assert_eq!(
+            *start,
+            (start.0, expected_last_start),
+            "{label}: the first diagnostic starts at the first selection"
+        );
+        assert_eq!(
+            *end,
+            (start.0, expected_last_start + 4),
+            "{label}: the first diagnostic ends at the first selection"
+        );
+
+        if let Some((second_code, second_reason, second_excerpt, second_start, second_end)) =
+            first.get(1)
+        {
+            assert_eq!(second_code, "MOTH-RULE-0053");
+            assert_eq!(
+                *second_reason,
+                CompileTimeEvaluationErrorReason::SameFileForwardConstantReference
+            );
+            assert_eq!(
+                second_excerpt, "later",
+                "{label}: the later authored span must report second"
+            );
+            assert_eq!(
+                *second_start,
+                (start.0, expected_later_start),
+                "{label}: the second diagnostic starts at the second selection"
+            );
+            assert_eq!(
+                *second_end,
+                (start.0, expected_later_start + 5),
+                "{label}: the second diagnostic ends at the second selection"
+            );
+            assert!(
+                *start < *second_start,
+                "{label}: retained diagnostics must be ordered by authored span"
+            );
+        }
+
+        first_diagnostic_per_allowance.push(first[0].clone());
+    }
+
+    assert_eq!(
+        first_diagnostic_per_allowance[0], first_diagnostic_per_allowance[1],
+        "the first retained diagnostic must not depend on the module error allowance"
     );
 }

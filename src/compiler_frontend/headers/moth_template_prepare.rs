@@ -10,7 +10,9 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker_in_cursor;
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
-use crate::compiler_frontend::headers::qualified_references::collect_qualified_references;
+use crate::compiler_frontend::headers::qualified_references::{
+    HeaderExpressionRange, collect_qualified_references,
+};
 use crate::compiler_frontend::headers::synthetic_content_header::{
     SyntheticContentHeaderInput, synthetic_content_header,
 };
@@ -88,9 +90,11 @@ pub(crate) fn prepare_moth_template_file(
         } else {
             // Every `.mtf` qualified occurrence lives inside a template head (including nested
             // heads), so one bounded scan of the retained body is the complete occurrence set.
+            // The synthetic content body is compile-time content, so every occurrence is
+            // const-required.
             let occurrences = collect_qualified_references(
                 canonical,
-                [(0, context.body_range)],
+                [HeaderExpressionRange::const_required(0, context.body_range)],
                 context.file_id,
                 0,
                 path_syntax.as_ref(),

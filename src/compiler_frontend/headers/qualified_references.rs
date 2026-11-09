@@ -11,12 +11,15 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{CommonSyntaxMistakeReason, CompilerStage};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax;
+use crate::compiler_frontend::declaration_syntax::signature_members::SignatureMemberSyntax;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
 use crate::compiler_frontend::headers::dependency_paths::validate_dependency_path;
 use crate::compiler_frontend::headers::dependency_target::{
     checked_provider_target, classify_dependency_target,
 };
-use crate::compiler_frontend::headers::types::{Header, HeaderKind, HeaderParseFailure};
+use crate::compiler_frontend::headers::types::{
+    Header, HeaderKind, HeaderParseFailure, SyntheticContentPayload,
+};
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
@@ -26,6 +29,46 @@ use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenIndex, Toke
 use crate::compiler_frontend::utilities::token_scan::{
     TokenFactView, recognize_qualified_selection,
 };
+
+/// One expression-bearing token range owned by a prepared header shell.
+///
+/// WHAT: the canonical authored interval plus whether its expression folds to compile-time
+///       content before the declaring shell is prepared.
+/// WHY: Stage 0 occurrence recognition scans runtime bodies and compile-time values in one pass,
+///      while Stage 3 declaration ordering consumes only the const-required ranges. Retaining the
+///      classification on the range lets `collect_qualified_references` stamp each occurrence
+///      without rescanning tokens at ordering time.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HeaderExpressionRange {
+    /// Index of the header shell that owns this range.
+    pub(crate) header_index: usize,
+    /// Exact authored token interval.
+    pub(crate) range: TokenRange,
+    /// Whether this range folds before its declaring shell is prepared.
+    pub(crate) const_required: bool,
+}
+
+impl HeaderExpressionRange {
+    /// Build one compile-time range for an adapter that owns only content syntax.
+    ///
+    /// WHY: a synthetic template body is entirely const-required, so its prepare path supplies
+    ///      ranges with one explicit constructor instead of reconstructing the flag per range.
+    pub(crate) fn const_required(header_index: usize, range: TokenRange) -> Self {
+        Self {
+            header_index,
+            range,
+            const_required: true,
+        }
+    }
+
+    fn expression(header_index: usize, range: TokenRange) -> Self {
+        Self {
+            header_index,
+            range,
+            const_required: false,
+        }
+    }
+}
 
 /// One authored expression-qualified reference retained by its preparing source file.
 ///
@@ -50,6 +93,12 @@ pub struct QualifiedReferenceOccurrence {
     pub selected: StringId,
     /// Exact authored span of the selected symbol token.
     pub selected_span: SourceSpan,
+    /// Whether the producing expression folds before its declaring shell is prepared.
+    ///
+    /// WHY: Stage 0 provider discovery sees every occurrence, but only a const-required
+    ///      occurrence is a declaration-ordering dependency. Runtime function and start bodies
+    ///      must never add a Stage 3 edge.
+    pub const_required: bool,
 }
 
 impl QualifiedReferenceOccurrence {
@@ -77,9 +126,12 @@ impl QualifiedReferenceOccurrence {
 /// Recognize every expression-qualified selection inside the supplied token ranges.
 ///
 /// WHAT: sorts and trims the caller's expression ranges, walks them once and emits one occurrence
-///       per `PATH` + same-line `SYMBOL` pair in canonical source order.
+///       per `PATH` + same-line `SYMBOL` pair in canonical source order. Every occurrence records
+///       whether its producing range is const-required.
 /// WHY: ranges arrive per header shell (body, initializer, defaults) rather than in one contiguous
-///      span, and trimming keeps a pair from being recorded twice when caller ranges meet.
+///      span, and trimming keeps a pair from being recorded twice when caller ranges meet. A
+///      const-required range always wins an overlap with a runtime body, so a shared shell cannot
+///      hide the Stage 3 declaration dependency.
 ///
 /// Every occurrence validates its authored path through the same `validate_dependency_path`
 /// contract an ordinary dependency clause uses, so `@/`, `@./x`, `@../x` and `@x.moth` produce the
@@ -88,7 +140,7 @@ impl QualifiedReferenceOccurrence {
 /// caller can see the authored `as`.
 pub(crate) fn collect_qualified_references(
     canonical: &SourceTokens,
-    ranges: impl IntoIterator<Item = (usize, TokenRange)>,
+    ranges: impl IntoIterator<Item = HeaderExpressionRange>,
     file_id: SourceId,
     first_shell_ordinal: u32,
     path_syntax: &PathSyntaxTable,
@@ -103,26 +155,39 @@ pub(crate) fn collect_qualified_references(
         .into());
     }
 
-    let mut ranges: Vec<(usize, TokenRange)> = ranges
+    let ranges: Vec<HeaderExpressionRange> = ranges
         .into_iter()
-        .filter(|(_, range)| !range.is_empty())
+        .filter(|range| !range.range.is_empty())
         .collect();
-    ranges.sort_by_key(|(_, range)| range.start().index());
-
-    let mut scanned = Vec::new();
-    let mut unsupported_alias_span = None;
-    let mut next_unscanned_index = 0usize;
-
-    for (header_index, range) in ranges {
-        if range.source() != file_id {
+    for range in &ranges {
+        if range.range.source() != file_id {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::HeaderParsing,
                 "qualified-reference scan received a range from another source",
             )
             .into());
         }
-        let start = range.start().index().max(next_unscanned_index);
-        let end = range.end().index();
+    }
+    let mut ranges = split_runtime_ranges_around_const_required(ranges);
+    ranges.sort_by_key(|range| {
+        (
+            range.range.start().index(),
+            !range.const_required,
+            range.range.end().index(),
+        )
+    });
+
+    let mut scanned = Vec::new();
+    let mut unsupported_alias_span = None;
+    let mut next_unscanned_index = 0usize;
+
+    for expression_range in ranges {
+        let start = expression_range
+            .range
+            .start()
+            .index()
+            .max(next_unscanned_index);
+        let end = expression_range.range.end().index();
         if end <= start {
             continue;
         }
@@ -134,8 +199,8 @@ pub(crate) fn collect_qualified_references(
                 "qualified-reference scan start exceeded its checked token index domain",
             )
         })?;
-        let bounded =
-            TokenRange::try_new_for(canonical, start_index, range.end()).map_err(|error| {
+        let bounded = TokenRange::try_new_for(canonical, start_index, expression_range.range.end())
+            .map_err(|error| {
                 InfrastructureFailure::internal(
                     CompilerStage::HeaderParsing,
                     format!("qualified-reference scan range was invalid: {error:?}"),
@@ -158,12 +223,17 @@ pub(crate) fn collect_qualified_references(
             {
                 unsupported_alias_span = Some(SourceSpan::new(file_id, follower.span));
             }
-            scanned.push((header_index, selection));
+            scanned.push((
+                expression_range.header_index,
+                selection,
+                expression_range.const_required,
+            ));
         }
     }
 
     let mut occurrences = Vec::with_capacity(scanned.len());
-    for (index, (owning_header_index, selection)) in scanned.into_iter().enumerate() {
+    for (index, (owning_header_index, selection, const_required)) in scanned.into_iter().enumerate()
+    {
         let index = u32::try_from(index).map_err(|_| {
             InfrastructureFailure::internal(
                 CompilerStage::HeaderParsing,
@@ -201,6 +271,7 @@ pub(crate) fn collect_qualified_references(
             },
             selected: selection.selected_name,
             selected_span: SourceSpan::new(file_id, selection.selected_span),
+            const_required,
         });
     }
 
@@ -218,18 +289,95 @@ pub(crate) fn collect_qualified_references(
     Ok(occurrences)
 }
 
+/// Split runtime ranges so a const-required range always owns the tokens it covers.
+///
+/// WHAT: merges the const-required ranges and removes their covered intervals from every runtime
+///       range before the scan trims overlaps in authored order.
+/// WHY: a runtime body that starts earlier must not stamp a shared default as runtime and hide a
+///      real Stage 3 declaration edge. Range lists are small and per shell, so the merged-interval
+///      pass stays allocation-light and preserves every non-overlapping runtime token.
+fn split_runtime_ranges_around_const_required(
+    ranges: Vec<HeaderExpressionRange>,
+) -> Vec<HeaderExpressionRange> {
+    let mut const_ranges: Vec<TokenRange> = ranges
+        .iter()
+        .filter(|range| range.const_required)
+        .map(|range| range.range)
+        .collect();
+    if const_ranges.is_empty() {
+        return ranges;
+    }
+
+    const_ranges.sort_by_key(|range| (range.start(), range.end()));
+    let mut merged: Vec<TokenRange> = Vec::with_capacity(const_ranges.len());
+    for range in const_ranges {
+        match merged.last_mut() {
+            Some(last) if range.start() <= last.end() => {
+                if range.end() > last.end() {
+                    *last = TokenRange::new(range.source(), last.start(), range.end())
+                        .expect("merging two ordered ranges keeps the interval ordered");
+                }
+            }
+            _ => merged.push(range),
+        }
+    }
+
+    let mut split = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        if range.const_required {
+            split.push(range);
+            continue;
+        }
+
+        // Every validated range shares this source, so gap construction cannot mix owners.
+        let source = range.range.source();
+        let mut uncovered_start = range.range.start();
+        for covered in &merged {
+            if covered.end() <= uncovered_start {
+                continue;
+            }
+            if covered.start() >= range.range.end() {
+                break;
+            }
+            if covered.start() > uncovered_start {
+                split.push(HeaderExpressionRange {
+                    header_index: range.header_index,
+                    range: TokenRange::new(source, uncovered_start, covered.start())
+                        .expect("an uncovered gap between ordered ranges stays ordered"),
+                    const_required: false,
+                });
+            }
+            uncovered_start = covered.end();
+        }
+        if uncovered_start < range.range.end() {
+            split.push(HeaderExpressionRange {
+                header_index: range.header_index,
+                range: TokenRange::new(source, uncovered_start, range.range.end())
+                    .expect("a trailing uncovered gap keeps the runtime range ordered"),
+                const_required: false,
+            });
+        }
+    }
+
+    split
+}
+
 /// Append the expression-bearing token ranges owned by one header shell.
 ///
-/// WHAT: collects the header body (retained range or segmented start-body sequence) and every
-///       declaration default/initializer range that can contain a value expression.
+/// WHAT: appends the header body (retained range or segmented start-body sequence) as
+///       ordering-neutral expression syntax, a config-qualified constant initializer for path
+///       consumption, and every const-required value position from
+///       `push_const_required_expression_ranges`.
 /// WHY: a qualified reference may appear in a constant initializer, a parameter or field default,
 ///       a function/start body or a template head. Header shells retain those regions separately,
 ///       so occurrence recognition needs one bounded range list instead of rescanning the file.
+///       Deriving the compile-time positions from the classifier keeps this wide Stage 0 scan and
+///       Stage 3 ordering on one eligibility policy.
 pub(crate) fn push_header_expression_ranges(
     header: &Header,
     header_index: usize,
     canonical: &SourceTokens,
-    ranges: &mut Vec<(usize, TokenRange)>,
+    ranges: &mut Vec<HeaderExpressionRange>,
 ) -> Result<(), InfrastructureFailure> {
     if let Some(sequence) = header.token_sequence {
         let view = canonical.token_sequence(sequence).map_err(|error| {
@@ -238,58 +386,105 @@ pub(crate) fn push_header_expression_ranges(
                 format!("retained header token sequence could not be resolved: {error:?}"),
             )
         })?;
-        ranges.extend(view.ranges().map(|range| (header_index, range)));
+        ranges.extend(
+            view.ranges()
+                .map(|range| HeaderExpressionRange::expression(header_index, range)),
+        );
     } else if !header.tokens.is_empty() {
-        ranges.push((header_index, header.tokens));
+        ranges.push(HeaderExpressionRange::expression(
+            header_index,
+            header.tokens,
+        ));
     }
+
+    // A config-qualified constant initializer is expression syntax for path consumption but not
+    // compile-time content: the file-reference classifier must consume its rows so they never
+    // become ordinary file values, while Stage 3 ordering must not see it before config
+    // validation succeeds. The expression lane never scans a config-owned shell, so this range
+    // stays ordering-neutral.
+    if let HeaderKind::Constant { declaration } = &header.kind
+        && declaration.config_qualifier.is_some()
+        && let Some(range) = declaration.initializer_range
+    {
+        ranges.push(HeaderExpressionRange::expression(header_index, range));
+    }
+
+    push_const_required_expression_ranges(header, header_index, ranges);
+    Ok(())
+}
+
+/// Append the token ranges whose values fold before their declaring shell is prepared.
+///
+/// WHAT: exactly the compile-time value positions: a non-config constant initializer, a synthetic
+///       Moth-template body, a const-template body, and function parameter, struct field and
+///       choice variant record field defaults.
+/// WHY: content-source ordering and qualified-reference ordering must recognise one eligibility
+///      policy. A const-required expression is semantically bound before ordinary body emission,
+///      so it can require a declaration-ordering edge; a runtime body never can. Trait requirement
+///      defaults are absent because signature parsing rejects them (MOTH-RULE-0028), so they are
+///      never folded or prepared.
+pub(crate) fn push_const_required_expression_ranges(
+    header: &Header,
+    header_index: usize,
+    ranges: &mut Vec<HeaderExpressionRange>,
+) {
+    let mut push = |range: TokenRange| {
+        ranges.push(HeaderExpressionRange::const_required(header_index, range));
+    };
 
     match &header.kind {
         HeaderKind::Constant { declaration } => {
-            ranges.extend(
-                declaration
-                    .initializer_range
-                    .map(|range| (header_index, range)),
-            );
+            if declaration.config_qualifier.is_some() {
+                return;
+            }
+            if let Some(range) = declaration.initializer_range {
+                push(range);
+            } else if matches!(
+                header.synthetic_content_payload,
+                Some(SyntheticContentPayload::MothTemplate { .. })
+            ) && !header.tokens.is_empty()
+            {
+                // A Moth-template synthetic content constant keeps its body in `Header::tokens`
+                // while leaving the declaration initializer range empty.
+                push(header.tokens);
+            }
+        }
+        HeaderKind::ConstTemplate { .. } => {
+            // Const-template tokens cover the template head and body, including the top-level
+            // compile-time fragments folded before body emission.
+            if !header.tokens.is_empty() {
+                push(header.tokens);
+            }
         }
         HeaderKind::Function { signature, .. } => {
-            push_signature_default_ranges(&signature.parameters, header_index, ranges);
+            push_signature_default_ranges(&signature.parameters, &mut push);
         }
         HeaderKind::Struct { fields, .. } => {
-            push_signature_default_ranges(fields, header_index, ranges);
+            push_signature_default_ranges(fields, &mut push);
         }
         HeaderKind::Choice { variants, .. } => {
             for variant in variants {
                 let ChoiceVariantPayloadSyntax::Record { fields } = &variant.payload else {
                     continue;
                 };
-                push_signature_default_ranges(fields, header_index, ranges);
-            }
-        }
-        HeaderKind::Trait { declaration } => {
-            for requirement in &declaration.requirements {
-                push_signature_default_ranges(
-                    &requirement.signature.parameters,
-                    header_index,
-                    ranges,
-                );
+                push_signature_default_ranges(fields, &mut push);
             }
         }
         HeaderKind::StartFunction
         | HeaderKind::TypeAlias { .. }
-        | HeaderKind::ConstTemplate { .. }
+        | HeaderKind::Trait { .. }
         | HeaderKind::TraitConformance { .. }
         | HeaderKind::TraitIncompatibility { .. } => {}
     }
-
-    Ok(())
 }
 
 fn push_signature_default_ranges(
-    members: &[crate::compiler_frontend::declaration_syntax::signature_members::SignatureMemberSyntax],
-    header_index: usize,
-    ranges: &mut Vec<(usize, TokenRange)>,
+    members: &[SignatureMemberSyntax],
+    push: &mut impl FnMut(TokenRange),
 ) {
     for member in members {
-        ranges.extend(member.default_range.map(|range| (header_index, range)));
+        if let Some(range) = member.default_range {
+            push(range);
+        }
     }
 }

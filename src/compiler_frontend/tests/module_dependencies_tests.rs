@@ -1857,3 +1857,69 @@ fn qualified_template_content_orders_after_its_selected_constant() {
         "both the file value and the qualified selection must order after the same content header"
     );
 }
+
+#[test]
+fn qualified_default_adds_declaration_hint_but_body_reference_does_not() {
+    let entry_source = "body_only || -> I32:\n    value = @helper answer\n    return value\n;\nwith_default |value I32 = @helper answer| -> I32:\n    return value\n;\n";
+    let (headers, string_table, path_fork) = parse_module_headers(
+        &[
+            ("src/@entry.moth", entry_source),
+            ("src/helper.moth", "answer #= 42\n"),
+        ],
+        "src/@entry.moth",
+    );
+
+    let header_named = |name: &str| {
+        headers
+            .headers
+            .iter()
+            .find(|header| header_name(header, &string_table, &path_fork) == name)
+            .unwrap_or_else(|| panic!("expected one {name} header"))
+    };
+    let qualified_hint_count = |name: &str| {
+        header_named(name)
+            .local_ordering_hints
+            .iter()
+            .filter(|hint| hint.origin() == LocalDeclarationOrderingHintOrigin::QualifiedReference)
+            .count()
+    };
+
+    assert_eq!(
+        qualified_hint_count("body_only"),
+        0,
+        "a runtime body occurrence must not add a Stage 3 declaration-ordering edge"
+    );
+    assert_eq!(
+        qualified_hint_count("with_default"),
+        1,
+        "a const-required parameter default must add its qualified-reference edge"
+    );
+
+    let occurrences: Vec<_> = headers
+        .module_symbols
+        .qualified_references_by_source
+        .values()
+        .flatten()
+        .collect();
+    assert_eq!(
+        occurrences.len(),
+        2,
+        "the body and the default each retain one authored occurrence"
+    );
+    assert_eq!(
+        occurrences
+            .iter()
+            .filter(|occurrence| occurrence.const_required)
+            .count(),
+        1,
+        "only the parameter-default occurrence is const-required"
+    );
+    assert_eq!(
+        occurrences
+            .iter()
+            .filter(|occurrence| !occurrence.const_required)
+            .count(),
+        1,
+        "the function-body occurrence stays a Stage 0 provider fact only"
+    );
+}

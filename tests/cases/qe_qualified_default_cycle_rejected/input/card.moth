@@ -1,0 +1,6 @@
+-- The field default is the only edge from this resource to `settings.title`. `title` declares
+-- the resource type, which already orders `settings.title` after `Resource`. Together they close
+-- a real declaration cycle.
+Resource = |
+    title String = @settings title,
+|

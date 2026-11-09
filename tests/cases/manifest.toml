@@ -19316,6 +19316,28 @@ contract = "language.dependencies.qualified_reference_self_cycle_is_rejected"
 role = "primary"
 
 [[case]]
+id = "qe_qualified_default_ordering"
+path = "qe_qualified_default_ordering"
+tags = ["integration", "language", "dependencies", "expression-qualified"]
+contract = "language.dependencies.qualified_default_orders_provider"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_default_cycle_rejected"
+path = "qe_qualified_default_cycle_rejected"
+tags = ["integration", "language", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.qualified_default_cycle_is_rejected"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_default_same_file_forward_success"
+path = "qe_qualified_default_same_file_forward_success"
+tags = ["integration", "language", "structs", "dependencies", "expression-qualified"]
+contract = "language.dependencies.qualified_default_same_file_forward_reference_succeeds"
+role = "primary"
+
+
+[[case]]
 id = "qe_cross_module_qualified_constant"
 path = "qe_cross_module_qualified_constant"
 tags = ["integration", "language", "dependencies", "expression-qualified"]
@@ -19488,5 +19510,12 @@ id = "single_file_selected_entry_export_rejected"
 path = "single_file_selected_entry_export_rejected"
 tags = ["integration", "html", "single-file", "diagnostics", "root-roles"]
 contract = "language.entry.selected_single_file_entry_rejects_export_surface"
+role = "primary"
+
+[[case]]
+id = "qe_cross_module_qualified_cycle_rejected"
+path = "qe_cross_module_qualified_cycle_rejected"
+tags = ["integration", "language", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.cross_module_qualified_cycle_is_rejected"
 role = "primary"
 

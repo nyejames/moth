@@ -1,0 +1,5 @@
+@a label
+@b other
+
+page = label
+[: [page] ]
