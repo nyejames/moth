@@ -81,13 +81,9 @@ legacy `Number` type alias.
 
 ### Configuration names
 
-The accepted queued project directives use the `$` marker: `$config`,
-`$project` and `$html_builder`. A general `$entry` root purpose is a separate
-future directive. The earlier `$page` proposal is superseded and is not current
-syntax. There is no accepted `config:` block or `#Config` qualifier.
-Directive spellings do not reserve ordinary identifiers, so `config`, `Config`,
-`project`, `html_builder` and `entry` remain ordinary names outside directive
-syntax.
+The accepted queued source modifier uses the `$` marker: `$config`. Project and active-builder settings remain ordinary named records, so `$project`, `$builder` and `$html_builder` are not directives and no future form restores them. A root-purpose directive does not exist either. Entry eligibility comes from the `@entry.moth` file role, so `$entry` and `$page` are not source syntax. The future `$export` modifier will replace the current `export:` block only in `@mod.moth` and `@package.moth`.
+
+Directive spellings do not reserve ordinary identifiers, so `config`, `Config`, `project`, `html_builder` and `entry` remain ordinary names outside directive syntax.
 The file `config.moth` and the dependency root `@project` retain their separate
 path and package semantics.
 

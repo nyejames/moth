@@ -123,7 +123,7 @@ On the page, `visitor` as a `String` meets `greet`'s `name` parameter at a recei
 ## Construction-only numeric inference
 
 AST gathers numeric constraints across one runtime body, including nested
-blocks, branches, loops and handlers. The implicit root runtime body follows
+blocks, branches, loops and handlers. The dormant entry-root body follows
 the same rule, and each concrete generic instance gets its own state. Copies
 connect an existing numeric origin and mutable writes constrain one binding
 type, not a new type per write.

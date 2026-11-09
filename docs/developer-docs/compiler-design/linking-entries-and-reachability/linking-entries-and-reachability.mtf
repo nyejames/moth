@@ -2,17 +2,15 @@
 
 Compilation and activation are different verbs.
 
-A module can compile completely, including its dormant top-level work, and still do nothing at runtime until an **entry** selects it. The seed can be fully formed and still sleep. Dependencies do not secretly run initialisers because someone mentioned a name.
+A module can compile completely, including its dormant entry work, and still do nothing at runtime until an **entry** selects it. The seed can be fully formed and still sleep. Dependencies do not secretly run initialisers because someone mentioned a name.
 
-Current Alpha HTML selection uses root runtime activity or fragments, so a metadata-only root carrying a direct builder slot becomes a page. The accepted future design gives the root-only `$entry` directive the explicit entry declaration; even a metadata-only root will need that purpose. A declaration-only root selects no entry. The dormant entry and non-activating dependency rules below remain part of both paths. The earlier `$page` proposal is superseded.
+Project entries are exactly the directories with an `@entry.moth` root. Presence is the only selection fact. An entry may be empty, static-only or metadata-only. `@mod.moth` and `@package.moth` never become entries, and importing a module or package never activates its entry.
 
 ## Compile versus activate
 
-Every normal root may carry dormant top-level runtime work and page fragments. That work is parsed, type-checked, lowered and borrow-validated **before** any entry activates it. Local lifetime-region and escape analysis belongs to the same accepted sequence, but its implementation is still deferred.
+Only an `@entry` root may carry dormant top-level runtime work and fragments. That work is parsed, type-checked, lowered and borrow-validated **before** any entry activates it. Local lifetime-region and escape analysis belongs to the same accepted sequence, but its implementation is still deferred.
 
-Under the deferred root-purpose policy, authored executable work or direct output will require a recognised `$entry` purpose. An unmarked root must not disappear merely because HTML entry filtering selects explicit entries. Until that cutover, root activity selects HTML entries as described above.
-
-The compiler synthesises an implicit **entry** for a normal root. The entry has no source-level name, so `start` remains an ordinary identifier. Properties that matter:
+The compiler synthesises an implicit **entry** for an `@entry` root. The entry has no source-level name, so `start` remains an ordinary identifier. Properties that matter:
 
 - non-exported
 - non-bindable
@@ -23,9 +21,9 @@ Compilation never activates the entry. Entry assembly may activate it once after
 
 Implicit checked failure materialises as `Error` in the entry. Typed `Error!` propagates with `!`; custom errors need explicit recovery. Builders consume that typed outcome without adding an error-fragment channel. The @../../../docs/progress (Progress matrix) records current support.
 
-Support roots and the project package facade have no implicit entry.
+Support facades, the project package facade and `@mod` roots have no implicit entry.
 
-In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `greeting.moth` is an ordinary source file inside that same directory-scoped module, not a separate module with a root of its own. Binding `greet` runs no page-level statements, because only an activated entry root runs root work.
+In the walkthrough, `@entry.moth` owns dormant root work and a page fragment. `greeting.moth` is an ordinary source file inside that same directory-scoped module, not a separate module with a root of its own. Binding `greet` runs no entry statements, because only an activated entry root runs root work.
 
 [@diagrams diagram:
     [$in label: Compiling is not activating]
@@ -45,11 +43,11 @@ In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `gr
                 [@diagrams lane:
                 [@diagrams detail:
                     [$in href: ./]
-                    `@page.moth` and its owned sources
+                    `@entry.moth` and its owned sources
                 ]
                 [@diagrams detail:
                     [$in href: ../project-graphs-and-modules/]
-                    Support roots and package facades
+                    Support facades and package facades
                 ]
                 ]
             ]
@@ -87,13 +85,13 @@ Fragments split into useful kinds:
 
 Dependency modules do not run their root work merely because a consumer bound a function. Activation is explicit and entry-scoped.
 
-For a current HTML entry, fragments belong to an active root; fragments select the entry through root activity. A future `$entry` purpose will make that selection explicit.
+For an HTML entry, fragments belong to the selected `@entry` root. The root's presence selected the entry, not the fragments themselves.
 
-The paragraph in `@page.moth` enters through fragment metadata and, if needed, runtime production. It does not require the backend to re-read the `.moth` file.
+The paragraph in `@entry.moth` enters through fragment metadata and, if needed, runtime production. It does not require the backend to re-read the `.moth` file.
 
 ## Entry assembly
 
-The build system selects **entry candidates** from retained root activity and builds an **`EntryAssembly`** from existing facts: which root activates, which fragments apply, which builder slot destinations the builder needs. Under the deferred `$entry` design, explicit purpose facts replace activity as the candidate source. A metadata-only root with a direct builder slot contribution remains a candidate today.
+The build system selects **entry candidates** from `@entry.moth` presence and builds an **`EntryAssembly`** from existing facts: which entry root activates, which fragments apply, which builder slot destinations the builder needs. An empty, static-only or metadata-only entry still assembles. Route derivation uses the directory position, never source activity.
 
 Contrast **`ProjectPackageAssembly`**, which carries project-wide assembly privilege for the facade. Different job, shared taste for explicit data.
 
@@ -133,7 +131,7 @@ Link planning consumes published artefacts, so the failures it owns are narrow:
 - a required module blocked by its own diagnostics
 - an unresolved link identity, which signals a broken internal invariant rather than an author mistake
 
-Failures that feel like linking but land earlier: a future invalid root purpose or a missing command-required entry candidate are Stage 0 or early frontend concerns, and fragment destinations and builder slot values are validated before an artefact is ever published.
+Failures that feel like linking but land earlier: an invalid root filename or a missing command-required entry are Stage 0 or early frontend concerns, and fragment destinations and builder slot values are validated before an artefact is ever published.
 
 Target capability failures wait for the next article even when they appear adjacent in real builds.
 
@@ -145,13 +143,13 @@ Target capability failures wait for the next article even when they appear adjac
 
 **Benefit:** dependencies remain predictable and entry planning stays data-driven.
 
-**Cost:** the builder must carry explicit root activity, fragment destinations and builder slot values.
+**Cost:** the builder must carry explicit entry facts, fragment destinations and builder slot values.
 
 ## Roadmap and current status
 
-- **Accepted design:** typed entry selection, entry assembly and exact reachable union.
-- **Current implementation:** selected normal modules compile their dormant entry work, and entry assembly activates the selected entry exactly once. Imported and API-only roots expose interfaces without activating anything.
-- **Queued work:** `html-page-directives-and-runtime-title-plan.md` carries the general `$entry` purpose and runtime-title work. Builder slots own initial document metadata; the earlier `$page` proposal is superseded.
+- **Accepted design:** presence-based entry eligibility, typed entry assembly and exact reachable union.
+- **Current implementation:** fixed root roles and presence-based entry selection are delivered. Entry assembly activates the selected `@entry` root exactly once. Imported entries and facade roots expose interfaces without activating anything.
+- **Queued work:** capability-checked runtime title mutation. Builder slots own initial document metadata.
 - **Deferred or outside scope:** link-time deferred source compilation.
 
 ## Exit state

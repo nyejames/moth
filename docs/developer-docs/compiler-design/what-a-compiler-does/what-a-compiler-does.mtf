@@ -17,7 +17,7 @@ The project tree enters as authored text:
 [codeblock, $code("text"):
 compiler_walkthrough/
 ├── config.moth
-├── @page.moth
+├── @entry.moth
 └── greeting.moth
 ]
 
@@ -204,8 +204,8 @@ Later articles assign exact diagnostic ownership. Here only the families matter:
 ## Roadmap and current status
 
 - **Accepted design:** a staged compiler library plus a build-owned project pipeline.
-- **Current implementation:** follow the progress matrix. Do not treat transitional backend handoff details as permanent law.
-- **Queued work:** the mixed JavaScript/Wasm backend plan, the accepted general-directive/config migration and the deferred `$entry` purpose and runtime-title plan. Canonical module compilation and scoped packages already landed.
+- **Current implementation:** follow the progress matrix. Do not treat transitional backend handoff details as permanent law. Fixed root roles and presence-based entry selection are delivered.
+- **Queued work:** the mixed JavaScript/Wasm backend plan, the accepted general-directive/config migration and capability-checked runtime title mutation.
 - **Deferred or outside scope:** this article does not teach a universal compiler taxonomy for every language.
 
 ## Exit state

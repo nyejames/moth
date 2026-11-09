@@ -1416,7 +1416,7 @@ Publish final-design contracts in their permanent owners during Phase 0 and keep
 | `docs/docs/generics/type-application.mtf` | Distinguish nominal `of` parameter introduction from applied type use, preserve ordered arguments and document required constructor receiving context |
 | `docs/docs/generics/generic-instances.mtf` | Owner-local parameter identity, independent instances, aligned receiver methods, explicit construction and public nominal contracts |
 | `docs/docs/generics/generic-limits.mtf` | Eight exact-case numeric families, ordinary single trait limit, universal operator/result/literal rules and V1 exclusions |
-| Generic `@page.moth` and Basic page composition | Present the learning sequence below and link the detailed rules without duplicating a second capability catalogue |
+| Generic `@entry.moth` and Basic page composition | Present the learning sequence below and link the detailed rules without duplicating a second capability catalogue |
 | `docs/docs/traits/generic-trait-bounds.mtf` and relevant trait pages | Convert source syntax and terminology to reusable generic declarations with one trait limit, preserve explicit conformance and explain that numeric families are compiler-owned limits rather than implementable traits |
 | Struct, choice, function and receiver references | New nominal declaration syntax, applied constructor receivers, signature-derived function parameters, aligned receiver rules and examples for empty/payload-free construction |
 | `docs/docs/aliases/type-aliases.mtf` | Preserve concrete aliases and explain that reusable generic copying/aliasing is excluded, with no reversal of ordinary alias syntax |

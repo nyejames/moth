@@ -18,14 +18,15 @@ init_docs_sidebar()!
 #[section, $md:
     # Directives
 
-    `$` introduces a registered compiler or builder directive. Template
-    formatters already use this marker. The accepted general family extends it
-    to configuration, future root purpose and later compiler-owned blocks.
-    HTML document metadata uses direct const root inserts through builder slots.
+    `$` introduces a registered compiler directive. Template-head directives
+    already use this marker. The accepted source-modifier family adds next-construct
+    modifiers such as `$config` and later compiler-owned forms. HTML document
+    metadata uses direct const inserts in `@entry.moth` through builder slots.
 
-    Template directives are implemented. The general non-template family is
-    accepted design and is not yet available in the Alpha compiler. The earlier
-    `$page` proposal is superseded; general `$entry` remains deferred.
+    Template directives are implemented. General source modifiers are accepted
+    design and are not yet available in the Alpha compiler. No root-purpose
+    directive exists: `@entry.moth` owns entry eligibility, and `$entry` and
+    `$page` are not source syntax.
 ]
 
 #[section:

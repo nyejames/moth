@@ -1,11 +1,10 @@
-**Entry roots and support.** HTML entries currently come from authored root
-activity: top-level runtime work and direct const fragments. Direct
-const root `$in` inserts supply builder metadata. A general `$entry` root
-purpose remains deferred design, and the former `$page` metadata design is
-superseded by builder slots. Exact entry and metadata rules live in Project
-Structure. This page describes the template and value boundary; current support
-is tracked in @../progress (Progress) and
-@../progress/packages-and-builders (Packages and builders).
+**Entries and page fragments.** HTML pages come from directories that contain
+`@entry.moth`. A direct top-level template in that file contributes page output.
+Direct const root `$in` inserts supply builder metadata. No root-purpose
+directive exists, and the former `$page` metadata design is superseded by
+builder slots. Exact entry and metadata rules live in Project Structure. This
+page describes the template and value boundary; current support is tracked in
+@../progress (Progress) and @../progress/packages-and-builders (Packages and builders).
 
 Templates create owned `String` values.
 
@@ -90,9 +89,9 @@ Unevaluated template syntax is not a MON string literal. A folded compile-time t
 
 ### Page fragments
 
-A direct top-level template contributes output only on the active entry root.
+A direct top-level template contributes output only in `@entry.moth`.
 
-- top-level runtime templates run through the entry-selected root runtime in source order
+- top-level runtime templates run through the entry runtime in source order
 - direct top-level const templates fold into compile-time fragments
 - a direct top-level const `$in` insert routes to a builder-registered destination
 - ordinary direct const fragments and runtime body fragments render into the page body
@@ -101,8 +100,7 @@ A direct top-level template contributes output only on the active entry root.
 
 Only a direct root insert reaches builder routing. A nested or stored insert stays
 ordinary template composition. Runtime top-level named builder inserts are not
-part of the current contract, and their final design remains unsettled. General
-`$entry` purpose validation remains deferred.
+part of the contract.
 
 Page assembly is owned by Project Structure. Const-template rules, including
 builder slot contributions, are owned by @../constants/#const-templates (Const

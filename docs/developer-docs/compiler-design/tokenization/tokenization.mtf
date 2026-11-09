@@ -165,7 +165,7 @@ Defer semantic errors to their owning stages. A good lexer stays humble.
 
 - **Accepted design:** located tokens and retained source preparation.
 - **Current implementation:** progress rows for source-kind coverage. The numeric surface includes `Dec`, `DecN` and `Byte`. `moth-lexical` owns lexical facts shared with MON, AST owns semantic typing and HIR owns numeric domains and failure.
-- **Queued work:** `general-directives-and-project-config-plan.md` extends registered directive recognition while preserving lexical modes and diagnostic ownership.
+- **Queued work:** `general-directives-plan.md` extends registered directive recognition while preserving lexical modes and diagnostic ownership.
 - **Deferred or outside scope:** tokenization does not infer target support or type identity.
 
 ## Exit state

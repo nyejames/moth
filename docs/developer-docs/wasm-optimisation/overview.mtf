@@ -4,7 +4,7 @@
 Moth and native code generation and the evidence required for new passes.
 Read it before changing Wasm optimisation or Lappet's compilation policy.
 
-`@page.moth` composes the website from that topic file. It does not import this
+`@entry.moth` composes the website from that topic file. It does not import this
 routing reference.
 
 ## Related authorities

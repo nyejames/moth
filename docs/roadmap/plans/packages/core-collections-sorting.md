@@ -76,8 +76,8 @@ Read these from the active worktree before implementation:
 - `docs/developer-docs/style-guide/style-guide.mtf`
 - `docs/developer-docs/style-guide/testing.mtf`
 - `docs/developer-docs/style-guide/validation.mtf`
-- `docs/docs/progress/@page.moth`
-- `docs/docs/progress/packages-and-builders/@page.moth`
+- `docs/docs/progress/@entry.moth`
+- `docs/docs/progress/packages-and-builders/@entry.moth`
 - `docs/roadmap/plans/packages/first-party-package-programme.md`
 - `docs/roadmap/roadmap.md`
 - `index.md` as a locator only

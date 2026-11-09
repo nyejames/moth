@@ -23,9 +23,10 @@ init_docs_sidebar()!
     You use it from the command line to create projects, check them, build them and run the hot-reloading dev server.
 
     **Support notice.** Live config syntax uses grouped parenthesised `project` and
-    `html` records with declaration-owned `#Config of T` inputs. Direct const
-    root inserts supply HTML metadata. The accepted `$config`, `$project` and
-    `$html_builder` forms remain queued design.
+    `html` records with declaration-owned `#Config of T` inputs. The `$config`
+    input marker remains queued design. There are no `$project` or `$html_builder`
+    directives. Direct const inserts in `@entry.moth` supply HTML metadata, and a
+    folder with `@entry.moth` produces a page.
 
     Other tooling continues rapid development.
 
@@ -59,7 +60,7 @@ init_docs_sidebar()!
         [data:
             [$md:`new html`]
             [: Creates the current HTML project scaffold.]
-            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates a minimal grouped parenthesised config with an explicit valid name, a conventional root-level `@page.moth` with direct builder slot metadata, output manifests and an optional .gitignore. It does not yet emit the accepted `$config`/`$project`/`$html_builder` starter or an explicit `$entry` declaration. Use structural `+*.moth` packages under the selected source root for project-local packages.]
+            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates a minimal grouped parenthesised config with an explicit valid name, a root-level `@entry.moth` with direct builder slot metadata and an optional .gitignore. The config keeps the named `project` and `html` records. Use structural `@package.moth` packages under the selected source root for project-local packages.]
         ]
 
         [data:
@@ -130,38 +131,35 @@ init_docs_sidebar()!
     ## Create a new HTML project
 
     The current scaffold creates a project with a minimal grouped parenthesised config and an explicit valid name, a
-    conventional root-level `@page.moth`, hidden generated output folders, build manifests and an
-    optional .gitignore. It does not yet emit the accepted `$config`/`$project`/`$html_builder` starter below.
+    root-level `@entry.moth` and an optional .gitignore. The first build creates the hidden output folders and their manifests.
     The HTML project builder itself has more rules than this page needs to
     cover. See @../project-structure (the project structure guide) for page
     layout, routing, assets, fragments and generated output details.
 
-    ### Accepted starter shape (queued)
+    ### Starter shape
 
-    The accepted design leaves version optional and has no `entry_root`:
+    The named `project` record and its `name` field are optional. Version is optional too:
 
     [codeblock, $code("moth"):
-        $project(
+        project #= (
             name = "my_site",
         )
-
-        $html_builder
+        html #= ()
     ]
 
-    To supply a version explicitly, add an earlier `$config` contract or a fixed
-    literal to `$project`. The selected directory is the source root.
+    The selected directory is the source root. To supply a version, add it to the
+    `project` record or pass a configurable value through the queued `$config` input marker.
 
-    A normal module root can supply HTML metadata with direct const builder
-    slots. That contribution counts as root activity, so a metadata-only root
-    still produces a page:
+    `@entry.moth` supplies HTML metadata with direct const builder slots. An empty or
+    metadata-only entry still produces a page:
 
     [codeblock, $code("moth"):
         #[$in title:Welcome]
     ]
 
-    `moth new` emits the current grouped parenthesised config and builder slots.
-    A general `$entry` root purpose remains deferred; the earlier `$page`
-    proposal is superseded and is not current syntax.
+    `moth new` emits the named config records and an `@entry.moth` with builder slots.
+    Entry eligibility comes from that file's presence, so no `$entry` or `$page`
+    directive is involved.
 
     Start a new project:
 
@@ -217,12 +215,12 @@ init_docs_sidebar()!
 
     ### Generated project structure
 
-    A scaffolded project looks like this:
+    A project after its first build looks like this:
 
     [codeblock, $code("text"):
         project-root/
         ├── config.moth
-        ├── @page.moth
+        ├── @entry.moth
         ├── _dev/
         │   └── .moth_manifest
         ├── _release/
@@ -232,8 +230,8 @@ init_docs_sidebar()!
 
     - `_dev/` and `_release/` are hidden output folders.
     - `.moth_manifest` files are build-system metadata for safe stale-output cleanup.
-    - `@page.moth` is the current conventional module root at the selected project root. The filename is cosmetic; it does not mean that a root-purpose directive is present. Entries are selected from root activity, and a direct builder slot contribution is activity.
-    - Use structural `+*.moth` packages under the selected source root for project-local packages.
+    - `@entry.moth` is the executable entry root at the selected project root. Its presence selects the page, including when the file is empty or holds only metadata.
+    - Use structural `@package.moth` packages under the selected source root for project-local packages.
 
     ### Using --force
 
@@ -320,7 +318,7 @@ init_docs_sidebar()!
     Terse diagnostics have a stable compact shape:
 
     [codeblock, $code("bash"):
-        E|type|@page.moth|4:12|Expected Bool, found I32|help=Use a Bool expression here.
+        E|type|@entry.moth|4:12|Expected Bool, found I32|help=Use a Bool expression here.
         W|identifier_naming_convention|button.moth|1:1|Dependency alias case mismatch
     ]
 ]
@@ -346,7 +344,7 @@ init_docs_sidebar()!
         Type Error (ಠ_ಠ) 🔥
         Declaration 'count' has incompatible initializer type. Expected 'I32', but found 'String'.
 
-          --> @page.moth:6:17
+          --> @entry.moth:6:17
             |
           6 | count I32 = "wrong"
             |             ^^^^^^^

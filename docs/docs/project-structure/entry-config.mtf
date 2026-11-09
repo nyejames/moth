@@ -1,17 +1,10 @@
-HTML pages currently become entries from root activity: a non-trivial top-level
-runtime body, a direct const fragment or a runtime fragment. Direct const root
-inserts supply builder metadata. The accepted fixed-root-roles design will use
-`@entry.moth` as the explicit executable entry file. No entry-purpose directive
-is part of the language. Capability-checked `io.set_title` remains queued; the
-earlier `$page` proposal is superseded. See @../progress (Progress) and
-@../progress/packages-and-builders (Packages and builders).
+An HTML page's entry root is `@entry.moth`. Entry eligibility follows the file's presence, not the amount of authored runtime work. Direct const root inserts on the entry supply document metadata. No root-purpose directive exists, so `$page` and `$entry` are not source syntax.
 
 This page describes entry metadata and its relationship to project configuration.
 
 ### The `@project` namespace
 
-`@project` is an explicitly bound immutable namespace. The named `project` configuration record supplies its predefined fields. The
-existing grouped-record configuration remains the accepted model.
+`@project` is an explicitly bound immutable namespace. The named `project` configuration record supplies its predefined fields. The grouped-record configuration remains the accepted model.
 
 [codeblock, $code("moth"):
     @project version
@@ -19,17 +12,13 @@ existing grouped-record configuration remains the accepted model.
     footer #= [: v[version]]
 ]
 
-Normal project modules and eligible project-owned support packages may bind it.
-It is never implicitly injected or directly re-exported. Project-package
-exposure restrictions and field provenance still apply. Config helper and input
-bindings do not become project metadata merely because they exist.
+Normal project modules and eligible project-owned support packages may bind it. It is never implicitly injected or directly re-exported. Project-package exposure restrictions and field provenance still apply. Config helper and input bindings do not become project metadata merely because they exist.
 
-See @#project-config (Project configuration) for the field contract and
-@#build-inputs (Build configuration values) for independent input resolution.
+See @#project-config (Project configuration) for the field contract and @#build-inputs (Build configuration values) for independent input resolution.
 
 ### HTML builder slots
 
-Use direct top-level const inserts on an active root to supply document metadata:
+Use direct top-level const inserts in `@entry.moth` to supply document metadata:
 
 [codeblock, $code("moth"):
     #[$in title:Moth]
@@ -41,63 +30,33 @@ Use direct top-level const inserts on an active root to supply document metadata
     #[: <main>Hello Moth</main>]
 ]
 
-The HTML builder registers `title`, `description`, `lang`, `favicon`,
-`body_style`, `stylesheets` and `head`. Ordinary top-level const and runtime
-fragments render into the body. A nested or aliased `$in` remains a template
-composition helper, not a builder message. Helper files and imported roots do
-not contribute to the selected entry.
+The HTML builder registers `title`, `description`, `lang`, `favicon`, `body_style`, `stylesheets` and `head`. Ordinary top-level const and runtime fragments render into the body. A nested or aliased `$in` remains a template composition helper, not a builder message. Helper files, API facades and imported modules do not contribute to the selected entry.
 
-A root with only these direct const contributions still counts as
-output-producing root activity and emits a complete document. Runtime top-level
-templates contribute only to the default body lane. Runtime named builder slots
-are unsettled design and are not supported.
+An entry with only these direct const contributions still produces a complete document. Runtime top-level templates contribute only to the default body lane. Runtime named builder slots are not supported.
 
-The compiler accepts the active builder's read-only destination schema. It
-validates that a direct root insert targets a registered name and folds the
-contribution to a structural value; it does not know HTML slot meaning. The
-builder validates slot-specific content and assembles the document. Both the
-JavaScript and HTML-Wasm paths consume the same builder slot plan, so metadata
-fallbacks, stylesheet order and body output remain equivalent.
+The compiler accepts the active builder's read-only destination schema. It validates that a direct root insert targets a registered name and folds the contribution to a structural value, but it does not know HTML slot meaning. The builder validates slot-specific content and assembles the document. Both the JavaScript and HTML-Wasm paths consume the same builder slot plan, so metadata fallbacks, stylesheet order and body output remain equivalent.
 
-Repeated `title`, `description`, `lang`, `favicon` and `body_style`
-contributions concatenate in source order. Template body whitespace remains
-part of each value, including a space immediately after `:`. A supplied empty
-value counts as present. An absent title uses the route, then project name, with the configured
-title prefix and postfix. An absent description emits no description element.
-Absent language, favicon and body style use the HTML builder defaults.
+Repeated `title`, `description`, `lang`, `favicon` and `body_style` contributions concatenate in source order. Template body whitespace remains part of each value, including a space immediately after `:`. A supplied empty value counts as present. An absent title uses the route, then project name, with the configured title prefix and postfix. An absent description emits no description element. Absent language, favicon and body style use the HTML builder defaults.
 
-The builder escapes title text and attribute values. It inserts `head` as raw
-HTML after its dedicated head content. It removes only repeated complete head
-contributions that render identically in the page's URL context. It does not
-rewrite duplicates inside one contribution.
+The builder escapes title text and attribute values. It inserts `head` as raw HTML after its dedicated head content. It removes only repeated complete head contributions that render identically in the page's URL context. It does not rewrite duplicates inside one contribution.
 
-Each `stylesheets` contribution must contain exactly one tracked CSS resource
-and optional formatting whitespace. Plain paths, external URLs, site-root
-values, non-CSS resources and combined resources are invalid. The builder
-deduplicates by stable resource origin, keeps the first occurrence and renders
-the URL relative to each output page. Use `head` for an external stylesheet.
+Each `stylesheets` contribution must contain exactly one tracked CSS resource and optional formatting whitespace. Plain paths, external URLs, site-root values, non-CSS resources and combined resources are invalid. The builder deduplicates by stable resource origin, keeps the first occurrence and renders the URL relative to each output page. Use `head` for an external stylesheet.
 
-Resource and site-root pieces retain their identity through folding and output
-planning. Named contributions keep their tracked resources live, including on
-metadata-only pages. The builder does not scan rendered HTML for paths. The
-former `page_title`, `page_description`, `page_lang`, `page_favicon`,
-`page_body_style` and `page_head` names are ordinary constants with no implicit
-document effect.
+Resource and site-root pieces retain their identity through folding and output planning. Named contributions keep their tracked resources live, including on metadata-only pages. The builder does not scan rendered HTML for paths. The former `page_title`, `page_description`, `page_lang`, `page_favicon`, `page_body_style` and `page_head` names are ordinary constants with no implicit document effect.
 
-### Fixed entry file and runtime title
+### Entry selection
 
-The fixed-root-roles design uses `@entry.moth` to identify the only authored
-executable entry root in a structural module. Entry eligibility follows file
-presence, including static-only, metadata-only and empty entries, rather than
-authored activity. `@mod.moth` and `@package.moth` are API-only facades. The
-separate root-role implementation owns directory discovery, migration and
-entry activation. The earlier `$page` proposal is superseded. Runtime top-level
-templates do not gain named builder slots. Capability-checked `io.set_title`
-remains independent queued work.
+`@entry.moth` is the only project entry source. A directory that contains the file is entry-eligible whether the file is empty, static-only, metadata-only or full of runtime work.
+
+`@mod.moth` and `@package.moth` are API-only facades. They never become entries, own no start function and emit no route. An entry-only module publishes no importable API.
+
+Importing a module or binding a package never activates its entry. Only a build or development command activates selected compiled entries. Separately compiled dependency entries stay dormant.
+
+HTML `build` and `dev` require at least one `@entry.moth` anywhere below the selected project directory. No homepage is required. `check` accepts a project with no entries.
 
 ### Concepts related to entry metadata
 
-- For module identity versus artefacts see @#module-roots (Module roots).
-- For fragments and the entry see @#entry-runtime-and-fragments (Active-root runtime and fragments).
-- For routes and command-specific no-page rules see @#html-routing-and-artifacts (HTML routing and artefacts).
+- For module identity and role rules see @#module-roots (Module roots).
+- For entry runtime and fragments see @#entry-runtime-and-fragments (Entry runtime and fragments).
+- For routes and command policy see @#html-routing-and-artifacts (HTML routing and artefacts).
 - For general directive grammar see @../directives (Directives).

@@ -78,8 +78,8 @@ Read these from the active worktree before changing package code:
 - `docs/build-system-design.md`, especially selected builder capabilities, package classification,
   Core and Builder package availability, exact semantic compatibility and external JavaScript emission
 - `docs/docs/packages/` and the canonical numeric/cast/Error references
-- `docs/docs/progress/@page.moth`
-- `docs/docs/progress/packages-and-builders/@page.moth`
+- `docs/docs/progress/@entry.moth`
+- `docs/docs/progress/packages-and-builders/@entry.moth`
 - `docs/developer-docs/style-guide/style-guide.mtf`
 - `docs/developer-docs/style-guide/testing.mtf`
 - `docs/developer-docs/style-guide/validation.mtf`
@@ -484,7 +484,7 @@ plan.
 ### Documentation and tracking closeout
 
 - update canonical package docs for accepted behaviour
-- update `docs/docs/progress/packages-and-builders/@page.moth`
+- update `docs/docs/progress/packages-and-builders/@entry.moth`
 - update the compiler progress matrix only for compiler or backend status
 - update this tracker
 - retain useful blockers and next extensions in the living package plan

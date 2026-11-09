@@ -1758,7 +1758,7 @@ The documentation migration and consistency pass now use the accepted collector-
 - [x] Update `docs/build-system-design.md` physical-strategy plans, capability metadata and release verification.
 - [x] Update the README memory goal from optional GC avoidance to the accepted collector-free release direction.
 - [x] Update the language cheatsheet with only a concise user-facing statement. Do not expose REC mechanics as source semantics.
-- [x] Update `docs/docs/progress/@page.moth` with separate rows for topology, retained-edge liveness, Affine Ownership ABI, REC planning, REC backend lowering, declared regions and collector-free release verification.
+- [x] Update `docs/docs/progress/@entry.moth` with separate rows for topology, retained-edge liveness, Affine Ownership ABI, REC planning, REC backend lowering, declared regions and collector-free release verification.
 - [x] Mark old compiler paths that still assume GC fallback as incomplete migration work.
 - [x] Link this plan from the main final memory-management plan.
 

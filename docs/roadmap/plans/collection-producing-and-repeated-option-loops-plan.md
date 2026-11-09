@@ -72,21 +72,21 @@ Read these from the active worktree before implementation:
   - `Lifetime-region and escape validation`
 - `docs/build-system-design.md`
   - target validation and backend handoff sections if backend capability coverage is affected
-- `docs/docs/loops/@page.moth`
+- `docs/docs/loops/@entry.moth`
 - `docs/docs/loops/conditional-loops.mtf`
 - `docs/docs/loops/collection-loops.mtf`
 - `docs/docs/loops/range-loops.mtf`
 - `docs/docs/loops/loop-control.mtf`
 - `docs/docs/branching/value-producing-if.mtf`
 - `docs/docs/errors/options.mtf`
-- `docs/docs/async/@page.moth`
+- `docs/docs/async/@entry.moth`
 - `docs/docs/cheatsheet/moth-language-cheatsheet.mtf`
 - `docs/developer-docs/memory-management/overview.mtf`
 - the routed borrow-validation and lifetime material for collection retention and loop liveness
 - `docs/developer-docs/style-guide/style-guide.mtf`
 - `docs/developer-docs/style-guide/testing.mtf`
 - `docs/developer-docs/style-guide/validation.mtf`
-- `docs/docs/progress/@page.moth`
+- `docs/docs/progress/@entry.moth`
 - `docs/roadmap/roadmap.md`
 
 The active documentation is the authority if any source path or internal Rust name in this queued plan has moved.
@@ -1322,7 +1322,7 @@ Expected changes:
 
 - [ ] add a Basic and Advanced "Collection-producing loops" section under `docs/docs/loops/`
 - [ ] add a Basic and Advanced or appropriately routed "Repeated option capture" section under `docs/docs/loops/`
-- [ ] update `docs/docs/loops/@page.moth`
+- [ ] update `docs/docs/loops/@entry.moth`
 - [ ] update conditional, collection and range loop pages only where their interaction with production needs clarification
 - [ ] update `loop-control.mtf` for producing-loop `then`, `continue` and `break`
 - [ ] update `value-producing-if.mtf` to distinguish scalar completeness from collection-producing loop fallthrough
@@ -1353,7 +1353,7 @@ Do not teach a fictional iterator object as the conceptual model.
 
 ## Async documentation
 
-Verify `docs/docs/async/@page.moth` still reserves `yield` for explicit coroutine suspension.
+Verify `docs/docs/async/@entry.moth` still reserves `yield` for explicit coroutine suspension.
 
 Only edit it if a short distinction is needed after the new loop docs land.
 

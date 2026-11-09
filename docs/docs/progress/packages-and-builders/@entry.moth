@@ -139,9 +139,9 @@ init_docs_sidebar()!
         [data:
             [: Project-local packages]
             [: Partial]
-            [: Targeted structural support-package roots, rejected legacy package-folder configuration, independently registered builder packages, dependency resolution, generic normal module-root and public-surface coverage.]
+            [: Targeted structural [$html:<code>@package.moth</code>] support roots, entry-only and paired normal-position owners, rejected legacy package-folder configuration, independently registered builder packages, dependency resolution, fixed normal module roots and public-surface coverage.]
             [: Frontend / HTML]
-            [: Structural [$html:<code>+*.moth</code>] support packages and the optional project-root facade define the accepted project-local package model. Legacy config-driven [$html:<code>package_folders</code>] paths and the historical default [$html:<code>lib/</code>] are removed. Independently registered Builder/Core source packages retain their own package boundaries.]
+            [: Structural [$html:<code>@package.moth</code>] support packages and the optional project-root facade define the accepted project-local package model. A module with [$html:<code>@mod.moth</code>] or [$html:<code>@entry.moth</code>] occupies the normal-position owner role, and an entry-only owner still gives its support descendants a legal scope. Legacy config-driven [$html:<code>package_folders</code>] paths and the historical default [$html:<code>lib/</code>] are removed. Independently registered Builder/Core source packages retain their own package boundaries.]
         ]
 
         [data:
@@ -149,7 +149,7 @@ init_docs_sidebar()!
             [: Partial]
             [: Targeted definition registration, rejection, project build driver, build profile and external-crate compile coverage.]
             [: Frontend / Rust]
-            [$md: [$html:<code>moth::builder::BuilderDefinition</code>] registers Builder-origin source packages, native host packages described with [$html:<code>moth::host::HostFunction</code>] and opt-in [$html:<code>.mtf</code>]/[$html:<code>.md</code>] source kinds through the existing registries. [$html:<code>finish</code>] rejects invalid builder identities, duplicate or overlapping package paths, reserved [$html:<code>@project</code>] and [$html:<code>@core</code>] paths, relative [$html:<code>from_dir</code>] paths, [$html:<code>available_in_templates</code>] without [$html:<code>moth_templates</code>] and host signatures outside the V1 profile. [$html:<code>moth::builder::build_project</code>] compiles a project through the shared build orchestration and calls the builder's [$html:<code>build</code>] step with an immutable compiled project, so source diagnostics never reach [$html:<code>build</code>]. [$html:<code>moth::builder::BuildProfile</code>] selects the development or release profile for one request, and the builder reads the selected profile through [$html:<code>BuildContext::profile</code>]. A missing facade is a builder error, and [$html:<code>ProjectPackage</code>] has no public methods yet. [$html:<code>.config(...)</code>], [$html:<code>CompiledProject::settings</code>], [$html:<code>BuildContext::compile_wasm</code>], non-empty [$html:<code>BuildArtifacts</code>] registration and publication, native host adapters and the Lappet runtime remain incomplete. The driver discards the current empty artefact set. Host-binding macros are accepted future conveniences, not current APIs.]
+            [$md: [$html:<code>moth::builder::BuilderDefinition</code>] registers Builder-origin source packages, native host packages described with [$html:<code>moth::host::HostFunction</code>] and opt-in [$html:<code>.mtf</code>]/[$html:<code>.md</code>] source kinds through the existing registries. [$html:<code>finish</code>] rejects invalid builder identities, duplicate or overlapping package paths, reserved [$html:<code>@project</code>] and [$html:<code>@core</code>] paths, relative [$html:<code>from_dir</code>] paths, a non-official [$html:<code>@html</code>] template prelude root, [$html:<code>.mtf</code>] support without the official HTML package set and host signatures outside the V1 profile. [$html:<code>moth::builder::build_project</code>] compiles a project through the shared build orchestration and calls the builder's [$html:<code>build</code>] step with an immutable compiled project, so source diagnostics never reach [$html:<code>build</code>]. [$html:<code>moth::builder::BuildProfile</code>] selects the development or release profile for one request, and the builder reads the selected profile through [$html:<code>BuildContext::profile</code>]. A missing facade is a builder error, and [$html:<code>ProjectPackage</code>] has no public methods yet. [$html:<code>.config(...)</code>], [$html:<code>CompiledProject::settings</code>], [$html:<code>BuildContext::compile_wasm</code>], non-empty [$html:<code>BuildArtifacts</code>] registration and publication, native host adapters and the Lappet runtime remain incomplete. The driver discards the current empty artefact set. Host-binding macros are accepted future conveniences, not current APIs.]
         ]
 
         [data:
@@ -370,24 +370,18 @@ init_docs_sidebar()!
         ]
 
         [data:
-            [: [$html:<code>$html_builder</code>] configuration]
-            [: Deferred]
-            [: None]
-            [$md: Closed config-only HTML settings directive with required singleton invocation for authored HTML directory projects. Bare [$html:<code>$html_builder</code>] uses defaults. Current grouped [$html:<code>html</code>] records remain implemented. Compiler-wide [$html:<code>$project</code>] / [$html:<code>$config</code>] status lives in @../ (Progress).]
-        ]
-
-        [data:
-            [: General [$html:<code>$entry</code>] purpose]
-            [: Deferred]
-            [: None]
-            [: Explicit root-purpose and command-specific no-entry rules remain queued. Current HTML entries use root activity. The earlier [$html:<code>$page</code>] proposal is superseded; a future general [$html:<code>$entry</code>] directive owns explicit purpose. Runtime named builder slots are unsettled.]
+            [: Presence-based entry roots and command policy]
+            [: Supported]
+            [: Root-role combinations, empty, static-only and metadata-only entries, imported-entry suppression, zero-entry checks, descendant-only directory builds, single-file synthetic entries and package-only build outcomes.]
+            [: Build system / HTML builder]
+            [: A directory with [$html:<code>@entry.moth</code>] is entry-eligible regardless of authored activity. [$html:<code>@mod.moth</code>] and [$html:<code>@package.moth</code>] never become entries. HTML [$html:<code>build</code>] and [$html:<code>dev</code>] need at least one entry anywhere below the selected project root and no homepage. [$html:<code>check</code>] accepts a project with no entries. Development launch opens the real homepage when present, otherwise the first route in alphabetical order.]
         ]
 
         [data:
             [: HTML builder root slots]
             [: Supported]
             [: Direct root routing, metadata-only entries, body interleaving, imported/helper/API-only isolation, unknown and nonconstant target rejection, resource liveness, scalar metadata, favicon sources, title fallback/concat, stylesheet validation and origin dedup, head dedup, and equivalent JavaScript and HTML-Wasm documents.]
-            [: Direct const root inserts supply document metadata, tracked stylesheet resources and additional head HTML. The compiler validates registered destinations without knowing HTML names. Scalar metadata concatenates, an explicit empty value stays supplied, title falls back through route then project name with prefix/postfix, and title/attribute values are escaped. Each [$html:<code>stylesheets</code>] insert must contain one tracked CSS origin; the first origin wins. Complete head contributions deduplicate after URL rendering and are emitted last. Runtime named builder slots are unsettled. Reserved [$html:<code>page_*</code>] constants have no implicit effect.]
+            [: Direct const root inserts in [$html:<code>@entry.moth</code>] supply document metadata, tracked stylesheet resources and additional head HTML. The compiler validates registered destinations without knowing HTML names. Scalar metadata concatenates, an explicit empty value stays supplied, title falls back through route then project name with prefix/postfix, and title/attribute values are escaped. Each [$html:<code>stylesheets</code>] insert must contain one tracked CSS origin; the first origin wins. Complete head contributions deduplicate after URL rendering and are emitted last. Runtime named builder slots are not supported. Reserved [$html:<code>page_*</code>] constants have no implicit effect.]
         ]
 
         [data:

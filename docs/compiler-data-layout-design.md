@@ -4,7 +4,7 @@
 > diagnostic representations, their lifetimes, and the boundary between user diagnostics,
 > infrastructure failures and compiler bugs.
 >
-> `docs/docs/progress/@page.moth` records implementation support. This document describes the
+> `docs/docs/progress/@entry.moth` records implementation support. This document describes the
 > current data and ownership contracts.
 
 
@@ -36,7 +36,7 @@ It does not override:
 - `docs/docs/mon/mon-format.mtf` for MON literal-data format semantics
 - `docs/developer-docs/language/overview.mtf` and its selected canonical references for source-language behaviour
 - the memory-management authorities for Moth program semantics
-- `docs/docs/progress/@page.moth` for current implementation status
+- `docs/docs/progress/@entry.moth` for current implementation status
 - `docs/roadmap/roadmap.md` for sequencing and deferred work
 
 Update every shared boundary in both owning authorities in the same change. This document sets

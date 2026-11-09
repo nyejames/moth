@@ -7,17 +7,17 @@ This index routes contributors to the canonical directive contract and its compi
 - `docs/docs/directives/directives.mtf` owns the two attachment locations, one-operand grammar, validation and diagnostics.
 - `docs/docs/directives/directives-basic.mtf` presents the short accepted surface.
 - `docs/docs/templates/template-directives.mtf` owns the existing template-head composition and formatting semantics.
-- `docs/docs/project-structure/project-config.mtf` owns named config records. `docs/docs/project-structure/build-inputs.mtf` owns the future `$config` input contract. `docs/docs/project-structure/entry-config.mtf` owns HTML builder slots and current activity-based entry selection.
+- `docs/docs/project-structure/project-config.mtf` owns named config records. `docs/docs/project-structure/build-inputs.mtf` owns the future `$config` input contract. `docs/docs/project-structure/entry-config.mtf` owns HTML builder slots and presence-based entry selection.
 
 ## Compiler and build handoffs
 
 - `docs/compiler-design-overview.md` owns Stage 1 tokenization, Stage 2 header syntax, Stage 4 semantics and entry metadata. Directive recognition must retain a known name and precise authored span before context validation.
 - `docs/build-system-design.md` owns selected configuration, root-role facts and builder entry selection.
-- `docs/roadmap/plans/general-directives-plan.md` implements `$config` and moves existing HTML formatters into compiler ownership. Source modifiers have contiguous next-construct attachment; template directives use the containing template. The separate fixed-root-roles plan owns `@entry.moth` eligibility and entry selection.
+- `docs/roadmap/plans/general-directives-plan.md` implements `$config` and moves existing HTML formatters into compiler ownership. Source modifiers have contiguous next-construct attachment; template directives use the containing template. Fixed root roles own `@entry.moth` eligibility and entry selection.
 - Placement errors must distinguish known invalid contexts, unknown names, deferred features, invalid operands, duplicate modifiers and attachment broken by an empty physical line. Use existing compiler diagnostic owners and avoid a second lexer/header grammar.
 
 ## Status
 
-- `docs/docs/progress/@page.moth` reports what actually works.
+- `docs/docs/progress/@entry.moth` reports what actually works.
 - `docs/roadmap/roadmap.md` owns implementation sequencing.
 - `docs/docs/design-scope/` owns accepted, deferred and excluded boundaries.

@@ -1,4 +1,4 @@
-**Current support and accepted design.** Template-head directives are implemented. General source modifiers, including `$config`, remain accepted design queued for implementation. Entry selection instead uses the planned fixed root filename `@entry.moth`. `config.moth` retains its named `project` and builder-specific records. See @../progress (Progress) for current support.
+**Current support and accepted design.** Template-head directives are implemented. General source modifiers, including `$config`, remain accepted design queued for implementation. Entry selection uses the fixed `@entry.moth` root file, not a directive. `config.moth` retains its named `project` and builder-specific records. See @../progress (Progress) for current support.
 
 A directive modifies an existing construct. Template-head directives modify their template and source directives modify the following eligible construct.
 
@@ -32,7 +32,8 @@ A source modifier has its own line and must attach to the next eligible construc
     api_url #String = "https://example.com"
 ]
 
-The source example describes accepted syntax, not current Alpha compiler support. No module-root directive category exists. The proposed fixed-root-roles module structure instead uses `@mod.moth` for the normal API facade, `@package.moth` for the scoped or external package facade and `@entry.moth` for executable entry work. `config.moth` remains separate. The compiler and builder select entries from the role facts, not from directives or authored runtime activity.
+The source example describes accepted syntax, not current Alpha compiler support. No module-root directive category exists. The fixed root files carry the module roles: `@mod.moth` publishes the normal API facade, `@package.moth` publishes the scoped or external package facade and `@entry.moth` owns executable entry work. `config.moth` remains separate. The compiler and builder select entries from root presence, not from directives or authored runtime activity.
+
 ### Operands and ownership
 
 The compiler defines directive names, valid target kinds, phases and operand contracts. A directive has at most one optional compile-time operand:
@@ -52,8 +53,8 @@ Directives are compiler-owned modifiers, not attributes available to arbitrary s
 ### Examples and contexts
 
 - `$config` marks one explicitly typed top-level compile-time `#` constant as an input contract. Its type and fallback are written on the declaration itself. It is valid in selected bootstrap configuration and eligible selected source modules. `#Config of T` remains the operational spelling until this migration.
-- There is no entry-purpose directive. `@entry.moth` identifies an eligible executable entry under the fixed-root-roles design. `$page` is not an alias.
-- `$test`, `$export`, `$layout` and computation constraints are separate planned designs. Their exact targets and semantics are not implemented by this reference.
+- There is no entry-purpose directive. `@entry.moth` is the executable entry root and `$page` is not an alias.
+- `$test`, `$export`, `$layout` and computation constraints are separate planned designs. Their exact targets and semantics are not implemented by this reference. The future `$export` modifier will apply only to `@mod.moth` and `@package.moth`, never to `@entry.moth`, helpers, templates or config.
 - `$async` and `$checked` remain undecided proposals. Their earlier block spellings do not establish a general-purpose directive block grammar.
 - Project and active-builder settings remain ordinary named compile-time records inside `config.moth`. There are no accepted `$project`, `$builder` or `$html_builder` directives.
 
@@ -79,6 +80,7 @@ Diagnostics identify the directive's authored span, the target when present and 
 - Unknown spellings and recognised but unimplemented directives have distinct diagnostics. Invalid directives never act as successful no-ops and recovery must not consume following unrelated source.
 
 A declaration modifier appearing first in a file is still a declaration modifier. Directive matching never depends on capitalisation. CRLF and LF line endings must have identical attachment semantics.
+
 ### Related references
 
 - @../templates/#template-directives (Template directives)

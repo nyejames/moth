@@ -135,11 +135,11 @@ init_docs_sidebar()!
         [header: [: Surface] [: Status] [: Coverage] [: Runtime target] [: Notes] ]
 
         [data:
-            [: Entry-selected module roots and compiler-owned entry]
+            [: Fixed root roles, presence-based entries and compiler-owned entry]
             [: Supported]
-            [: Broad entry-selected root, dependency-sort, normal-file top-level rejection, imported-root suppression, fragment-order and API-only artefact-filtering coverage. Targeted compiler-owned entry Error!, structured entry-failure and dormant dependency-root grouped-delimiter EOF diagnostics with exact source spans.]
+            [: Broad root-role combinations, closed filename rejection, root-local isolation, helper sharing across roots, dependency-sort, API-root runtime rejection, imported-root suppression, fragment-order and API-only artefact-filtering coverage. Targeted empty, static-only and metadata-only entries, zero-entry checks, descendant-only HTML builds, single-file synthetic entries and compiler-owned entry Error! with exact source spans.]
             [: Frontend / HTML builder]
-            [: Selected normal modules compile dormant compiler-owned entry work with builtin [$html:<code>Error!</code>]. Entry assembly activates it exactly once. Imported roots expose public interfaces without activating root work. API-only roots remain dependency-bindable and emit no HTML page artefact. The generated caller records returned entry failure structurally and reports a fixed notice independently of [$html:<code>Error.code</code>]. The entry has no source-level name, so [$html:<code>start</code>] is an ordinary identifier that code may declare, call, export and import.]
+            [: A directory recognises only [$html:<code>@mod.moth</code>], [$html:<code>@package.moth</code>] and [$html:<code>@entry.moth</code>] as optional roots. Only [$html:<code>@entry.moth</code>] owns dormant compiler-owned entry work with builtin [$html:<code>Error!</code>], and entry assembly activates it exactly once. Imported modules expose public interfaces without activating root work. API facades remain dependency-bindable and emit no HTML page artefact. Entry changes do not alter API fingerprints. The generated caller records returned entry failure structurally and reports a fixed notice independently of [$html:<code>Error.code</code>]. The entry has no source-level name, so [$html:<code>start</code>] is an ordinary identifier that code may declare, call, export and import.]
         ]
 
         [data:
@@ -217,9 +217,9 @@ init_docs_sidebar()!
         [data:
             [: Moth template [$html:<code>.mtf</code>] content assets]
             [: Partial]
-            [: Targeted compiler-integrated dependency binding, synthetic content constant, markdown folding, automatic heading IDs, module-root re-export, direct API source snapshots and cross-document warning contexts, diagnostics and integration coverage. Selected ordinary and module-root single-file entries cover direct Moth template file values, implicit HTML helpers and final source-identity rebinding.]
+            [: Targeted compiler-integrated dependency binding, synthetic content constant, markdown folding, automatic heading IDs, direct API source snapshots and cross-document warning contexts, diagnostics and integration coverage. Selected ordinary and entry-root single-file units cover direct Moth template file values, qualified helper selection, the fixed HTML prelude and final source-identity rebinding.]
             [: HTML builder / frontend]
-            [: [$html:<code>.mtf</code>] files are builder-supported source assets that synthesize one private compile-time [$html:<code>content #String</code>] constant from an implicit [$html:<code>$md</code>] template body. Static headings inherit [$html:<code>$md</code>] automatic fragment IDs. Nested templates with no explicit directive also default to [$html:<code>$md</code>], and any explicit nested directive overrides that default. They bind extensionlessly into [$html:<code>.moth</code>], can be re-exported through a module root's [$html:<code>export:</code>] block, and must fully fold. Same-directory constants and builder constants remain visible when their names are unique. A collision reports both source locations where available, and neither source shadows the other.]
+            [: [$html:<code>.mtf</code>] files are builder-supported source assets that synthesize one private compile-time [$html:<code>content #String</code>] constant from an implicit [$html:<code>$md</code>] template body. Static headings inherit [$html:<code>$md</code>] automatic fragment IDs. Nested templates with no explicit directive also default to [$html:<code>$md</code>], and any explicit nested directive overrides that default. They bind extensionlessly into [$html:<code>.moth</code>], can be re-exported through a facade's [$html:<code>export:</code>] block, and must fully fold. Template bodies reach application values through qualified helper references and the fixed flat [$html:<code>@html</code>] prelude. Root-local declarations in [$html:<code>@mod.moth</code>], [$html:<code>@package.moth</code>] and [$html:<code>@entry.moth</code>] remain inaccessible. A qualified selection creates no name binding, while a real colliding binding keeps ordinary collision diagnostics.]
         ]
 
         [data:
@@ -495,6 +495,14 @@ init_docs_sidebar()!
         ]
 
         [data:
+            [: Qualified expression references]
+            [: Supported]
+            [: Targeted ordinary expression, nested template, [$html:<code>.mtf</code>], same-name local, selected-name non-binding, helper-next-to-all-roots, cross-module constant, generic body, callable and constructor suffix, direct cycle, self-cycle, mixed-format cycle and invalid provider coverage. Missing [$html:<code>.moth</code>] and [$html:<code>.mtf</code>] targets, runtime values in [$html:<code>.mtf</code>], entry-only children, root-local declarations and unassigned top-level calls report typed diagnostics.]
+            [: Frontend / HTML builder]
+            [$md: A [$html:<code>@path symbol</code>] pair on one physical line is one expression primary. It creates an early provider-dependency fact, introduces no local binding and resolves through the provider's normal visibility rules. The same spelling in statement position is an ordinary dependency clause, and [$html:<code>@file.ext</code>] remains a file value. Source and [$html:<code>.mtf</code>] cycles are diagnosed through the existing Stage 0 and Stage 3 graphs.]
+        ]
+
+        [data:
             [: File paths in value position]
             [: Supported]
             [: Broad prepared-reference and Stage 0 physical-input resolution, fixed-point content discovery, AST String/file-kind semantics, structural Resource/SiteRoot flow, public/generated/service boundaries, provider JS identity, output-link planning, boundary, symlink, missing-watch, config-rejection and ordinary user-defined [$html:<code>Path</code>] coverage.]
@@ -553,9 +561,9 @@ init_docs_sidebar()!
         [data:
             [: Selected-directory project root]
             [: Supported]
-            [$md: Directory commands compile the selected directory as build and source root. Missing [$html:<code>config.moth</code>] applies validated builder defaults and a directory-derived name. Hidden [$html:<code>_</code>] source components are excluded with lexical and canonical symlink checks. Directory outputs default to [$html:<code>_dev</code>] and [$html:<code>_release</code>] and are hidden from source discovery. Scaffolds emit a root-level [$html:<code>@page.moth</code>] and a minimal explicit config.]
+            [$md: Directory commands compile the selected directory as build and source root. Missing [$html:<code>config.moth</code>] applies validated builder defaults and a directory-derived name. Hidden [$html:<code>_</code>] source components are excluded with lexical and canonical symlink checks. Directory outputs default to [$html:<code>_dev</code>] and [$html:<code>_release</code>] and are hidden from source discovery. Scaffolds emit a root-level [$html:<code>@entry.moth</code>] and a minimal explicit config.]
             [: Build system / CLI]
-            [$md: Paired normal/support roots compile in one transaction with isolated authoring scopes and atomic interface publication. Source-package and project-package surfaces select the declared support interface. See @../project-structure (Project structure).]
+            [$md: Optional normal, support and entry roots compile in one transaction with isolated root scopes and atomic optional-interface publication. Source-package and project-package surfaces select the declared API surface. HTML [$html:<code>build</code>] and [$html:<code>dev</code>] need at least one [$html:<code>@entry.moth</code>] and no homepage, while [$html:<code>check</code>] accepts zero entries. See @../project-structure (Project structure).]
         ]
 
         [data:
@@ -563,7 +571,7 @@ init_docs_sidebar()!
             [: Deferred]
             [: None]
             [: Frontend]
-            [$md: Accepted queued design. [$html:<code>$</code>] is the general marker, sharing call syntax with ordinary calls except that authored empty [$html:<code>()</code>] is invalid. Template directives remain implemented. See @../directives (Directives).]
+            [$md: Accepted queued design. [$html:<code>$</code>] is the general marker. Source modifiers use contiguous next-construct attachment and at most one optional compile-time operand, with no call-style argument list. Template directives remain implemented. See @../directives (Directives).]
         ]
 
         [data:
@@ -572,14 +580,6 @@ init_docs_sidebar()!
             [: None]
             [: Frontend / build system]
             [: Accepted queued design. Prefix on one typed top-level [$html:<code>#</code>] binding. Explicit-only providers; project fields never implicitly supply inputs. Current [$html:<code>#Config</code>] remains the implemented spelling.]
-        ]
-
-        [data:
-            [: [$html:<code>$project</code>] configuration]
-            [: Deferred]
-            [: None]
-            [: Frontend / build system]
-            [$md: Accepted queued design. Closed predefined signature with optional String name (directory-name default) and optional version. No entry_root, arbitrary fields or metadata argument. HTML $html_builder status lives in @./packages-and-builders (Packages and Builders).]
         ]
 
         [data:
@@ -611,7 +611,7 @@ init_docs_sidebar()!
             [: Deferred]
             [: None]
             [: Frontend / build system]
-            [: [$html:<code>$test</code>] is a later non-page purpose after currently queued work. No runner, command or lifecycle is defined. The general HTML [$html:<code>$entry</code>] purpose is tracked in the Packages and Builders Progress Matrix; the earlier [$html:<code>$page</code>] proposal is superseded.]
+            [: [$html:<code>$test</code>] is a later non-page purpose after currently queued work. No runner, command or lifecycle is defined. Entry eligibility is owned by the [$html:<code>@entry.moth</code>] root role, and no [$html:<code>$entry</code>] or [$html:<code>$page</code>] directive is accepted.]
         ]
 
         [data:
@@ -806,10 +806,10 @@ init_docs_sidebar()!
         ]
 
         [data:
-            [: Module-root export/re-export syntax]
+            [: API facade export/re-export syntax]
             [: Supported]
-            [: Targeted authored export, flat direct-selection re-export, alias, source/external symbol, privacy, duplicate, placement and strict-block rejection coverage. Pure one/two-hop Moth facades retain external Call/Invoke runtime demand without callable Moth wrappers or dormant-root activation.]
-            [: A module root's single strict [$html:<code>export:</code>] block exposes public authored declarations and flat dependency re-exports. Legacy inline [$html:<code>export</code>] forms, bare namespace exports, wildcard exports, function alias values and automatic method re-export through type aliases are rejected.]
+            [: Targeted authored export, flat direct-selection re-export, alias, source/external symbol, privacy, duplicate, placement and strict-block rejection coverage. Root-local and entry-root export rejection, pure one/two-hop Moth facades, external Call/Invoke runtime demand without callable Moth wrappers and dormant-root non-activation are covered.]
+            [: Only [$html:<code>@mod.moth</code>] and [$html:<code>@package.moth</code>] accept a single strict [$html:<code>export:</code>] block for public authored declarations and flat dependency re-exports. Entry roots, helper files and config reject it. Legacy inline [$html:<code>export</code>] forms, bare namespace exports, wildcard exports, function alias values and automatic method re-export through type aliases are rejected.]
         ]
 
         [data:

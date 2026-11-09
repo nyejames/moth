@@ -13,7 +13,7 @@ These docs teach the concepts rather than document every behaviour the compiler 
 [codeblock, $code("text"):
 compiler_walkthrough/
 ├── config.moth
-├── @page.moth
+├── @entry.moth
 └── greeting.moth
 ]
 
@@ -29,7 +29,7 @@ greet |name String| -> String:
 ]
 
 
-`@page.moth`
+`@entry.moth`
 [codeblock, $code("moth"):
 @greeting greet
 
@@ -138,7 +138,7 @@ pass policy separate from compiler-stage and memory-model contracts.
 - `docs/build-system-design.md` for commands, graphs, builders, linking and outputs
 - `docs/developer-docs/language/overview.mtf` for language surface
 - `docs/developer-docs/memory-management/overview.mtf` for reference semantics, borrow validation, lifetime regions, ownership and backend lowering
-- `docs/docs/progress/@page.moth` for what works today
+- `docs/docs/progress/@entry.moth` for what works today
 - `docs/roadmap/roadmap.md` for order and deferred design
 
 Educational pages explain those authorities. They do not outrank them.
@@ -146,8 +146,8 @@ Educational pages explain those authorities. They do not outrank them.
 ## Roadmap and current status
 
 - **Accepted design:** a staged compiler library with build-owned project orchestration, immutable module artefacts, entry-selected roots, per-function target assignment and a validated memory plan per physical variant.
-- **Current implementation:** the frontend through borrow validation, canonical module compilation, scoped packages, typed project config and the HTML builder's JavaScript path. Consult the progress matrix rather than this series for row-level detail.
-- **Queued work:** the mixed JavaScript and Wasm backend plan, the accepted general-directive/config migration, the deferred `$entry` purpose and runtime-title plan, and the collector-free memory and REC plans.
+- **Current implementation:** the frontend through borrow validation, fixed root roles, presence-based entries, canonical module compilation, scoped packages, typed project config and the HTML builder's JavaScript path. Consult the progress matrix rather than this series for row-level detail.
+- **Queued work:** the mixed JavaScript and Wasm backend plan, the accepted general-directive/config migration, capability-checked runtime title mutation, and the collector-free memory and REC plans.
 - **Deferred or outside scope:** lifetime-region validation, memory-strategy planning, REC, artefact reuse and persistence, trait objects and source-visible reference types.
 
 Read the series as the accepted destination, with each page's own status section marking where today diverges.

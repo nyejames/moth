@@ -30,7 +30,7 @@ Many ecosystems treat the language and the package tool as strangers. Moth grows
 
 **Command-selected capabilities** mean `moth build` does not discover the universe and hope. It selects a builder, a profile, tooling overlays and target intent before config validation begins.
 
-The greeting project needs a builder before source discovery. Without that choice, the tool cannot know whether `@page.moth` even counts as an entry kind.
+The greeting project needs a builder before source discovery. Without that choice, the tool cannot know which source kinds and entry kinds the project supports.
 
 This coupling feels strange if you expect `package.json` scripts or a free-form `build.rs`. It keeps the project contract visible and bounded before the graph exists.
 
@@ -149,10 +149,10 @@ When you propose an example, ask whether the progress matrix already supports it
 ## Roadmap and current status
 
 - **Accepted design:** design-scope, compiler and memory authorities agree on the bias above.
-- **Current implementation:** the progress matrix reports syntax and backend coverage without rewriting the bias. Grouped config, typed build values and explicit `@project` are implemented.
-- **Queued work:** mixed backend plans, the accepted general-directive/config migration and the deferred `$entry` purpose and runtime-title plan remain labelled by plan status.
+- **Current implementation:** the progress matrix reports syntax and backend coverage without rewriting the bias. Grouped config, typed build values, explicit `@project`, fixed root roles and presence-based entries are implemented.
+- **Queued work:** mixed backend plans, the accepted general-directive/config migration and capability-checked runtime title mutation remain labelled by plan status.
 - **Deferred or outside scope:** rejected language families stay outside scope even when a neighbouring language loves them.
 
 ## Exit state
 
-You leave with a design lens and a status vocabulary. Next: what the build command must decide before `@page.moth` even enters the compiler.
+You leave with a design lens and a status vocabulary. Next: what the build command must decide before `@entry.moth` even enters the compiler.

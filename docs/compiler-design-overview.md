@@ -16,7 +16,7 @@ Companion authorities:
 - `docs/developer-docs/memory-management/overview.mtf` routes to reference semantics, access validation, lifetime topology and physical memory contracts. Its permanent contracts take precedence over measurement reports and implementation proposals.
 - `docs/docs/directives/directives.mtf` owns directive grammar and extension limits. `docs/docs/mon/mon-format.mtf` owns MON literal-data semantics.
 - `docs/docs/design-scope/` owns accepted and excluded language boundaries. `docs/developer-docs/style-guide/style-guide.mtf` owns implementation standards.
-- `docs/roadmap/roadmap.md` and its plans record accepted work, sequencing and open design. `docs/docs/progress/@page.moth` and the packages-and-builders matrix record support.
+- `docs/roadmap/roadmap.md` and its plans record accepted work, sequencing and open design. `docs/docs/progress/@entry.moth` and the packages-and-builders matrix record support.
 
 Educational compiler pages explain these contracts without overriding them. Routine internal API details belong in owning modules and doc comments. Use `index.md` to locate code rather than treating a source-path inventory as architecture.
 
@@ -52,7 +52,7 @@ For every compiler task, read the authority text and `Architectural invariants`.
 
 ## Architectural invariants
 
-- One directory-scoped `@*.moth` or `+*.moth` module is the canonical semantic compilation unit. A boundary compiles it once, including dormant root work, before entry activation.
+- One directory-scoped module, rooted by any present subset of `@mod.moth`, `@package.moth` and `@entry.moth`, is the canonical semantic compilation unit. A boundary compiles it once, including dormant entry work, before entry activation.
 - Each semantic fact has one producing owner. Later stages consume retained syntax and validated facts rather than reconstructing meaning from source or another representation.
 - AST semantics builds compact typed expression nodes addressed by owner-local IDs. Parser scratch, declarations, callable contracts, constants and diagnostic facts keep their own lifetimes rather than sharing one universal expression record.
 - Stage 0 schedules compiler services. The compiler alone sequences local semantic stages and owns their outputs. Build code never mutates HIR or installs semantic summaries.
@@ -120,7 +120,7 @@ bind provider interfaces
 
 Summary-dependent source/generated work converges inside this transaction. Every published source and generated function has validated HIR, borrow facts and local lifetime facts, with any conservative integer proofs paired to that exact executable. Pending numeric construction state and recipes never cross publication. Link-level lifecycle validation remains a later operation.
 
-A new local semantic stage belongs inside this service. Normal roots, support surfaces, project package surfaces and synthetic single-file modules use it after preparation. The compiler receives compiler-owned options, not the project tool's configuration container.
+A new local semantic stage belongs inside this service. API facade and entry roots, project package surfaces and synthetic single-file modules use it after preparation. The compiler receives compiler-owned options, not the project tool's configuration container.
 
 Raw stage owners have frontend-only or narrower Rust visibility. The architecture boundary check also rejects reverse dependencies on build/project configuration. Build code cannot construct interface drafts, mutate semantic state, install summaries or rerun analyses. Named config and direct-template services are the only shorter semantic paths defined here.
 
@@ -130,7 +130,7 @@ Stage 0 may request provider-independent preparation before provider interfaces 
 
 A module input contains:
 
-- stable module identity and root role
+- stable module identity and the present root-file roles
 - the selected semantic source set and retained `PreparedHeaderSyntax` for each source
 - the matching Stage 0 resolved file-reference table
 - graph-resolved providers and immutable dependency-ordered interfaces
@@ -159,29 +159,33 @@ Separate four consumer lanes:
 | `PublicSemanticInterface` | Complete canonical facts visible to semantic consumers, defined under `Public semantic interfaces`. |
 | `ModuleExecutable` | Module-local `TypeEnvironment`, validated HIR, borrow facts and local lifetime/escape facts, plus optional canonical integer proofs paired with the executable. |
 | `ModuleLinkFacts` | Backend-neutral per-function facts and generated materialisation requests, defined under `Per-function link facts`. |
-| `ModuleCompilerMetadata` | Dormant root activity, folded fragments with body or builder-slot destinations and runtime insertion indexes, documentation/API-index data, semantic resource origins and non-executable uses, site-root use. |
+| `ModuleCompilerMetadata` | Dormant entry-root activity, folded fragments with body or builder-slot destinations and runtime insertion indexes, documentation/API-index data, semantic resource origins and non-executable uses, site-root use. |
 
 The local lanes share a publication lifetime. Other modules consume the public interface rather than donor-local semantic state. Linkers and lowerers may consume the validated executable and link lanes through explicit handoffs. Retained compact identities remain paired with their lookup context.
 
-Compile-time page fragments never live in HIR. Frontend preparation checks folded fragment values and root activity, and validates builder-slot destinations against the builder schema before publication. The ordered fragment handoff retains runtime insertion indexes. HIR validation checks executable fragment operations only.
+Compile-time entry fragments never live in HIR. Frontend preparation checks folded fragment values and entry-root activity, and validates builder-slot destinations against the builder schema before publication. The ordered fragment handoff retains runtime insertion indexes. HIR validation checks executable fragment operations only.
 
 ### Module root semantic roles
 
-A normal module may define declarations, dormant top-level runtime work and page fragments. The current HTML builder selects an entry from that activity. A future general `$entry` purpose will make the selection explicit; it is deferred and the earlier `$page` proposal is superseded. Compilation validates dormant work before publication. A dependency exposes declarations without activating that work or inserting fragments.
+A rooted directory is one structural module with one `ModuleId` and one compilation. It recognises up to three optional authored roots: `@mod.moth` publishes the normal API facade, `@package.moth` publishes the scoped support facade or the external project package surface, and `@entry.moth` owns executable root work. At least one present root makes the directory rooted, and a module may contain any subset, including all three. An entry-only module publishes no importable API.
 
-Support surfaces and the project package surface are API-only. They permit ordinary declarations and runtime function bodies, but have no implicit entry, root runtime statements, page fragments, root purpose, route or builder artefact. Invalid root activity is diagnosed before executable HIR leaves the compiler.
+Each present root is a separate root-local declaration and visibility scope. Its top-level declarations stay private to that file. Ordinary helper files are shared, prepared once and cannot see a root-local declaration. A root may bind helper declarations through ordinary dependency clauses, but it cannot read another root directly. Same-spelling declarations in disjoint roots remain independent.
 
-The project package surface consumes build-supplied package visibility and produces an ordinary immutable module artefact. Its separate package assembly and project-wide assembly privilege remain build-owned.
+`@mod` and `@package` permit declarations and function bodies but reject top-level runtime statements, direct compile-time fragments and builder slots. `@entry` permits private declarations, top-level runtime work, direct compile-time fragments, runtime fragments and registered direct builder slots, and rejects every export surface, including current `export:` blocks. `$export` is the accepted future declaration modifier for `@mod` and `@package` only. Its operand and attachment grammar remain unsettled. No export syntax is accepted in `@entry`, helpers, templates or config.
 
-Public visibility uses compiler-owned export metadata. `$export` is the accepted directive direction. Prefix-only versus optional directive-block form remains unsettled. Keep one final visibility syntax while preserving facade privacy and public re-exports.
+The compiler publishes an interface only for a present facade. Normal and support interfaces have separate role-qualified origins, visibility scopes and consumer positions. `@mod` and `@entry` sources occupy normal positions and `@package` sources occupy strict support positions. An entry-only module can own a support-only child, but it never gains an importable normal interface. The project package surface consumes build-supplied visibility and remains an ordinary immutable module artefact. Registered Core and Builder source packages keep their existing normal-or-support public-root contract. Only an external project package requires project-root `@package`. No dependency activates another module's entry.
 
-### Normal-root entry
+The form, syntax and attachment details of root-local isolation belong to Stage 0, Stage 2 and Stage 3. A missing facade produces a typed absence. An absent entry produces no `start`. Public visibility uses compiler-owned export metadata and preserves facade privacy and public re-exports.
 
-The normal root's implicit entry is compiler-owned, non-exported and unavailable to dependency binding. A future root-purpose directive creates neither another entry nor a per-file compilation unit.
+### Entry-root start
 
-The entry owns dormant root runtime work and produces runtime fragment strings in source order. Entry assembly activates it at most once for that entry after compilation. Dependency binding and compilation never activate it.
+The `@entry` root's implicit entry is compiler-owned, non-exported and unavailable to dependency binding. Project entry eligibility is `@entry.moth` presence. Empty, static-only and metadata-only entries are eligible. The selected command and builder decide which eligible entries apply. A declaration-only module, a module with only `@mod` or `@package`, or a separately compiled dependency entry never becomes an active entry.
 
-Frontend semantics gives every normal-root entry, including a synthetic single-file root, built-in `Error!` alongside the existing fragment-collection success slots. Implicit checked failure materialises as `Error`. Typed `Error!` propagates with `!`; custom errors require explicit recovery.
+The entry owns dormant runtime work and produces runtime fragment strings in source order. Entry assembly activates it at most once after compilation. Dependency binding, package assembly and compilation never activate it.
+
+Frontend semantics gives every entry root, including a synthetic single-file root, built-in `Error!` alongside the existing fragment-collection success slots. Implicit checked failure materialises as `Error`. Typed `Error!` propagates with `!`; custom errors require explicit recovery.
+
+A command that explicitly selects an ordinary `.moth` file or `@entry.moth` compiles a synthetic entry. A selected `@mod.moth` or `@package.moth` keeps its facade role and never becomes an executable synthetic entry. A declaration-only synthetic check stays valid without manufacturing an application artefact.
 
 After failure-summary convergence and private-lane installation, HIR drops the entry's error channel
 when no reachable `ReturnError` remains. This narrows only the executable contract. Its ordered
@@ -368,9 +372,9 @@ Each successful base module has five distinct fingerprint domains:
 
 | Fingerprint | Contents and exclusions |
 |---|---|
-| Public interface | The complete canonical `PublicSemanticInterface`. Excludes private bodies, source locations, warnings, formatting metadata and non-public dormant root work. |
-| Implementation | Executable body semantics and non-interface implementation facts, including exported bodies whose public facts stay unchanged. Excludes dormant root work and generated sidecar bodies. |
-| Dormant root activity | Implicit entry, top-level runtime work, fragments, builder-slot destinations and folded root-local slot contributions. |
+| Public interface | The complete canonical `PublicSemanticInterface`. Excludes private bodies, source locations, warnings, formatting metadata and non-public dormant entry work. |
+| Implementation | Executable body semantics and non-interface implementation facts, including exported bodies whose public facts stay unchanged. Excludes dormant entry work and generated sidecar bodies. |
+| Dormant entry activity | `@entry` start, top-level runtime work, fragments, builder-slot destinations and folded entry-local slot contributions. |
 | Runtime dependencies | Backend-neutral calls, helpers, capabilities, target-gated operations, glue requirements, resource uses and site-root requirements of executable functions/root work. |
 | Documentation | Public documentation, editor metadata and API-index data. |
 
@@ -378,7 +382,7 @@ Generated requests come from the active specialised AST. They are materialisatio
 
 Resolved exact numeric types and values participate in the existing fingerprint domains they affect. Configuration may change folded values, executable behaviour and derived public, root or link facts while preserving declaration/export existence and declaration-origin identity. Provenance survives folding. Structural `$feature` selection requires separate selection-compatibility facts, not ordinary configuration folding.
 
-Private implicit-failure changes use the existing implementation, dormant-root activity and runtime-dependency facts they affect. They create no new fingerprint domain.
+Private implicit-failure changes use the existing implementation, dormant entry activity and runtime-dependency facts they affect. They create no new fingerprint domain. Entry implementation edits do not invalidate a facade's public interface when its public facts stay equal.
 
 Resource bytes and rendered URLs are not semantic-origin identity. `docs/build-system-design.md` > `Incremental and persistent artefacts` owns recompilation, relinking and cache policy. Its resource section owns content/output invalidation.
 
@@ -424,13 +428,14 @@ Preparation is the sole owner of module-wide top-level declaration discovery. `P
 - dependency/re-export clauses, direct selections and aliases
 - declaration shells for constants, functions, structs, choices, aliases, traits and conformances
 - declaration modifiers, including `$config` input-contract shells
-- root slot contributions and future root-purpose invocations with balanced argument ranges
-- dormant entry-body separation and compile-time fragment placement information
+- entry-root slot contributions with balanced argument ranges
+- root-local declaration and visibility scope facts for each present root
+- dormant entry-root body separation and compile-time fragment placement information
 - structural provider references and structural file references
 - conservative local declaration-ordering hints
 - diagnostics and identity/remap data
 
-Source-kind adapters may synthesise ordinary declarations. API-only root roles reject authored root runtime/output activity. Normal roots retain the corresponding dormant work and activity facts; a future root purpose will add explicit purpose facts.
+Source-kind adapters may synthesise ordinary declarations. The `@mod` and `@package` roles reject authored root runtime/output activity. `@entry` retains the corresponding dormant work and fragment facts.
 
 Preparation neither checks executable bodies nor folds expressions. It retains directive arguments without parsing a parallel argument language. The shared argument owner parses them semantically once the receiving context is known. File classification reads the tokenizer's dense path rows, not surrounding expressions.
 
@@ -441,6 +446,8 @@ Input-contract shells do not create provider edges. Config compilation precedes 
 Binding resolves retained clauses against immutable provider interfaces and produces `BoundModuleHeaders`: stable origins/export bindings, canonical types and folded values, final file-local visibility, source and binding-package namespaces, receiver surfaces, prelude/builtin reservations and completed collision results.
 
 Provider-created binding interfaces may be available before source compilation. Source providers must compile first. Binding never copies provider declarations into a consumer, reparses source or bypasses a facade. It passes resolved file-reference facts to AST without interpreting their value meaning.
+
+An expression-qualified occurrence (`@provider symbol`) is not an interface-selection clause. Binding resolves each occurrence once against the same provider interface as an authored direct selection, records the selected declaration against `(SourceId, PathSyntaxId)` and installs no local name, alias or namespace. Stage 0 already discovered its provider dependency. A missing or invalid selected declaration fails at that occurrence and never falls back to a file value.
 
 #### Four reference classes
 
@@ -455,15 +462,23 @@ Keep these facts distinct:
 
 A dependency clause may produce a provider edge and later a symbol binding. Its consumed path row is never also published as a structural file reference. A dependency-bound declaration is never a node in the consumer's local declaration graph.
 
+A qualified expression occurrence contributes a structural provider reference and a per-occurrence selected-symbol fact. It creates no dependency symbol binding and no file-local name. When it appears in a constant initializer or a synthetic `.mtf` content body, its resolved local declaration participates in ordering through that containing declaration's existing local edge. It never becomes a standalone ordering node.
+
+At top level, an unassigned `@module symbol, other` remains an ordinary dependency clause rather than a qualified expression primary. The qualified expression form applies in value positions, including template heads.
+
 Local edges cover alias targets, field and signature types, explicit constant types, constant initialisers, fixed capacities, structurally visible const-template controls and trait/conformance references that require local ordering. Declaration-shell parsing is shared with body-local declaration parsing where the syntax is equivalent.
 
 #### Source-kind adapters
 
 An `.mtf` source contributes one private synthetic `content #String` declaration. Its initialiser is a structurally built `$md` template over the original body tokens. Nested templates inherit Markdown formatting unless an explicit directive overrides it.
 
+Qualified occurrences inside `.mtf` template heads are dependencies of that generated `content` declaration. A selected same-module constant must order before `content`, and a selected cross-module or package provider must be a Stage 0 graph dependency. An explicit `@intro.mtf` file value and a qualified `@intro content` reference resolve to the same synthetic declaration identity. Both cycle directions are diagnosed by the existing owners. Stage 0 catches cross-module and provider cycles, and Stage 3 catches cycles inside one module. No template-only ordering pass, constant registry or second fold exists.
+
 Plain `.md` renders raw Markdown to HTML and contributes the same declaration shape with a synthetic string-literal initialiser. Ordering and AST folding then treat both as ordinary constants. Neither creates a separate AST, HIR, borrow or backend pipeline.
 
 A recognised source kind unsupported by the active builder receives a typed dependency diagnostic. Resolution never falls through to another extension candidate.
+
+The only implicit `.mtf` constant scope is the fixed compiler-standard `@html` prelude. It exposes the flat compile-time helpers such as `p` and `codeblock` by bare name through the official `@html` source package interface. The registered package root must equal `BuilderSurface::builtin_source_package_root("html")`, which names the official `packages/html` directory. An SDK builder cannot register another directory under `@html` or substitute a different package. A builder that enables `.mtf` without the standard HTML package set fails builder-surface validation with a capability diagnostic rather than compiling with a reduced scope. This is template scope policy, distinct from `PackageOrigin`: the standard HTML builder still registers `@html` as a Builder-origin source package, and its `@web/canvas` runtime dependency keeps its existing package boundary. All non-HTML application data reaches `.mtf` only through explicit qualified references.
 
 #### Direct Moth template service
 
@@ -483,15 +498,17 @@ The config outcome returns its live source-local span owner on success and diagn
 
 ### Stage 3: local declaration ordering
 
-Stage 3 topologically orders retained local declaration shells, diagnoses cycles and preserves source order among independent declarations. Stage 0 has already ordered providers. Stage 3 appends builtins and the dormant normal-root entry after declarations.
+Stage 3 topologically orders retained local declaration shells, diagnoses cycles and preserves source order among independent declarations. Stage 0 has already ordered providers. Stage 3 appends builtins and the dormant entry-root start after declarations.
 
 Same-file constants retain source-order semantics and reject forward references. Cross-file constants use header-provided local edges. Cross-module constants are already folded interface facts. Directive retention changes none of these rules.
+
+A qualified reference in a constant initialiser or synthetic `.mtf` content contributes its resolved local declaration to the containing declaration's existing ordering hints. Imported and provider targets use provider edges and create no local header. Same-file forward-reference and self-reference rules apply unchanged. Stage 3 diagnoses cycles inside one module, while Stage 0 already ordered cross-module providers.
 
 A concrete required edge with no local declaration is a graph diagnostic. A conservative symbol-shaped hint that cannot be identified as local may reach AST for a precise type/expression diagnostic. Unresolved hints do not all become missing-header errors.
 
 AST consumes the resulting declaration order linearly. Local nominal identities are registered before alias targets resolve. Completed member shells follow the alias targets and capacity constants they require. An alias that folds a module constant is published at its own ordered position, never provisionally.
 
-Stage 3 does not order modules or body-local declarations, inspect executable body references or copy dependency symbols into its graph. The dormant entry is not a dependency participant. Missing local edges belong in header preparation. Missing providers belong in Stage 0.
+Stage 3 does not order modules or body-local declarations, inspect executable body references or copy dependency symbols into its graph. The dormant entry root is not a dependency participant. Missing local edges belong in header preparation. Missing providers belong in Stage 0.
 
 ### Stage 4: AST semantics
 
@@ -527,7 +544,7 @@ Handler types and fallback constraints are validated before failure analysis, ev
 
 Each ordinary concrete function body, including a concrete receiver method, is fail-fast. Its first primary error is reported with useful related labels and the rest of the body is abandoned. Body-local nested constructs belong to their containing body and are not separate recovery roots.
 
-After that first error, AST may check later ordinary concrete bodies in sorted header order through the existing signatures, bound visibility and bounded body token ranges. It never rescans for a function boundary or recovers statement by statement. A header needing no further semantic work, such as an already resolved struct shell, is passed over. Recovery ends at the first header that needs another semantic producer, such as generic-template validation, a const template or the implicit entry, and at the first unavailable prerequisite. A shared-store capacity diagnostic also ends recovery, keeping the diagnostics already collected. These endings are fail-fast scope boundaries rather than budget stops, so they record no stop reason. Environment construction, declaration and signature completion, generated materialisation and const-template producers keep their fail-fast boundaries. Templates and generic calls inside an eligible body create no extra recovery root.
+After that first error, AST may check later ordinary concrete bodies in sorted header order through the existing signatures, bound visibility and bounded body token ranges. It never rescans for a function boundary or recovers statement by statement. A header needing no further semantic work, such as an already resolved struct shell, is passed over. Recovery ends at the first header that needs another semantic producer, such as generic-template validation, a const template or the entry-root start, and at the first unavailable prerequisite. A shared-store capacity diagnostic also ends recovery, keeping the diagnostics already collected. These endings are fail-fast scope boundaries rather than budget stops, so they record no stop reason. Environment construction, declaration and signature completion, generated materialisation and const-template producers keep their fail-fast boundaries. Templates and generic calls inside an eligible body create no extra recovery root.
 
 A valid signature stays usable when its body fails, so a wrong argument elsewhere remains an independent error. Checks that need body-derived failure, effect or other semantic facts from a failed or unvisited body are withheld. Recovery never installs a fabricated successful or infallible callee. A missing infallibility fact keeps its conservative may-fail meaning and produces no follow-on diagnostic.
 
@@ -924,7 +941,7 @@ Effectful expression work is linearised into ordered statement preludes and temp
 
 Range loops and explicitly stepped collection loops commit their next counter or source index through one `RangeCandidate` statement rather than an ordinary checked arithmetic operation. It carries `current` and `end` in the counter domain, `step` in its own signed type, the static `inclusive` flag and the counter domain. The step sign selects the direction-specific header test, so a wrong-direction range is empty. The candidate guard proves each later successor lies within the bound before the commit, so no out-of-domain successor is materialised. A range loop also binds a zero-based `I32` ordinal, while a collection loop's second binding is the actual `I32` source index rather than a visit ordinal. Operand widening keeps the step at its own width, so signed minima, full-width unsigned distances and both endpoints are compared exactly before any counter update. A zero step fails through the loop-step failure channel rather than a trap.
 
-HIR contains no unresolved generic/trait work, TIR, compile-time page fragments, config evaluation, target-selected source branches, absolute source paths, HTML URL routes, rendered URLs, content hashes, output paths or builder names. It does not choose lifetime topology, runtime ownership or physical layout.
+HIR contains no unresolved generic/trait work, TIR, compile-time entry fragments, config evaluation, target-selected source branches, absolute source paths, HTML URL routes, rendered URLs, content hashes, output paths or builder names. It does not choose lifetime topology, runtime ownership or physical layout.
 
 HIR explicitly distinguishes local definition from assignment to an existing
 place. Every execution of a definition establishes a new dynamic occurrence of

@@ -60,7 +60,7 @@ Neutral template handoff from AST becomes ordinary string and control-flow opera
 - template control flow as ordinary CFG
 - slot accumulators and appends where needed
 
-Compile-time page fragments and TIR itself do **not** enter HIR. Folded fragment metadata lives in module metadata lanes. HIR validation checks executable fragment operations only.
+Compile-time entry fragments and TIR itself do **not** enter HIR. Folded fragment metadata lives in module metadata lanes. HIR validation checks executable fragment operations only.
 
 The greeting's runtime pieces, if any remain dynamic, look like ordinary operations over strings and calls. Static compile-time fragment text stays metadata until the HTML builder inserts it.
 

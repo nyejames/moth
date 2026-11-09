@@ -1,4 +1,4 @@
-`@project` and HTML builder slots are implemented. General `$entry` and runtime `io.set_title` remain queued. See @../progress (Progress).
+`@project` and HTML builder slots are implemented. `@entry.moth` is the entry root, selected by its presence. Runtime `io.set_title` remains queued. See @../progress (Progress).
 
 ### Using `@project`
 
@@ -14,7 +14,7 @@ Bind `@project` to read predefined project fields:
 
 ### HTML metadata
 
-Direct const inserts on an active root set document metadata:
+Direct const inserts in `@entry.moth` set document metadata:
 
 [codeblock, $code("moth"):
     #[$in title:About]
@@ -22,24 +22,17 @@ Direct const inserts on an active root set document metadata:
     #[: <main>About this site</main>]
 ]
 
-HTML also accepts `description`, `lang`, `favicon`, `body_style` and `head`.
-Repeated scalar contributions concatenate. A supplied empty value differs from
-an absent slot. An absent title uses the route and then the project name with
-the configured prefix and postfix; absent description emits nothing and the
-other values use builder defaults. The builder escapes title text and attribute
-values. Each stylesheet insert needs one tracked CSS resource. The builder keeps
-the first contribution for each resource origin and renders its URL relative to
-the output page.
+HTML also accepts `description`, `lang`, `favicon`, `body_style` and `head`. Repeated scalar contributions concatenate. A supplied empty value differs from an absent slot. An absent title uses the route and then the project name with the configured prefix and postfix. Absent description emits nothing and the other values use builder defaults. The builder escapes title text and attribute values. Each stylesheet insert needs one tracked CSS resource. The builder keeps the first contribution for each resource origin and renders its URL relative to the output page.
 
-`head` inserts raw HTML after built-in head content. Identical complete head
-contributions render once. Old `page_*` constants have no implicit metadata
-effect. JavaScript and HTML-Wasm documents use the same slot plan.
+`head` inserts raw HTML after built-in head content. Identical complete head contributions render once. Old `page_*` constants have no implicit metadata effect. JavaScript and HTML-Wasm documents use the same slot plan.
 
-A metadata-only root still produces a page because a direct const contribution
-counts as root activity. Runtime top-level templates contribute only to the
-body; runtime named builder slots are unsettled and are not supported. General
-`$entry` root purpose and runtime title mutation remain separate future
-features. The earlier `$page` proposal is superseded and is not current syntax.
+A metadata-only entry still produces a page. Runtime top-level templates contribute only to the body. Runtime named builder slots are not supported. Only direct inserts in `@entry.moth` reach the builder. API facades, helper files and imported modules cannot contribute.
+
+### Entry selection
+
+A folder becomes an entry when it contains `@entry.moth`. An empty or metadata-only file still counts. `@mod.moth` and `@package.moth` never become entries.
+
+`check` works with no entries. HTML `build` and `dev` need at least one entry somewhere below the selected project root. No homepage is required.
 
 ### Concepts related to entry basics
 

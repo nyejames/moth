@@ -1,7 +1,4 @@
-The Alpha compiler selects HTML entries from authored root activity. Direct
-const root inserts supply builder metadata. General `$entry` purpose validation
-remains queued, and the former `$page` metadata design is superseded by builder
-slots.
+HTML pages come from directories that contain `@entry.moth`. Direct const root inserts supply builder metadata. No root-purpose directive exists, and the former `$page` metadata design is superseded by builder slots.
 
 A template can be required to finish during compilation.
 
@@ -22,9 +19,7 @@ returned from a function remains a value and does not become a page fragment by 
 
 ### Direct top-level const fragments
 
-Direct root const-template fragments use the current activity-based entry
-selection policy. A future general `$entry` purpose is separate from metadata
-and is not implemented.
+Direct const-template fragments are valid in `@entry.moth`. The file's presence already makes the directory entry-eligible, so a metadata-only entry produces a complete page.
 
 [codeblock, $code("moth"):
     #[$md:
@@ -32,9 +27,9 @@ and is not implemented.
     ]
 ]
 
-The direct form on an active root:
+The direct form in the entry file:
 
-- is valid only as top-level root fragment syntax
+- is valid only as top-level entry fragment syntax
 - must fully fold
 - records its position relative to runtime fragments
 - is handed to the project builder
@@ -45,8 +40,7 @@ The direct form on an active root:
 A builder can register named destinations for direct top-level const inserts.
 The HTML builder registers `title`, `description`, `lang`, `favicon`,
 `body_style`, `stylesheets` and `head`. Ordinary direct const fragments still
-render into the body. A root with only direct named const inserts still counts
-as an output-producing entry where the builder's entry rules allow it.
+render into the body. A metadata-only `@entry.moth` still produces a complete page.
 
 [codeblock, $code("moth"):
     #[$in title:Moth]
@@ -103,9 +97,8 @@ with no runtime work. The former `page_title`, `page_description`, `page_lang`,
 `page_favicon`, `page_body_style` and `page_head` names are ordinary constants
 with no implicit document effect.
 
-Runtime top-level named builder inserts are not part of the current contract.
-Their final design remains unsettled. `$required`, `$unique`, loop-level
-uniqueness and const function syntax are not implemented.
+Runtime top-level named builder inserts are not supported. `$required`,
+`$unique`, loop-level uniqueness and const function syntax are not implemented.
 
 ### Const template `if`
 

@@ -92,7 +92,7 @@ Source expresses stable semantics rather than target identity. Source cannot
 inspect the OS, architecture, backend or physical target, and cannot condition
 imports, declarations, exports or bodies on target identity. Ordinary `$config`
 values and static `if` are not structural selection mechanisms: they cannot
-remove declarations or dependencies. Strict `$project` metadata and explicit
+remove declarations or dependencies. The closed `project` record and explicit
 builder capabilities likewise do not expose physical target identity.
 
 Future `$feature` is the separate structural direction. It may select source
@@ -127,7 +127,7 @@ block remains undecided.
 
 `$test` is a deferred root-purpose direction; its runner, command and
 lifecycle details are undefined. A separate custom-metadata directive remains
-open design, so `$project` stays strict in the meantime.
+open design. The named `project` record stays closed in the meantime.
 
 ### Literal data and small tooling
 

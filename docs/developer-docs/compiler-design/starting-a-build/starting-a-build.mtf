@@ -1,14 +1,15 @@
 # A build starts before source compilation
 
-`moth build` does not open `@page.moth` first. It asks a blunter question: which command, builder, profile and inputs should interpret this project at all?
+`moth build` does not open `@entry.moth` first. It asks a blunter question: which command, builder, profile and inputs should interpret this project at all?
 
 Until those answers settle, the compiler has no honest graph to walk. Choose climate and soil first. Then grow the plant.
 
 The Alpha compiler currently uses grouped `project`/`html` records and
 declaration-owned `#Config of T` contracts. HTML document metadata uses direct
-const root builder slots. The `$config`, `$project` and `$html_builder` forms in
-this article are accepted queued design, not current syntax. A general `$entry`
-root purpose is deferred; the earlier `$page` proposal is superseded.
+const root builder slots. The `$config` form in this article is accepted queued
+design. Named `project` and `html` records are the accepted configuration
+design and current syntax. Entry eligibility comes from `@entry.moth` presence,
+not config or a source directive.
 
 ## Command and capability surface
 
@@ -121,23 +122,23 @@ tokenization
 -> interface binding for the single config source
 -> local declaration ordering
 -> AST semantic checking and folding
--> validated directive arguments, folded project and builder settings, and bootstrap input results
+-> folded project and builder record settings and bootstrap input results
 ]
 
 Then config **stops**. No borrow checker. No backend.
 
-The accepted shape contains explicit `$config` declarations, exactly one `$project` invocation and, for an authored HTML project, exactly one `$html_builder` invocation. It may also contain private helper constants, scalars and other foldable values allowed by the single-file compile-time surface. Bare `$html_builder` supplies its defaults.
+The accepted shape contains explicit `$config` declarations, at most one `project` record constant and, for an authored HTML project, the required `html` record. It may also contain private helper constants, scalars and other foldable values allowed by the single-file compile-time surface. An empty `html #= ()` supplies its defaults.
 
-Rejected shape includes dependency clauses, runtime declarations, functions, traits, page fragments, `export:` and nested config files. Config does not select the builder; the command already did.
+Rejected shape includes dependency clauses, runtime declarations, functions, traits, entry fragments, `export:` and nested config files. Config does not select the builder; the command already did.
 
 The accepted starter shape is:
 
 [codeblock, $code("moth"):
-$project(
+project #= (
     name = "compiler_walkthrough",
 )
 
-$html_builder
+html #= ()
 ]
 
 Version is optional, and there is no `entry_root`; the selected directory is the
@@ -165,7 +166,7 @@ without an initialiser requires an input. An optional declaration resolves to
 `U64`, `F16`, `F32`, `F64` and one optional layer around a supported primitive.
 They exclude `Byte`, `Dec`, aliases, inferred types, collections and records.
 
-Project identity, source discovery and compiler-control arguments remain fixed-only. `$config` dependence is rejected in `$project`'s `name` and `template_const_loop_iteration_limit`, including through helper constants. `$project` has strict predefined fields; it does not become an open metadata record.
+Project identity, source discovery and compiler-control fields remain fixed-only. `$config` dependence is rejected in the `project` record's `name` and `template_const_loop_iteration_limit`, including through helper constants. The `project` record has strict predefined fields; it does not become an open metadata record.
 
 Bootstrap contracts resolve in this order:
 
@@ -198,9 +199,9 @@ optional type, not numeric width conversion or String coercion. Completed input
 values carry their exact canonical type and lossless value. Semantic fingerprints
 use that type and value, not raw spelling or source location.
 
-The folded `$project` result becomes a specialised immutable **`ProjectGlobalsInterface`** under the reserved **`@project`** dependency root. It carries stable field identities, folded backend-neutral values, source locations, field-level fingerprints and project-context provenance. It carries no AST, no HIR and no runtime body.
+The folded `project` record becomes a specialised immutable **`ProjectGlobalsInterface`** under the reserved **`@project`** dependency root. It carries stable field identities, folded backend-neutral values, source locations, field-level fingerprints and project-context provenance. It carries no AST, no HIR and no runtime body.
 
-Normal modules may bind `@project` explicitly. Nothing injects it silently. Child modules, dependency aliases and packages cannot steal the `@project` root. Direct re-export of `@project` is forbidden.
+Project modules and project-owned support packages may bind `@project` explicitly. The external project package surface cannot. Nothing injects it silently. Child modules, dependency aliases and packages cannot steal the `@project` root. Direct re-export of `@project` is forbidden.
 
 For the greeting walkthrough, the bootstrap facts needed for Stage 0 are the project name, the selected directory root and builder settings. The separate input-contract results travel alongside them; neither set is reconstructed by scanning `@project`.
 
@@ -232,19 +233,19 @@ Draw the line early and keep it sharp.
     ]
 ]
 
-The compiler does not wander the filesystem inventing a project. The builder does not re-parse `@page.moth` to rediscover `greet`. Each stage trusts the previous owner's facts.
+The compiler does not wander the filesystem inventing a project. The builder does not re-parse `@entry.moth` to rediscover `greet`. Each stage trusts the previous owner's facts.
 
 The command and build system own target intent, target partition and physical-variant orchestration. Compiler-owned validation checks the assignment it is handed rather than choosing it. Builders expose stable capabilities and map them to target artefact forms. Source never observes physical target identity at all.
 
-The compiler owns general directive syntax, `$config` contracts and `$project` semantics. The build system applies folded project settings and runs bootstrap and graph orchestration; the HTML builder owns `$html_builder` settings and its registered root slot destinations.
+The compiler owns general directive syntax, `$config` contracts and `project` record validation. The build system applies folded project settings and runs bootstrap and graph orchestration; the HTML builder owns `html` record settings and its registered root slot destinations.
 
 ## What can fail here
 
 - unknown or unsupported directive, or a known directive in a config-only or root-invalid context
 - invalid config shape, forbidden config dependency or missing required input
-- strict `$project` field, invalid optional version or configuration-dependence violation
+- strict `project` field, invalid optional version or configuration-dependence violation
 
-The command and config service report these as structured diagnostics. A future `$entry` purpose and explicit entry selection are validated later by the build system; they are not recovered by reopening `config.moth`.
+The command and config service report these as structured diagnostics. Entry eligibility is a later build-system fact validated from `@entry.moth` presence. It is not recovered by reopening `config.moth`.
 
 ## Why Moth does it this way
 
@@ -258,9 +259,9 @@ The command and config service report these as structured diagnostics. A future 
 
 ## Roadmap and current status
 
-- **Accepted design:** one self-contained `config.moth` service with explicit `$config` contracts, strict `$project` and `$html_builder` invocations, separate bootstrap input results and a specialised `ProjectGlobalsInterface`.
+- **Accepted design:** one self-contained `config.moth` service with explicit `$config` contracts, strict `project` and active-builder records, separate bootstrap input results and a specialised `ProjectGlobalsInterface`.
 - **Current implementation:** grouped parenthesised `config.moth`, declaration-owned `#Config`, typed `--input` for build, check and dev, ordinary static-`if` integration and immutable explicit `@project`.
-- **Queued work:** `general-directives-and-project-config-plan.md` for the directive/config cutover and `html-page-directives-and-runtime-title-plan.md` for a general `$entry` purpose and runtime title. Builder slots own initial document metadata; the earlier `$page` proposal is superseded.
+- **Queued work:** `general-directives-plan.md` for the directive/config cutover and capability-checked runtime title mutation. Builder slots own initial document metadata and entries come from `@entry.moth` presence.
 - **Deferred or outside scope:** structural `$feature` selection, config dependencies and a general Moth build-script system.
 
 ## Exit state

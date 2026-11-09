@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-- Status: Accepted design, queued after fixed-root-roles and builder-slots integration.
+- Status: Accepted design, queued for implementation. The fixed-root role cutover is delivered.
 - Roadmap file: `docs/roadmap/plans/general-directives-plan.md`.
 - Deliver: a constrained two-context directive grammar, frontend ownership of existing template formatters and `$config` input contracts.
 - Preserve: optional `config.moth` and its existing named `project` and builder-settings records, including the selected builder's current schema, defaults and validation policy.
@@ -111,9 +111,12 @@ Delete the merged builder directive API, the HTML directive registration owner, 
 
 The separate fixed-root-roles plan owns root filenames, visibility, dormant `start`, entry eligibility, source discovery, builder selection, package facades, command routing, migration and entry-specific tests. Its accepted roles are `@mod.moth` for the normal API facade, `@package.moth` for the scoped or external package facade and `@entry.moth` for executable entry work. One directory remains one structural module and its available roles share one atomic compilation outcome.
 
-This directive work neither registers nor implements a module-root directive. A source-level `$entry` or `$page` is not an entry-selection mechanism. The builder consumes the completed `@entry` presence fact from root-role implementation, not source annotations, authored activity or rendered contents. Direct root `$in` contributions retain their ordinary template-head parsing and reach builder-owned destinations only under the selected active entry. Config remains independent in `config.moth`.
+This directive work neither registers nor implements a module-root directive. A source annotation never selects an entry. The builder consumes the completed `@entry` presence fact from root-role implementation, not authored activity or rendered contents. Direct root `$in` contributions retain their ordinary template-head parsing and reach builder-owned destinations only under the selected active entry. Config remains independent in `config.moth`.
 
-The fixed-root-roles cutover must be complete before the directive implementation assumes these filename and root-role contracts. Do not migrate root filenames, alter interface publication, change source discovery or rebuild entry planning here.
+The fixed-root-roles cutover is complete and this plan assumes its filename and root-role contracts. Do not migrate root filenames, alter interface publication, change source discovery or rebuild entry planning here.
+
+`$export` remains a future declaration modifier, not a module-root directive. Its accepted scope is declarations in `@mod.moth` and `@package.moth`. It is never accepted in `@entry.moth`, ordinary helpers, templates or `config.moth`. This plan defines no operand or attachment grammar for it and does not implement it.
+
 ## 5. Owners and implementation sequence
 
 Use current paths as locators and reconcile them against the integration tree. Preserve one semantic owner per fact:

@@ -207,7 +207,7 @@ duplicates export syntax; block support remains undecided.
 
 `$test` is a deferred root-purpose direction. Runner, command and lifecycle
 details are not yet defined. A separate custom-metadata directive remains open
-design, so strict `$project` metadata remains the interim boundary.
+design. The closed `project` record remains the interim boundary.
 
 ### Read next on excluded language families
 

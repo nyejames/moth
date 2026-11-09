@@ -1,47 +1,59 @@
-**Current support.** The Alpha builder finds HTML entries from root activity. A
-general `$entry` root purpose is deferred, and the earlier `$page` proposal is
-superseded. Current `export:` blocks are implemented; later `$export` migration
-remains deferred.
+Every folder can hold one module. A module can have up to three special root files, and each one has one job.
 
-Each source directory forms at most one structural module. A normal module
-uses an `@*.moth` root, while an API-only support package uses a `+*.moth` root. A
-directory may contain one root of each role, forming one paired module with a
-normal interface and a separately published support interface.
+### Three jobs, three files
 
-### One root per role
+- `@mod.moth` publishes the folder's normal API.
+- `@package.moth` publishes the folder's support API. At the project root it publishes the project's external package API.
+- `@entry.moth` runs the page or application code.
 
-The filename after `@` or `+` does not matter. `@page.moth`, `@mod.moth` and
-`@api.moth` all create the same normal-root role. One directory cannot contain
-two roots of the same role. A normal root and a support root may coexist, but
-they must resolve to distinct physical source files owned by that module.
+A folder may have one, two or all three files. A folder with only `@entry.moth` is a normal module that has no API to import.
 
-### Bind the module, not the root file
+Other helper files in the folder hold shared code. All roots can bind that shared code.
 
-Normal module-root files have no direct dependency form. Bind the directory's public module surface.
+### The names are fixed
 
-The `@` in `@page.moth` marks the file as a module root on disk. The `@` in
-`@pages` starts a dependency path. They share the same symbol but are not
-combined. Do not write `@@pages`. The second `@` is invalid.
+Only those three names work. The compiler rejects other special names and suggests the right one:
 
-[codeblock, $code("moth"):
-    @pages
+- `@page.moth` becomes `@entry.moth` for page code or `@mod.moth` for API
+- `+package.moth` becomes `@package.moth`
+- `@api.moth` and `@Entry.moth` are rejected too
+
+`config.moth` stays the build config file. `@config.moth` is not a root and is rejected.
+
+### Roots keep their declarations private
+
+A root file can read its own top-level declarations and shared helper declarations. It cannot read a declaration written in another root file. Helper files cannot read declarations written in a root file either.
+
+[codeblock, $code("text"):
+    site/
+    ├── @mod.moth
+    ├── @package.moth
+    ├── @entry.moth
+    └── shared.moth
 ]
 
-### Root and helper roles
+All three roots may bind `shared.moth`. None of them can read another root's private declarations. Move shared declarations into `shared.moth` instead.
 
-The root file defines the module identity. Files without `@` remain helpers in
-that module. Helpers cannot become entries or pages on their own.
+### What each root allows
 
-A root becomes an HTML entry from authored root activity: a non-trivial root
-body, a const fragment or a runtime fragment. A direct builder slot
-contribution is a const fragment and still produces a complete page:
+`@mod.moth` and `@package.moth` hold declarations and functions. They may export an API. They cannot hold page runtime code, page fragments or builder metadata.
+
+`@entry.moth` holds page runtime code, page fragments and builder metadata. It also owns the page's entry point. It cannot export an API.
+
+An imported module never runs its entry. The build command runs only selected entries.
+
+### Names come from folders
+
+A root filename never becomes an import name. `pages/@mod.moth` is imported as `@pages`, not `@mod`.
 
 [codeblock, $code("moth"):
-    #[$in title:Welcome]
+    @pages page_heading
 ]
 
-A future `$entry` purpose will make entry selection explicit. It is deferred and
-is not current syntax; do not write `$entry` or `$page`.
+The filename is a role marker, not a dependency path.
 
-`export:` currently controls public declarations. The later `$export` spelling
-will replace it; both forms won't remain permanent alternatives.
+### Concepts related to module roots
+
+- For the API surface see @#public-api (Public API).
+- For runtime code and fragments see @#entry-runtime-and-fragments (Entry runtime and fragments).
+- For page routes see @#html-routing-and-artifacts (HTML routes and artefacts).
