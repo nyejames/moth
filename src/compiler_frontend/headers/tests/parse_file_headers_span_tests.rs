@@ -849,3 +849,119 @@ Generic of A must {trait_name}\n"
         );
     }
 }
+
+/// Qualified-reference occurrences survive string remapping and source rebinding unchanged.
+///
+/// WHAT: retains `(path row, selected name, path span, selected span, shell)` through the exact
+///       per-file merge and final identity rebinding the module pipeline performs.
+/// WHY: occurrence keys are `(SourceId, PathSyntaxId)` and the selected name is a local string
+///       id; a stale id or span source would silently detach the later provider binding.
+#[test]
+fn qualified_reference_occurrences_survive_string_remapping_and_source_rebinding() {
+    let source = "value #= @math square\n";
+    let canonical = PathBuf::from("qualified-spans.moth");
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
+        .expect("source should register");
+    let source_id = sources
+        .get_by_canonical_path(&canonical)
+        .expect("registered source")
+        .id;
+    let scope = path_fork
+        .try_intern_filesystem_path(&canonical, &mut strings)
+        .expect("source path");
+    let mut spans = ExtendedSpanBuilder::new();
+    let tokens = tokenize(
+        source,
+        scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        &mut path_fork,
+        source_id,
+        &mut spans,
+    )
+    .expect("source should tokenize");
+    let (owner, path_syntax) = super::canonical_handoff(tokens);
+    let mut prepared = parse_file_headers_with_table(
+        owner,
+        scope,
+        path_syntax,
+        &HeaderParseOptions::default(),
+        &mut strings,
+        &mut path_fork,
+        0,
+        0,
+        &mut spans,
+    )
+    .expect("qualified reference preparation should succeed");
+    let original = prepared
+        .qualified_references
+        .first()
+        .expect("the initializer should retain one occurrence")
+        .clone();
+    assert_eq!(strings.resolve(original.selected), "square");
+    assert_eq!(original.dependency.span.source(), source_id);
+
+    let mut merged = StringTable::new();
+    let mut remapped_path_fork = PathInternerFork::empty();
+    merged.intern("unrelated");
+    let remap = merged.merge_from(&strings);
+    let path_remap = remapped_path_fork
+        .merge_delta_from(&path_fork, &remap)
+        .expect("source paths should remap");
+    prepared
+        .remap_string_ids(&remap)
+        .expect("prepared strings should remap");
+    prepared
+        .remap_path_ids(&path_remap)
+        .expect("prepared paths should remap");
+    drop(sources);
+
+    let earlier_source = PathBuf::from("a-earlier.moth");
+    let final_sources =
+        SourceDatabase::build([&earlier_source, &canonical], &canonical, None, &mut merged)
+            .expect("final source membership should register");
+    let final_id = final_sources
+        .get_by_canonical_path(&canonical)
+        .expect("final source")
+        .id;
+    assert_ne!(
+        final_id, source_id,
+        "canonical membership changes the provisional identity"
+    );
+    let final_path = remapped_path_fork
+        .try_intern_portable_path("qualified-spans.moth", &mut merged)
+        .expect("test path fits");
+    prepared
+        .rebind_source_identity(final_id, final_path, &mut remapped_path_fork)
+        .expect("retained source should rebind");
+
+    let rebound = prepared
+        .qualified_references
+        .first()
+        .expect("the occurrence must survive remapping")
+        .clone();
+    assert_eq!(rebound.selected, remap.get(original.selected));
+    assert_eq!(merged.resolve(rebound.selected), "square");
+    assert_eq!(
+        rebound.dependency.path_syntax,
+        original.dependency.path_syntax
+    );
+    assert_eq!(
+        rebound.dependency.span.local(),
+        original.dependency.span.local()
+    );
+    assert_eq!(
+        rebound.selected_span.local(),
+        original.selected_span.local()
+    );
+    assert_eq!(rebound.dependency.span.source(), final_id);
+    assert_eq!(rebound.selected_span.source(), final_id);
+    assert_eq!(rebound.dependency.dependency_shell_id.source, final_id);
+    assert_eq!(
+        rebound.dependency.dependency_shell_id.ordinal,
+        original.dependency.dependency_shell_id.ordinal
+    );
+}

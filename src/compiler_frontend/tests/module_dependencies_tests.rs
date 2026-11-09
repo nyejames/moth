@@ -1752,3 +1752,109 @@ fn missing_content_target_defers_to_the_stage0_diagnostic_lane() {
         "the declaring shell must still sort; the missing target is diagnosed by Stage 0's lane"
     );
 }
+
+#[test]
+fn qualified_template_content_cycle_reports_circular_dependency() {
+    let (headers, content_source_targets, mut string_table, mut path_fork) =
+        parse_module_headers_with_content_sources(
+            &[
+                ("@page.moth", "unused #= 0\n"),
+                ("settings.moth", "title #= @intro.mtf\n"),
+            ],
+            &[("intro.mtf", "# [@settings title]\n")],
+            &[],
+            "@page.moth",
+        );
+
+    let failure = resolve_module_dependencies(
+        headers,
+        &content_source_targets,
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("definition and template use must not form a cycle");
+    let boundary = diagnosed_result(failure);
+    assert!(
+        diagnosed_reports(&boundary).iter().any(|(_, diagnostic)| {
+            diagnostic.family_view::<CircularDependencyView>().is_some()
+        }),
+        "qualified template content and its source constant must report a cycle: {boundary:?}"
+    );
+}
+
+#[test]
+fn self_qualified_template_content_reports_circular_dependency() {
+    let (headers, _content_source_targets, mut string_table, mut path_fork) =
+        parse_module_headers_with_content_sources(
+            &[],
+            &[("intro.mtf", "# [@intro content]\n")],
+            &[],
+            "intro.mtf",
+        );
+
+    let failure = resolve_module_dependencies(
+        headers,
+        &ContentSourceTargets::empty(),
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("a template must not select its own content");
+    let boundary = diagnosed_result(failure);
+    assert!(
+        diagnosed_reports(&boundary).iter().any(|(_, diagnostic)| {
+            diagnostic.family_view::<CircularDependencyView>().is_some()
+        }),
+        "self-qualified template content must report a cycle: {boundary:?}"
+    );
+}
+
+#[test]
+fn qualified_template_content_orders_after_its_selected_constant() {
+    let (headers, content_source_targets, mut string_table, mut path_fork) =
+        parse_module_headers_with_content_sources(
+            &[
+                ("@page.moth", "unused #= 0\n"),
+                (
+                    "settings.moth",
+                    "title #= \"Title\"\nfrom_file #= @intro.mtf\nfrom_qualified #= @intro content\n",
+                ),
+            ],
+            &[("intro.mtf", "# [@settings title]\n")],
+            &[],
+            "@page.moth",
+        );
+
+    let sorted = resolve_module_dependencies(
+        headers,
+        &content_source_targets,
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("a non-cyclic qualified template chain must sort");
+
+    let title_index =
+        sorted_header_index(&sorted, "settings.moth/title", &string_table, &path_fork);
+    let content_index =
+        sorted_header_index(&sorted, "intro.mtf/content", &string_table, &path_fork);
+    let from_file_index = sorted_header_index(
+        &sorted,
+        "settings.moth/from_file",
+        &string_table,
+        &path_fork,
+    );
+    let from_qualified_index = sorted_header_index(
+        &sorted,
+        "settings.moth/from_qualified",
+        &string_table,
+        &path_fork,
+    );
+
+    assert!(
+        title_index < content_index,
+        "the selected constant must sort before the template content that folds it"
+    );
+    assert!(
+        content_index < from_file_index && content_index < from_qualified_index,
+        "both the file value and the qualified selection must order after the same content header"
+    );
+}

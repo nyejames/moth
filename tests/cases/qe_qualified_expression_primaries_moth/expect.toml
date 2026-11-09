@@ -1,0 +1,14 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "qe-a",
+    "name=Moth Site",
+    "square=144",
+    "background=Dark",
+    "conditional=Moth Site",
+    "nested= Moth Site",
+    "selected=Moth Site",
+]

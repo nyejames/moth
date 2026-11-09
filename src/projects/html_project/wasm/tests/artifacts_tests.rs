@@ -51,7 +51,12 @@ fn compile_html_module_wasm_exports_moth_start_directly() {
         project_name: "",
         document_config: &HtmlDocumentConfig::default(),
         build_profile: crate::build_system::BuildProfile::Dev,
-        root_activity: &module.metadata.root_activity,
+        root_activity: &module
+            .metadata
+            .entry
+            .as_ref()
+            .expect("fixture module represents an entry root")
+            .root_activity,
         external_package_registry: Arc::new(
             crate::compiler_frontend::external_packages::ExternalPackageRegistry::new(),
         ),
@@ -162,7 +167,12 @@ fn compile_html_module_wasm_preserves_nested_logical_html_route() {
         project_name: "",
         document_config: &HtmlDocumentConfig::default(),
         build_profile: crate::build_system::BuildProfile::Dev,
-        root_activity: &module.metadata.root_activity,
+        root_activity: &module
+            .metadata
+            .entry
+            .as_ref()
+            .expect("fixture module represents an entry root")
+            .root_activity,
         external_package_registry: Arc::new(
             crate::compiler_frontend::external_packages::ExternalPackageRegistry::new(),
         ),

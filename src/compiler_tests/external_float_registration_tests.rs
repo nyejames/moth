@@ -187,8 +187,9 @@ fn compile_raw_fixed_f64_fixture(
             artefact
                 .module
                 .metadata
-                .entry_point
-                .ends_with(Path::new("@page.moth"))
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with(Path::new("@page.moth")))
         })
         .map(|artefact| &artefact.module)
         .expect("the fixture project should compile its entry module");

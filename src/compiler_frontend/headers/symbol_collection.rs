@@ -97,6 +97,12 @@ pub(super) fn build_module_symbols(
                 std::mem::take(&mut file_output.file_dependency_clauses),
             );
         }
+        if !file_output.qualified_references.is_empty() {
+            module_symbols.qualified_references_by_source.insert(
+                file_output.source_file.to_owned(),
+                std::mem::take(&mut file_output.qualified_references),
+            );
+        }
         if !file_output.dependency_selections.is_empty() {
             module_symbols.dependency_selections_by_source.insert(
                 file_output.source_file.to_owned(),

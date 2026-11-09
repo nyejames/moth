@@ -1,5 +1,0 @@
-export:
-    @home_constants greeting
-
-    @intro content as intro_content
-;

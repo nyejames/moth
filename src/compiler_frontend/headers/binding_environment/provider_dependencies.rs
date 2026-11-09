@@ -13,10 +13,8 @@ use crate::builder_surface::external_import_providers::provider::ResolvedExterna
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
-use crate::compiler_frontend::headers::types::DependencySelection;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
@@ -27,78 +25,6 @@ use crate::compiler_frontend::symbols::string_interning::StringId;
 type ProviderDependencyResult<T> = Result<T, BindingEnvironmentError>;
 
 impl<'a> BindingEnvironmentBuilder<'a> {
-    /// Try to resolve direct selections against a provider-backed external file.
-    ///
-    /// WHAT: the clause root identifies the provider-created external package and each direct
-    /// selection is looked up within that one package surface.
-    ///
-    /// Returns `Ok(Some(()))` if resolved, `Ok(None)` if this dependency is not
-    /// provider-backed, or `Err` for a diagnostic.
-    pub(super) fn resolve_provider_backed_selection_dependencies(
-        &mut self,
-        file_visibility: &mut FileVisibility,
-        registry: &mut VisibleNameRegistry,
-        dependency: &RetainedDependencyClause,
-        selections: &[DependencySelection],
-        source_file: &PathId,
-    ) -> ProviderDependencyResult<Option<()>> {
-        let Some((resolved, remaining)) = self
-            .find_provider_resolution_from_retained_target(source_file, &dependency.dependency)?
-        else {
-            return Ok(None);
-        };
-
-        // A retained provider root must match the provider prefix exactly. Any remaining path
-        // component is a malformed provider identity, not a selected source name.
-        if !remaining.is_empty() {
-            return Err(imports::direct_symbol_path_import(
-                dependency.dependency.path,
-                Some(dependency.dependency.span),
-            )
-            .into());
-        }
-
-        let package = self
-            .external_package_registry
-            .get_package_by_id(resolved.package_id);
-        let Some(package) = package else {
-            return Err(super::diagnostics::missing_dependency_target(
-                &dependency.dependency.path,
-                Some(dependency.dependency.span),
-            )
-            .into());
-        };
-
-        for selection in selections {
-            let selected_path = self
-                .path_fork
-                .try_intern_child(dependency.dependency.path, selection.source_name)
-                .ok_or_else(token_lexical::logical_path_capacity)?;
-            let symbol_id = self
-                .lookup_external_symbol_id_by_name(&package.path, selection.source_name)
-                .ok_or_else(|| {
-                    super::diagnostics::missing_dependency_target(
-                        &selected_path,
-                        Some(selection.source_span),
-                    )
-                })?;
-            let local_name = selection.local_name();
-            self.register_external_import(
-                file_visibility,
-                registry,
-                super::external_imports::ExternalImportInput {
-                    symbol_name: selection.source_name,
-                    local_name,
-                    source_span: Some(selection.source_span),
-                    local_alias: selection.local_alias(),
-                    symbol_id,
-                },
-            )?;
-        }
-
-        Ok(Some(()))
-    }
-
     /// Try to resolve a namespace dependency against a provider-backed external file.
     ///
     /// WHAT: `@helper.js` where `helper.js` has a registered provider.
@@ -175,7 +101,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
     }
 
     /// Look up the Stage 0 provider resolution for the exact retained prefix.
-    fn find_provider_resolution_from_retained_target(
+    pub(super) fn find_provider_resolution_from_retained_target(
         &self,
         source_file: &PathId,
         dependency: &crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath,
@@ -211,7 +137,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         )))
     }
     /// Look up an external symbol ID by name within a provider-created package.
-    fn lookup_external_symbol_id_by_name(
+    pub(super) fn lookup_external_symbol_id_by_name(
         &self,
         package_path: &str,
         name: StringId,

@@ -726,3 +726,489 @@ fn source_package_dependency_index_rejects_cross_category_or_duplicate_shells() 
     .expect_err("one shell cannot address both a provider module and a source package");
     assert_compiler_bug(payload, &expected_message);
 }
+
+// -------------------------
+//  Qualified-reference provider discovery
+// -------------------------
+
+#[test]
+fn qualified_occurrence_queues_same_module_helper_source() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
+        "message = @helper answer\n#[:entry]\n",
+    )
+    .expect("should write entry");
+    fs::write(src.join("helper.moth"), "answer #= 42\n").expect("should write helper");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let (modules, _graph, _source_tree_index, _source_files, _string_table) =
+        discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
+    let modules: Vec<_> = modules.waves().iter().flatten().collect();
+    assert_eq!(modules.len(), 1, "one entry module owns both sources");
+    assert_eq!(
+        module_prepared_source_names(modules[0]),
+        vec!["@page.moth", "helper.moth"],
+        "the helper is reachable only through the qualified occurrence and must be prepared"
+    );
+
+    let module = modules[0];
+    let occurrences: Vec<_> = module
+        .prepared
+        .semantic
+        .prepared_header_syntax
+        .module_symbols
+        .qualified_references_by_source
+        .values()
+        .flatten()
+        .collect();
+    assert_eq!(occurrences.len(), 1, "one authored occurrence is retained");
+    let occurrence = occurrences[0];
+    assert_eq!(
+        module
+            .prepared
+            .semantic
+            .string_table
+            .resolve(occurrence.selected),
+        "answer"
+    );
+    let local_source_id = occurrence
+        .dependency
+        .local_source_id
+        .expect("same-module occurrence should own its resolved compiler SourceId");
+    assert!(
+        module
+            .prepared
+            .semantic
+            .prepared_header_syntax
+            .module_symbols
+            .source_ids_by_source
+            .values()
+            .any(|source_id| *source_id == local_source_id),
+        "the resolved same-module target must be one of the prepared source identities"
+    );
+}
+
+#[test]
+fn qualified_occurrence_in_moth_template_queues_same_module_helper_source() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), "title #= @intro.mtf\n#[:entry]\n")
+        .expect("should write entry");
+    // The `.mtf` body selects a private same-module helper constant from a template head.
+    fs::write(src.join("intro.mtf"), "# [@settings site_name]\n").expect("should write template");
+    fs::write(src.join("settings.moth"), "site_name #= \"Moth\"\n").expect("should write helper");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
+
+    let (modules, _graph, _source_tree_index, _source_files, _string_table) =
+        discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
+    let modules: Vec<_> = modules.waves().iter().flatten().collect();
+    assert_eq!(modules.len(), 1, "one entry module owns both sources");
+    assert_eq!(
+        module_prepared_source_names(modules[0]),
+        vec!["@page.moth", "intro.mtf", "settings.moth"],
+        "the helper is reachable only through the `.mtf` head occurrence and must be prepared"
+    );
+
+    let module = modules[0];
+    let module_symbols = &module
+        .prepared
+        .semantic
+        .prepared_header_syntax
+        .module_symbols;
+    let occurrences: Vec<_> = module_symbols
+        .qualified_references_by_source
+        .values()
+        .flatten()
+        .collect();
+    assert_eq!(occurrences.len(), 1, "one authored occurrence is retained");
+    let occurrence = occurrences[0];
+    assert_eq!(
+        module
+            .prepared
+            .semantic
+            .string_table
+            .resolve(occurrence.selected),
+        "site_name"
+    );
+    let local_source_id = occurrence
+        .dependency
+        .local_source_id
+        .expect("same-module occurrence should own its resolved compiler SourceId");
+    let mut scratch = Vec::new();
+    let target_name = module_symbols
+        .source_paths_by_source_id
+        .iter()
+        .find_map(|(source_id, logical_path)| {
+            (*source_id == local_source_id).then(|| {
+                module.prepared.semantic.path_fork.render_portable(
+                    *logical_path,
+                    &module.prepared.semantic.string_table,
+                    &mut scratch,
+                )
+            })
+        })
+        .expect("the resolved occurrence target must be a prepared source identity");
+    assert!(
+        target_name.ends_with("settings.moth"),
+        "the `.mtf` occurrence must resolve to the helper source, found {target_name}"
+    );
+}
+
+#[test]
+fn qualified_occurrence_in_moth_source_queues_moth_template_content_source() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
+        "message = @intro content\n#[:entry]\n",
+    )
+    .expect("should write entry");
+    fs::write(src.join("intro.mtf"), "hello\n").expect("should write template");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
+    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
+    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
+
+    let (modules, _graph, _source_tree_index, _source_files, _string_table) =
+        discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
+    let modules: Vec<_> = modules.waves().iter().flatten().collect();
+    assert_eq!(modules.len(), 1, "one entry module owns both sources");
+    assert_eq!(
+        module_prepared_source_names(modules[0]),
+        vec!["@page.moth", "intro.mtf"],
+        "the `.mtf` provider is reachable only through the `.moth` occurrence"
+    );
+
+    let module = modules[0];
+    let module_symbols = &module
+        .prepared
+        .semantic
+        .prepared_header_syntax
+        .module_symbols;
+    let occurrence = module_symbols
+        .qualified_references_by_source
+        .values()
+        .flatten()
+        .next()
+        .expect("one authored occurrence is retained");
+    assert_eq!(
+        module
+            .prepared
+            .semantic
+            .string_table
+            .resolve(occurrence.selected),
+        "content"
+    );
+    let local_source_id = occurrence
+        .dependency
+        .local_source_id
+        .expect("same-module occurrence should own its resolved compiler SourceId");
+    let mut scratch = Vec::new();
+    let target_name = module_symbols
+        .source_paths_by_source_id
+        .iter()
+        .find_map(|(source_id, logical_path)| {
+            (*source_id == local_source_id).then(|| {
+                module.prepared.semantic.path_fork.render_portable(
+                    *logical_path,
+                    &module.prepared.semantic.string_table,
+                    &mut scratch,
+                )
+            })
+        })
+        .expect("the resolved occurrence target must be a prepared source identity");
+    assert!(
+        target_name.ends_with("intro.mtf"),
+        "the `.moth` occurrence must resolve to the template source, found {target_name}"
+    );
+}
+
+#[test]
+fn qualified_occurrence_creates_one_cross_module_graph_edge() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let (config, resolver, style_directives, module_a_root, module_b_root) =
+        write_cross_module_project(&root);
+    // Replace the authored namespace clause with an expression-qualified occurrence.
+    fs::write(
+        module_a_root.join("@pageA.moth"),
+        "value = @module_b b\n#[:pageA]\n",
+    )
+    .expect("should write pageA");
+
+    let (modules, graph, source_tree_index, _source_files, _string_table) =
+        discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
+
+    let module_a_id = source_tree_index
+        .module_identities()
+        .module_id_for_directory(&module_a_root)
+        .expect("module_a root should be a graph node");
+    let module_b_id = source_tree_index
+        .module_identities()
+        .module_id_for_directory(&module_b_root)
+        .expect("module_b root should be a graph node");
+
+    assert!(
+        graph.has_dependency_edge(module_b_id, module_a_id),
+        "the qualified provider module must precede its consumer"
+    );
+    assert!(!graph.has_dependency_edge(module_a_id, module_b_id));
+
+    let occurrence_shell = modules
+        .waves()
+        .iter()
+        .flatten()
+        .flat_map(|module| {
+            module
+                .prepared
+                .semantic
+                .prepared_header_syntax
+                .module_symbols
+                .qualified_references_by_source
+                .values()
+                .flatten()
+        })
+        .map(|occurrence| occurrence.dependency.dependency_shell_id)
+        .next()
+        .expect("the entry retains one qualified occurrence");
+
+    let (_waves, provider_bindings, package_dependencies, _check_only) = modules.into_parts();
+    assert_eq!(
+        provider_bindings.len(),
+        1,
+        "one cross-module occurrence publishes one provider edge binding"
+    );
+    let edge = &provider_bindings[0];
+    assert_eq!(edge.provider_module_id, module_b_id);
+    assert_eq!(edge.consumer_module_id, module_a_id);
+    assert_eq!(edge.dependency_shell_id, occurrence_shell);
+    assert!(
+        package_dependencies.is_empty(),
+        "a module provider is not a source-package dependency"
+    );
+}
+
+#[test]
+fn duplicate_qualified_occurrences_share_one_provider_edge_and_preparation() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let (config, resolver, style_directives, module_a_root, module_b_root) =
+        write_cross_module_project(&root);
+    fs::write(
+        module_a_root.join("@pageA.moth"),
+        "first = @module_b b\nsecond = @module_b b\n#[:pageA]\n",
+    )
+    .expect("should write pageA");
+
+    let (modules, graph, source_tree_index, _source_files, _string_table) =
+        discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
+
+    let module_a_id = source_tree_index
+        .module_identities()
+        .module_id_for_directory(&module_a_root)
+        .expect("module_a root should be a graph node");
+    let module_b_id = source_tree_index
+        .module_identities()
+        .module_id_for_directory(&module_b_root)
+        .expect("module_b root should be a graph node");
+
+    assert!(
+        graph.has_dependency_edge(module_b_id, module_a_id),
+        "both occurrences select the same provider module"
+    );
+    assert_eq!(
+        graph
+            .dependency_providers(module_a_id)
+            .expect("consumer adjacency is readable")
+            .len(),
+        1,
+        "the project graph keeps one provider-to-consumer adjacency edge"
+    );
+
+    let mut consumer_jobs = modules.waves().iter().flatten().filter(|module| {
+        module
+            .prepared
+            .semantic
+            .prepared_header_syntax
+            .module_symbols
+            .qualified_references_by_source
+            .values()
+            .any(|occurrences| !occurrences.is_empty())
+    });
+    let module_a = consumer_jobs
+        .next()
+        .expect("the consumer module is retained");
+    assert!(
+        consumer_jobs.next().is_none(),
+        "only the consumer module retains qualified occurrences"
+    );
+    let occurrence_shells: Vec<_> = module_a
+        .prepared
+        .semantic
+        .prepared_header_syntax
+        .module_symbols
+        .qualified_references_by_source
+        .values()
+        .flatten()
+        .map(|occurrence| occurrence.dependency.dependency_shell_id)
+        .collect();
+    assert_eq!(
+        occurrence_shells.len(),
+        2,
+        "each authored occurrence keeps its distinct shell"
+    );
+
+    // The provider module is prepared once even though two occurrences select it.
+    let provider_jobs: Vec<_> = modules
+        .waves()
+        .iter()
+        .flatten()
+        .filter(|module| {
+            prepared_entry_file_path(&module.prepared.semantic)
+                .expect("prepared module retains its entry file identity")
+                .file_name()
+                == Some(OsStr::new("@api.moth"))
+        })
+        .collect();
+    assert_eq!(
+        provider_jobs.len(),
+        1,
+        "two occurrences must not schedule an extra provider module job"
+    );
+    assert_eq!(
+        module_prepared_source_names(provider_jobs[0]),
+        vec!["@api.moth"],
+        "the provider module prepares its reached root once"
+    );
+
+    let (_waves, provider_bindings, _packages, _check_only) = modules.into_parts();
+    assert_eq!(
+        provider_bindings.len(),
+        2,
+        "each occurrence shell retains its provider binding row"
+    );
+    assert!(
+        provider_bindings
+            .iter()
+            .all(|edge| edge.provider_module_id == module_b_id
+                && edge.consumer_module_id == module_a_id),
+        "both shells resolve to the one provider module"
+    );
+    assert_eq!(
+        provider_bindings
+            .iter()
+            .map(|edge| edge.dependency_shell_id)
+            .collect::<Vec<_>>(),
+        occurrence_shells,
+        "provider binding rows remain aligned with occurrence shells"
+    );
+}
+
+#[test]
+fn qualified_occurrence_in_unused_function_body_reaches_provider() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
+        "unused || -> I32:\n    value = @helper answer\n    return value\n;\n#[:entry]\n",
+    )
+    .expect("should write entry");
+    fs::write(src.join("helper.moth"), "answer #= 42\n").expect("should write helper");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let (modules, _graph, _source_tree_index, _source_files, _string_table) =
+        discover_modules_and_graph_for_test(&config, &resolver, &style_directives);
+    let modules: Vec<_> = modules.waves().iter().flatten().collect();
+    assert_eq!(modules.len(), 1);
+    assert_eq!(
+        module_prepared_source_names(modules[0]),
+        vec!["@page.moth", "helper.moth"],
+        "an occurrence in an unused function body is still a Stage 0 provider fact"
+    );
+    let local_source_ids: Vec<_> = modules[0]
+        .prepared
+        .semantic
+        .prepared_header_syntax
+        .module_symbols
+        .qualified_references_by_source
+        .values()
+        .flatten()
+        .filter_map(|occurrence| occurrence.dependency.local_source_id)
+        .collect();
+    assert_eq!(
+        local_source_ids.len(),
+        1,
+        "the unused-body occurrence resolves its same-module provider"
+    );
+}

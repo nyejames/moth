@@ -12,16 +12,19 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerStage, DiagnosticBag, NamespaceMemberRole, NamespaceRecordKind,
 };
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_interface::{PublicDeclarationRecord, PublicEvidenceRecord};
 use crate::compiler_frontend::semantic_identity::{
     ModulePrivateExecutableIdentity, OriginDeclarationId, OriginFunctionId,
 };
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
+
+use super::qualified_targets::{QualifiedReferenceTargets, ResolvedQualifiedReference};
 
 /// A member of a namespace record that is valid in value/expression context.
 #[derive(Clone, Debug)]
@@ -361,9 +364,17 @@ pub(crate) struct HeaderBindingEnvironment {
     /// Consumer-local declaration paths mapped to their stable provider origins.
     ///
     /// WHAT: aliases and namespace members reference the one record stored under
-    ///       [`HeaderBindingEnvironment::imported_declarations_by_origin`] instead of cloning the
+    ///       [`HeaderBindingEnvironment::imported_declarations_by_origin`] rather than duplicating a
     ///       complete declaration payload per local path.
     pub(crate) imported_declarations_by_local_path: FxHashMap<PathId, OriginDeclarationId>,
+    /// Resolved targets for authored expression-qualified references.
+    ///
+    /// WHAT: one entry per `(owning source, authored path row)` occurrence. Imported entries also
+    ///       register their consumer-local path in `imported_declarations_by_local_path` so AST
+    ///       projects the declaration without receiving a visible local name.
+    /// WHY: AST lowering and Stage 3 ordering consume the binding proved here; neither may look
+    ///      the selected name up by text or probe provider state again.
+    pub(crate) qualified_reference_targets: QualifiedReferenceTargets,
     /// Stable declaration closure supplied by completed provider interfaces.
     ///
     /// AST projects these records into consumer-local semantic handles. Keeping the stable
@@ -420,5 +431,19 @@ impl HeaderBindingEnvironment {
                 "Missing visibility entry for source file. This is a compiler bug: header parsing did not produce a visibility map for '{source_file:?}'."
             ))
         })
+    }
+
+    /// Resolve one authored expression-qualified reference by its owning source and path row.
+    ///
+    /// WHAT: the exact lookup Stage 3 and AST use. It returns `None` only for a path row that was
+    ///       not recognized as a qualified occurrence.
+    /// WHY: the map key is file-local path syntax plus source identity, so the caller never
+    ///      reconstructs a selected name or a provider path from tokens.
+    pub(crate) fn qualified_reference_target(
+        &self,
+        source: SourceId,
+        path_syntax: PathSyntaxId,
+    ) -> Option<&ResolvedQualifiedReference> {
+        self.qualified_reference_targets.get(&(source, path_syntax))
     }
 }

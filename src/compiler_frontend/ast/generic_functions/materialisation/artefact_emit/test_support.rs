@@ -52,6 +52,7 @@ impl ModuleMaterialisationContext {
                     source_path_table: None,
                     source_string_table: None,
                     resolved_file_references: Box::new([]),
+                    qualified_references: Box::new([]),
                 },
                 signature: StableFunctionSignature {
                     parameters: Box::new([]),

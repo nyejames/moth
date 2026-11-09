@@ -1,0 +1,5 @@
+secret #= "root-local"
+
+export:
+    public_value #= "public"
+;

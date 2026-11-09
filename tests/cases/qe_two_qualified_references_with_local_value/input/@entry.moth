@@ -1,0 +1,5 @@
+value #= "local"
+
+direct = value
+
+[: [@a value] [@b value] [direct] ]

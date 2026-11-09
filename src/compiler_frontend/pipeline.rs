@@ -499,7 +499,6 @@ impl CompilerFrontend<'static> {
                     local_path_fork,
                     &mut span_builder,
                 )
-                .map_err(FileFrontendPrepareFailure::Infrastructure)
             }
         })();
         SourcePreparationDelta {
@@ -577,6 +576,12 @@ impl<'a> CompilerFrontend<'a> {
                 Arc::clone(self.source_files),
             ))),
             module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
+            qualified_reference_targets: Arc::new(
+                sorted
+                    .binding_environment
+                    .qualified_reference_targets
+                    .clone(),
+            ),
             module_origin,
             public_source_trait_origins,
             frozen_identity_handle,

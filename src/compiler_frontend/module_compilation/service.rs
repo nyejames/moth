@@ -37,8 +37,8 @@ use crate::compiler_frontend::instrumentation::{
     FrontendCounter, add_frontend_counter, increment_frontend_counter,
 };
 use crate::compiler_frontend::module_compilation::artefact::{
-    Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts, ModuleRootActivity,
-    ResolvedConstFragment,
+    EntryRootMetadata, Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
+    ModuleRootActivity, ResolvedConstFragment,
 };
 use crate::compiler_frontend::module_compilation::context::ModuleCompilationContext;
 use crate::compiler_frontend::module_compilation::external_imports::collect_external_import_candidates;
@@ -90,7 +90,9 @@ use std::sync::Arc;
 pub(crate) struct BoracleModuleInput {
     pub(crate) hir: HirModule,
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
-    pub(crate) entry_point: PathBuf,
+    /// The preparation anchor that located this module's source. Boracle analyses any module,
+    /// including entryless API-only roots, so this is a source identity rather than an entry.
+    pub(crate) source_path: PathBuf,
 }
 
 /// Compile one ready module through the canonical local semantic sequence.
@@ -119,10 +121,7 @@ pub(crate) fn compile_module(
         .preparation_anchor_path(context.source_files)?
         .to_path_buf();
     let module_anchor_path = module_anchor_path.as_path();
-    let entry_point_path = prepared
-        .entry_point_path(context.source_files)?
-        .to_path_buf();
-    let entry_point_path = entry_point_path.as_path();
+    let entry_point_path = prepared.entry_point_path(context.source_files)?;
     let synthesizes_entry_start = prepared.synthesizes_entry_start();
     let preparation_anchor = prepared.preparation_anchor()?;
     let facade_surface_roots = prepared.facade_surface_roots();
@@ -250,10 +249,7 @@ pub(crate) fn compile_module_for_boracle(
         .preparation_anchor_path(context.source_files)?
         .to_path_buf();
     let module_anchor_path = module_anchor_path.as_path();
-    let entry_point_path = prepared
-        .entry_point_path(context.source_files)?
-        .to_path_buf();
-    let entry_point_path = entry_point_path.as_path();
+    let entry_point_path = prepared.entry_point_path(context.source_files)?;
     let synthesizes_entry_start = prepared.synthesizes_entry_start();
     let preparation_anchor = prepared.preparation_anchor()?;
     let facade_surface_roots = prepared.facade_surface_roots();
@@ -345,8 +341,8 @@ struct SemanticStageInputs<'a> {
     module_origin: StableModuleOriginIdentity,
     /// The preparation-anchor path, used only to locate the module's AST entry directory.
     module_anchor_path: &'a Path,
-    /// The executable entry-root path, or the anchor for a module without an entry root.
-    entry_point_path: &'a Path,
+    /// The executable entry-root path, or a typed absence for an entryless module.
+    entry_point_path: Option<&'a Path>,
     /// Whether preparation synthesized the compiler-owned `start` body.
     synthesizes_entry_start: bool,
     source_file_count: usize,
@@ -859,6 +855,26 @@ fn run_semantic_stages(
             })
             .collect::<Result<Vec<_>, InfrastructureFailure>>()?
     };
+    // Entry metadata exists exactly when the module has a start-bearing root. An entryless
+    // module must not carry a dormant start, an entry fragment schedule or root activity facts.
+    let entry_metadata = match entry_point_path {
+        Some(entry_point_path) => Some(EntryRootMetadata {
+            entry_point: entry_point_path.to_path_buf(),
+            const_top_level_fragments,
+            root_activity,
+        }),
+        None => {
+            if !const_top_level_fragments.is_empty() {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    "semantic module compilation: an entryless module retained const top-level fragments",
+                )
+                .into());
+            }
+            debug_assert_eq!(root_activity, ModuleRootActivity::default());
+            None
+        }
+    };
 
     let mut warning_bag = DiagnosticBag::from_diagnostics(std::mem::take(&mut warnings));
     // 6. Lower AST to Higher-level Intermediate Representation (HIR).
@@ -894,7 +910,7 @@ fn run_semantic_stages(
         return Ok(SemanticStageOutput::Boracle(Box::new(BoracleModuleInput {
             hir: hir_module,
             external_package_registry: Arc::clone(compiler.external_package_registry),
-            entry_point: entry_point_path.to_path_buf(),
+            source_path: module_anchor_path.to_path_buf(),
         })));
     }
 
@@ -925,7 +941,6 @@ fn run_semantic_stages(
             materialisation_context_builder.context(),
             &mut generated_never_proofs,
             compiler,
-            module_anchor_path,
             #[cfg(feature = "timers")]
             timing_context,
         )
@@ -1101,10 +1116,8 @@ fn run_semantic_stages(
                     functions: function_link_facts,
                 },
                 metadata: ModuleCompilerMetadata::from_hir_lowering(
-                    entry_point_path.to_path_buf(),
+                    entry_metadata,
                     lowering_metadata,
-                    const_top_level_fragments,
-                    root_activity,
                     materialisation_context,
                 ),
             },

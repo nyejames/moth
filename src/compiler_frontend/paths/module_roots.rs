@@ -103,18 +103,6 @@ impl ModuleRootTable {
         self.records.iter().map(|record| &record.root_directory)
     }
 
-    /// The directory's API facade root file: normal when present, otherwise support.
-    ///
-    /// Same-directory template queuing uses it because a `.mtf` source may only read
-    /// export-capable roots. An entry root is never an API facade, so an entry-only directory
-    /// has no such root. Dependency resolution requests its explicit surface instead.
-    pub(crate) fn api_facade_root_file_for_directory(&self, directory: &Path) -> Option<&Path> {
-        let record = &self.records[self.by_directory.get(directory)?.0];
-        record
-            .root_file_for_surface(ModuleRootRole::Normal)
-            .or_else(|| record.root_file_for_surface(ModuleRootRole::Support))
-    }
-
     /// The root file for one explicit surface, when that surface exists in the directory.
     pub(crate) fn root_file_for_directory_surface(
         &self,

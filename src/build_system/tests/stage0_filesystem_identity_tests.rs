@@ -3371,7 +3371,10 @@ mod owned_source_inventory_tests {
         let canonical_root = fs::canonicalize(&root).expect("test root should canonicalize");
 
         assert_eq!(
-            compilation_roots.api_facade_root_file_for_directory(&canonical_root),
+            compilation_roots.root_file_for_directory_surface(
+                &canonical_root,
+                crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal
+            ),
             Some(canonical_root.join("@page.moth").as_path()),
             "the normal module remains the primary compilation root for the shared directory"
         );

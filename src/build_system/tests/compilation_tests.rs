@@ -169,9 +169,7 @@ fn invalid_artifact() -> CompiledModuleArtifact {
                 functions: HirModuleLinkFacts::default(),
             },
             metadata: ModuleCompilerMetadata {
-                entry_point: PathBuf::new(),
-                const_top_level_fragments: Vec::new(),
-                root_activity: ModuleRootActivity::default(),
+                entry: None,
                 doc_fragments: Vec::new(),
                 materialisation_context: Some(Arc::new(
                     ModuleMaterialisationContext::from_identities_for_test(vec![
@@ -256,9 +254,7 @@ fn generated_sidecar(
             functions: HirModuleLinkFacts::default(),
         },
         metadata: ModuleCompilerMetadata {
-            entry_point: PathBuf::new(),
-            const_top_level_fragments: Vec::new(),
-            root_activity: ModuleRootActivity::default(),
+            entry: None,
             doc_fragments: Vec::new(),
             materialisation_context: None,
         },
@@ -1044,9 +1040,7 @@ fn check_only_success_result_with_warnings() -> (
         },
         link_facts: base_link_facts,
         metadata: ModuleCompilerMetadata {
-            entry_point: PathBuf::from("@sidecar.moth"),
-            const_top_level_fragments: Vec::new(),
-            root_activity: ModuleRootActivity::default(),
+            entry: None,
             doc_fragments: Vec::new(),
             materialisation_context: None,
         },
@@ -1986,7 +1980,13 @@ fn publish_generated_sidecar_boundary(
             module_string_table,
             module_path_fork,
         );
-        compiled.module.metadata.entry_point = PathBuf::from(module_path);
+        compiled.module.metadata.entry = Some(
+            crate::compiler_frontend::module_compilation::artefact::EntryRootMetadata {
+                entry_point: PathBuf::from(module_path),
+                const_top_level_fragments: Vec::new(),
+                root_activity: ModuleRootActivity::default(),
+            },
+        );
         compiled
             .normal_interface
             .as_mut()

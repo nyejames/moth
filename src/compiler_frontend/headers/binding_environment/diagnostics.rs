@@ -108,6 +108,7 @@ fn root_local_declaration_role(role: FileRole) -> RootLocalDeclarationRole {
             | ModuleRootRole::SyntheticProjectContext,
         )
         | FileRole::ReachedApiFacadeRoot(_)
+        | FileRole::ReachedLegacyCombinedRoot
         | FileRole::ConfigBootstrap
         | FileRole::Normal => crate::compiler_bug!(
             CompilerStage::HeaderParsing,

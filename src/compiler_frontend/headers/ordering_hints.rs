@@ -19,11 +19,15 @@ use crate::compiler_frontend::declaration_syntax::type_syntax::{
     ParsedNamedTypeReference, collect_capacity_references_in_parsed_ref,
     for_each_named_type_in_parsed_ref,
 };
+use crate::compiler_frontend::headers::binding_environment::{
+    HeaderBindingEnvironment, ResolvedQualifiedTarget,
+};
+use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
 use crate::compiler_frontend::headers::types::{
     DependencySelection, Header, HeaderBuildContext, HeaderKind, HeaderParseFailure,
-    LocalDeclarationOrderingHint, SyntheticContentPayload,
+    LocalDeclarationOrderingHint, SourceTokenOwners, SyntheticContentPayload,
 };
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, PreparedFileReferenceTable,
@@ -195,6 +199,180 @@ pub(super) fn dependency_path_for_local_name(
     }
 
     Ok(None)
+}
+
+// ------------------------
+//  Qualified-reference ordering
+// ------------------------
+
+/// Record declaration-ordering hints for expression-qualified occurrences in const-required shells.
+///
+/// WHAT: scans each constant initializer, the synthetic `.mtf` body and const-template tokens for
+/// an authored path row that binding resolved as a qualified occurrence, then records the
+/// resolved target as one local ordering hint.
+/// WHY: a qualified reference in a compile-time shell is a real declaration dependency even
+///      though it installed no local name. Imported targets keep the provider-interface path so
+///      Stage 3 classifies them through the existing provider edge arm instead of fabricating a
+///      local header. Runtime function and start bodies stay out of the declaration graph.
+pub(super) fn collect_qualified_reference_ordering_hints(
+    headers: &mut [Header],
+    source_token_owners: &SourceTokenOwners,
+    module_symbols: &ModuleSymbols,
+    binding_environment: &HeaderBindingEnvironment,
+) -> Result<(), InfrastructureFailure> {
+    let sources_with_targets: HashSet<_> = binding_environment
+        .qualified_reference_targets
+        .keys()
+        .map(|(source, _path_syntax)| *source)
+        .collect();
+    if sources_with_targets.is_empty() {
+        return Ok(());
+    }
+
+    for header in headers {
+        if !sources_with_targets.contains(&header.tokens.source()) {
+            continue;
+        }
+
+        // Payload-only synthetic content (plain Markdown) has no retained token stream and can
+        // carry no qualified occurrence.
+        let Some(source_tokens) = source_token_owners
+            .get(&header.tokens.source())
+            .map(|owner| owner.tokens_ref())
+        else {
+            continue;
+        };
+
+        match &header.kind {
+            HeaderKind::Constant { declaration } => {
+                if declaration.config_qualifier.is_some() {
+                    continue;
+                }
+                if let Some(range) = declaration.initializer_range {
+                    scan_range_for_qualified_reference_hints(
+                        range,
+                        source_tokens,
+                        module_symbols,
+                        binding_environment,
+                        &mut header.local_ordering_hints,
+                    )?;
+                } else if matches!(
+                    header.synthetic_content_payload,
+                    Some(SyntheticContentPayload::MothTemplate { .. })
+                ) && !header.tokens.is_empty()
+                {
+                    // The Moth template body is the synthetic content initializer even though
+                    // the declaration retains no authored initializer range.
+                    scan_range_for_qualified_reference_hints(
+                        header.tokens,
+                        source_tokens,
+                        module_symbols,
+                        binding_environment,
+                        &mut header.local_ordering_hints,
+                    )?;
+                }
+            }
+            HeaderKind::ConstTemplate { .. } => {
+                scan_header_token_ranges_for_qualified_references(
+                    header,
+                    source_tokens,
+                    module_symbols,
+                    binding_environment,
+                )?;
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+
+fn scan_header_token_ranges_for_qualified_references(
+    header: &mut Header,
+    source_tokens: &SourceTokens,
+    module_symbols: &ModuleSymbols,
+    binding_environment: &HeaderBindingEnvironment,
+) -> Result<(), InfrastructureFailure> {
+    if let Some(sequence) = header.token_sequence {
+        let view = source_tokens.token_sequence(sequence).map_err(|error| {
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                format!("qualified-reference ordering token sequence is invalid: {error:?}"),
+            )
+        })?;
+        for range in view.ranges() {
+            scan_range_for_qualified_reference_hints(
+                range,
+                source_tokens,
+                module_symbols,
+                binding_environment,
+                &mut header.local_ordering_hints,
+            )?;
+        }
+        return Ok(());
+    }
+
+    if !header.tokens.is_empty() {
+        scan_range_for_qualified_reference_hints(
+            header.tokens,
+            source_tokens,
+            module_symbols,
+            binding_environment,
+            &mut header.local_ordering_hints,
+        )?;
+    }
+    Ok(())
+}
+
+fn scan_range_for_qualified_reference_hints(
+    range: TokenRange,
+    source_tokens: &SourceTokens,
+    module_symbols: &ModuleSymbols,
+    binding_environment: &HeaderBindingEnvironment,
+    hints: &mut HashSet<LocalDeclarationOrderingHint>,
+) -> Result<(), InfrastructureFailure> {
+    if range.source() != source_tokens.source() {
+        return Err(InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            "qualified-reference ordering range belongs to a different source token owner",
+        ));
+    }
+
+    let mut cursor = source_tokens.cursor(range).map_err(|error| {
+        InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            format!("qualified-reference ordering range is invalid: {error:?}"),
+        )
+    })?;
+
+    while let Some(token) = cursor.advance() {
+        if let Some(path_syntax) = token.path_syntax_id()
+            && let Some(resolved) =
+                binding_environment.qualified_reference_target(range.source(), path_syntax)
+        {
+            let target_path = match &resolved.target {
+                ResolvedQualifiedTarget::Source { declaration_path }
+                    if module_symbols.constant_paths.contains(declaration_path) =>
+                {
+                    Some(*declaration_path)
+                }
+                ResolvedQualifiedTarget::Imported { local_path, .. } => Some(*local_path),
+                ResolvedQualifiedTarget::Source { .. }
+                | ResolvedQualifiedTarget::External { .. } => None,
+            };
+            if let Some(target_path) = target_path {
+                hints.insert(
+                    LocalDeclarationOrderingHint::qualified_reference(target_path)
+                        .with_occurrence_span(resolved.selected_span),
+                );
+            }
+        }
+        if token.is_eof() {
+            break;
+        }
+    }
+
+    Ok(())
 }
 
 // ------------------------

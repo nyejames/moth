@@ -44,12 +44,12 @@ Stage 4 specialises ordinary executable work from resolved configuration values:
 
 Stage 4 adds no config-value branch node. HIR never redoes the decision, and Moth source has no platform-conditional source mechanism. Future compiler-owned `$feature` is a separate deferred structural-selection mechanism: it may select source structure before graph and declaration publication, but it is not another evaluator.
 
-[diagram:
+[@diagrams diagram:
     [$in label: What leaves the runtime program entirely]
     [$in caption: Folding is deletion as much as evaluation. Work finished at Stage 4 has no runtime cost and no second chance to disagree with itself.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../ast-semantics-and-types/]
             [$in eyebrow: Authored]
             [$in title: greeting_prefix #= "Hello"]
@@ -57,18 +57,18 @@ Stage 4 adds no config-value branch node. HIR never redoes the decision, and Mot
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Also settled here]
-                [lane:
-                [detail:
+                [@diagrams lane:
+                [@diagrams detail:
                     [$in href: ./]
                     Known-Bool branches selected
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     Generic requests committed
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     Trait evidence resolved
                 ]
@@ -77,8 +77,8 @@ Stage 4 adds no config-value branch node. HIR never redoes the decision, and Mot
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../module-artefacts-and-reuse/]
             [$in eyebrow: Folded]
             [$in title: A backend-neutral value]
@@ -86,8 +86,8 @@ Stage 4 adds no config-value branch node. HIR never redoes the decision, and Mot
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../hir/]
             [$in eyebrow: Absent]
             [$in title: Nothing reaches HIR]

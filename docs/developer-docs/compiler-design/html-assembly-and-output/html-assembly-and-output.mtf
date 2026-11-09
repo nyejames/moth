@@ -26,12 +26,12 @@ The builder consumes explicit inputs such as:
 
 If a fact is missing, an upstream owner failed. The builder should not open `greeting.moth` to peek at source again.
 
-[diagram:
+[@diagrams diagram:
     [$in label: Everything converges, nothing is rediscovered]
     [$in caption: Harvest time. Every input arrived as a record from an owner upstream, which is why the builder never has to open a source file.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../linking-entries-and-reachability/]
             [$in eyebrow: From the compiler]
             [$in title: Semantic records]
@@ -39,8 +39,8 @@ If a fact is missing, an upstream owner failed. The builder should not open `gre
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../backend-lowering/]
             [$in eyebrow: From the backends]
             [$in title: Emitted code]
@@ -48,8 +48,8 @@ If a fact is missing, an upstream owner failed. The builder should not open `gre
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Builder]
             [$in title: One document and one output plan]
@@ -57,22 +57,22 @@ If a fact is missing, an upstream owner failed. The builder should not open `gre
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Written under one owned root]
-                [fanout:
-                [detail:
+                [@diagrams fanout:
+                [@diagrams detail:
                     [$in href: ./]
                     HTML document
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     JavaScript and Wasm
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     Runtime assets
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     Output manifest
                 ]
@@ -122,12 +122,12 @@ Manifests remember what this builder produced. Incremental builds compare record
 
 ## Writing and ownership
 
-[diagram:
+[@diagrams diagram:
     [$in label: Nobody writes a file until the whole set is agreed]
     [$in caption: Backends hand over records rather than writing directly, so conflicts surface before any byte lands and cleanup knows exactly what it owns.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../backend-lowering/]
             [$in eyebrow: Backends]
             [$in title: Emit records]
@@ -135,8 +135,8 @@ Manifests remember what this builder produced. Incremental builds compare record
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Build system]
             [$in title: Validate the whole set]
@@ -144,8 +144,8 @@ Manifests remember what this builder produced. Incremental builds compare record
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Build system]
             [$in title: Write and record]
@@ -153,10 +153,10 @@ Manifests remember what this builder produced. Incremental builds compare record
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Cleanup, keyed by builder and profile]
-                [lane:
-                [detail:
+                [@diagrams lane:
+                [@diagrams detail:
                     [$in href: ./]
                     A debug build never tidies up after a release build
                 ]

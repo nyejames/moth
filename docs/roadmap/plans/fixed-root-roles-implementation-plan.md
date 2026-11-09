@@ -5,6 +5,8 @@
 > Reviewed baseline: `main` at `12b936de9989f0fbc18c30079ac7f97307ef0286` (8 November 2026), including merged PR #30. Verify the implementation branch against this baseline. The current Rust compiler still recognises arbitrary `@*.moth` and `+*.moth` roots, treats normal roots as possible starts and selects HTML entries by root activity.
 >
 > Authority: this plan owns the fixed-root-role cutover. `docs/roadmap/plans/general-directives-plan.md` already delegates entry selection to it and has no `$entry` implementation phase. Keep the remaining directive work separately queued.
+>
+> Hard prerequisite: `docs/roadmap/plans/expression-qualified-references-and-mtf-dependencies-plan.md`. Its `.mtf` contract replaces any implied same-directory facade-export constant scope here: a `.mtf` reaches application data only through explicit qualified references (`[@helper value]`) plus the fixed `@html` prelude. Phase 2 binding and the Phase 4 migration depend on it, and this plan is not complete until that plan's changes and migration are complete.
 
 ## 1. Purpose and design authority
 

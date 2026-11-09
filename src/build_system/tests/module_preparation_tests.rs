@@ -819,7 +819,14 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
         "the semantic draft should retain the module's stable origin"
     );
     assert_eq!(
-        draft.module.metadata.entry_point, canonical_entry,
+        draft
+            .module
+            .metadata
+            .entry
+            .as_ref()
+            .expect("the legacy combined synthetic root carries entry metadata")
+            .entry_point,
+        canonical_entry,
         "semantic compilation should preserve the module entry point"
     );
     let materialisation_context = draft

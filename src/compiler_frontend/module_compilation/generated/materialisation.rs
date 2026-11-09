@@ -25,7 +25,7 @@ use crate::compiler_frontend::hir::reachability::{
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::module_compilation::artefact::{
-    Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts, ModuleRootActivity,
+    Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
 };
 use crate::compiler_frontend::module_compilation::context::ModuleCompilationContext;
 use crate::compiler_frontend::module_compilation::external_imports::{
@@ -49,7 +49,6 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
-use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -80,7 +79,6 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
     requester_context: &ModuleMaterialisationPreparation,
     never_proofs: &mut GeneratedNeverProofs,
     compiler: &mut CompilerFrontend<'_>,
-    entry_file_path: &Path,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
 ) -> Result<(), PreparedFailure> {
     for request_id in request_ids {
@@ -100,7 +98,6 @@ pub(in crate::compiler_frontend::module_compilation) fn materialise_generated_re
             requester_context,
             never_proofs,
             compiler,
-            entry_file_path,
         )?;
     }
     Ok(())
@@ -118,7 +115,6 @@ fn materialise_generated_request<'build>(
     requester_context: &ModuleMaterialisationPreparation,
     never_proofs: &mut GeneratedNeverProofs,
     compiler: &mut CompilerFrontend<'_>,
-    entry_file_path: &Path,
 ) -> Result<(), PreparedFailure> {
     match transaction.enter(request_id) {
         GeneratedRequestEntry::Complete => return Ok(()),
@@ -372,7 +368,6 @@ fn materialise_generated_request<'build>(
                     &generated_context,
                     never_proofs,
                     &mut generated_compiler,
-                    entry_file_path,
                 )?;
             }
             // Nested materialisation consumes only detached facts. Release its requester services
@@ -478,10 +473,10 @@ fn materialise_generated_request<'build>(
                     external_import_candidates,
                     functions,
                 },
+                // A generated sidecar is a function body, not a structural module with an
+                // entry root: it carries no entry metadata, no start and no fragment schedule.
                 metadata: ModuleCompilerMetadata {
-                    entry_point: entry_file_path.to_path_buf(),
-                    const_top_level_fragments: Vec::new(),
-                    root_activity: ModuleRootActivity::default(),
+                    entry: None,
                     doc_fragments: lowering_metadata.doc_fragments,
                     materialisation_context: None,
                 },

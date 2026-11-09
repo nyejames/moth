@@ -530,13 +530,21 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
         project_compilation
             .modules()
             .find(|module| {
-                module.metadata.entry_point.ends_with("@page.moth")
-                    && !module.metadata.entry_point.ends_with("docs/@page.moth")
+                module.metadata.entry.as_ref().is_some_and(|entry| {
+                    entry.entry_point.ends_with("@page.moth")
+                        && !entry.entry_point.ends_with("docs/@page.moth")
+                })
             })
             .expect("directory build should discover homepage module");
         project_compilation
             .modules()
-            .find(|module| module.metadata.entry_point.ends_with("docs/@page.moth"))
+            .find(|module| {
+                module
+                    .metadata
+                    .entry
+                    .as_ref()
+                    .is_some_and(|entry| entry.entry_point.ends_with("docs/@page.moth"))
+            })
             .expect("directory build should discover docs module");
 
         let (error, warning) = {

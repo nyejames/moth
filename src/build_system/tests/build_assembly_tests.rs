@@ -56,7 +56,8 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::module_compilation::artefact::{
-    ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts, ResolvedConstFragment,
+    EntryRootMetadata, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
+    ResolvedConstFragment,
 };
 use crate::compiler_frontend::module_compilation::{
     CompiledModuleArtifact, Module, ModuleRootActivity,
@@ -268,24 +269,26 @@ fn synthetic_module(
             functions: function_link_facts,
         },
         metadata: ModuleCompilerMetadata {
-            entry_point: PathBuf::from(entry_point),
-            const_top_level_fragments: const_fragments
-                .into_iter()
-                .enumerate()
-                .map(|(runtime_insertion_index, origin)| ResolvedConstFragment {
-                    runtime_insertion_index,
-                    destination: ConstFragmentDestination::Body,
-                    span: None,
-                    value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Resource(
-                        origin,
-                    )]),
-                })
-                .collect(),
-            root_activity: ModuleRootActivity {
-                has_non_trivial_root_body: start_function.is_some(),
-                const_fragment_count: usize::from(!function_rows.is_empty()),
-                ..ModuleRootActivity::default()
-            },
+            entry: start_function.map(|_| EntryRootMetadata {
+                entry_point: PathBuf::from(entry_point),
+                const_top_level_fragments: const_fragments
+                    .into_iter()
+                    .enumerate()
+                    .map(|(runtime_insertion_index, origin)| ResolvedConstFragment {
+                        runtime_insertion_index,
+                        destination: ConstFragmentDestination::Body,
+                        span: None,
+                        value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Resource(
+                            origin,
+                        )]),
+                    })
+                    .collect(),
+                root_activity: ModuleRootActivity {
+                    has_non_trivial_root_body: true,
+                    const_fragment_count: usize::from(!function_rows.is_empty()),
+                    ..ModuleRootActivity::default()
+                },
+            }),
             doc_fragments: Vec::new(),
             materialisation_context: None,
         },
@@ -734,7 +737,7 @@ fn entry_union_keeps_entry_fragment_and_excludes_linked_module_fragment() {
     let provider_module = synthetic_module(
         "provider/@provider.moth",
         vec![(helper_origin, Vec::new(), None)],
-        None,
+        Some(FunctionId(0)),
         vec![linked_resource],
     );
     let provider_boundary = boundary(

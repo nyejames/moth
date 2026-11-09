@@ -74,12 +74,12 @@ If a feature would force solver-heavy reasoning, implicit behaviour or backend l
 
 Do not call those refusals "missing features" as if every language must collect the same stamps.
 
-[diagram:
+[@diagrams diagram:
     [$in label: Where each choice moves the work]
     [$in caption: Read every row the same way. Something the programmer would otherwise express, or the runtime would otherwise decide, becomes the compiler's job instead.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Given up]
             [$in title: Source-surface power]
@@ -87,8 +87,8 @@ Do not call those refusals "missing features" as if every language must collect 
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../compile-time-semantics/]
             [$in eyebrow: Absorbed]
             [$in title: Compiler bookkeeping]
@@ -96,22 +96,22 @@ Do not call those refusals "missing features" as if every language must collect 
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Who now does the work]
-                [lane:
-                [detail:
+                [@diagrams lane:
+                [@diagrams detail:
                     [$in href: ../compile-time-semantics/]
                     Folding and trait evidence
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../templates-and-tir/]
                     Template structure
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../borrow-validation-and-drops/]
                     Inferred moves
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../target-planning-and-validation/]
                     Target planning
                 ]
@@ -120,8 +120,8 @@ Do not call those refusals "missing features" as if every language must collect 
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../what-a-compiler-does/]
             [$in eyebrow: Bought]
             [$in title: One owner per question]

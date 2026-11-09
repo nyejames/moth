@@ -722,28 +722,34 @@ fn fold_template_semantics(
         .unwrap_or_else(FrozenIdentityHandle::new);
 
     let source_database = source_builder.sources();
-    let ast_result = {
-        let file_value_resolution = resolved_references.map(|resolved_file_references| {
+    let qualified_reference_targets = sorted
+        .binding_environment
+        .qualified_reference_targets
+        .clone();
+    let file_value_resolution =
+        (resolved_references.is_some() || !qualified_reference_targets.is_empty()).then(|| {
             Rc::new(FileValueResolutionServices {
-                stage0_resolution_facts: Some(Arc::new(Stage0ResolutionFacts::ordinary(
-                    resolved_file_references,
-                    Arc::clone(source_database),
-                ))),
+                stage0_resolution_facts: resolved_references.map(|resolved_file_references| {
+                    Arc::new(Stage0ResolutionFacts::ordinary(
+                        resolved_file_references,
+                        Arc::clone(source_database),
+                    ))
+                }),
                 module_resources: Rc::clone(&module_resources),
+                qualified_reference_targets: Arc::new(qualified_reference_targets),
                 module_origin,
                 public_source_trait_origins: Arc::default(),
                 frozen_identity_handle,
             })
         });
-        fold_template_ast(
-            sorted,
-            entry_scope,
-            request,
-            string_table,
-            path_fork,
-            file_value_resolution,
-        )
-    };
+    let ast_result = fold_template_ast(
+        sorted,
+        entry_scope,
+        request,
+        string_table,
+        path_fork,
+        file_value_resolution,
+    );
 
     let mut ast = match ast_result {
         Ok(ast) => ast,

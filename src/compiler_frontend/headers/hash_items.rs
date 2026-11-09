@@ -132,9 +132,16 @@ fn handle_top_level_const_template(
     }
 
     // A reached foreign facade keeps its declaration surface but owns no start or root runtime
-    // in this compilation, so its const templates are captured and discarded after validating
-    // that no misplaced `#Config` marker hides inside the discarded range.
-    if matches!(context.file_role, FileRole::ReachedApiFacadeRoot(_)) {
+    // in this compilation. Reject its const templates, after validating that no misplaced
+    // `#Config` marker hides inside the range so the specific config diagnostic wins.
+    //
+    // LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): a reached legacy combined normal
+    // root still owns root output inside its own module, so this compilation keeps the pre-Phase-3
+    // capture-and-discard handling instead of rejecting the template.
+    if matches!(
+        context.file_role,
+        FileRole::ReachedApiFacadeRoot(_) | FileRole::ReachedLegacyCombinedRoot
+    ) {
         let opening = cursor.current().ok_or_else(|| {
             HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
                 CompilerStage::HeaderParsing,
@@ -152,7 +159,7 @@ fn handle_top_level_const_template(
         let cursor = canonical.cursor(range).map_err(|error| {
             HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
                 CompilerStage::HeaderParsing,
-                format!("discarded template range exceeds its source token owner: {error:?}",),
+                format!("reached facade template range exceeds its source token owner: {error:?}",),
             ))
         })?;
         if let Some((marker_span, adjacent)) = find_config_qualifier_marker_in_cursor(
@@ -174,7 +181,12 @@ fn handle_top_level_const_template(
             };
             return Err(diagnostic.into());
         }
-        return Ok(());
+        if context.file_role == FileRole::ReachedLegacyCombinedRoot {
+            return Ok(());
+        }
+        return Err(
+            names_declarations::invalid_top_level_runtime_statement(Some(current_span)).into(),
+        );
     }
 
     if matches!(context.file_role, FileRole::ActiveApiOnlyModuleRoot(_)) {

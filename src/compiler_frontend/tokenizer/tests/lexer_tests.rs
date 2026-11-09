@@ -2989,3 +2989,46 @@ fn malformed_trusted_record_reports_the_invariant_lane() {
         Ok(()) => panic!("absent path handle must not pack"),
     }
 }
+
+/// A path and the symbol selected from it stay separate tokens with no lexical glue.
+///
+/// WHAT: `@math square(12)` lexes as PATH, SYMBOL, call suffix.
+/// WHY: expression-qualified references reuse the existing dependency path and symbol tokens; a
+///      new token kind or a lexer-level pair would fork the path parser and the dependency clause
+///      syntax the language already owns.
+#[test]
+fn qualified_reference_path_and_selected_symbol_are_separate_tokens() {
+    let source = "@math square(12)\n";
+    let (file_tokens, string_table) = tokenize_source(source);
+    let tokens = file_tokens.tokens.as_ref();
+
+    let path = token_at(tokens, 1);
+    assert_eq!(path.tag(), TokenTag::PATH);
+    assert!(
+        token_has_path_payload(path),
+        "the dependency path must carry its authored path row"
+    );
+    let selected = token_at(tokens, 2);
+    assert_eq!(selected.tag(), TokenTag::SYMBOL);
+    assert!(
+        token_string_is(selected, &string_table, "square"),
+        "the selected name must keep its authored spelling"
+    );
+    assert_eq!(token_at(tokens, 3).tag(), TokenTag::OPEN_PARENTHESIS);
+}
+
+/// A physical newline ends the qualified reference before the next symbol.
+///
+/// WHAT: `@math` followed by a newline and `square` keeps a NEWLINE token between them.
+/// WHY: same-line termination is the only thing that distinguishes `@math square` from two
+///      statements, so the lexer must keep that boundary observable.
+#[test]
+fn newline_between_path_and_symbol_keeps_them_separate_statements() {
+    let source = "@math\nsquare\n";
+    let (file_tokens, _string_table) = tokenize_source(source);
+    let tokens = file_tokens.tokens.as_ref();
+
+    assert_eq!(token_at(tokens, 1).tag(), TokenTag::PATH);
+    assert_eq!(token_at(tokens, 2).tag(), TokenTag::NEWLINE);
+    assert_eq!(token_at(tokens, 3).tag(), TokenTag::SYMBOL);
+}

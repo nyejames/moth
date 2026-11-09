@@ -168,15 +168,6 @@ impl ProjectPathResolver {
         self.source_package_roots.root_files().iter()
     }
 
-    pub(crate) fn module_api_facade_root_file_for_directory(
-        &self,
-        directory: &Path,
-    ) -> Option<PathBuf> {
-        self.module_roots
-            .api_facade_root_file_for_directory(directory)
-            .map(|path| path.to_path_buf())
-    }
-
     /// Borrow the prepared role-keyed module-root table for one boundary.
     ///
     /// Preparation consumes the same inventory the resolver owns, so it borrows instead of

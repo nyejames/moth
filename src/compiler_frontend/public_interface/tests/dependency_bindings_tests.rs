@@ -2,7 +2,8 @@
 //!
 //! WHAT: proves `SourceProviderDependencySet` resolves retained dependency shells by `DependencyShellId`,
 //!       assigns one dense `ProviderInterfaceId` per unique interface, rejects duplicate shells
-//!       and implicit scopes, and fails deterministically when equal module origins disagree.
+//!       and duplicate template preludes, and fails deterministically when equal module origins
+//!       disagree.
 //! WHY: one exact build-local provider identity replaces optional shell/prefix/boolean
 //!      provider states and module-origin cache keys; these hidden join invariants are
 //!      not observable through end-to-end output.
@@ -43,12 +44,12 @@ fn authored(
     }
 }
 
-fn implicit<'a>(
+fn template_prelude<'a>(
     package_prefix: &'a str,
     interface: &'a PublicSemanticInterface,
 ) -> SourceProviderDependency<'a> {
     SourceProviderDependency {
-        kind: ProviderDependencyKind::ImplicitTemplate { package_prefix },
+        kind: ProviderDependencyKind::TemplatePrelude { package_prefix },
         interface,
     }
 }
@@ -133,16 +134,16 @@ fn one_shell_resolves_one_provider_surface() {
 }
 
 #[test]
-fn duplicate_implicit_template_scope_fails() {
+fn duplicate_template_prelude_fails() {
     let provider = provider_interface("html");
 
     let error = SourceProviderDependencySet::new(vec![
-        implicit("html", &provider),
-        implicit("html", &provider),
+        template_prelude("html", &provider),
+        template_prelude("html", &provider),
     ])
-    .expect_err("one implicit scope prefix must not register twice");
+    .expect_err("the template prelude must not register twice");
 
-    assert!(error.message.contains("implicit template scope @html"));
+    assert!(error.message.contains("template prelude @html"));
 }
 
 #[test]
@@ -216,6 +217,38 @@ fn exact_repeated_interfaces_receive_one_provider_id() {
 }
 
 #[test]
+fn duplicate_qualified_occurrence_shells_share_one_provider_interface() {
+    // Qualified occurrences allocate retained shells from the same per-file ordinal space as
+    // authored clauses. Two occurrences selecting one provider therefore register two authored
+    // shells that must resolve to exactly one interface identity.
+    let provider = provider_interface("occurrence-provider");
+    let set = SourceProviderDependencySet::new(vec![
+        authored(
+            DependencyShellId::new(SourceId::from_index(5), 2),
+            &provider,
+        ),
+        authored(
+            DependencyShellId::new(SourceId::from_index(5), 3),
+            &provider,
+        ),
+    ])
+    .expect("occurrence shells for one provider should collapse");
+
+    let first = set
+        .resolve_clause(DependencyShellId::new(SourceId::from_index(5), 2))
+        .expect("first occurrence shell resolves");
+    let second = set
+        .resolve_clause(DependencyShellId::new(SourceId::from_index(5), 3))
+        .expect("second occurrence shell resolves");
+    assert_eq!(first.provider, second.provider);
+    assert_eq!(
+        set.interfaces().count(),
+        1,
+        "both occurrence shells must map to the one provider interface"
+    );
+}
+
+#[test]
 fn grouped_reexport_lookup_uses_the_same_shell_identity() {
     let provider = provider_interface("provider");
     let set = SourceProviderDependencySet::new(vec![authored(
@@ -255,23 +288,24 @@ fn unbound_shell_stays_outside_the_provider_map() {
 }
 
 #[test]
-fn implicit_scope_bindings_have_no_shell_and_keep_their_prefix() {
+fn template_prelude_has_no_shell_and_keeps_its_prefix() {
     let provider = provider_interface("html");
-    let set = SourceProviderDependencySet::new(vec![implicit("html", &provider)])
-        .expect("one implicit template provider should register");
+    let set = SourceProviderDependencySet::new(vec![template_prelude("html", &provider)])
+        .expect("one template prelude provider should register");
 
-    let implicit: Vec<_> = set.implicit_template_scope_providers().collect();
-    assert_eq!(implicit.len(), 1);
-    assert_eq!(implicit[0].0, "html");
+    let (prefix, provider_id) = set
+        .template_prelude_provider()
+        .expect("the fixed template prelude should resolve");
+    assert_eq!(prefix, "html");
     assert!(std::ptr::eq(
-        set.interface(implicit[0].1)
-            .expect("implicit provider resolves"),
+        set.interface(provider_id)
+            .expect("prelude provider resolves"),
         &provider,
     ));
     assert!(
         set.resolve_clause(DependencyShellId::new(SourceId::from_index(0), 0))
             .is_none(),
-        "implicit scope must never satisfy an explicit authored shell"
+        "the template prelude must never satisfy an explicit authored shell"
     );
 }
 

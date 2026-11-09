@@ -31,6 +31,9 @@ use crate::compiler_frontend::headers::header_dispatch::{
 };
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
 use crate::compiler_frontend::headers::parse_file_headers::find_config_qualifier_marker_in_declaration_defaults;
+use crate::compiler_frontend::headers::qualified_references::{
+    collect_qualified_references, push_header_expression_ranges,
+};
 use crate::compiler_frontend::headers::start_capture::capture_runtime_template_range_from_cursor;
 use crate::compiler_frontend::headers::symbol_collection::is_receiver_method_candidate;
 use crate::compiler_frontend::headers::top_level_classifier::{
@@ -40,9 +43,9 @@ use crate::compiler_frontend::headers::top_level_classifier::{
     starts_trait_declaration_after_must_at_source, statement_boundary_at_source,
 };
 use crate::compiler_frontend::headers::types::{
-    DependencySelection, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole, Header,
-    HeaderBuildContext, HeaderExportMode, HeaderKind, HeaderParseContext, HeaderParseFailure,
-    RetainedDependencyClause, SourceTokenOwner,
+    DependencySelection, FileFrontendPrepareError, FileFrontendPrepareFailure,
+    FileFrontendPrepareOutput, FileRole, Header, HeaderBuildContext, HeaderExportMode, HeaderKind,
+    HeaderParseContext, HeaderParseFailure, RetainedDependencyClause, SourceTokenOwner,
 };
 use crate::compiler_frontend::paths::const_paths::can_serialize_path_component_bare;
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
@@ -154,7 +157,7 @@ fn parse_headers_in_file_inner(
         let current_tag = current.tag();
         if !runtime_nesting.is_top_level() && current_tag != TokenTag::EOF {
             if current_tag == TokenTag::TEMPLATE_HEAD {
-                // A discarded foreign-root body has no AST consumer, so validate nested template
+                // A rejected foreign-root body has no AST consumer, so validate nested template
                 // balance here.
                 cursor.advance();
                 let range = capture_runtime_template_range_from_cursor(
@@ -1141,12 +1144,12 @@ fn handle_runtime_template_item(
     Ok(())
 }
 
-/// Scan the captured start-body ranges of a discarded foreign root for a misplaced `#Config`
+/// Scan the captured start-body ranges of a reached foreign root for a misplaced `#Config`
 /// marker.
 ///
-/// A reached foreign facade keeps its declaration surface but discards its top-level body, so
-/// no later AST stage can report a config marker authored there. Preparation rejects it here,
-/// mirroring the retained-body validation.
+/// A reached foreign facade keeps its declaration surface and rejects its top-level body, so
+/// no later AST stage can report a config marker authored there. Preparation scans the rejected
+/// ranges first so the specific config diagnostic wins over the generic root-runtime rejection.
 fn find_config_marker_in_start_ranges(
     state: &HeaderFileParseState,
     canonical: &SourceTokens,
@@ -1191,15 +1194,17 @@ pub(super) fn finish_file_output(
     state: HeaderFileParseState,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let canonical = owner.tokens_ref();
-    if matches!(context.file_role, FileRole::ReachedApiFacadeRoot(_))
-        && let Some((marker_span, adjacent)) = find_config_marker_in_start_ranges(
-            &state,
-            canonical,
-            file_id,
-            context.string_table,
-            context.span_builder,
-        )
-        .map_err(FileFrontendPrepareFailure::Infrastructure)?
+    if matches!(
+        context.file_role,
+        FileRole::ReachedApiFacadeRoot(_) | FileRole::ReachedLegacyCombinedRoot
+    ) && let Some((marker_span, adjacent)) = find_config_marker_in_start_ranges(
+        &state,
+        canonical,
+        file_id,
+        context.string_table,
+        context.span_builder,
+    )
+    .map_err(FileFrontendPrepareFailure::Infrastructure)?
     {
         let diagnostic = if adjacent {
             project_config::invalid_config_reason(
@@ -1232,7 +1237,7 @@ pub(super) fn finish_file_output(
 
     if matches!(
         context.file_role,
-        FileRole::Normal | FileRole::ActiveApiOnlyModuleRoot(_)
+        FileRole::Normal | FileRole::ActiveApiOnlyModuleRoot(_) | FileRole::ReachedApiFacadeRoot(_)
     ) && state.has_non_trivial_start_body()
     {
         let span = state
@@ -1266,21 +1271,32 @@ pub(super) fn finish_file_output(
                 "prepared file output is missing its canonical source token owner",
             ))
         })?;
-    attach_structural_file_facts(
+    if let Err(failure) = attach_structural_file_facts(
         &mut output,
         &canonical_owner,
         context.string_table,
         context.path_fork,
-    )
-    .map_err(FileFrontendPrepareFailure::Infrastructure)?;
+    ) {
+        return Err(match failure {
+            HeaderParseFailure::Diagnostic(diagnostic) => {
+                FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
+                    warnings: output.warnings,
+                    diagnostic,
+                })
+            }
+            HeaderParseFailure::Infrastructure(error) => {
+                FileFrontendPrepareFailure::Infrastructure(error)
+            }
+        });
+    }
     Ok(output)
 }
 
 /// Classify this file's graph-active file-value paths and derive shell ordering facts from them.
 ///
-/// WHAT: classifies every non-dependency path row once, then records content-source ordering
-///       hints from the classified rows into each declaration shell that folds before body
-///       emission.
+/// WHAT: recognizes expression-qualified occurrences and classifies every non-consumed path row
+///       once, then records content-source ordering hints from the classified rows into each
+///       declaration shell that folds before body emission.
 /// WHY: classification is the single graph-activity fact source, and the content ordering edges
 ///       must come from the same prepared rows at token level rather than an expression parse.
 ///       Source `#Config` initializers are excluded until their primitive-only contract validation
@@ -1290,7 +1306,7 @@ fn attach_structural_file_facts(
     canonical: &SourceTokens,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<(), InfrastructureFailure> {
+) -> Result<(), HeaderParseFailure> {
     let is_config_file = path_fork
         .component(output.source_file)
         .is_some_and(|name| file_name_is_config_file(string_table.resolve(name)));
@@ -1298,7 +1314,8 @@ fn attach_structural_file_facts(
         return Err(InfrastructureFailure::internal(
             CompilerStage::HeaderParsing,
             "source token owner does not match its file stream identity",
-        ));
+        )
+        .into());
     }
     let mut consumed_path_syntax_ids = Vec::new();
     consumed_path_syntax_ids.extend(
@@ -1307,6 +1324,7 @@ fn attach_structural_file_facts(
             .iter()
             .map(|clause| clause.dependency.path_syntax),
     );
+    let mut qualified_reference_ranges = Vec::new();
     fn append_source_range_paths(
         output: &mut Vec<crate::compiler_frontend::paths::path_syntax::PathSyntaxId>,
         canonical: &SourceTokens,
@@ -1342,7 +1360,8 @@ fn attach_structural_file_facts(
             return Err(InfrastructureFailure::internal(
                 CompilerStage::HeaderParsing,
                 "retained header range does not match its source token owner",
-            ));
+            )
+            .into());
         }
         let declaration_owned_marker = matches!(
             &header.kind,
@@ -1379,11 +1398,21 @@ fn attach_structural_file_facts(
             find_config_qualifier_marker_in_declaration_defaults(header, canonical, string_table)?
                 .is_some()
         };
-        if is_config_file
-            || (!declaration_owned_marker
-                && !body_has_config_marker
-                && !declaration_has_config_marker)
-        {
+        if is_config_file {
+            // Config syntax paths are values, not qualified-reference occurrences.
+            continue;
+        }
+        let config_owned =
+            declaration_owned_marker || body_has_config_marker || declaration_has_config_marker;
+        if !config_owned {
+            // Ordinary expression context: recognize `PATH SYMBOL` occurrences in this header's
+            // body, initializer and defaults. Configuration-qualified bodies stay out of scope.
+            push_header_expression_ranges(
+                header,
+                canonical,
+                output.file_id,
+                &mut qualified_reference_ranges,
+            )?;
             continue;
         }
 
@@ -1452,6 +1481,33 @@ fn attach_structural_file_facts(
         }
     }
 
+    let first_occurrence_shell_ordinal = u32::try_from(output.file_dependency_clauses.len())
+        .map_err(|_| {
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "dependency clause count exceeded the file-local shell ordinal domain",
+            )
+        })?;
+    let qualified_references = collect_qualified_references(
+        canonical,
+        qualified_reference_ranges,
+        output.file_id,
+        first_occurrence_shell_ordinal,
+        output.path_syntax.table(),
+        string_table,
+        path_fork,
+    )?;
+    if let Some(alias_span) = qualified_references.unsupported_alias_span {
+        return Err(HeaderParseFailure::Diagnostic(
+            token_lexical::common_syntax_mistake(
+                CommonSyntaxMistakeReason::InvalidAsOperator,
+                Some(alias_span),
+            ),
+        ));
+    }
+    consumed_path_syntax_ids.extend(qualified_references.consumed_path_syntax_ids);
+    output.qualified_references = qualified_references.occurrences;
+
     output.structural_file_references = classify_prepared_file_references(
         output.path_syntax.table(),
         consumed_path_syntax_ids,
@@ -1468,6 +1524,7 @@ fn attach_structural_file_facts(
         string_table,
         path_fork,
     )
+    .map_err(HeaderParseFailure::Infrastructure)
 }
 
 /// Scan one retained source-owned range for a `#Config` marker without materializing it.

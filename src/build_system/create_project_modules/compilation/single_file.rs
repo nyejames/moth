@@ -14,6 +14,7 @@ use crate::compiler_frontend::module_compilation::ModuleCompilationContext;
 use crate::compiler_frontend::module_compilation::compile_module_for_boracle;
 
 use crate::builder_surface::BuilderSurface;
+use crate::builder_surface::definition::TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{
@@ -433,12 +434,13 @@ fn compile_single_file_frontend_with_target(
     let result = (|| -> Result<SingleFileFrontendResult, BoundaryPremergeFailure> {
         // Stage 0 indexed package roots above for namespace and collision checks. The shared
         // inventory path materialises every registered source package when entered, so skip it
-        // only when the consumer retained no source-package edges and no selected Moth template
-        // can receive an implicit package from this builder.
+        // only when the consumer retained no source-package edges and no Moth template needs the
+        // compiler-standard `@html` prelude provider.
         let requires_source_package_inventories = !source_package_dependencies.is_empty()
-            || (!builder_surface
-                .implicit_template_scope_source_packages
-                .is_empty()
+            || (builder_surface
+                .source_packages
+                .get_root(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX)
+                .is_some()
                 && input_files
                     .iter()
                     .any(|input| source_is_moth_template(source_files, input.source_id())));

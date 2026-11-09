@@ -78,12 +78,12 @@ HIR stores no dependency aliases as semantic authority and no backend runtime na
 
 Those facts are the linking authority later stages consume.
 
-[diagram:
+[@diagrams diagram:
     [$in label: Link facts sit beside HIR, never inside it]
     [$in caption: Later stages read the facts on the right without touching the control flow on the left. Analysis writes side tables; it never rewrites the IR to taste.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Validated]
             [$in title: HIR control flow]
@@ -91,18 +91,18 @@ Those facts are the linking authority later stages consume.
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Recorded alongside, per function]
-                [lane:
-                [detail:
+                [@diagrams lane:
+                [@diagrams detail:
                     [$in href: ../linking-entries-and-reachability/]
                     Call edges to explicit identities
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../target-planning-and-validation/]
                     Helper and capability needs
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../html-assembly-and-output/]
                     Resource uses
                 ]

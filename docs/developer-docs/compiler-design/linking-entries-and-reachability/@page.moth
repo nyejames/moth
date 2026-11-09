@@ -1,6 +1,6 @@
 @linking-entries-and-reachability content as reference_content
 @styles navbar, section, theme_css, sidebar, init_docs_sidebar
-@diagrams css as diagrams_css, diagram as flow_diagram, stage as flow_stage, node as flow_node, branch as flow_branch, lane as flow_lane, detail as flow_detail, island as flow_island, fanout as flow_fanout
+@diagrams css as diagrams_css
 
 #[$in title:["15. Linking, entries and reachability"]]
 #[$in description:["How dormant roots become an explicit entry and reachable function union."]]
@@ -20,13 +20,3 @@ init_docs_sidebar()!
     @../ (Compiler design) / @../module-artefacts-and-reuse (Previous) / @../target-planning-and-validation (Next)
 ]
 
-export:
-    diagram #= flow_diagram
-    stage #= flow_stage
-    node #= flow_node
-    branch #= flow_branch
-    lane #= flow_lane
-    detail #= flow_detail
-    island #= flow_island
-    fanout #= flow_fanout
-;

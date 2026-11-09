@@ -201,8 +201,15 @@ fn prepare_discovery_output(
         source_files
             .get(source_id)
             .and_then(|record| record.canonical_os_path.as_deref())
-            .and_then(|path| project_path_resolver?.module_root_role_for_file(path))
-            .and_then(FileRole::reached_api_facade)
+            .and_then(|path| {
+                let resolver = project_path_resolver?;
+                let role = resolver.module_root_role_for_file(path)?;
+                super::module_preparation::reached_root_file_role(
+                    resolver.prepared_module_roots(),
+                    role,
+                    path,
+                )
+            })
     };
     let reached_root_roles = reached_role.map(|role| [(source_id, role)]);
     let options = HeaderParseOptions {

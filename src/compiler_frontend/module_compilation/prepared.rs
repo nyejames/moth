@@ -160,19 +160,38 @@ impl PreparedModuleInput {
             })
     }
 
-    /// The canonical path of the executable entry root, falling back to the preparation anchor
-    /// for modules without an entry root.
+    /// The one source that owns the synthesized `start`, when this module has one.
+    ///
+    /// A directory module is start-bearing when it owns an entry root, or when a normal root
+    /// still acts as today's legacy combined root. A standalone selection declares the same fact
+    /// through its explicit file role.
+    pub(crate) fn entry_root_source(&self) -> Option<SourceId> {
+        if let Some(entry_root) = self.root_file_ids.entry {
+            return Some(entry_root);
+        }
+        if self.root_file_ids.normal_root_is_legacy_combined() {
+            return self.root_file_ids.normal;
+        }
+        self.selected_file
+            .filter(|(_, role)| role.synthesizes_entry_start())
+            .map(|(source_id, _)| source_id)
+    }
+
+    /// The canonical path of the executable entry root, or `None` for an entryless module.
+    ///
+    /// WHY: an API-only or support-only module owns no dormant start, so it has no entry path.
+    ///      Consumers must observe that typed absence instead of receiving the preparation anchor.
     pub(crate) fn entry_point_path<'a>(
         &self,
         source_files: &'a SourceDatabase,
-    ) -> Result<&'a Path, InfrastructureFailure> {
-        let entry_root = self.root_file_ids.entry;
-        let Some(entry_root) = entry_root else {
-            return self.preparation_anchor_path(source_files);
+    ) -> Result<Option<&'a Path>, InfrastructureFailure> {
+        let Some(entry_root) = self.entry_root_source() else {
+            return Ok(None);
         };
         source_files
             .get(entry_root)
             .and_then(|identity| identity.canonical_os_path.as_deref())
+            .map(Some)
             .ok_or_else(|| {
                 InfrastructureFailure::internal(
                     CompilerStage::ProjectBuildAssembly,
@@ -185,16 +204,8 @@ impl PreparedModuleInput {
     }
 
     /// Whether preparation synthesized a start-bearing root for this module.
-    ///
-    /// A directory module is start-bearing when it owns an entry root, or when a normal root
-    /// still acts as today's legacy combined root. A standalone selection declares the same fact
-    /// through its explicit file role.
     pub(crate) fn synthesizes_entry_start(&self) -> bool {
-        self.root_file_ids.entry.is_some()
-            || self.root_file_ids.normal_root_is_legacy_combined()
-            || self
-                .selected_file
-                .is_some_and(|(_, role)| role.synthesizes_entry_start())
+        self.entry_root_source().is_some()
     }
 
     /// Borrow normalized source `#Config` shells retained during header preparation.

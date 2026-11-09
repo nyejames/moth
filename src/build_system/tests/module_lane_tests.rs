@@ -57,7 +57,7 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::module_compilation::artefact::{
-    ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
+    EntryRootMetadata, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
 };
 use crate::compiler_frontend::module_compilation::{
     CompiledModuleArtifact, CompletedGeneratedFunction, GeneratedFunctionSidecar, Module,
@@ -256,9 +256,11 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
         },
         link_facts,
         metadata: ModuleCompilerMetadata {
-            entry_point: entry_point.clone(),
-            const_top_level_fragments: vec![],
-            root_activity: ModuleRootActivity::default(),
+            entry: Some(EntryRootMetadata {
+                entry_point: entry_point.clone(),
+                const_top_level_fragments: vec![],
+                root_activity: ModuleRootActivity::default(),
+            }),
             doc_fragments: vec![],
             materialisation_context: None,
         },
@@ -328,7 +330,15 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
     );
 
     // The metadata entry path is a PathBuf, not interned, so it is preserved.
-    assert_eq!(module.metadata.entry_point, entry_point);
+    assert_eq!(
+        module
+            .metadata
+            .entry
+            .as_ref()
+            .expect("remap fixture represents an active entry root")
+            .entry_point,
+        entry_point
+    );
 }
 
 #[test]
@@ -360,12 +370,14 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
             functions: function_link_facts,
         },
         metadata: ModuleCompilerMetadata {
-            entry_point: PathBuf::from("@page.moth"),
-            const_top_level_fragments: vec![],
-            root_activity: ModuleRootActivity {
-                has_non_trivial_root_body: true,
-                ..ModuleRootActivity::default()
-            },
+            entry: Some(EntryRootMetadata {
+                entry_point: PathBuf::from("@page.moth"),
+                const_top_level_fragments: vec![],
+                root_activity: ModuleRootActivity {
+                    has_non_trivial_root_body: true,
+                    ..ModuleRootActivity::default()
+                },
+            }),
             doc_fragments: vec![],
             materialisation_context: None,
         },
@@ -401,6 +413,9 @@ fn frontend_compilation_retains_project_artefact_interfaces() {
         artifact
             .module
             .metadata
+            .entry
+            .as_ref()
+            .expect("project artefact retains entry metadata")
             .root_activity
             .has_html_artifact_activity(),
         "project artefact root activity is retained"
@@ -466,6 +481,9 @@ fn source_package_artefacts_are_retained_but_never_project_entries() {
             .expect("package root should be successful")
             .module
             .metadata
+            .entry
+            .as_ref()
+            .expect("package root retains entry metadata")
             .root_activity
             .has_html_artifact_activity(),
         "source-package root activity is retained, not cleared"
@@ -487,6 +505,9 @@ fn source_package_artefacts_are_retained_but_never_project_entries() {
     assert!(
         package_module
             .metadata
+            .entry
+            .as_ref()
+            .expect("package module retains entry metadata")
             .root_activity
             .has_html_artifact_activity(),
         "package module metadata is unchanged by project assembly"
@@ -637,12 +658,28 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
         .artifact(ModuleId::from_index(2))
         .expect("valid high module id")
         .expect("high module should be successful");
-    assert!(high.module.metadata.entry_point.ends_with("high/@mod.moth"));
+    assert!(
+        high.module
+            .metadata
+            .entry
+            .as_ref()
+            .expect("high module represents an active root")
+            .entry_point
+            .ends_with("high/@mod.moth")
+    );
     let low = store
         .artifact(ModuleId::from_index(1))
         .expect("valid low module id")
         .expect("low module should be successful");
-    assert!(low.module.metadata.entry_point.ends_with("low/@mod.moth"));
+    assert!(
+        low.module
+            .metadata
+            .entry
+            .as_ref()
+            .expect("low module represents an active root")
+            .entry_point
+            .ends_with("low/@mod.moth")
+    );
     assert!(
         store
             .artifact(ModuleId::from_index(0))
@@ -653,7 +690,16 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
 
     let order = store
         .successful_artefacts_in_module_id_order()
-        .map(|artifact| artifact.module.metadata.entry_point.clone())
+        .map(|artifact| {
+            artifact
+                .module
+                .metadata
+                .entry
+                .as_ref()
+                .expect("ordered artefacts represent active roots")
+                .entry_point
+                .clone()
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         order,
@@ -847,6 +893,9 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
         package_a_module
             .module
             .metadata
+            .entry
+            .as_ref()
+            .expect("package a root represents an active root")
             .entry_point
             .ends_with("packages/a/@mod.moth")
     );
@@ -864,6 +913,9 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
         package_b_module
             .module
             .metadata
+            .entry
+            .as_ref()
+            .expect("package b root represents an active root")
             .entry_point
             .ends_with("packages/b/@mod.moth")
     );
@@ -873,7 +925,15 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
     assert_eq!(compilation.module_count(), 3);
     let module_paths = compilation
         .modules()
-        .map(|module| module.metadata.entry_point.clone())
+        .map(|module| {
+            module
+                .metadata
+                .entry
+                .as_ref()
+                .expect("overlapping package roots represent active roots")
+                .entry_point
+                .clone()
+        })
         .collect::<Vec<_>>();
     assert!(module_paths[1].ends_with("packages/a/@mod.moth"));
     assert!(module_paths[2].ends_with("packages/b/@mod.moth"));
@@ -1195,24 +1255,12 @@ fn project_and_package_boundaries_may_contain_equal_generated_identities() {
     let project_sidecar = entry
         .linked_modules
         .iter()
-        .find(|linked| {
-            linked
-                .module
-                .metadata
-                .entry_point
-                .ends_with("@project_shared_generated.moth")
-        })
+        .find(|linked| linked.source_domain.is_none())
         .expect("project-boundary sidecar should be linked");
     let package_sidecar = entry
         .linked_modules
         .iter()
-        .find(|linked| {
-            linked
-                .module
-                .metadata
-                .entry_point
-                .ends_with("@package_shared_generated.moth")
-        })
+        .find(|linked| linked.source_domain.is_some())
         .expect("package-boundary sidecar should be linked");
     let project_name = project_sidecar
         .generated_function_names
@@ -1415,16 +1463,10 @@ fn independent_packages_publish_equal_generated_identities_in_any_order() {
         let mut symbols = rustc_hash::FxHashMap::default();
         for linked_module in &entries[0].linked_modules {
             if let Some(name) = linked_module.generated_function_names.get(&shared_identity) {
-                let prefix = if linked_module
-                    .module
-                    .metadata
-                    .entry_point
-                    .starts_with("packages/a/")
-                {
-                    "a"
-                } else {
-                    "b"
-                };
+                let prefix = linked_module
+                    .source_domain
+                    .expect("package sidecar carries its package domain")
+                    .name();
                 symbols.insert(prefix.to_owned(), name.clone());
             }
         }
@@ -1550,16 +1592,14 @@ fn lane_module_with_generated_and_cross_module_calls(
             functions: function_link_facts,
         },
         metadata: ModuleCompilerMetadata {
-            entry_point,
-            const_top_level_fragments: vec![],
-            root_activity: if active_root {
-                ModuleRootActivity {
+            entry: active_root.then(|| EntryRootMetadata {
+                entry_point,
+                const_top_level_fragments: vec![],
+                root_activity: ModuleRootActivity {
                     has_non_trivial_root_body: true,
                     ..ModuleRootActivity::default()
-                }
-            } else {
-                ModuleRootActivity::default()
-            },
+                },
+            }),
             doc_fragments: vec![],
             materialisation_context: None,
         },
@@ -1797,16 +1837,14 @@ fn minimal_lane_module(entry_point: PathBuf, active_root: bool) -> Module {
             functions: function_link_facts,
         },
         metadata: ModuleCompilerMetadata {
-            entry_point,
-            const_top_level_fragments: vec![],
-            root_activity: if active_root {
-                ModuleRootActivity {
+            entry: active_root.then(|| EntryRootMetadata {
+                entry_point,
+                const_top_level_fragments: vec![],
+                root_activity: ModuleRootActivity {
                     has_non_trivial_root_body: true,
                     ..ModuleRootActivity::default()
-                }
-            } else {
-                ModuleRootActivity::default()
-            },
+                },
+            }),
             doc_fragments: vec![],
             materialisation_context: None,
         },

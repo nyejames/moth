@@ -171,6 +171,13 @@ pub(super) fn canonicalize_local_ordering_hints(
                 continue;
             }
 
+            if hint.origin() == LocalDeclarationOrderingHintOrigin::QualifiedReference {
+                // Binding already proved this target. It has no authored local spelling to
+                // canonicalize, so the provider/source identity is preserved verbatim.
+                canonical.insert(hint);
+                continue;
+            }
+
             let mut matching_dependency = None;
             for dependency in file_dependency_clauses {
                 let selections = match dependency.selections(selection_table) {

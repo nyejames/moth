@@ -24,6 +24,7 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::{
 };
 use crate::compiler_frontend::headers::dependency_target::DependencyTargetKind;
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
+use crate::compiler_frontend::headers::qualified_references::QualifiedReferenceOccurrence;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceTable;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
@@ -368,6 +369,13 @@ pub enum LocalDeclarationOrderingHintOrigin {
     ProviderSpelling,
     /// A namespace-qualified type spelling resolved directly through bound namespace visibility.
     QualifiedTypeSpelling,
+    /// A resolved expression-qualified reference target.
+    ///
+    /// WHAT: binding already resolved the authored `PATH SYMBOL` occurrence to a canonical
+    ///       module-local declaration path or an imported provider interface path.
+    /// WHY: the hint is a proven target, not a spelling, so canonicalization must preserve it and
+    ///      Stage 3 must classify imported targets through the existing provider edge path.
+    QualifiedReference,
     /// A content source's synthetic `content` constant.
     ///
     /// WHAT: the path targets `<content source>/content` of another prepared file, recorded from a
@@ -441,7 +449,22 @@ impl LocalDeclarationOrderingHint {
         }
     }
 
-    /// Attach the exact authored span for a content-source occurrence.
+    /// Record one resolved expression-qualified reference target.
+    ///
+    /// WHAT: `path` is either a module-local declaration path or the imported provider path the
+    ///       target map recorded; both are already canonical.
+    /// WHY: Stage 3 must sort this occurrence without canonicalizing it through an authored
+    ///      dependency spelling that the occurrence never installed.
+    pub fn qualified_reference(path: PathId) -> Self {
+        Self {
+            path,
+            origin: LocalDeclarationOrderingHintOrigin::QualifiedReference,
+            occurrence: None,
+            occurrence_span: None,
+        }
+    }
+
+    /// Attach the exact authored span for a content-source or qualified-reference occurrence.
     pub fn with_occurrence_span(mut self, span: SourceSpan) -> Self {
         self.occurrence_span = Some(span);
         self
@@ -502,6 +525,7 @@ impl LocalDeclarationOrderingHint {
             }
             LocalDeclarationOrderingHintOrigin::ProviderSpelling
             | LocalDeclarationOrderingHintOrigin::QualifiedTypeSpelling
+            | LocalDeclarationOrderingHintOrigin::QualifiedReference
             | LocalDeclarationOrderingHintOrigin::ContentSource => self.path,
         };
         Ok(Self {
@@ -680,9 +704,8 @@ impl RetainedDependencyClause {
 
     /// Commit the source identity after `FileFrontendPrepareOutput` has preflighted every
     /// required source-owned retained path.
-    pub fn commit_source_rebinding(&mut self, file_id: SourceId, logical_path: PathId) {
-        self.dependency
-            .commit_source_rebinding(file_id, logical_path);
+    pub fn commit_source_rebinding(&mut self, file_id: SourceId) {
+        self.dependency.commit_source_rebinding(file_id);
         self.binding.rebind_source_identity(file_id);
     }
 }
@@ -1438,7 +1461,8 @@ impl RetainedDependencyClause {
 
 /// Classification of a source file's role within the current module compilation.
 ///
-/// WHAT: distinguishes the start-bearing root, the API-only facade roots and ordinary source.
+/// WHAT: distinguishes the start-bearing root, the API-only facade roots, reached foreign roots
+///       and ordinary source.
 /// WHY: root identity and compilation context are independent. The entry root owns start and
 ///       runtime, the API-only roots own export surfaces, and an ordinary helper owns neither.
 ///       The role is derived from Stage 0's root inventory, never from the file name.
@@ -1464,9 +1488,21 @@ pub enum FileRole {
     /// The synthetic single-file path prepares every module root its dependency clauses reach in
     /// one flat source set. Such a root keeps its export surface so its declarations parse like the
     /// facade they are, but it is not the compiled module's own surface: it publishes no
-    /// interface and owns no start or root runtime. The carried role is `Normal` or `Support` and
-    /// comes from Stage 0's bounded root inventory, never from the filename.
+    /// interface and owns no start or root runtime, so authored root runtime, fragments and
+    /// direct builder slots are rejected rather than silently discarded. The carried role is
+    /// `Normal` or `Support` and comes from Stage 0's bounded root inventory, never from the
+    /// filename.
     ReachedApiFacadeRoot(ModuleRootRole),
+    /// A legacy combined normal root of another structural module reached inside a flattened
+    /// synthetic unit.
+    ///
+    /// LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): until every executable fixture
+    /// authors `@entry.moth`, a reached normal root whose module has no entry root still owns the
+    /// combined export/start role inside its own module. This compilation does not activate that
+    /// module, so its root runtime and fragments keep the pre-Phase-3 capture-and-discard
+    /// handling instead of being rejected as an API-only facade. It publishes no interface and
+    /// owns no start here.
+    ReachedLegacyCombinedRoot,
     /// The self-contained `config.moth` bootstrap unit.
     ///
     /// It is deliberately not a module root: the fixed build-only file creates no structural
@@ -1482,7 +1518,11 @@ impl FileRole {
     /// Whether this file is a structural module root, including a foreign root reached by a
     /// flattened synthetic unit.
     pub(crate) fn is_module_root(self) -> bool {
-        self.is_active_module_root() || matches!(self, Self::ReachedApiFacadeRoot(_))
+        self.is_active_module_root()
+            || matches!(
+                self,
+                Self::ReachedApiFacadeRoot(_) | Self::ReachedLegacyCombinedRoot
+            )
     }
 
     /// Whether this root belongs to the module currently being compiled.
@@ -1505,6 +1545,7 @@ impl FileRole {
             Self::LegacyCombinedRoot
                 | Self::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal | ModuleRootRole::Support)
                 | Self::ReachedApiFacadeRoot(ModuleRootRole::Normal | ModuleRootRole::Support)
+                | Self::ReachedLegacyCombinedRoot
         )
     }
 
@@ -1533,6 +1574,7 @@ impl FileRole {
             // A reached foreign facade belongs to another structural module, so this compilation
             // never projects it as its own public surface.
             Self::ReachedApiFacadeRoot(_)
+            | Self::ReachedLegacyCombinedRoot
             | Self::ActiveEntryRoot
             | Self::ConfigBootstrap
             | Self::Normal => None,
@@ -1549,9 +1591,10 @@ impl FileRole {
     ///      surface.
     pub(crate) fn consumer_surface(self) -> Option<ModuleRootRole> {
         match self {
-            Self::LegacyCombinedRoot | Self::ActiveEntryRoot | Self::Normal => {
-                Some(ModuleRootRole::Normal)
-            }
+            Self::LegacyCombinedRoot
+            | Self::ActiveEntryRoot
+            | Self::ReachedLegacyCombinedRoot
+            | Self::Normal => Some(ModuleRootRole::Normal),
             Self::ActiveApiOnlyModuleRoot(role) | Self::ReachedApiFacadeRoot(role) => match role {
                 ModuleRootRole::Normal | ModuleRootRole::Support => Some(role),
                 ModuleRootRole::Entry
@@ -1559,21 +1602,6 @@ impl FileRole {
                 | ModuleRootRole::SyntheticProjectContext => None,
             },
             Self::ConfigBootstrap => None,
-        }
-    }
-
-    /// The header role for one foreign root reached by a flattened synthetic unit.
-    ///
-    /// Normal and support roots keep their API-facade role so their export surfaces parse. An
-    /// entry root publishes no importable surface and stays an ordinary source.
-    pub(crate) fn reached_api_facade(role: ModuleRootRole) -> Option<Self> {
-        match role {
-            ModuleRootRole::Normal | ModuleRootRole::Support => {
-                Some(Self::ReachedApiFacadeRoot(role))
-            }
-            ModuleRootRole::Entry
-            | ModuleRootRole::Shared
-            | ModuleRootRole::SyntheticProjectContext => None,
         }
     }
 
@@ -1635,6 +1663,14 @@ pub struct FileFrontendPrepareOutput {
     pub file_dependency_clauses: Vec<RetainedDependencyClause>,
     /// Graph-active file-value paths authored by this file, excluding dependency-clause rows.
     pub structural_file_references: PreparedFileReferenceTable,
+    /// Expression-qualified `PATH SYMBOL` occurrences authored by this file.
+    ///
+    /// WHAT: one fact per authored occurrence in canonical source order, with its unique
+    ///       provider-handoff shell.
+    /// WHY: the same fact feeds Stage 0 provider discovery, later semantic binding and AST
+    ///      lowering. A qualified occurrence installs no file-local name, so it is deliberately
+    ///      not a dependency clause and never enters file visibility.
+    pub qualified_references: Vec<QualifiedReferenceOccurrence>,
     /// One flat selection store for all dependency clauses authored by this file.
     pub dependency_selections: Vec<DependencySelection>,
     pub headers: Vec<Header>,
@@ -1848,6 +1884,10 @@ impl FileFrontendPrepareOutput {
             clause.remap_string_ids(remap);
         }
 
+        for occurrence in &mut self.qualified_references {
+            occurrence.remap_string_ids(remap);
+        }
+
         for selection in &mut self.dependency_selections {
             selection.source_name = remap.get(selection.source_name);
             if let Some(alias) = &mut selection.local_alias {
@@ -1895,6 +1935,9 @@ impl FileFrontendPrepareOutput {
         for clause in &mut self.file_dependency_clauses {
             clause.remap_path_ids(remap);
         }
+        for occurrence in &mut self.qualified_references {
+            occurrence.remap_path_ids(remap);
+        }
         for header in &mut self.headers {
             header.remap_path_ids(remap);
         }
@@ -1938,7 +1981,10 @@ impl FileFrontendPrepareOutput {
         }
 
         for clause in &mut self.file_dependency_clauses {
-            clause.commit_source_rebinding(final_file_id, final_logical_path);
+            clause.commit_source_rebinding(final_file_id);
+        }
+        for occurrence in &mut self.qualified_references {
+            occurrence.commit_source_rebinding(final_file_id);
         }
         self.structural_file_references
             .rebind_source_identity(final_file_id, final_logical_path);
@@ -2062,6 +2108,8 @@ impl FileFrontendPrepareOutput {
         validate_dependency_clauses(
             &self.file_dependency_clauses,
             &self.dependency_selections,
+            &self.qualified_references,
+            path_syntax,
             self.file_id,
             string_table,
             path_fork,
@@ -2096,6 +2144,8 @@ impl FileFrontendPrepareOutput {
 fn validate_dependency_clauses(
     clauses: &[RetainedDependencyClause],
     selections: &[DependencySelection],
+    qualified_references: &[QualifiedReferenceOccurrence],
+    path_syntax: &PathSyntaxTable,
     file_id: SourceId,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
@@ -2166,6 +2216,58 @@ fn validate_dependency_clauses(
             CompilerStage::HeaderParsing,
             "file-owned dependency selection table contains unclaimed rows",
         ));
+    }
+
+    // Inline qualified occurrences allocate their shells after every authored clause in the same
+    // dense ordinal space, so one ordinal can never bind two providers.
+    let occurrence_base = u32::try_from(clauses.len()).map_err(|_| {
+        InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            "prepared file contains more dependency shells than its ordinal identity can represent",
+        )
+    })?;
+    for (occurrence_index, occurrence) in qualified_references.iter().enumerate() {
+        let occurrence_index = u32::try_from(occurrence_index).map_err(|_| {
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "prepared file contains more qualified references than its shell ordinal identity can represent",
+            )
+        })?;
+        let expected_ordinal = occurrence_base
+            .checked_add(occurrence_index)
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
+                    "qualified-reference shell ordinal exceeded its file-local identity",
+                )
+            })?;
+        if occurrence.dependency.dependency_shell_id.source != file_id {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "qualified-reference shell does not use the prepared file's source identity",
+            ));
+        }
+        if occurrence.dependency.dependency_shell_id.ordinal != expected_ordinal {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "qualified-reference shell ordinal does not follow its dense file-local occurrence position",
+            ));
+        }
+        validate_dependency_path(&occurrence.dependency, file_id, string_table, path_fork)?;
+        validate_source_span(
+            Some(occurrence.dependency.span),
+            file_id,
+            "qualified-reference path",
+        )?;
+        validate_source_span(
+            Some(occurrence.selected_span),
+            file_id,
+            "qualified-reference selection",
+        )?;
+        path_syntax.try_path_for_token(
+            occurrence.dependency.path_syntax,
+            occurrence.dependency.span,
+        )?;
     }
     Ok(())
 }

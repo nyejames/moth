@@ -14,6 +14,7 @@ use super::discovery_provider_imports::{
 use super::*;
 use crate::builder_surface::external_import_providers::provider_sources::ProviderSourceRegistrar;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::DependencyClauseKind;
 use crate::compiler_frontend::compiler_messages::SourceSpanCapacityResource;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
@@ -371,18 +372,7 @@ fn walk_reachable_sources(
             continue;
         }
 
-        if next_file.kind == SourceFileKind::MothTemplate {
-            // Moth template is a Moth template body with a small compile-time scope, so the
-            // same-directory root may supply visible constants. Its retained output is scanned
-            // here as well, allowing content references to reach a fixed point without a second
-            // parse during module preparation.
-            queue_same_directory_root_for_moth_template(
-                &canonical_file,
-                project_path_resolver,
-                reachable,
-                queue,
-            );
-        } else if next_file.kind == SourceFileKind::PlainMarkdown {
+        if next_file.kind == SourceFileKind::PlainMarkdown {
             // Markdown files are importless content assets. They are carried forward for
             // header-stage preparation but are never scanned for dependencies.
             continue;
@@ -442,71 +432,48 @@ fn walk_reachable_sources(
             dependency_clauses_scanned += dependency_clauses.len();
         }
 
-        for clause in dependency_clauses {
-            // Stage 0 resolves each retained clause root once. Direct selections remain binding
-            // facts inside the completed provider surface and never become independent source
-            // paths during discovery.
-            let provider = &clause.dependency;
-            let dependency_path = provider.path;
-            let action = policy.handle_dependency(
-                ProviderCapableDependencyInput {
-                    dependency_path,
-                    dependency_span: Some(provider.span),
-                    clause_kind: clause.binding.clause_kind(),
-                    target: &provider.target,
-                    provider_target: provider.provider_target.as_ref(),
-                    canonical_file: &canonical_file,
-                    project_path_resolver,
-                    path_fork: &mut *path_fork,
-                    directory_dependency_resolution: None,
-                    string_table,
-                },
+        {
+            // Clauses and expression-qualified occurrences share the same synthetic provider
+            // closure: a per-file resolution cache keys on the retained path so a second
+            // occurrence of one provider cannot repeat provider invocation or filesystem work.
+            let mut reachable_queue = ReachableQueue { reachable, queue };
+            let mut resolved_by_path = FxHashMap::default();
+            let mut context = ReachableDependencyContext {
+                policy,
                 provider_sources,
-            )?;
-
-            // Virtual binding packages also need local collision checks before their policy
-            // skips filesystem discovery. Explicit-extension providers retain their own owner.
-            if matches!(provider.target, DependencyTargetKind::Source)
-                && let Some(package) = namespace_set.resolve_single_file_package_dependency(
-                    provider,
-                    &canonical_file,
-                    project_path_resolver,
+                namespace_set,
+                canonical_file: &canonical_file,
+                project_path_resolver,
+            };
+            for clause in dependency_clauses {
+                process_reachable_authored_dependency(
+                    &mut context,
+                    &clause.dependency,
+                    clause.binding.clause_kind(),
                     string_table,
                     path_fork,
-                )?
-            {
-                if let ResolvedDependency::SourcePackageSurface {
-                    consumer_module_id,
-                    dependency_prefix,
-                    ..
-                } = package
-                {
-                    source_package_dependencies.push(ResolvedSourcePackageDependency {
-                        consumer_module_id,
-                        dependency_prefix,
-                        dependency_shell_id: provider.dependency_shell_id,
-                    });
-                    add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
-                }
-                continue;
+                    &mut reachable_queue,
+                    source_package_dependencies,
+                    &mut resolved_by_path,
+                )
+                .map_err(|error| {
+                    with_provider_dependency_error(error, Some(clause.dependency.span))
+                })?;
             }
-
-            match action {
-                DependencyPolicyAction::Skip => continue,
-                DependencyPolicyAction::QueueLocal => {
-                    let mut reachable_queue = ReachableQueue { reachable, queue };
-                    let result = resolve_and_queue_via_filesystem(
-                        provider,
-                        &canonical_file,
-                        path_fork,
-                        project_path_resolver,
-                        string_table,
-                        &mut reachable_queue,
-                    );
-                    result.map_err(|error| {
-                        with_provider_dependency_error(error, Some(provider.span))
-                    })?;
-                }
+            for occurrence in &prepared.qualified_references {
+                process_reachable_authored_dependency(
+                    &mut context,
+                    &occurrence.dependency,
+                    DependencyClauseKind::DirectSelection,
+                    string_table,
+                    path_fork,
+                    &mut reachable_queue,
+                    source_package_dependencies,
+                    &mut resolved_by_path,
+                )
+                .map_err(|error| {
+                    with_provider_dependency_error(error, Some(occurrence.dependency.span))
+                })?;
             }
         }
 
@@ -609,14 +576,146 @@ pub(crate) fn discover_reachable_source_files(
 /// Resolve an ordinary source clause within the bounded synthetic consumer.
 /// Registered package clauses have already produced separate provider edges, so this lane
 /// only queues consumer-owned source through its retained module roots and filesystem resolver.
-fn resolve_and_queue_via_filesystem(
+/// One synthetic dependency resolution reused by every authored dependency with the same path.
+///
+/// WHAT: records the provider-policy outcome, the package-surface record or the filesystem source
+///       file selected for one retained path.
+/// WHY: the single-file traversal has no module graph dedup, so two qualified occurrences of one
+///       provider would otherwise repeat provider invocation and filesystem resolution.
+#[derive(Clone)]
+enum SyntheticDependencyResolution {
+    Skipped,
+    Queue(ReachableSourceFile),
+    PackageSurface {
+        consumer_module_id: ModuleId,
+        dependency_prefix: String,
+    },
+    HandledPackage,
+}
+
+/// Borrowed services shared by every authored dependency of one reachable source.
+struct ReachableDependencyContext<'a, 'state, 'external> {
+    policy: &'a mut DependencyPolicy<'state, 'external>,
+    provider_sources: &'a mut ProviderOwnedSourceStaging,
+    namespace_set: &'a ModuleNamespaceSet,
+    canonical_file: &'a Path,
+    project_path_resolver: &'a ProjectPathResolver,
+}
+
+/// Resolve one authored synthetic dependency (clause or qualified occurrence) exactly once.
+///
+/// WHAT: runs the provider policy, the local binding-package collision check and filesystem source
+///       resolution for one retained provider path, then applies the cached outcome to this
+///       authored shell.
+/// WHY: direct selections inside clauses and expression-qualified occurrences must reach the same
+///       synthetic source/provider/package closure and the same error lane. Only the caller's
+///       authored path span distinguishes their diagnostics.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "synthetic dependency resolution keeps the shared walk services, the authored provider path and kind, and the mutable tables/accumulators separate"
+)]
+fn process_reachable_authored_dependency(
+    context: &mut ReachableDependencyContext<'_, '_, '_>,
+    provider: &RetainedDependencyPath,
+    clause_kind: DependencyClauseKind,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+    reachable_queue: &mut ReachableQueue<'_>,
+    source_package_dependencies: &mut Vec<ResolvedSourcePackageDependency>,
+    resolved_by_path: &mut FxHashMap<PathId, SyntheticDependencyResolution>,
+) -> Result<(), SourceDiscoveryError> {
+    let resolution = match resolved_by_path.get(&provider.path) {
+        Some(resolution) => resolution.clone(),
+        None => {
+            let action = context.policy.handle_dependency(
+                ProviderCapableDependencyInput {
+                    dependency_path: provider.path,
+                    dependency_span: Some(provider.span),
+                    clause_kind,
+                    target: &provider.target,
+                    provider_target: provider.provider_target.as_ref(),
+                    canonical_file: context.canonical_file,
+                    project_path_resolver: context.project_path_resolver,
+                    path_fork,
+                    directory_dependency_resolution: None,
+                    string_table,
+                },
+                context.provider_sources,
+            )?;
+
+            // Virtual binding packages also need local collision checks before their policy
+            // skips filesystem discovery. Explicit-extension providers retain their own owner.
+            let resolution = if matches!(provider.target, DependencyTargetKind::Source)
+                && let Some(package) = context
+                    .namespace_set
+                    .resolve_single_file_package_dependency(
+                        provider,
+                        context.canonical_file,
+                        context.project_path_resolver,
+                        string_table,
+                        path_fork,
+                    )? {
+                match package {
+                    ResolvedDependency::SourcePackageSurface {
+                        consumer_module_id,
+                        dependency_prefix,
+                        ..
+                    } => SyntheticDependencyResolution::PackageSurface {
+                        consumer_module_id,
+                        dependency_prefix,
+                    },
+                    _ => SyntheticDependencyResolution::HandledPackage,
+                }
+            } else {
+                match action {
+                    DependencyPolicyAction::Skip => SyntheticDependencyResolution::Skipped,
+                    DependencyPolicyAction::QueueLocal => {
+                        SyntheticDependencyResolution::Queue(resolve_via_filesystem(
+                            provider,
+                            context.canonical_file,
+                            path_fork,
+                            context.project_path_resolver,
+                            string_table,
+                        )?)
+                    }
+                }
+            };
+            resolved_by_path.insert(provider.path, resolution.clone());
+            resolution
+        }
+    };
+
+    match resolution {
+        SyntheticDependencyResolution::Skipped | SyntheticDependencyResolution::HandledPackage => {}
+        SyntheticDependencyResolution::PackageSurface {
+            consumer_module_id,
+            dependency_prefix,
+        } => {
+            source_package_dependencies.push(ResolvedSourcePackageDependency {
+                consumer_module_id,
+                dependency_prefix,
+                dependency_shell_id: provider.dependency_shell_id,
+            });
+            add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+        }
+        SyntheticDependencyResolution::Queue(resolved_source_file) => {
+            add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+            if !reachable_queue.reachable.contains(&resolved_source_file) {
+                reachable_queue.queue.push_back(resolved_source_file);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn resolve_via_filesystem(
     provider: &RetainedDependencyPath,
     canonical_file: &Path,
     path_fork: &mut PathInternerFork,
     project_path_resolver: &ProjectPathResolver,
     string_table: &mut StringTable,
-    reachable_queue: &mut ReachableQueue<'_>,
-) -> Result<(), SourceDiscoveryError> {
+) -> Result<ReachableSourceFile, SourceDiscoveryError> {
     let resolved = if is_relative_dependency_path(provider.path, path_fork, string_table) {
         project_path_resolver
             .resolve_dependency_to_source_file(
@@ -647,13 +746,7 @@ fn resolve_and_queue_via_filesystem(
     };
 
     // Extensionless source clauses bind to a resolved source file in the synthetic traversal.
-    add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
-    let resolved_source_file = resolved_source_file(&resolved.path, resolved.kind);
-    if !reachable_queue.reachable.contains(&resolved_source_file) {
-        reachable_queue.queue.push_back(resolved_source_file);
-    }
-
-    Ok(())
+    Ok(resolved_source_file(&resolved.path, resolved.kind))
 }
 
 /// Resolve a bare dependency from the retained module-root topology before entry-root lookup.
@@ -922,30 +1015,5 @@ fn resolved_source_file(path: &Path, kind: SourceFileKind) -> ReachableSourceFil
     ReachableSourceFile {
         path: path.to_path_buf(),
         kind,
-    }
-}
-
-fn queue_same_directory_root_for_moth_template(
-    moth_template_path: &Path,
-    project_path_resolver: &ProjectPathResolver,
-    reachable: &BTreeSet<ReachableSourceFile>,
-    queue: &mut VecDeque<ReachableSourceFile>,
-) {
-    let Some(directory) = moth_template_path.parent() else {
-        return;
-    };
-
-    let Some(root_path) =
-        project_path_resolver.module_api_facade_root_file_for_directory(directory)
-    else {
-        return;
-    };
-
-    let root_source_file = ReachableSourceFile {
-        path: root_path,
-        kind: SourceFileKind::Moth,
-    };
-    if !reachable.contains(&root_source_file) {
-        queue.push_back(root_source_file);
     }
 }

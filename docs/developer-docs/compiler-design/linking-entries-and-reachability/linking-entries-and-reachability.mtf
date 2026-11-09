@@ -27,12 +27,12 @@ Support roots and the project package facade have no implicit entry.
 
 In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `greeting.moth` is an ordinary source file inside that same directory-scoped module, not a separate module with a root of its own. Binding `greet` runs no page-level statements, because only an activated entry root runs root work.
 
-[diagram:
+[@diagrams diagram:
     [$in label: Compiling is not activating]
     [$in caption: Every module goes through the full frontend. Only the entry decides which dormant root work ever wakes up.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../module-artefacts-and-reuse/]
             [$in eyebrow: Compiled]
             [$in title: Every module in the graph]
@@ -40,14 +40,14 @@ In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `gr
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: All still asleep]
-                [lane:
-                [detail:
+                [@diagrams lane:
+                [@diagrams detail:
                     [$in href: ./]
                     `@page.moth` and its owned sources
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../project-graphs-and-modules/]
                     Support roots and package facades
                 ]
@@ -56,8 +56,8 @@ In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `gr
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Selected]
             [$in title: One entry picks a root]
@@ -65,8 +65,8 @@ In the walkthrough, `@page.moth` owns dormant root work and a page fragment. `gr
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../target-planning-and-validation/]
             [$in eyebrow: Reachable]
             [$in title: The function union]

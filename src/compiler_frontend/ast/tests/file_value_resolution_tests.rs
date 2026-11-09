@@ -737,6 +737,7 @@ fn resolve_file_value_fixture(
             Arc::clone(&source_files),
         ))),
         module_resources: Rc::clone(&module_resources),
+        qualified_reference_targets: Arc::default(),
         module_origin: Some(module_origin.clone()),
         public_source_trait_origins: Arc::default(),
         frozen_identity_handle: FrozenIdentityHandle::new(),

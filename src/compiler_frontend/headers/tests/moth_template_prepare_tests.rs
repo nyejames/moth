@@ -8,7 +8,9 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry, SourcePackageRegistry};
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::{Ast, AstBuildContext, AstBuildInput};
+use crate::compiler_frontend::ast::{
+    Ast, AstBuildContext, AstBuildInput, FileValueResolutionServices,
+};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
@@ -40,6 +42,7 @@ use crate::compiler_frontend::module_compilation::{
 use crate::compiler_frontend::module_dependencies::{
     ContentSourceTargets, resolve_module_dependencies,
 };
+use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::module_roots::{ModuleRootRecord, ModuleRootTable};
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::pipeline::{
@@ -56,22 +59,23 @@ use crate::compiler_frontend::semantic_identity::{
     StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, SourceDatabase, SourceId, SourceKind, SourceRegistrationIndex,
+    ExtendedSpanBuilder, FrozenIdentityHandle, SourceDatabase, SourceId, SourceKind,
+    SourceRegistrationIndex,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::parse_support::{
-    ast_error_label_spans, ast_error_primary_span,
-};
+use crate::compiler_frontend::tests::parse_support::ast_error_primary_span;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
     TokenCursor, TokenRef, TokenTag, TokenizerEntryMode,
 };
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -106,6 +110,48 @@ fn prepare_directly(source: &str) -> (FileFrontendPrepareOutput, StringTable, Ex
     )
     .expect("freshly tokenized Moth template should own a preparing path table");
     (output, string_table, span_builder)
+}
+
+/// Prepare one `.mtf` body and return its typed diagnosis.
+fn prepare_diagnostic(
+    source: &str,
+) -> crate::compiler_frontend::compiler_messages::diagnostics::test_support::CompactDiagnosticBagForTest
+{
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork
+        .try_intern_portable_path("test.mtf", &mut string_table)
+        .expect("test path fits");
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let lexed = tokenize(
+        source,
+        source_path,
+        TokenizerEntryMode::for_source_file_kind(SourceFileKind::MothTemplate)
+            .expect("Moth template should tokenize"),
+        &style_directives,
+        &mut string_table,
+        &mut path_fork,
+        SourceId::COMPILATION_ROOT,
+        &mut span_builder,
+    )
+    .expect("Moth template body should tokenize");
+    let owner = SourceTokenOwner::new(lexed.tokens);
+    let failure = match prepare_moth_template_file(
+        owner,
+        source_path,
+        lexed.path_syntax,
+        &mut string_table,
+        &mut path_fork,
+        &mut span_builder,
+    ) {
+        Ok(_) => panic!("fixture should be rejected during template preparation"),
+        Err(failure) => failure,
+    };
+    let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
+        panic!("expected a typed diagnostic, found {failure:?}");
+    };
+    diagnostic_view_for_test(error.diagnostic)
 }
 
 #[test]
@@ -365,6 +411,7 @@ struct MothTemplateScopeFixture {
     project_path_resolver: ProjectPathResolver,
     source_files: Arc<SourceDatabase>,
     base_string_table: StringTable,
+    external_package_registry: ExternalPackageRegistry,
 }
 
 impl MothTemplateScopeFixture {
@@ -454,7 +501,19 @@ impl MothTemplateScopeFixture {
             project_path_resolver,
             source_files: Arc::new(source_files),
             base_string_table: string_table,
+            external_package_registry: ExternalPackageRegistry::new(),
         }
+    }
+
+    fn register_prelude_type_symbol(&mut self, name: &'static str) {
+        self.external_package_registry
+            .register_prelude_symbol(
+                name,
+                crate::compiler_frontend::external_packages::ExternalSymbolId::Type(
+                    crate::compiler_frontend::external_packages::ExternalTypeId(10_000),
+                ),
+            )
+            .expect("test prelude symbol should register");
     }
 
     fn compile_moth_template_ast(
@@ -498,12 +557,12 @@ impl MothTemplateScopeFixture {
         let html_interface = empty_provider_interface("html");
         let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
             kind:
-                crate::compiler_frontend::public_interface::ProviderDependencyKind::ImplicitTemplate {
+                crate::compiler_frontend::public_interface::ProviderDependencyKind::TemplatePrelude {
                     package_prefix: "html",
                 },
             interface: &html_interface,
         }])
-        .expect("one implicit template provider should register");
+        .expect("one standard template prelude provider should register");
         self.compile_module_ast_with_providers(prepared_relative_paths, &provider_dependencies)
     }
 
@@ -532,7 +591,23 @@ impl MothTemplateScopeFixture {
             .try_intern_filesystem_path(&self.entry_file_path, &mut string_table)
             .expect("test path should be UTF-8");
         let style_directives = StyleDirectiveRegistry::built_ins();
-        let external_package_registry = Arc::new(ExternalPackageRegistry::new());
+        let external_package_registry = Arc::new(self.external_package_registry.clone());
+        // Production installs shared value services for every module. The fixture keeps no Stage 0
+        // file facts, but qualified primaries still need the binding-owned target map.
+        let qualified_reference_targets = sorted_headers
+            .binding_environment
+            .qualified_reference_targets
+            .clone();
+        let file_value_resolution = (!qualified_reference_targets.is_empty()).then(|| {
+            Rc::new(FileValueResolutionServices {
+                stage0_resolution_facts: None,
+                module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
+                qualified_reference_targets: Arc::new(qualified_reference_targets),
+                module_origin: None,
+                public_source_trait_origins: Arc::default(),
+                frozen_identity_handle: FrozenIdentityHandle::new(),
+            })
+        });
 
         Ast::new(
             AstBuildInput {
@@ -552,7 +627,7 @@ impl MothTemplateScopeFixture {
                 path_fork: &mut path_fork,
                 entry_dir,
                 build_profile: FrontendBuildProfile::Dev,
-                file_value_resolution: None,
+                file_value_resolution,
                 config_resolution: None,
                 build_config_values: Arc::new(Default::default()),
                 builder_root_slots: None,
@@ -597,12 +672,12 @@ impl MothTemplateScopeFixture {
         let html_interface = empty_provider_interface("html");
         let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
             kind:
-                crate::compiler_frontend::public_interface::ProviderDependencyKind::ImplicitTemplate {
+                crate::compiler_frontend::public_interface::ProviderDependencyKind::TemplatePrelude {
                     package_prefix: "html",
                 },
             interface: &html_interface,
         }])
-        .expect("one implicit template provider should register");
+        .expect("one standard template prelude provider should register");
         let mut path_fork = self.source_files.fork_path_interner();
         self.prepare_and_bind_headers_with_providers(
             prepared_relative_paths,
@@ -645,7 +720,7 @@ impl MothTemplateScopeFixture {
         (DiagnosticDraft, StringTable),
     > {
         let style_directives = StyleDirectiveRegistry::built_ins();
-        let external_package_registry = Arc::new(ExternalPackageRegistry::new());
+        let external_package_registry = Arc::new(self.external_package_registry.clone());
         let mut string_table = self.base_string_table.clone();
         let mut prepared_files = Vec::new();
         let mut span_builders = Vec::new();
@@ -1342,7 +1417,7 @@ fn module_root_export_syntax_can_target_moth_template_content() {
 }
 
 #[test]
-fn moth_template_body_sees_flat_exported_html_constants() {
+fn moth_template_body_sees_flat_html_prelude_constants() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[p]")]);
     let (ast, string_table, path_fork) = fixture
         .compile_moth_template_ast_ok("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
@@ -1351,7 +1426,7 @@ fn moth_template_body_sees_flat_exported_html_constants() {
 }
 
 #[test]
-fn moth_template_header_visibility_contains_implicit_html_constants() {
+fn moth_template_header_visibility_contains_html_prelude_constants() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[p]")]);
     let (headers, mut string_table, mut path_fork) = fixture
         .prepare_and_bind_headers_for(&["@html/@mod.moth", "src/intro.mtf"])
@@ -1372,7 +1447,7 @@ fn moth_template_header_visibility_contains_implicit_html_constants() {
 
     assert!(
         visibility.visible_source_names.contains_key(&p_name),
-        "Moth template visibility should include @html p; visible names: {:?}",
+        "Moth template visibility should include the @html prelude p; visible names: {:?}",
         visibility
             .visible_source_names
             .keys()
@@ -1382,23 +1457,18 @@ fn moth_template_header_visibility_contains_implicit_html_constants() {
 }
 
 #[test]
-fn moth_template_body_sees_root_reexported_helper_constants() {
+fn moth_template_body_selects_same_module_helper_constant_explicitly() {
     let fixture = MothTemplateScopeFixture::new(&[
         (
             "src/docs/home_constants.moth",
             "local_label #= \"from helper\"\n",
         ),
-        (
-            "src/docs/@mod.moth",
-            "export:\n    @home_constants local_label\n;\n",
-        ),
-        ("src/docs/intro.mtf", "[local_label]"),
+        ("src/docs/intro.mtf", "[@home_constants local_label]"),
     ]);
     let (ast, string_table, path_fork) = fixture.compile_moth_template_ast_ok(
         "src/docs/intro.mtf",
         &[
             "@html/@mod.moth",
-            "src/docs/@mod.moth",
             "src/docs/home_constants.moth",
             "src/docs/intro.mtf",
         ],
@@ -1408,49 +1478,13 @@ fn moth_template_body_sees_root_reexported_helper_constants() {
 }
 
 #[test]
-fn moth_template_body_sees_exported_same_directory_root_constants() {
-    // TEMPLATE SCOPE MIGRATION BRIDGE (removed by qualified-reference plan Phase 5): the
-    // implicit same-directory scope deliberately admits root-authored exported constants until
-    // QE Phase 5 replaces it with explicit `[@helper value]` references.
+fn moth_template_does_not_see_same_directory_facade_exported_constant() {
     let fixture = MothTemplateScopeFixture::new(&[
         (
             "src/docs/@mod.moth",
             "export:\n    local_label #= \"from root\"\n;\n",
         ),
         ("src/docs/intro.mtf", "[local_label]"),
-    ]);
-    let (ast, string_table, path_fork) = fixture.compile_moth_template_ast_ok(
-        "src/docs/intro.mtf",
-        &[
-            "@html/@mod.moth",
-            "src/docs/@mod.moth",
-            "src/docs/intro.mtf",
-        ],
-    );
-
-    folded_content_contains(&ast, &string_table, &path_fork, "from root");
-}
-#[test]
-fn moth_template_without_same_directory_root_sees_only_html_constants() {
-    let fixture = MothTemplateScopeFixture::new(&[("src/docs/intro.mtf", "[collision]")]);
-    let (ast, string_table, path_fork) = fixture.compile_moth_template_ast_ok(
-        "src/docs/intro.mtf",
-        &["@html/@mod.moth", "src/docs/intro.mtf"],
-    );
-
-    folded_content_contains(&ast, &string_table, &path_fork, "html");
-}
-#[test]
-fn same_directory_root_constants_collide_with_html_constants() {
-    // TEMPLATE SCOPE MIGRATION BRIDGE (removed by qualified-reference plan Phase 5): the
-    // bridge's root-authored constant participates in the same collision check as the
-    // helper-reexported constants that survive the bridge.
-    let fixture = MothTemplateScopeFixture::new(&[
-        (
-            "src/docs/@mod.moth",
-            "export:\n    collision #= \"local\"\n;\n",
-        ),
-        ("src/docs/intro.mtf", "[collision]"),
     ]);
     let diagnostic = fixture.compile_moth_template_diagnostic(
         "src/docs/intro.mtf",
@@ -1461,16 +1495,81 @@ fn same_directory_root_constants_collide_with_html_constants() {
         ],
     );
 
+    assert_ast_failure_diagnostic(&diagnostic, "MOTH-IMPORT-0030", None);
+}
+
+#[test]
+fn moth_template_qualified_root_local_declaration_is_not_addressable() {
+    let fixture = MothTemplateScopeFixture::new(&[
+        (
+            "src/docs/@mod.moth",
+            "export:\n    local_label #= \"from root\"\n;\n",
+        ),
+        ("src/docs/intro.mtf", "[@mod local_label]"),
+    ]);
+    let diagnostic = fixture.compile_moth_template_diagnostic(
+        "src/docs/intro.mtf",
+        &[
+            "@html/@mod.moth",
+            "src/docs/@mod.moth",
+            "src/docs/intro.mtf",
+        ],
+    );
+
+    // Root facade source files are not qualified-reference targets; naming one is a missing
+    // dependency target rather than an implicit-scope read.
+    assert_ast_failure_diagnostic(&diagnostic, "MOTH-IMPORT-0005", None);
+}
+
+#[test]
+fn html_prelude_constant_does_not_collide_with_an_explicit_qualified_selection() {
+    // The qualified selection introduces no visible local name, so selecting a helper constant
+    // spelled like an `@html` prelude constant must not be treated as a collision.
+    let fixture = MothTemplateScopeFixture::new(&[
+        ("src/docs/home_constants.moth", "p #= \"local p\"\n"),
+        ("src/docs/intro.mtf", "[p][@home_constants p]"),
+    ]);
+    let (ast, string_table, path_fork) = fixture.compile_moth_template_ast_ok(
+        "src/docs/intro.mtf",
+        &[
+            "@html/@mod.moth",
+            "src/docs/home_constants.moth",
+            "src/docs/intro.mtf",
+        ],
+    );
+
+    folded_content_contains(&ast, &string_table, &path_fork, "<p>");
+    folded_content_contains(&ast, &string_table, &path_fork, "local p");
+}
+
+#[test]
+fn moth_template_without_local_bindings_sees_only_html_prelude_constants() {
+    let fixture = MothTemplateScopeFixture::new(&[("src/docs/intro.mtf", "[collision]")]);
+    let (ast, string_table, path_fork) = fixture.compile_moth_template_ast_ok(
+        "src/docs/intro.mtf",
+        &["@html/@mod.moth", "src/docs/intro.mtf"],
+    );
+
+    folded_content_contains(&ast, &string_table, &path_fork, "html");
+}
+
+#[test]
+fn html_prelude_constant_collides_with_an_existing_visible_binding() {
+    // `.mtf` files have no authored declarations, so the only local binding the prelude can meet
+    // is one reserved before it in the visible-name registry. The injected prelude symbol stands
+    // in for that binding lane and proves the prelude still uses ordinary collision handling.
+    let mut fixture = MothTemplateScopeFixture::new(&[("src/docs/intro.mtf", "[p]")]);
+    fixture.register_prelude_type_symbol("p");
+
+    let diagnostic = fixture.compile_moth_template_diagnostic(
+        "src/docs/intro.mtf",
+        &["@html/@mod.moth", "src/docs/intro.mtf"],
+    );
+
     let diagnostic = assert_ast_failure_diagnostic(&diagnostic, "MOTH-IMPORT-0009", None);
     assert!(
         ast_error_primary_span(diagnostic).is_some(),
         "collision primary span should remain separate from secondary labels"
-    );
-    let label_spans = ast_error_label_spans(diagnostic);
-    assert_eq!(label_spans.len(), 1);
-    assert!(
-        label_spans.iter().all(|span| span.is_some()),
-        "collision labels should retain exact source spans"
     );
 }
 
@@ -1483,13 +1582,12 @@ fn exported_html_functions_are_not_visible_to_moth_template_body() {
 }
 
 #[test]
-fn moth_template_sees_capability_selected_provider_constants_without_provider_headers() {
-    // Simulates the production path: source-backed providers are separate compiled modules whose
-    // completed interfaces are available through SourceProviderDependencySet, but whose source
-    // headers are not in the consumer module's prepared files. The `.mtf` implicit scope must
-    // collect constant exports from every capability-selected provider, not only `@html`.
-    let fixture =
-        MothTemplateScopeFixture::new(&[("src/intro.mtf", "[test_constant] [custom_constant]")]);
+fn moth_template_sees_standard_html_prelude_constants_without_provider_headers() {
+    // Simulates the production path: `@html` is a separate compiled package whose completed
+    // interface is available through SourceProviderDependencySet, but whose source headers are
+    // not in the consumer module's prepared files. The fixed prelude must still collect its
+    // constant exports under their flat names.
+    let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[test_constant]")]);
 
     let html_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("html"),
@@ -1525,54 +1623,13 @@ fn moth_template_sees_capability_selected_provider_constants_without_provider_he
         concrete_call_summaries: Vec::new(),
     };
 
-    let custom_origin = StableModuleOriginIdentity::from_portable_path(
-        StablePackageIdentity::project_local("custom"),
-        "custom".to_owned(),
-        ModuleRootRole::Normal,
-    );
-    let custom_constant_origin = OriginDeclarationId::Constant(OriginConstantId::new(
-        custom_origin.clone(),
-        "custom_constant".to_owned(),
-    ));
-    let custom_interface = PublicSemanticInterface {
-        module_origin: custom_origin.clone(),
-        export_bindings: vec![ExportBinding::new(
-            custom_origin,
-            "custom_constant".to_owned(),
-            custom_constant_origin.clone(),
-        )],
-        export_diagnostic_provenance: Vec::new(),
-        binding_exports: Vec::new(),
-        declarations: vec![PublicDeclarationRecord {
-            origin: custom_constant_origin,
-            synthetic_interface_provenance: Default::default(),
-            semantics: PublicDeclarationSemantics::Constant(PublicConstantSemantics {
-                type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-                folded_value: PublicFoldedValue::String(OwnedFoldedString::Text(
-                    "from custom".to_owned(),
-                )),
-            }),
-        }],
-        reusable_evidence: Vec::new(),
-        concrete_call_summaries: Vec::new(),
-    };
-
-    let provider_dependencies =
-        SourceProviderDependencySet::new(vec![
-        SourceProviderDependency {
-            kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::ImplicitTemplate {
-                package_prefix: "html",
-            },
-            interface: &html_interface,
+    let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
+        kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::TemplatePrelude {
+            package_prefix: "html",
         },
-        SourceProviderDependency {
-            kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::ImplicitTemplate {
-                package_prefix: "custom",
-            },
-            interface: &custom_interface,
-        },
-    ])
-        .expect("two distinct implicit template providers should register");
+        interface: &html_interface,
+    }])
+    .expect("the standard template prelude provider should register");
 
     let (ast, string_table, path_fork) = fixture
         .compile_moth_template_ast_with_providers(
@@ -1580,67 +1637,15 @@ fn moth_template_sees_capability_selected_provider_constants_without_provider_he
             &["src/intro.mtf"],
             &provider_dependencies,
         )
-        .expect(".mtf body should see @html constant through provider interface");
+        .expect(".mtf body should see the @html constant through the provider interface");
 
     folded_content_contains(&ast, &string_table, &path_fork, "from html");
-    folded_content_contains(&ast, &string_table, &path_fork, "from custom");
 }
-#[test]
-fn moth_template_runtime_function_call_is_rejected_by_const_template_folding() {
-    let fixture = MothTemplateScopeFixture::new(&[
-        (
-            "src/docs/@mod.moth",
-            r#"export:
-    render_local || -> String:
-        return "runtime"
-    ;
-;
-"#,
-        ),
-        ("src/docs/intro.mtf", "[render_local()]"),
-    ]);
-    let diagnostic = fixture.compile_moth_template_diagnostic(
-        "src/docs/intro.mtf",
-        &[
-            "@html/@mod.moth",
-            "src/docs/@mod.moth",
-            "src/docs/intro.mtf",
-        ],
-    );
-    assert_ast_failure_diagnostic(&diagnostic, "MOTH-RULE-0034", None);
-}
-
 #[test]
 fn moth_template_unknown_template_condition_is_rejected_by_const_template_folding() {
     let fixture = MothTemplateScopeFixture::new(&[("src/intro.mtf", "[if show: visible]")]);
     let diagnostic = fixture
         .compile_moth_template_diagnostic("src/intro.mtf", &["@html/@mod.moth", "src/intro.mtf"]);
-    assert_ast_failure_diagnostic(&diagnostic, "MOTH-RULE-0034", None);
-}
-
-#[test]
-fn exported_same_directory_functions_and_types_are_not_visible_to_moth_template_body() {
-    let fixture = MothTemplateScopeFixture::new(&[
-        (
-            "src/docs/@mod.moth",
-            r#"export:
-    LocalType = | value String |
-    render_local || -> String:
-        return "runtime"
-    ;
-;
-"#,
-        ),
-        ("src/docs/intro.mtf", "[render_local][LocalType]"),
-    ]);
-    let diagnostic = fixture.compile_moth_template_diagnostic(
-        "src/docs/intro.mtf",
-        &[
-            "@html/@mod.moth",
-            "src/docs/@mod.moth",
-            "src/docs/intro.mtf",
-        ],
-    );
     assert_ast_failure_diagnostic(&diagnostic, "MOTH-RULE-0034", None);
 }
 
@@ -1654,17 +1659,15 @@ fn moth_template_const_record_field_access_folds_in_template_head() {
 }
 
 #[test]
-fn root_supplied_content_constant_can_be_referenced_normally() {
+fn moth_template_body_selects_sibling_content_constant_explicitly() {
     let fixture = MothTemplateScopeFixture::new(&[
-        ("src/docs/@mod.moth", "export:\n    @other content\n;\n"),
         ("src/docs/other.mtf", "shared body"),
-        ("src/docs/intro.mtf", "[content]"),
+        ("src/docs/intro.mtf", "[@other content]"),
     ]);
     let (ast, string_table, path_fork) = fixture.compile_moth_template_ast_ok(
         "src/docs/intro.mtf",
         &[
             "@html/@mod.moth",
-            "src/docs/@mod.moth",
             "src/docs/other.mtf",
             "src/docs/intro.mtf",
         ],
@@ -1678,27 +1681,6 @@ fn generated_self_content_is_not_visible_to_moth_template_body() {
     let failure = fixture.compile_moth_template_diagnostic(
         "src/docs/intro.mtf",
         &["@html/@mod.moth", "src/docs/intro.mtf"],
-    );
-    assert_ast_failure_diagnostic(
-        &failure,
-        "MOTH-RULE-0053",
-        Some("compile_time_evaluation_error.constant_not_visible"),
-    );
-}
-
-#[test]
-fn self_originating_content_reexport_is_excluded_from_moth_template_body_scope() {
-    let fixture = MothTemplateScopeFixture::new(&[
-        ("src/docs/@mod.moth", "export:\n    @intro content\n;\n"),
-        ("src/docs/intro.mtf", "[content]"),
-    ]);
-    let failure = fixture.compile_moth_template_diagnostic(
-        "src/docs/intro.mtf",
-        &[
-            "@html/@mod.moth",
-            "src/docs/@mod.moth",
-            "src/docs/intro.mtf",
-        ],
     );
     assert_ast_failure_diagnostic(
         &failure,
@@ -2011,5 +1993,182 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
     assert_eq!(
         bd_folded, authored_folded,
         "Moth template folded output should match authored $md template folded output"
+    );
+}
+
+/// One template head records one occurrence and owns its path row.
+///
+/// WHAT: `[@settings site_name]` retains the path, the selected symbol and the shell on the
+///       prepared `.mtf` output, and the path row is not also a file value.
+/// WHY: a `.mtf` body has no authored dependency clauses, so its occurrence shells must start at
+///       ordinal zero while the synthetic `content` constant stays the only header.
+#[test]
+fn moth_template_head_records_qualified_reference_occurrence() {
+    let source = "[@settings site_name]";
+    let (output, string_table, span_builder) = prepare_directly(source);
+
+    assert_eq!(output.qualified_references.len(), 1);
+    let occurrence = &output.qualified_references[0];
+    assert_eq!(string_table.resolve(occurrence.selected), "site_name");
+    assert_eq!(
+        occurrence.dependency.dependency_shell_id.source,
+        output.file_id
+    );
+    assert_eq!(occurrence.dependency.dependency_shell_id.ordinal, 0);
+    assert!(
+        output.structural_file_references.references().is_empty(),
+        "the occurrence path must not become an extensionless file value"
+    );
+    let resolve = |span: crate::compiler_frontend::source::SourceSpan| {
+        let range = span.resolve_with(span_builder.resolver_for(output.file_id));
+        source
+            .get(range.start() as usize..range.end() as usize)
+            .unwrap_or_default()
+    };
+    assert_eq!(resolve(occurrence.dependency.span), "@settings");
+    assert_eq!(resolve(occurrence.selected_span), "site_name");
+
+    let declaration = content_constant(&output);
+    assert!(
+        declaration
+            .initializer_references
+            .iter()
+            .all(|reference| string_table.resolve(reference.name) != "site_name"),
+        "the selected name is owned by the occurrence, not by bare reference scanning"
+    );
+}
+
+/// Nested template heads contribute occurrences in canonical body order.
+#[test]
+fn nested_moth_template_heads_record_ordered_occurrences() {
+    let source = "before [p: [@first one] [@second two]] after";
+    let (output, string_table, _span_builder) = prepare_directly(source);
+
+    let selections: Vec<&str> = output
+        .qualified_references
+        .iter()
+        .map(|occurrence| string_table.resolve(occurrence.selected))
+        .collect();
+    assert_eq!(selections, vec!["one", "two"]);
+    let ordinals: Vec<u32> = output
+        .qualified_references
+        .iter()
+        .map(|occurrence| occurrence.dependency.dependency_shell_id.ordinal)
+        .collect();
+    assert_eq!(ordinals, vec![0, 1], "shells must stay unique and ordered");
+}
+
+/// A newline ends the selection inside a template head too.
+#[test]
+fn newline_between_moth_template_path_and_symbol_records_no_occurrence() {
+    let source = "[@settings\nsite_name]";
+    let (output, _string_table, _span_builder) = prepare_directly(source);
+
+    assert!(
+        output.qualified_references.is_empty(),
+        "the same-line rule applies unchanged inside template heads"
+    );
+}
+
+/// A bare content file value in a template head keeps its existing meaning.
+#[test]
+fn moth_template_content_file_value_without_symbol_stays_content_source() {
+    let source = "[@docs/intro.mtf]";
+    let (output, _string_table, _span_builder) = prepare_directly(source);
+
+    assert!(output.qualified_references.is_empty());
+    let references = output.structural_file_references.references();
+    assert_eq!(references.len(), 1);
+    assert_eq!(
+        references[0].class,
+        crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass::ContentSource
+    );
+}
+
+/// An occurrence path in a template head gets the same path diagnostics as an ordinary clause.
+#[test]
+fn moth_template_occurrence_paths_reuse_dependency_path_diagnostics() {
+    for (source, reason_key) in [
+        ("[@/ name]", "invalid_import_path.public_root"),
+        (
+            "[@./x name]",
+            "invalid_import_path.current_directory_segment",
+        ),
+        (
+            "[@../x name]",
+            "invalid_import_path.parent_directory_segment",
+        ),
+    ] {
+        let diagnostics = prepare_diagnostic(source);
+        let diagnostic = diagnostics
+            .views()
+            .next()
+            .expect("expected one path diagnostic");
+        assert_eq!(diagnostic.reason_key(), Some(reason_key), "{source}");
+    }
+
+    let diagnostics = prepare_diagnostic("[@helper.moth name]");
+    let diagnostic = diagnostics
+        .views()
+        .next()
+        .expect("expected the explicit extension diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-IMPORT-0020");
+}
+
+/// Aliases stay illegal after an inline selected symbol in a template head.
+#[test]
+fn moth_template_occurrence_alias_is_reported_at_the_alias() {
+    let diagnostics = prepare_diagnostic("[@math square as squared]");
+    let diagnostic = diagnostics
+        .views()
+        .next()
+        .expect("expected the alias diagnostic");
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0031");
+    assert_eq!(
+        diagnostic.reason_key(),
+        Some("common_syntax_mistake.invalid_as_operator")
+    );
+}
+
+/// The `.mtf` occurrence keeps its path row, spans and shell through the per-file string remap.
+#[test]
+fn moth_template_occurrences_survive_string_remapping() {
+    let source = "[@math square]";
+    let (mut output, original_strings, _span_builder) = prepare_directly(source);
+    let original = output
+        .qualified_references
+        .first()
+        .expect("the template head should retain one occurrence")
+        .clone();
+
+    let mut merged = StringTable::new();
+    merged.intern("unrelated");
+    let remap = merged.merge_from(&original_strings);
+    output
+        .remap_string_ids(&remap)
+        .expect("per-file strings should remap");
+
+    let rebound = output
+        .qualified_references
+        .first()
+        .expect("the occurrence must survive the string remap")
+        .clone();
+    assert_eq!(rebound.selected, remap.get(original.selected));
+    assert_eq!(merged.resolve(rebound.selected), "square");
+    assert_eq!(
+        rebound.dependency.path_syntax,
+        original.dependency.path_syntax
+    );
+    assert_eq!(
+        rebound.dependency.span.local(),
+        original.dependency.span.local()
+    );
+    assert_eq!(
+        rebound.selected_span.local(),
+        original.selected_span.local()
+    );
+    assert_eq!(
+        rebound.dependency.dependency_shell_id,
+        original.dependency.dependency_shell_id
     );
 }

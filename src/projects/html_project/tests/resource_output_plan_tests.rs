@@ -872,7 +872,12 @@ fn fragment_and_metadata_uses_keep_authored_spans_with_hir_use() {
         .executable
         .resource_table
         .intern_origin(origin.clone(), Some(intern_span));
-    module.metadata.const_top_level_fragments = vec![ResolvedConstFragment {
+    module
+        .metadata
+        .entry
+        .as_mut()
+        .expect("fixture module represents an entry root")
+        .const_top_level_fragments = vec![ResolvedConstFragment {
         runtime_insertion_index: 0,
         destination: ConstFragmentDestination::Body,
         span: Some(fragment_span),

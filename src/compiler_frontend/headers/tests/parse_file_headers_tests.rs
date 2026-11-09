@@ -93,6 +93,8 @@ mod parse_file_headers_multifile_tests;
 mod parse_file_headers_prepared_tests;
 #[path = "parse_file_headers_provider_collision_tests.rs"]
 mod parse_file_headers_provider_collision_tests;
+#[path = "parse_file_headers_qualified_reference_tests.rs"]
+mod parse_file_headers_qualified_reference_tests;
 #[path = "parse_file_headers_signature_choice_tests.rs"]
 mod parse_file_headers_signature_choice_tests;
 #[path = "parse_file_headers_source_config_tests.rs"]

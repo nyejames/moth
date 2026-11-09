@@ -22,9 +22,7 @@ use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
 use crate::compiler_frontend::module_compilation::artefact::{
     ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
 };
-use crate::compiler_frontend::module_compilation::{
-    CompiledModuleArtifact, Module, ModuleRootActivity,
-};
+use crate::compiler_frontend::module_compilation::{CompiledModuleArtifact, Module};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
@@ -152,9 +150,7 @@ fn artifact_with_context(context: ModuleMaterialisationContext) -> CompiledModul
                 functions: HirModuleLinkFacts::default(),
             },
             metadata: ModuleCompilerMetadata {
-                entry_point: PathBuf::new(),
-                const_top_level_fragments: Vec::new(),
-                root_activity: ModuleRootActivity::default(),
+                entry: None,
                 doc_fragments: Vec::new(),
                 materialisation_context: Some(Arc::new(context)),
             },

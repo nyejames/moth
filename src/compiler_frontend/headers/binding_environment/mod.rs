@@ -13,6 +13,7 @@ mod external_imports;
 mod namespace_bindings;
 mod provider_dependencies;
 mod public_export_resolution;
+mod qualified_targets;
 mod receiver_bindings;
 mod source_dependencies;
 mod target_resolution;
@@ -34,6 +35,9 @@ pub(crate) use public_export_resolution::{
     check_source_package_boundary, resolve_public_export_boundary,
 };
 
+pub(crate) use qualified_targets::{
+    QualifiedReferenceTargets, ResolvedQualifiedReference, ResolvedQualifiedTarget,
+};
 pub(crate) use target_resolution::{
     DependencyTargetResolutionInput, ExternalPackageSymbolLookup,
     ExternalPackageSymbolResolutionInput, NamespaceTargetResolutionInput, ResolvedDependencyTarget,

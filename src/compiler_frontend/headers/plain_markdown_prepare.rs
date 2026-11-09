@@ -67,6 +67,7 @@ pub(crate) fn prepare_plain_markdown_file(
         file_role: FileRole::Normal,
         file_dependency_clauses: Vec::new(),
         structural_file_references: Default::default(),
+        qualified_references: Vec::new(),
         dependency_selections: Vec::new(),
         headers: vec![content_header],
         top_level_const_fragments: Vec::new(),

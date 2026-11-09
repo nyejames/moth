@@ -16,12 +16,12 @@ A **provider** supplies a public interface. A **consumer** binds against that in
 
 Not every `@` clause makes an edge between modules, though. In the running example `@page.moth` and `greeting.moth` share a directory, so they are one module and `@greeting` binds a sibling source file directly. A provider edge appears when a dependency resolves to a *different* module or package, and even then it names a relationship rather than copying `greet`'s body across. Think of a graft point, not a clone.
 
-[diagram:
+[@diagrams diagram:
     [$in label: A directory becomes one module, not one module per file]
     [$in caption: The root marks the boundary. Everything beside it in the same directory is owned source, which is why the walkthrough compiles one module rather than two.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: One directory]
             [$in title: Project root rooted by @page.moth]
@@ -29,14 +29,14 @@ Not every `@` clause makes an edge between modules, though. In the running examp
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Owned by that root]
-                [lane:
-                [detail:
+                [@diagrams lane:
+                [@diagrams detail:
                     [$in href: ./]
                     `@page.moth`, the root itself
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     `greeting.moth`, ordinary owned source
                 ]
@@ -45,8 +45,8 @@ Not every `@` clause makes an edge between modules, though. In the running examp
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../declarations-dependencies-and-ordering/]
             [$in eyebrow: Inside]
             [$in title: @greeting greet binds a sibling]
@@ -54,8 +54,8 @@ Not every `@` clause makes an edge between modules, though. In the running examp
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Across]
             [$in title: A real provider edge]

@@ -25,12 +25,12 @@ Those files hold characters on disk. They do not yet hold a typed call graph, a 
 
 Think of a seed and a plant. The seed holds a plan. The same plan can grow under different conditions into different adult forms. Source meaning is the plan. Target code is the plant in a particular climate: browser JavaScript, Wasm, an HTML shell. Compilers live in that gap.
 
-[diagram:
+[@diagrams diagram:
     [$in label: One source meaning grown into several target forms]
     [$in caption: The plan is authored once. Each target grows it into a different adult form without changing what the program means.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../ast-semantics-and-types/]
             [$in eyebrow: Source meaning]
             [$in title: The plan]
@@ -38,18 +38,18 @@ Think of a seed and a plant. The seed holds a plan. The same plan can grow under
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Grown forms]
-                [fanout:
-                [detail:
+                [@diagrams fanout:
+                [@diagrams detail:
                     [$in href: ../backend-lowering/]
                     JavaScript for browser work
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../backend-lowering/]
                     WebAssembly for neutral compute
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../html-assembly-and-output/]
                     HTML the browser displays
                 ]
@@ -87,12 +87,12 @@ The **backend** faces a concrete target. It lowers validated meaning into JavaSc
 
 Moth's compiler library holds frontend and analysis stages. The project tool and builders sit around that library. Stage 0 graph construction belongs to the build system, even when people call the whole CLI "the compiler."
 
-[diagram:
+[@diagrams diagram:
     [$in label: Which part of Moth owns which job]
     [$in caption: Four owners, four questions. The build system asks which files matter, the frontend asks what they mean, analysis asks whether that meaning is safe and the backend asks how to say it in a target language.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../starting-a-build/]
             [$in eyebrow: Build system]
             [$in title: Which files, in which order?]
@@ -100,8 +100,8 @@ Moth's compiler library holds frontend and analysis stages. The project tool and
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../ast-semantics-and-types/]
             [$in eyebrow: Frontend]
             [$in title: What does this source mean?]
@@ -109,8 +109,8 @@ Moth's compiler library holds frontend and analysis stages. The project tool and
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../borrow-validation-and-drops/]
             [$in eyebrow: Analysis]
             [$in title: Is that meaning legal?]
@@ -118,8 +118,8 @@ Moth's compiler library holds frontend and analysis stages. The project tool and
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../backend-lowering/]
             [$in eyebrow: Backend]
             [$in title: How do we say it in the target?]

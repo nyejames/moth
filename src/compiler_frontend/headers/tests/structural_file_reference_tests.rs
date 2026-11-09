@@ -128,11 +128,26 @@ fn moth_value_paths_are_classified_without_becoming_dependency_clauses() {
 
 #[test]
 fn a_path_inside_a_broken_expression_is_still_graph_active() {
-    let (output, _, _path_fork, _span_builder) = prepare_source("broken #= @assets/logo.svg foo\n");
+    // The path has no same-line selected symbol, so it keeps its file-value role even though the
+    // surrounding expression is incomplete.
+    let (output, _, _path_fork, _span_builder) = prepare_source("broken #= @assets/logo.svg 2\n");
     let references = output.structural_file_references.references();
     assert_eq!(references.len(), 1);
     assert_eq!(
         references[0].class,
         PreparedFileReferenceClass::ResourceFile
+    );
+}
+
+#[test]
+fn an_explicit_extension_path_with_a_selected_symbol_is_an_occurrence_not_a_file_value() {
+    // Plan 2.1: a selected symbol after an explicit-extension path is a malformed qualified
+    // reference, not a reinterpretation of the resource as a namespace. Phase 1 retains the
+    // authored shape and lets provider validation diagnose it.
+    let (output, _, _path_fork, _span_builder) = prepare_source("broken #= @assets/logo.svg foo\n");
+    assert_eq!(output.qualified_references.len(), 1);
+    assert!(
+        output.structural_file_references.references().is_empty(),
+        "the occurrence owns its path row instead of filing it as a resource value"
     );
 }

@@ -19,12 +19,12 @@ A **semantic tree** (still often stored as AST nodes in Moth) adds resolved fact
 
 Before checking, the page call is unresolved shape. After checking, it is a fact later stages may lower without reopening the dependency clauses.
 
-[diagram:
+[@diagrams diagram:
     [$in label: The same call, before and after checking]
     [$in caption: Parsing refuses to invent any of the facts on the right. Each one needs a rule and a source of truth, which is exactly what this stage supplies.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../declarations-dependencies-and-ordering/]
             [$in eyebrow: Before]
             [$in title: greet(visitor) as shape]
@@ -32,8 +32,8 @@ Before checking, the page call is unresolved shape. After checking, it is a fact
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: After]
             [$in title: greet(visitor) as fact]
@@ -41,22 +41,22 @@ Before checking, the page call is unresolved shape. After checking, it is a fact
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Facts added here]
-                [lane:
-                [detail:
+                [@diagrams lane:
+                [@diagrams detail:
                     [$in href: ./]
                     Which symbol `greet` names
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     Which local `visitor` names
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     Argument and return `TypeId` values
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../diagnostics/]
                     Whether the call is legal here
                 ]
@@ -65,8 +65,8 @@ Before checking, the page call is unresolved shape. After checking, it is a fact
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../hir/]
             [$in eyebrow: Downstream]
             [$in title: Lowered without reopening]

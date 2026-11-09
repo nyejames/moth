@@ -398,7 +398,10 @@ impl ProjectCompilation {
                     )
                 })?
                 .module;
-            if !module.metadata.root_activity.has_html_artifact_activity() {
+            let Some(entry_metadata) = module.metadata.entry.as_ref() else {
+                continue;
+            };
+            if !entry_metadata.root_activity.has_html_artifact_activity() {
                 continue;
             }
 

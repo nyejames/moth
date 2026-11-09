@@ -16,7 +16,7 @@ use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
 use crate::compiler_frontend::module_compilation::artefact::{
-    Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts, ModuleRootActivity,
+    Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
 };
 use crate::compiler_frontend::module_compilation::generated::artefacts::{
     CompletedGeneratedFunction, GeneratedFunctionId, GeneratedFunctionSidecar,
@@ -36,7 +36,6 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::FxHashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 pub(crate) fn assert_compiler_bug<T>(
@@ -149,9 +148,7 @@ pub(crate) fn test_module() -> Module {
             functions: HirModuleLinkFacts::default(),
         },
         metadata: ModuleCompilerMetadata {
-            entry_point: PathBuf::new(),
-            const_top_level_fragments: Vec::new(),
-            root_activity: ModuleRootActivity::default(),
+            entry: None,
             doc_fragments: Vec::new(),
             materialisation_context: None,
         },

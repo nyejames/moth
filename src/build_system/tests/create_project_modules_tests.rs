@@ -1262,6 +1262,23 @@ fn discover_modules_and_graph_for_test(
     SourceDatabase,
     StringTable,
 ) {
+    discover_modules_and_graph_for_test_with_check_only(config, resolver, style_directives, false)
+}
+
+/// Discover modules and, when requested, prepare deferred check-only units from the final
+/// canonical provider state so focused tests can inspect their transient bindings.
+pub(super) fn discover_modules_and_graph_for_test_with_check_only(
+    config: &Config,
+    resolver: &ProjectPathResolver,
+    style_directives: &StyleDirectiveRegistry,
+    include_check_only: bool,
+) -> (
+    ModuleCompilationSchedule,
+    super::project_module_graph::ProjectModuleGraph,
+    super::source_tree_index::SourceTreeIndex,
+    SourceDatabase,
+    StringTable,
+) {
     let mut string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
     let entry_root = fs::canonicalize(config.entry_dir.clone()).expect("entry root should resolve");
@@ -1316,7 +1333,7 @@ fn discover_modules_and_graph_for_test(
     let modules = {
         let path_interner = source_owner.sources_mut().fork_path_builder();
         let (source_files, mut source_spans) = source_owner.split();
-        discover_all_modules_in_project_with_check_only(
+        let mut schedule = discover_all_modules_in_project_with_check_only(
             config,
             resolver,
             source_files,
@@ -1331,15 +1348,35 @@ fn discover_modules_and_graph_for_test(
             ),
             &mut resource_inputs,
             true,
-            false,
+            include_check_only,
             &mut selected_source_texts,
             &mut string_table,
             &path_interner,
             #[cfg(feature = "timers")]
             crate::timing::NO_TIMING_BOUNDARY,
         )
-    }
-    .expect("module discovery should pass for focused graph-edge tests");
+        .expect("module discovery should pass for focused graph-edge tests");
+        if include_check_only {
+            schedule
+                .prepare_check_only_jobs(
+                    style_directives,
+                    &mut source_spans,
+                    resolver,
+                    &mut external_imports,
+                    DirectoryDependencyResolution::project(
+                        &module_namespace_set,
+                        &source_tree_index,
+                        &path_fork,
+                    ),
+                    &project_module_graph,
+                    &string_table,
+                    &path_interner,
+                    &mut selected_source_texts,
+                )
+                .expect("deferred check-only units should prepare for focused tests");
+        }
+        schedule
+    };
     let mut path_fork = source_owner.sources().fork_path_interner();
     let retain_result =
         selected_source_texts.retain_into(source_owner.sources_mut(), &mut path_fork);
@@ -1748,10 +1785,7 @@ fn empty_module() -> Module {
             functions: HirModuleLinkFacts::default(),
         },
         metadata: ModuleCompilerMetadata {
-            entry_point: PathBuf::new(),
-            const_top_level_fragments: Vec::new(),
-            root_activity:
-                crate::compiler_frontend::module_compilation::ModuleRootActivity::default(),
+            entry: None,
             doc_fragments: Vec::new(),
             materialisation_context: None,
         },

@@ -35,6 +35,9 @@ use crate::compiler_frontend::ast::expressions::parse_expression::create_express
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
+use crate::compiler_frontend::ast::expressions::parse_expression_qualified_references::{
+    QualifiedPathStatus, diagnosed_occurrence_failure, qualified_path_status,
+};
 use crate::compiler_frontend::ast::module_ast::scope_context::ValueDeclarationRef;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
@@ -857,17 +860,59 @@ pub fn parse_template_head(
                     TemplateHeadItemName::Expression,
                     item_span,
                 )?;
-                push_template_head_path_expression(
-                    path_id,
-                    token_stream,
-                    context,
-                    type_interner,
-                    expression_builder,
-                    const_values,
-                    construction_context,
-                    string_table,
-                    path_fork,
-                )?;
+                match qualified_path_status(context, path_id) {
+                    // Ordinary file values keep the existing Stage 0 value-position lane.
+                    QualifiedPathStatus::FileValue => {
+                        push_template_head_path_expression(
+                            path_id,
+                            token_stream,
+                            context,
+                            type_interner,
+                            expression_builder,
+                            const_values,
+                            construction_context,
+                            string_table,
+                            path_fork,
+                        )?;
+                    }
+                    // A qualified primary is an ordinary expression primary. Parsing the whole
+                    // head item through the shared expression lane consumes the path and selected
+                    // symbol and applies the existing suffix, constant and renderability rules.
+                    QualifiedPathStatus::Resolved(_) => {
+                        let value_span = Some(item_span);
+                        let expression = parse_head_expression(
+                            token_stream,
+                            context,
+                            type_interner,
+                            expression_builder,
+                            const_values,
+                            &ValueMode::ImmutableOwned,
+                            false,
+                            string_table,
+                            path_fork,
+                        );
+                        push_parsed_template_head_expression(
+                            expression,
+                            TemplateHeadExpressionContext {
+                                context,
+                                type_environment: type_interner.environment(),
+                                expression_builder,
+                                const_values,
+                                construction_context,
+                                path_fork: &*path_fork,
+                                value_mode: ValueMode::ImmutableOwned,
+                            },
+                            value_span,
+                            string_table,
+                        )?;
+                        defer_comma_advance = true;
+                    }
+                    // Preparation recognised this occurrence, so its binding diagnostic owns the
+                    // failure. Never reinterpret the path as a file value or emit a second one.
+                    QualifiedPathStatus::Diagnosed => {
+                        return Err(diagnosed_occurrence_failure(path_id).into());
+                    }
+                }
                 apply_head_compatibility(
                     &mut head_state,
                     &meaningful_item_compatibility,

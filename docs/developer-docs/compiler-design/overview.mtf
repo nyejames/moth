@@ -76,7 +76,7 @@ project tree
 
 Each article opens with the incoming representation and closes with the outgoing one. If a page jumps ahead, you have left the chronological route.
 
-[compiler_pipeline]
+[@pipeline_diagram compiler_pipeline]
 
 *Question: which step still looks like source, and which first looks like something a host can run?*
 

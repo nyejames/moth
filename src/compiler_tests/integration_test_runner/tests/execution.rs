@@ -550,10 +550,11 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
             html_package
                 .boundary
                 .successful_module_views()
-                .any(|module| module
-                    .metadata
-                    .entry_point
-                    .ends_with("packages/html/@mod.moth")),
+                .any(
+                    |module| module.metadata.entry.as_ref().is_some_and(|entry| {
+                        entry.entry_point.ends_with("packages/html/@mod.moth")
+                    })
+                ),
             "the HTML package root must remain in its own compilation boundary"
         );
         let source_root = fs::canonicalize(fixture.directory.path().join("src"))
@@ -1218,6 +1219,8 @@ fn synthetic_start_api_support_and_package_facade_have_no_start() {
     let fixture = EntryFixture::new("@support label\n[:[label]]\n", true);
     fs::create_dir(fixture.directory.path().join("src/support")).expect("should create support");
     fs::create_dir(fixture.directory.path().join("src/api")).expect("should create API module");
+    fs::create_dir(fixture.directory.path().join("src/triple"))
+        .expect("should create triple-root module");
     for (path, source) in [
         (
             "src/support/+package.moth",
@@ -1225,27 +1228,156 @@ fn synthetic_start_api_support_and_package_facade_have_no_start() {
         ),
         ("src/api/@mod.moth", "export:\n    label #= \"api\"\n;\n"),
         ("+package.moth", "export:\n    label #= \"facade\"\n;\n"),
+        (
+            "src/triple/@mod.moth",
+            "export:\n    label #= \"triple normal\"\n;\n",
+        ),
+        (
+            "src/triple/@package.moth",
+            "export:\n    label #= \"triple support\"\n;\n",
+        ),
+        (
+            "src/triple/@entry.moth",
+            "#[$in title: \"triple metadata\"]\n",
+        ),
     ] {
         fs::write(fixture.directory.path().join(path), source).expect("should write API root");
     }
-    let frontend = fixture.frontend();
-    for relative_path in ["src/support/+package.moth", "+package.moth"] {
-        let module = frontend
-            .successful_module_views()
-            .find(|module| module.metadata.entry_point.ends_with(relative_path))
-            .expect("each API-only root must be compiled");
+    let frontend = fixture.html_frontend();
+    let artefacts = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .collect::<Vec<_>>();
+    let support_roots = artefacts
+        .iter()
+        .filter(|artefact| {
+            artefact.support_interface.is_some() && artefact.module.metadata.entry.is_none()
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        !support_roots.is_empty(),
+        "the authored support root must be compiled"
+    );
+    for artefact in support_roots {
         assert!(
-            start_function(module).is_none(),
-            "{relative_path} must not synthesize start"
+            start_function(&artefact.module).is_none(),
+            "an API-only support root must not synthesize start"
+        );
+        assert!(
+            artefact.module.metadata.entry.is_none(),
+            "an API-only support root must not carry entry metadata"
         );
     }
 
-    // Declarations alone do not change a Normal root's semantic role or activate it.
-    let normal_api = frontend
-        .successful_module_views()
-        .find(|module| module.metadata.entry_point.ends_with("src/api/@mod.moth"))
+    // Declarations alone do not change a legacy combined Normal root's semantic role; the
+    // Phase 3 bridge keeps its dormant start until the filename cutover.
+    let normal_api = artefacts
+        .iter()
+        .find(|artefact| {
+            artefact
+                .normal_interface
+                .as_ref()
+                .is_some_and(|interface| interface.module_origin.logical_module_path() == "api")
+        })
+        .map(|artefact| &artefact.module)
         .expect("declaration-only Normal root must be compiled");
     assert_start_result(normal_api, false);
+
+    // A triple-root module keeps its metadata-only entry start and both API facades.
+    let triple = artefacts
+        .iter()
+        .find(|artefact| {
+            artefact
+                .module
+                .metadata
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with("triple/@entry.moth"))
+        })
+        .expect("the triple-root module must compile its entry");
+    assert!(
+        start_function(&triple.module).is_some(),
+        "the triple-root entry must own a compiler-owned start"
+    );
+    assert!(
+        triple.normal_interface.is_some(),
+        "the triple-root module must publish its normal facade"
+    );
+    assert!(
+        triple.support_interface.is_some(),
+        "the triple-root module must publish its support facade"
+    );
+    let triple_entry = triple
+        .module
+        .metadata
+        .entry
+        .as_ref()
+        .expect("the triple-root module carries entry metadata");
+    assert_eq!(
+        triple_entry.const_top_level_fragments.len(),
+        1,
+        "the metadata-only entry carries exactly its const builder fragment"
+    );
+}
+
+#[test]
+fn synthetic_single_file_reached_legacy_root_discards_runtime_like_directory_build() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    for directory_entry in [false, true] {
+        let mut fixture =
+            EntryFixture::new("@child value\n[: selected [value]]\n", directory_entry);
+        // Both roots are legacy combined normal roots: fixed `@mod.moth` spelling, no co-located
+        // `@entry.moth`. Single-file selection still builds the bounded root inventory.
+        let selected_root = fixture.root_source.with_file_name("@mod.moth");
+        fs::rename(&fixture.root_source, &selected_root).expect("should rename the selected root");
+        fixture.root_source = selected_root.clone();
+        if !directory_entry {
+            fixture.entry = selected_root;
+        }
+        let child = fixture.directory.path().join("src/child");
+        fs::create_dir(&child).expect("should create the reached legacy module");
+        fs::write(
+            child.join("@mod.moth"),
+            "export:\n    value #= \"child\"\n;\n\
+             io.line(\"discarded runtime\")\n\
+             [: discarded fragment]\n",
+        )
+        .expect("should write the reached legacy root");
+
+        let built = fixture.build(&[]);
+        let html = built
+            .project
+            .output_files
+            .iter()
+            .find_map(|output| match output.file_kind() {
+                FileKind::Html(html)
+                    if !directory_entry
+                        || output.relative_output_path() == std::path::Path::new("index.html") =>
+                {
+                    Some(html)
+                }
+                _ => None,
+            })
+            .expect("the selected legacy root must emit its homepage");
+        assert!(
+            html.contains("selected child"),
+            "the reached legacy root must keep its export surface for the {} build",
+            if directory_entry {
+                "directory"
+            } else {
+                "single-file"
+            }
+        );
+        assert!(
+            !html.contains("discarded runtime") && !html.contains("discarded fragment"),
+            "the reached legacy root runtime and fragments must stay dormant in the {} build",
+            if directory_entry {
+                "directory"
+            } else {
+                "single-file"
+            }
+        );
+    }
 }
 
 #[test]
@@ -1265,14 +1397,22 @@ fn synthetic_start_failing_imported_provider_remains_dormant() {
     let consumer = frontend
         .successful_module_views()
         .find(|module| {
-            module.metadata.entry_point
-                == fs::canonicalize(&fixture.root_source).expect("root must exist")
+            module.metadata.entry.as_ref().is_some_and(|entry| {
+                entry.entry_point
+                    == fs::canonicalize(&fixture.root_source).expect("root must exist")
+            })
         })
         .expect("consumer must compile");
     assert_start_result(consumer, false);
     let provider = frontend
         .successful_module_views()
-        .find(|module| module.metadata.entry_point.ends_with("provider/@mod.moth"))
+        .find(|module| {
+            module
+                .metadata
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with("provider/@mod.moth"))
+        })
         .expect("provider must compile its dormant body");
     assert_start_result(provider, true);
 

@@ -33,6 +33,7 @@ use crate::compiler_frontend::headers::constant_dependencies::{
 };
 use crate::compiler_frontend::headers::dependency_canonicalization::canonicalize_local_ordering_hints;
 use crate::compiler_frontend::headers::file_parser::{finish_file_output, parse_headers_in_file};
+use crate::compiler_frontend::headers::ordering_hints::collect_qualified_reference_ordering_hints;
 use crate::compiler_frontend::headers::public_exports::build_public_exports;
 use crate::compiler_frontend::headers::symbol_collection::build_module_symbols;
 #[cfg(test)]
@@ -817,6 +818,14 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         string_table,
         path_fork,
     })?;
+
+    collect_qualified_reference_ordering_hints(
+        &mut headers,
+        &source_token_owners,
+        &module_symbols,
+        &binding_environment,
+    )
+    .map_err(|error| HeaderPreparationFailure::Infrastructure(error.into()))?;
 
     canonicalize_local_ordering_hints(
         &mut headers,

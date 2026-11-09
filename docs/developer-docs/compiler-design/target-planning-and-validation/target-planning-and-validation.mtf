@@ -27,12 +27,12 @@ Some functions are born with **affinity**. A JavaScript-owned entry that must or
 
 Requirements **propagate backwards** along call edges. If a callee needs the DOM, callers that must reach it inherit the constraint under the accepted propagation rules. Neutral callees can still sit in Wasm when callers bridge correctly.
 
-[diagram:
+[@diagrams diagram:
     [$in label: A capability requirement travels backwards along call edges]
     [$in caption: The helper needs the DOM, so anything that must reach it inherits the requirement. Constraints climb towards callers, which is why a caller can be moved by a decision made three calls away.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Callee]
             [$in title: Touches the DOM]
@@ -40,8 +40,8 @@ Requirements **propagate backwards** along call edges. If a callee needs the DOM
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Caller]
             [$in title: Inherits the requirement]
@@ -49,8 +49,8 @@ Requirements **propagate backwards** along call edges. If a callee needs the DOM
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../linking-entries-and-reachability/]
             [$in eyebrow: Root]
             [$in title: start lands in JavaScript]

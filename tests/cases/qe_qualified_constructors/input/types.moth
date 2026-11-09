@@ -1,0 +1,10 @@
+Color = |
+    label String = "blue",
+|
+
+Outcome ::
+    Ok,
+    Err |
+        message String,
+    |,
+;

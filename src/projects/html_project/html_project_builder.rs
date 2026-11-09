@@ -20,6 +20,7 @@ use crate::build_system::output::{BuilderIdentity, CleanupPolicy, register_outpu
 use crate::builder_surface::config_schema::{
     ConfigSchema, ConfigSchemaField, NamedConfigSectionSchema, UnknownFieldPolicy,
 };
+use crate::builder_surface::definition::TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
 use crate::builder_surface::{BuilderSurface, SourceFileKind};
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -112,7 +113,6 @@ fn capture_module_diagnostic(
     )
 }
 
-const HTML_SOURCE_PACKAGE_PREFIX: &str = "html";
 const WEB_SITE_SOURCE_PACKAGE_PREFIX: &str = "web/site";
 
 #[derive(Debug, Default)]
@@ -204,10 +204,13 @@ impl BackendBuilder for HtmlProjectBuilder {
         );
         for entry in artifact_entries {
             let module = entry.module;
+            let entry_metadata = module
+                .metadata
+                .require_entry("HTML entry artefact planning")?;
             // Derive the canonical page route once. JS-only and HTML+Wasm output modes consume
             // projections from this same value — downstream code must not re-derive route semantics.
             let route = match derive_logical_html_path(
-                &module.metadata.entry_point,
+                &entry_metadata.entry_point,
                 entry_paths.resolved_source_root.as_deref(),
             ) {
                 Ok(route) => route,
@@ -270,7 +273,7 @@ impl BackendBuilder for HtmlProjectBuilder {
             let slot_plan = {
                 let mut diagnostic_strings = backend_context.diagnostic_strings();
                 plan_html_entry_slots(
-                    &module.metadata.const_top_level_fragments,
+                    &entry_metadata.const_top_level_fragments,
                     &structural_url_renderer,
                     entry.source_domain,
                     &mut diagnostic_strings,
@@ -317,13 +320,13 @@ impl BackendBuilder for HtmlProjectBuilder {
                         &output_files[*existing_index],
                         existing_entry_point,
                         &output_file,
-                        &module.metadata.entry_point,
+                        &entry_metadata.entry_point,
                     )? {
                         continue;
                     }
                     let mut diagnostic_strings = backend_context.diagnostic_strings();
                     return Err(duplicate_output_path_error(
-                        &module.metadata.entry_point,
+                        &entry_metadata.entry_point,
                         existing_entry_point,
                         &output_path,
                         &mut diagnostic_strings,
@@ -333,12 +336,12 @@ impl BackendBuilder for HtmlProjectBuilder {
                 output_paths.insert(output_path.clone());
                 output_path_owners.insert(
                     output_path,
-                    (module.metadata.entry_point.clone(), output_files.len()),
+                    (entry_metadata.entry_point.clone(), output_files.len()),
                 );
                 output_files.push(output_file);
             }
 
-            if entry_paths.is_homepage_entry(&module.metadata.entry_point) {
+            if entry_paths.is_homepage_entry(&entry_metadata.entry_point) {
                 has_directory_homepage = true;
                 entry_page_rel = Some(html_output_path.clone());
             } else if !entry_paths.is_directory_build() && entry_page_rel.is_none() {
@@ -427,14 +430,14 @@ impl BackendBuilder for HtmlProjectBuilder {
         builder_surface
             .source_packages
             .register_filesystem_root(
-                HTML_SOURCE_PACKAGE_PREFIX,
-                BuilderSurface::builtin_source_package_root(HTML_SOURCE_PACKAGE_PREFIX),
+                TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
+                BuilderSurface::builtin_source_package_root(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX),
                 crate::builder_surface::PackageOrigin::Builder,
             )
             .expect("the built-in @html source package registers once");
-        builder_surface.register_implicit_template_scope_source_package(HTML_SOURCE_PACKAGE_PREFIX);
 
-        // `@web/site` needs an explicit dependency clause, so it stays out of template scope.
+        // `@web/site` is not part of the standard template prelude, so consumers need an explicit
+        // dependency clause to use it.
         builder_surface
             .source_packages
             .register_filesystem_root(
@@ -589,6 +592,10 @@ impl HtmlProjectBuilder {
             wasm_enabled,
         } = context;
 
+        let entry_metadata = module
+            .metadata
+            .require_entry("HTML module artefact compilation")?;
+
         // Validate that every selected external call has lowering metadata for the target.
         // WHY: fail early with a structured Rule error at the call site rather than a vague
         // backend-internal error during lowering.
@@ -716,14 +723,14 @@ impl HtmlProjectBuilder {
             resource_table: &module.executable.resource_table,
             reachability,
             type_environment: &module.executable.type_environment,
-            const_fragments: &module.metadata.const_top_level_fragments,
+            const_fragments: &entry_metadata.const_top_level_fragments,
             slot_plan,
             borrow_facts: module.executable.borrow_analysis.borrow_facts(),
             numeric_proofs: &module.executable.numeric_proofs,
             project_name,
             document_config,
             build_profile,
-            root_activity: &module.metadata.root_activity,
+            root_activity: &entry_metadata.root_activity,
             external_package_registry: Arc::clone(&module.link_facts.external_package_registry),
         };
         if wasm_enabled {

@@ -13126,13 +13126,6 @@ contract = "language.dependencies.moth_without_template_implicit_provider_reject
 role = "primary"
 
 [[case]]
-id = "moth_template_provider_constant_collision_rejected"
-path = "moth_template_provider_constant_collision_rejected"
-tags = ["integration", "moth_template", "html", "diagnostics", "dependencies", "source-packages"]
-contract = "language.dependencies.moth_template_provider_constant_collision_rejected"
-role = "primary"
-
-[[case]]
 id = "moth_template_unrelated_source_package_implicit_rejected"
 path = "moth_template_unrelated_source_package_implicit_rejected"
 tags = ["integration", "moth_template", "html", "diagnostics", "dependencies", "source-packages"]
@@ -14351,10 +14344,10 @@ contract = "language.dependencies.legacy_inline_export_rejected"
 role = "primary"
 
 [[case]]
-id = "moth_template_same_directory_root_constant"
-path = "moth_template_same_directory_root_constant"
+id = "moth_template_explicit_helper_constant"
+path = "moth_template_explicit_helper_constant"
 tags = ["integration", "moth_template", "html", "dependencies", "module-roots"]
-contract = "language.dependencies.moth_template_same_directory_root_constant_acceptance"
+contract = "language.dependencies.moth_template_explicit_helper_constant_acceptance"
 role = "primary"
 
 [[case]]
@@ -19300,3 +19293,136 @@ path = "never_call_fallible_argument_rejected"
 tags = ["integration", "language", "functions", "diagnostics", "never"]
 contract = "language.functions.never_return_contract"
 role = "boundary"
+
+[[case]]
+id = "qe_qualified_expression_primaries_moth"
+path = "qe_qualified_expression_primaries_moth"
+tags = ["integration", "language", "templates", "dependencies", "expression-qualified"]
+contract = "language.expression.qualified_reference_is_an_ordinary_primary"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_reference_in_mtf_folds"
+path = "qe_qualified_reference_in_mtf_folds"
+tags = ["integration", "language", "templates", "dependencies", "expression-qualified"]
+contract = "language.expression.qualified_reference_in_mtf_folds"
+role = "primary"
+
+[[case]]
+id = "qe_two_qualified_references_with_local_value"
+path = "qe_two_qualified_references_with_local_value"
+tags = ["integration", "language", "dependencies", "expression-qualified"]
+contract = "language.expression.qualified_reference_installs_no_local_name"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_selected_name_not_local"
+path = "qe_qualified_selected_name_not_local"
+tags = ["integration", "language", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.expression.qualified_selection_does_not_bind_the_selected_name"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_reference_cycle_rejected"
+path = "qe_qualified_reference_cycle_rejected"
+tags = ["integration", "language", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.qualified_reference_cycle_is_rejected"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_reference_self_cycle_rejected"
+path = "qe_qualified_reference_self_cycle_rejected"
+tags = ["integration", "language", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.qualified_reference_self_cycle_is_rejected"
+role = "primary"
+
+[[case]]
+id = "qe_cross_module_qualified_constant"
+path = "qe_cross_module_qualified_constant"
+tags = ["integration", "language", "dependencies", "expression-qualified"]
+contract = "language.dependencies.cross_module_qualified_constant_is_visible"
+role = "primary"
+
+[[case]]
+id = "qe_entry_only_child_qualified_reference_rejected"
+path = "qe_entry_only_child_qualified_reference_rejected"
+tags = ["integration", "language", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.entry_only_child_is_not_an_import_surface"
+role = "primary"
+
+[[case]]
+id = "qe_runtime_value_in_mtf_rejected"
+path = "qe_runtime_value_in_mtf_rejected"
+tags = ["integration", "language", "templates", "diagnostics", "expression-qualified"]
+contract = "language.templates.mtf_head_requires_compile_time_values"
+role = "primary"
+
+[[case]]
+id = "qe_unassigned_qualified_path_rejected"
+path = "qe_unassigned_qualified_path_rejected"
+tags = ["integration", "language", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.statement_path_is_not_an_expression"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_reference_in_generic_body"
+path = "qe_qualified_reference_in_generic_body"
+tags = ["integration", "language", "templates", "dependencies", "generics", "expression-qualified"]
+contract = "language.generics.qualified_reference_survives_materialisation"
+role = "primary"
+
+[[case]]
+id = "qe_missing_qualified_target_moth_rejected"
+path = "qe_missing_qualified_target_moth_rejected"
+tags = ["integration", "language", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.missing_qualified_target_reports_only_binding_diagnostic"
+role = "primary"
+
+[[case]]
+id = "qe_missing_qualified_target_mtf_rejected"
+path = "qe_missing_qualified_target_mtf_rejected"
+tags = ["integration", "language", "templates", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.templates.missing_qualified_target_reports_only_binding_diagnostic"
+role = "primary"
+
+[[case]]
+id = "qe_helper_selected_next_to_all_roots"
+path = "qe_helper_selected_next_to_all_roots"
+tags = ["integration", "language", "templates", "dependencies", "expression-qualified"]
+contract = "language.templates.helper_selection_is_visible_next_to_all_roots"
+role = "primary"
+
+[[case]]
+id = "qe_mixed_format_cycle_rejected"
+path = "qe_mixed_format_cycle_rejected"
+tags = ["integration", "language", "templates", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.mixed_format_cycle_is_rejected"
+role = "primary"
+
+[[case]]
+id = "qe_cross_module_same_name_qualified_values"
+path = "qe_cross_module_same_name_qualified_values"
+tags = ["integration", "language", "dependencies", "expression-qualified"]
+contract = "language.dependencies.cross_module_same_name_targets_stay_distinct"
+role = "primary"
+
+[[case]]
+id = "qe_external_qualified_lowering"
+path = "qe_external_qualified_lowering"
+tags = ["integration", "language", "dependencies", "expression-qualified"]
+contract = "language.expression.external_symbol_is_lowered_from_qualified_reference"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_constructors"
+path = "qe_qualified_constructors"
+tags = ["integration", "language", "dependencies", "expression-qualified"]
+contract = "language.expression.qualified_reference_constructs_struct_and_choice_values"
+role = "primary"
+
+[[case]]
+id = "qe_root_local_qualified_reference_rejected"
+path = "qe_root_local_qualified_reference_rejected"
+tags = ["integration", "language", "templates", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.root_roots_are_not_same_module_namespace_entries"
+role = "primary"

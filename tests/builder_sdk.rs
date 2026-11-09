@@ -34,11 +34,7 @@ const HOST_U8_PAGE_SOURCE: &str = "@platform takes_byte\noctet U8 = 42\ntakes_by
 fn external_crate_defines_source_and_host_packages() {
     let ui_dir = tempfile::tempdir().expect("should create package directory");
     let definition = BuilderDefinition::new("game")
-        .source_package(
-            SourcePackage::new("@ui")
-                .from_dir(ui_dir.path())
-                .available_in_templates(),
-        )
+        .source_package(SourcePackage::new("@ui").from_dir(ui_dir.path()))
         .host_package(
             HostPackage::new("@platform").function(
                 HostFunction::new("has_prefix")
@@ -47,12 +43,31 @@ fn external_crate_defines_source_and_host_packages() {
                     .returns(HostType::Bool),
             ),
         )
-        .moth_templates()
         .markdown()
         .finish()
-        .expect("public definition should finish");
+        .expect("public definition should finish without the standard template prelude");
 
     assert_eq!(definition.identity(), "game");
+}
+
+#[test]
+fn external_crate_cannot_register_the_html_prelude_package() {
+    let html_dir = tempfile::tempdir().expect("should create HTML package directory");
+
+    for (case, path) in [("root", "@html"), ("nested", "@html/docs")] {
+        let error = BuilderDefinition::new("game")
+            .source_package(SourcePackage::new(path).from_dir(html_dir.path()))
+            .finish()
+            .expect_err("SDK builders cannot register the official HTML prelude package");
+        assert_eq!(error.kind(), ErrorKind::InvalidDefinition, "{case}");
+        assert!(error.to_string().contains("reserved"), "{case}: {error}");
+        assert!(
+            error
+                .to_string()
+                .contains("standard HTML builder package set"),
+            "{case}: {error}"
+        );
+    }
 }
 
 #[test]

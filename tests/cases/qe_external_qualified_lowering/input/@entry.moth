@@ -1,0 +1,3 @@
+value = @core/math PI
+
+[: [value] ]

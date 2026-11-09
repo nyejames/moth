@@ -15,7 +15,7 @@ use super::super::{
 use super::ModuleMaterialisationInput;
 use super::artefact_emit::{ModuleMaterialisationContext, check_materialisation_row_identity};
 use super::frozen_file_references::StableResolvedFileReferenceOutcome;
-use super::frozen_syntax::{SharedDonorIdentity, StableBodySyntax};
+use super::frozen_syntax::{SharedDonorIdentity, StableBodyCaptureFacts, StableBodySyntax};
 use super::preparation_freeze::{ModuleMaterialisationCapture, ModuleMaterialisationPreparation};
 use super::stable_types::GeneratedFoldedValueMaterialiser;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
@@ -245,8 +245,11 @@ fn capture_test_body(
         *source_file,
         path_fork,
         Some(&donor_identity),
-        Some(&facts),
-        FrozenIdentityHandle::new(),
+        StableBodyCaptureFacts {
+            qualified_references: &[],
+            stage0_resolution_facts: Some(&facts),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+        },
         &no_content_value,
     )
     .expect("test body path rows should be resolved before capture")
@@ -371,8 +374,11 @@ fn frozen_content_value_captures_and_reinterns_resource_pieces() {
         source_file,
         &path_fork,
         Some(&donor_identity),
-        Some(&facts),
-        FrozenIdentityHandle::new(),
+        StableBodyCaptureFacts {
+            qualified_references: &[],
+            stage0_resolution_facts: Some(&facts),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+        },
         &|_| {
             Ok(PublicFoldedValue::String(OwnedFoldedString::Pieces(vec![
                 OwnedFoldedStringPiece::Text("private content: ".to_owned()),
@@ -461,8 +467,11 @@ fn missing_content_fold_fails_loudly_during_capture() {
         source_file,
         &path_fork,
         Some(&donor_identity),
-        Some(&facts),
-        FrozenIdentityHandle::new(),
+        StableBodyCaptureFacts {
+            qualified_references: &[],
+            stage0_resolution_facts: Some(&facts),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+        },
         &|_| {
             Err(InfrastructureFailure::internal(
                 CompilerStage::GenericMaterialisation,
@@ -491,8 +500,11 @@ fn non_string_content_fold_fails_loudly_during_capture() {
         source_file,
         &path_fork,
         Some(&donor_identity),
-        Some(&facts),
-        FrozenIdentityHandle::new(),
+        StableBodyCaptureFacts {
+            qualified_references: &[],
+            stage0_resolution_facts: Some(&facts),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+        },
         &|_| {
             Ok(PublicFoldedValue::FixedScalar(
                 FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32"),
@@ -730,8 +742,11 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
         source_file,
         &path_fork,
         Some(&donor_identity),
-        Some(&facts),
-        FrozenIdentityHandle::new(),
+        StableBodyCaptureFacts {
+            qualified_references: &[],
+            stage0_resolution_facts: Some(&facts),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+        },
         &|_| {
             Err::<PublicFoldedValue, InfrastructureFailure>(InfrastructureFailure::internal(
                 CompilerStage::GenericMaterialisation,
@@ -899,8 +914,11 @@ fn source_body_captures_share_donor_strings_after_construction_owners_drop() {
             source_file,
             &path_fork,
             Some(&donor_identity),
-            Some(&facts),
-            FrozenIdentityHandle::new(),
+            StableBodyCaptureFacts {
+                qualified_references: &[],
+                stage0_resolution_facts: Some(&facts),
+                frozen_identity_handle: FrozenIdentityHandle::new(),
+            },
             &content_value,
         )
         .expect("source body should capture with one declaring donor")
@@ -1055,8 +1073,11 @@ fn canonical_string_only_donors_borrow_identity_without_retaining_file_tokens() 
         source_file,
         &path_fork,
         Some(&donor_identity),
-        body.resolution_facts().map(Arc::as_ref),
-        FrozenIdentityHandle::new(),
+        StableBodyCaptureFacts {
+            qualified_references: &[],
+            stage0_resolution_facts: body.resolution_facts().map(Arc::as_ref),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+        },
         &|_| {
             Err(InfrastructureFailure::internal(
                 CompilerStage::GenericMaterialisation,
@@ -1227,8 +1248,11 @@ fn donor_numeric_literal_text_renders_through_borrowed_origin() {
         source_file,
         &path_fork,
         Some(&donor_identity),
-        body.resolution_facts().map(Arc::as_ref),
-        FrozenIdentityHandle::new(),
+        StableBodyCaptureFacts {
+            qualified_references: &[],
+            stage0_resolution_facts: body.resolution_facts().map(Arc::as_ref),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+        },
         &|_| {
             Err(InfrastructureFailure::internal(
                 CompilerStage::GenericMaterialisation,
@@ -2743,8 +2767,11 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
             source_file,
             &path_fork,
             Some(&donor_identity),
-            Some(&facts),
-            FrozenIdentityHandle::new(),
+            StableBodyCaptureFacts {
+                qualified_references: &[],
+                stage0_resolution_facts: Some(&facts),
+                frozen_identity_handle: FrozenIdentityHandle::new(),
+            },
             &|_| {
                 Err::<PublicFoldedValue, InfrastructureFailure>(InfrastructureFailure::internal(
                     CompilerStage::GenericMaterialisation,

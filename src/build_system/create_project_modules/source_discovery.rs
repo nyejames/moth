@@ -20,9 +20,7 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::builder_surface::{SourceFileKind, SourceFileKindRegistry};
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
-use crate::compiler_frontend::compiler_messages::{
-    DependencyClauseKind, InvalidDependencyClauseReason, PreparedFailure,
-};
+use crate::compiler_frontend::compiler_messages::{InvalidDependencyClauseReason, PreparedFailure};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
 use crate::compiler_frontend::headers::dependency_target::{
@@ -304,6 +302,228 @@ pub(super) fn collect_reachable_input_files(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builder_surface::{BuilderSurface, SourceFileKind};
+    use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
+
+    /// Build the synthetic Stage 0 boundary services for one entry file without running the
+    /// semantic pipeline.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the synthetic traversal fixture keeps the surface, resolver, namespace set and mutable external-import state separate for the caller"
+    )]
+    fn synthetic_traversal_fixture(
+        entry: &Path,
+        surface: &mut BuilderSurface,
+        string_table: &mut StringTable,
+    ) -> (
+        ProjectPathResolver,
+        ModuleNamespaceSet,
+        PathInternerFork,
+        ResourceInputRegistry,
+        ExternalImportProviderCache,
+        ExternalImportResolutionTable,
+        ExternalPackageRegistry,
+    ) {
+        let entry = fs::canonicalize(entry).expect("entry should canonicalize");
+        let source_root = entry
+            .parent()
+            .expect("entry has a containing directory")
+            .to_path_buf();
+        let source_package_indexes =
+            super::super::source_package_discovery::build_source_package_boundary_indexes(
+                &surface.source_packages,
+                &surface.source_file_kinds,
+                &surface.external_import_providers,
+                string_table,
+            )
+            .expect("source package indexes should build");
+        let prepared_roots = source_package_indexes.prepared_source_package_roots();
+        let resolver = ProjectPathResolver::new_with_module_roots(
+            source_root.clone(),
+            source_root,
+            prepared_roots,
+            &surface.source_file_kinds,
+            ModuleRootTable::empty(),
+        );
+        let namespace_set = ModuleNamespaceSet::for_single_file(
+            source_package_indexes,
+            &surface.binding_packages,
+            &resolver,
+        )
+        .expect("synthetic namespace set should build");
+        (
+            resolver,
+            namespace_set,
+            PathInternerFork::empty(),
+            ResourceInputRegistry::new(),
+            ExternalImportProviderCache::new(),
+            ExternalImportResolutionTable::new(),
+            ExternalPackageRegistry::new(),
+        )
+    }
+
+    #[test]
+    fn synthetic_traversal_follows_qualified_occurrence_to_same_module_source() {
+        let temp = tempfile::tempdir().expect("should create temporary source root");
+        let directory = temp.path();
+        let entry = directory.join("entry.moth");
+        fs::write(
+            &entry,
+            "message = @helper answer
+",
+        )
+        .expect("should write entry");
+        fs::write(
+            directory.join("helper.moth"),
+            "answer #= 42
+",
+        )
+        .expect("should write helper");
+
+        let mut surface = BuilderSurface::with_mandatory_core();
+        let mut string_table = StringTable::new();
+        let (
+            resolver,
+            namespace_set,
+            mut path_fork,
+            mut resource_inputs,
+            mut cache,
+            mut resolution_table,
+            mut packages,
+        ) = synthetic_traversal_fixture(&entry, &mut surface, &mut string_table);
+        let mut external_imports = ExternalImportDiscoveryState {
+            external_packages: &mut packages,
+            providers: &surface.external_import_providers,
+            cache: &mut cache,
+            resolution_table: &mut resolution_table,
+        };
+        let mut provider_sources = ProviderOwnedSourceStaging::new();
+        let canonical_entry = fs::canonicalize(&entry).expect("entry should canonicalize");
+        let outcome = discover_reachable_source_files(
+            &canonical_entry,
+            &namespace_set,
+            &resolver,
+            &StyleDirectiveRegistry::built_ins(),
+            &mut external_imports,
+            &mut provider_sources,
+            &surface.source_file_kinds,
+            &mut resource_inputs,
+            &mut path_fork,
+            &mut string_table,
+        )
+        .expect("synthetic traversal should follow the qualified occurrence");
+
+        assert_eq!(
+            outcome.input_files.len(),
+            2,
+            "the same-module helper is reachable only through the qualified occurrence"
+        );
+    }
+
+    #[test]
+    fn synthetic_traversal_follows_moth_template_occurrence_to_helper_source() {
+        let temp = tempfile::tempdir().expect("should create temporary source root");
+        let directory = temp.path();
+        let entry = directory.join("entry.moth");
+        fs::write(&entry, "title #= @intro.mtf\n").expect("should write entry");
+        fs::write(directory.join("intro.mtf"), "# [@settings site_name]\n")
+            .expect("should write template");
+        fs::write(directory.join("settings.moth"), "site_name #= \"Moth\"\n")
+            .expect("should write helper");
+
+        let mut surface = BuilderSurface::with_mandatory_core();
+        surface
+            .source_file_kinds
+            .register("mtf", SourceFileKind::MothTemplate);
+        let mut string_table = StringTable::new();
+        let (
+            resolver,
+            namespace_set,
+            mut path_fork,
+            mut resource_inputs,
+            mut cache,
+            mut resolution_table,
+            mut packages,
+        ) = synthetic_traversal_fixture(&entry, &mut surface, &mut string_table);
+        let mut external_imports = ExternalImportDiscoveryState {
+            external_packages: &mut packages,
+            providers: &surface.external_import_providers,
+            cache: &mut cache,
+            resolution_table: &mut resolution_table,
+        };
+        let mut provider_sources = ProviderOwnedSourceStaging::new();
+        let canonical_entry = fs::canonicalize(&entry).expect("entry should canonicalize");
+        let outcome = discover_reachable_source_files(
+            &canonical_entry,
+            &namespace_set,
+            &resolver,
+            &StyleDirectiveRegistry::built_ins(),
+            &mut external_imports,
+            &mut provider_sources,
+            &surface.source_file_kinds,
+            &mut resource_inputs,
+            &mut path_fork,
+            &mut string_table,
+        )
+        .expect("synthetic traversal should follow the template-head occurrence");
+
+        assert_eq!(
+            outcome.input_files.len(),
+            3,
+            "the template content source and the helper it selects must both be reachable"
+        );
+    }
+
+    #[test]
+    fn synthetic_traversal_follows_moth_occurrence_to_template_content_source() {
+        let temp = tempfile::tempdir().expect("should create temporary source root");
+        let directory = temp.path();
+        let entry = directory.join("entry.moth");
+        fs::write(&entry, "message = @intro content\n").expect("should write entry");
+        fs::write(directory.join("intro.mtf"), "hello\n").expect("should write template");
+
+        let mut surface = BuilderSurface::with_mandatory_core();
+        surface
+            .source_file_kinds
+            .register("mtf", SourceFileKind::MothTemplate);
+        let mut string_table = StringTable::new();
+        let (
+            resolver,
+            namespace_set,
+            mut path_fork,
+            mut resource_inputs,
+            mut cache,
+            mut resolution_table,
+            mut packages,
+        ) = synthetic_traversal_fixture(&entry, &mut surface, &mut string_table);
+        let mut external_imports = ExternalImportDiscoveryState {
+            external_packages: &mut packages,
+            providers: &surface.external_import_providers,
+            cache: &mut cache,
+            resolution_table: &mut resolution_table,
+        };
+        let mut provider_sources = ProviderOwnedSourceStaging::new();
+        let canonical_entry = fs::canonicalize(&entry).expect("entry should canonicalize");
+        let outcome = discover_reachable_source_files(
+            &canonical_entry,
+            &namespace_set,
+            &resolver,
+            &StyleDirectiveRegistry::built_ins(),
+            &mut external_imports,
+            &mut provider_sources,
+            &surface.source_file_kinds,
+            &mut resource_inputs,
+            &mut path_fork,
+            &mut string_table,
+        )
+        .expect("synthetic traversal should follow the .moth occurrence to the template source");
+
+        assert_eq!(
+            outcome.input_files.len(),
+            2,
+            "the `.mtf` content source is reachable only through the `.moth` occurrence"
+        );
+    }
 
     #[test]
     fn deferred_source_infrastructure_failure_dominates_diagnostic_in_both_orders() {

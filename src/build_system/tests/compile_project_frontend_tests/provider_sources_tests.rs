@@ -507,8 +507,9 @@ fn reexported_js_final_calls_retain_provider_runtime_candidate() {
         .find(|module| {
             module
                 .metadata
-                .entry_point
-                .ends_with("components/@components.moth")
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with("components/@components.moth"))
         })
         .expect("export-only components artifact should exist");
     let provider_candidate = components
@@ -531,7 +532,13 @@ fn reexported_js_final_calls_retain_provider_runtime_candidate() {
 
     let page = modules
         .successful_module_views()
-        .find(|module| module.metadata.entry_point.ends_with("@page.moth"))
+        .find(|module| {
+            module
+                .metadata
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with("@page.moth"))
+        })
         .expect("calling page artifact should exist");
     let start = page
         .executable
@@ -1339,8 +1346,9 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources() {
             artefact
                 .module
                 .metadata
-                .entry_point
-                .ends_with(Path::new("first/@first.moth"))
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with(Path::new("first/@first.moth")))
         })
         .expect("expected first sibling module artefact");
     let second = artefacts
@@ -1349,8 +1357,13 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources() {
             artefact
                 .module
                 .metadata
-                .entry_point
-                .ends_with(Path::new("second/@second.moth"))
+                .entry
+                .as_ref()
+                .is_some_and(|entry| {
+                    entry
+                        .entry_point
+                        .ends_with(Path::new("second/@second.moth"))
+                })
         })
         .expect("expected second sibling module artefact");
 
@@ -1460,8 +1473,9 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources_when_
             artefact
                 .module
                 .metadata
-                .entry_point
-                .ends_with(Path::new("a/@a.moth"))
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with(Path::new("a/@a.moth")))
         })
         .expect("expected a sibling module artefact");
     let module_a_b = artefacts
@@ -1470,8 +1484,9 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources_when_
             artefact
                 .module
                 .metadata
-                .entry_point
-                .ends_with(Path::new("a-b/@b.moth"))
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with(Path::new("a-b/@b.moth")))
         })
         .expect("expected a-b sibling module artefact");
 

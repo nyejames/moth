@@ -68,9 +68,7 @@ fn module_with_resource_table(resources: ModuleResourceTable) -> Module {
             functions: Default::default(),
         },
         metadata: ModuleCompilerMetadata {
-            entry_point: PathBuf::new(),
-            const_top_level_fragments: Vec::new(),
-            root_activity: Default::default(),
+            entry: None,
             doc_fragments: Vec::new(),
             materialisation_context: None,
         },
@@ -106,8 +104,18 @@ fn reachable_resource_use_reads_only_live_origins_through_its_table() {
 fn entry_union_includes_named_const_fragment_resource_without_executable_use() {
     let fragment_resource = origin("assets/fragment.svg");
     let mut module = module_with_resource_table(ModuleResourceTable::new());
+    module.metadata.entry = Some(
+        crate::compiler_frontend::module_compilation::artefact::EntryRootMetadata {
+            entry_point: PathBuf::from("test/@entry.moth"),
+            const_top_level_fragments: Vec::new(),
+            root_activity: Default::default(),
+        },
+    );
     module
         .metadata
+        .entry
+        .as_mut()
+        .expect("fixture module represents an entry root")
         .const_top_level_fragments
         .push(ResolvedConstFragment {
             runtime_insertion_index: 0,

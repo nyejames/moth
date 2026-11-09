@@ -42,12 +42,12 @@ The three commands also differ in how far they run:
 - **`dev`** compiles its complete graph on the first build. Rebuilds are currently fresh rather than incremental.
 - **`check`** casts the widest net, taking in every discovered module plus check-only orphans and package surfaces. It plans and validates all the way through the `ValidatedMemoryPlan`, then stops before lowering or writing anything.
 
-[diagram:
+[@diagrams diagram:
     [$in label: What is already decided before config.moth opens]
     [$in caption: Each step narrows what the project is allowed to be. By the time any page source is read, the set of legal source kinds, packages and targets is already fixed.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: First]
             [$in title: The command]
@@ -55,8 +55,8 @@ The three commands also differ in how far they run:
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Second]
             [$in title: The capability surface]
@@ -64,22 +64,22 @@ The three commands also differ in how far they run:
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Published before any source is read]
-                [lane:
-                [detail:
+                [@diagrams lane:
+                [@diagrams detail:
                     [$in href: ./]
                     Config schemas
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../project-graphs-and-modules/]
                     Available packages
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../tokenization/]
                     Supported source kinds
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../target-planning-and-validation/]
                     Target affinity metadata
                 ]
@@ -88,8 +88,8 @@ The three commands also differ in how far they run:
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Third]
             [$in title: Bootstrap facts]
@@ -97,8 +97,8 @@ The three commands also differ in how far they run:
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../project-graphs-and-modules/]
             [$in eyebrow: Then]
             [$in title: Stage 0 discovery]

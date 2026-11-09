@@ -258,7 +258,9 @@ fn resolve_root_file_ids(
 /// Resolve Stage 0's bounded root inventory into reached-root roles for a flattened synthetic unit.
 ///
 /// WHAT: every normal or support root present in the unit, other than the standalone selection,
-///       becomes an export-capable but non-active `FileRole::ReachedApiFacadeRoot`. An entry root
+///       becomes an export-capable but non-active reached root role. A normal root keeps
+///       `FileRole::ReachedLegacyCombinedRoot` while its own module has no entry root; otherwise,
+///       and for every support root, it becomes `FileRole::ReachedApiFacadeRoot`. An entry root
 ///       publishes no importable surface, so it stays an ordinary source. Roots absent from the
 ///       source database were never reached and contribute no header role.
 /// WHY: synthetic single-file compilation follows dependency clauses into other directories and
@@ -279,9 +281,7 @@ fn resolve_reached_root_roles(
             continue;
         }
 
-        // Entry roots own executable output and never publish an importable surface. Shared and
-        // synthetic roles never occupy a module-root slot.
-        let Some(file_role) = FileRole::reached_api_facade(role) else {
+        let Some(file_role) = reached_root_file_role(module_roots, role, root_path) else {
             continue;
         };
 
@@ -291,6 +291,45 @@ fn resolve_reached_root_roles(
     }
 
     roles
+}
+
+/// The header role for one foreign module root reached by a flattened synthetic unit.
+///
+/// WHAT: a support root is always an API-only reached facade. A normal root is an API-only reached
+///       facade only when its own module also owns `@entry.moth`; otherwise it is the legacy
+///       combined normal root and keeps the pre-Phase-3 capture-and-discard handling.
+/// WHY: the rejecting reached-facade role is correct for an API-only root but would reject the
+///      dormant runtime of a legacy combined root and make single-file builds disagree with
+///      directory builds. Entry, shared and synthetic roots never occupy a reached facade slot.
+///
+/// LEGACY ROOT MIGRATION BRIDGE (removed at Phase 4 cutover): once every executable fixture
+/// authors `@entry.moth`, every reached normal root is API-only and the legacy arm disappears.
+pub(super) fn reached_root_file_role(
+    module_roots: &ModuleRootTable,
+    role: ModuleRootRole,
+    root_path: &Path,
+) -> Option<FileRole> {
+    match role {
+        ModuleRootRole::Support => Some(FileRole::ReachedApiFacadeRoot(role)),
+        ModuleRootRole::Normal => {
+            let has_entry_root =
+                module_roots
+                    .module_root_for_file(root_path)
+                    .is_some_and(|directory| {
+                        module_roots
+                            .root_file_for_directory_surface(&directory, ModuleRootRole::Entry)
+                            .is_some()
+                    });
+            if has_entry_root {
+                Some(FileRole::ReachedApiFacadeRoot(role))
+            } else {
+                Some(FileRole::ReachedLegacyCombinedRoot)
+            }
+        }
+        ModuleRootRole::Entry
+        | ModuleRootRole::Shared
+        | ModuleRootRole::SyntheticProjectContext => None,
+    }
 }
 
 /// Borrow the retained text of a source the boundary database already holds, or surface the load
@@ -747,8 +786,9 @@ impl ModulePreparationContext<'_> {
         let path_fork_source = path_fork.fork_source();
 
         // Offsets are only relevant for the start-bearing root file. A reached foreign facade
-        // discards its fragments, and ordinary files produce zero const templates and runtime
-        // fragments, so every file can safely start from offset zero without name collisions.
+        // either rejects its fragments or captures and discards them, and ordinary files produce
+        // zero const templates and runtime fragments, so every file can safely start from offset
+        // zero without name collisions.
         let const_template_offset = 0usize;
         let runtime_fragment_offset = 0usize;
 

@@ -18,7 +18,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports;
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, DiagnosticDraft, InvalidConfigReason, PreparedFailure,
+    DependencyClauseKind, DiagnosticBag, DiagnosticDraft, InvalidConfigReason, PreparedFailure,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
@@ -35,7 +35,7 @@ use crate::compiler_frontend::source_module_origin::SourceModuleOriginTable;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::path_interner::{
-    PathInternerBuilder, PathInternerForkSource,
+    PathId, PathInternerBuilder, PathInternerForkSource,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringTable, StringTableForkSource};
 use crate::projects::settings::Config;
@@ -49,7 +49,9 @@ use std::sync::Arc;
 use super::file_reference_resolution::FileReferenceResolver;
 use super::module_identity::ModuleId;
 use super::module_namespace::{DirectoryDependencyResolution, ResolvedDependency};
-use super::module_preparation::{ModulePreparationContext, RegisteredModuleSources};
+use super::module_preparation::{
+    ModulePreparationContext, ModuleSyntaxDiscovery, RegisteredModuleSources,
+};
 use super::prepared_module::PreparedModule;
 use super::project_module_graph::ProjectModuleGraph;
 use super::project_structure_diagnostics::{config_diagnostic, path_id};
@@ -206,6 +208,231 @@ fn resolve_directory_dependency_path(
                 Err(error) => PreparedFailure::Infrastructure(error.into()),
             }
         })
+}
+
+/// One module or source-package dependency resolved from an authored directory dependency.
+///
+/// WHAT: carries only the resolved identity and the authored provider shell, before the caller
+///       converts it into a canonical graph edge/package record or a check-only job record.
+/// WHY: ordinary clauses and expression-qualified occurrences share one resolution body; the
+///      caller-specific accumulators stay separate without duplicating provider/namespace work.
+enum ResolvedDirectoryDependencyEffect {
+    CrossModule {
+        provider_module_id: ModuleId,
+        provider_surface: ModuleRootRole,
+        dependency_shell_id: DependencyShellId,
+    },
+    SourcePackage {
+        dependency_prefix: String,
+        dependency_shell_id: DependencyShellId,
+    },
+}
+
+/// Immutable Stage 0 services used to resolve one authored directory dependency.
+///
+/// The authored source path is per prepared file; every other service belongs to the enclosing
+/// project/package boundary and is shared by canonical discovery and deferred check-only units.
+struct DirectoryDependencyServices<'a> {
+    project_path_resolver: &'a ProjectPathResolver,
+    project_module_graph: &'a ProjectModuleGraph,
+    directory_dependency_resolution: DirectoryDependencyResolution<'a>,
+    source_tree_index: &'a SourceTreeIndex,
+    source_files: &'a SourceDatabase,
+    consumer_module_id: ModuleId,
+    consumer_role: ModuleRootRole,
+    source_path: &'a Path,
+}
+
+/// Mutable per-source accumulation for one provider-resolution walk.
+struct DirectoryDependencyWalkState<'a> {
+    queued: &'a mut BTreeSet<SourceRecordIndex>,
+    queue: &'a mut VecDeque<SourceRecordIndex>,
+    effects: Vec<ResolvedDirectoryDependencyEffect>,
+}
+
+/// Resolve one authored provider dependency through the shared canonical Stage 0 mechanics.
+///
+/// WHAT: resolves structural provider references, the indexed namespace target and the
+///       same-module queue/cross-module/package consequences for an ordinary dependency clause or
+///       an expression-qualified occurrence.
+/// WHY: both authored forms must reach the identical provider/source closure, visibility check and
+///      failure lane. The per-source resolution cache deduplicates a provider path reached by
+///      multiple authored dependencies, so a second occurrence cannot repeat provider invocation,
+///      filesystem resolution or source preparation.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "shared directory dependency resolution keeps syntax, live spans, external-import state, immutable boundary services, per-source walk state, the retained path and its binding kind as separate borrows"
+)]
+fn resolve_authored_directory_dependency(
+    syntax: &mut ModuleSyntaxDiscovery<'_, '_>,
+    source_spans: &mut SourceSpanBuilders<'_>,
+    external_imports: &mut ExternalImportDiscoveryState<'_>,
+    services: &DirectoryDependencyServices<'_>,
+    walk: &mut DirectoryDependencyWalkState<'_>,
+    resolved_by_path: &mut FxHashMap<PathId, Option<ResolvedDependency>>,
+    provider: &mut RetainedDependencyPath,
+    clause_kind: DependencyClauseKind,
+) -> Result<(), PreparedFailure> {
+    if let Some(resolved) = resolved_by_path.get(&provider.path) {
+        return apply_resolved_directory_dependency(
+            syntax,
+            services,
+            walk,
+            provider,
+            resolved.as_ref(),
+        );
+    }
+
+    let action = {
+        let (syntax_string_table, selected_source_texts, syntax_path_fork) =
+            syntax.source_preparation_inputs_and_path_fork_mut();
+        let mut provider_sources =
+            BoundaryProviderSources::new(source_spans, selected_source_texts);
+        resolve_structural_provider_reference(
+            provider,
+            clause_kind,
+            services.source_path,
+            services.project_path_resolver,
+            syntax_path_fork,
+            &mut provider_sources,
+            external_imports,
+            services.directory_dependency_resolution,
+            syntax_string_table,
+        )
+    };
+    let action = match action {
+        Ok(action) => action,
+        Err(error) => {
+            let path_table = Arc::new(syntax.path_fork_mut().shared_table());
+            return Err(error.into_failure(syntax.string_table_mut(), path_table));
+        }
+    };
+
+    let resolved = match action {
+        StructuralProviderAction::Handled => None,
+        StructuralProviderAction::ResolveSource => {
+            let resolved = {
+                let (syntax_string_table, _selected_source_texts, syntax_path_fork) =
+                    syntax.source_preparation_inputs_and_path_fork_mut();
+                resolve_directory_dependency_path(
+                    services
+                        .directory_dependency_resolution
+                        .with_path_fork(syntax_path_fork),
+                    provider,
+                    services.source_path,
+                    syntax_string_table,
+                )?
+            };
+            Some(resolved)
+        }
+    };
+
+    let application =
+        apply_resolved_directory_dependency(syntax, services, walk, provider, resolved.as_ref());
+    if application.is_ok() {
+        resolved_by_path.insert(provider.path, resolved);
+    }
+    application
+}
+
+/// Apply one resolved directory dependency to the caller's queue and effect accumulators.
+fn apply_resolved_directory_dependency(
+    syntax: &mut ModuleSyntaxDiscovery<'_, '_>,
+    services: &DirectoryDependencyServices<'_>,
+    walk: &mut DirectoryDependencyWalkState<'_>,
+    provider: &mut RetainedDependencyPath,
+    resolved: Option<&ResolvedDependency>,
+) -> Result<(), PreparedFailure> {
+    let Some(resolved) = resolved else {
+        // The provider lane handled this dependency without a local directory target.
+        return Ok(());
+    };
+
+    match resolved {
+        ResolvedDependency::SameModuleSource {
+            source_index,
+            consumer_module_id,
+            ..
+        } => {
+            add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+            if *consumer_module_id != services.consumer_module_id {
+                return Err(graph_inventory_mismatch_error(
+                    "Same-module dependency resolved to another module".to_owned(),
+                ));
+            }
+            provider.local_source_id = Some(compiler_source_id_for_index(
+                *source_index,
+                services.source_tree_index,
+                services.source_files,
+            )?);
+            // Same-module targets include `.moth` helpers and `.mtf` content sources; the source
+            // preparation lane accepts both compiler-semantic kinds.
+            if walk.queued.insert(*source_index) {
+                walk.queue.push_back(*source_index);
+            }
+        }
+        ResolvedDependency::CrossModule {
+            provider_module_id,
+            provider_surface,
+            consumer_module_id,
+            ..
+        } => {
+            add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+            if *consumer_module_id != services.consumer_module_id {
+                return Err(graph_inventory_mismatch_error(
+                    "Cross-module dependency resolved to another consumer module".to_owned(),
+                ));
+            }
+            if !cross_module_support_import_is_visible(
+                services.project_module_graph,
+                *provider_module_id,
+                *provider_surface,
+                services.consumer_module_id,
+                services.consumer_role,
+            ) {
+                let path_table = Arc::new(syntax.path_fork_mut().shared_table());
+                let table = syntax.string_table_mut().take_for_handoff();
+                let batch = PreparedDiagnosticBatch::capture_with_required_paths(
+                    DiagnosticBag::from(imports::cross_module_import_not_exported(
+                        provider.path,
+                        Some(provider.span),
+                    )),
+                    table,
+                    None,
+                    || Some(path_table),
+                )?;
+                return Err(PreparedFailure::Diagnosed(batch));
+            }
+            walk.effects
+                .push(ResolvedDirectoryDependencyEffect::CrossModule {
+                    provider_module_id: *provider_module_id,
+                    provider_surface: *provider_surface,
+                    dependency_shell_id: provider.dependency_shell_id,
+                });
+        }
+        ResolvedDependency::SourcePackageSurface {
+            consumer_module_id,
+            dependency_prefix,
+            ..
+        } => {
+            add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+            if *consumer_module_id != services.consumer_module_id {
+                return Err(graph_inventory_mismatch_error(
+                    "Source-package dependency resolved to another consumer module".to_owned(),
+                ));
+            }
+            walk.effects
+                .push(ResolvedDirectoryDependencyEffect::SourcePackage {
+                    dependency_prefix: dependency_prefix.clone(),
+                    dependency_shell_id: provider.dependency_shell_id,
+                });
+        }
+        ResolvedDependency::BindingPackage => {
+            add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+        }
+    }
+
+    Ok(())
 }
 
 /// Borrowed Stage 0 services and live source spans for one serial discovery pass.
@@ -861,127 +1088,70 @@ fn prepare_check_only_module(
         // `prepare_source` already returns the premerge lane, so propagate directly without
         // building an intermediate vessel.
         let mut prepared_output = syntax.prepare_source(input, source_spans)?;
-        for dependency in &mut prepared_output.file_dependency_clauses {
-            let provider = &mut dependency.dependency;
-            let action = {
-                let (syntax_string_table, selected_source_texts, syntax_path_fork) =
-                    syntax.source_preparation_inputs_and_path_fork_mut();
-                let mut provider_sources =
-                    BoundaryProviderSources::new(source_spans, selected_source_texts);
-                resolve_structural_provider_reference(
-                    provider,
-                    dependency.binding.clause_kind(),
-                    &current_file_path,
-                    project_path_resolver,
-                    syntax_path_fork,
-                    &mut provider_sources,
+        let consumer_role = source
+            .logical_identity()
+            .module_origin()
+            .map(|origin| origin.role())
+            .unwrap_or(ModuleRootRole::Normal);
+        let services = DirectoryDependencyServices {
+            project_path_resolver,
+            project_module_graph,
+            directory_dependency_resolution,
+            source_tree_index,
+            source_files: preparation_context.source_files,
+            consumer_module_id: owner_module_id,
+            consumer_role,
+            source_path: &current_file_path,
+        };
+        {
+            let mut walk = DirectoryDependencyWalkState {
+                queued: &mut queued_module_sources,
+                queue: &mut pending_module_sources,
+                effects: Vec::new(),
+            };
+            let mut resolved_by_path = FxHashMap::default();
+            for dependency in &mut prepared_output.file_dependency_clauses {
+                resolve_authored_directory_dependency(
+                    &mut syntax,
+                    source_spans,
                     &mut isolated_external_imports,
-                    directory_dependency_resolution,
-                    syntax_string_table,
-                )
-            };
-            let action = match action {
-                Ok(action) => action,
-                Err(error) => {
-                    let path_table = Arc::new(syntax.path_fork_mut().shared_table());
-                    return Err(error.into_failure(syntax.string_table_mut(), path_table));
-                }
-            };
-            if matches!(&action, StructuralProviderAction::Handled) {
-                continue;
+                    &services,
+                    &mut walk,
+                    &mut resolved_by_path,
+                    &mut dependency.dependency,
+                    dependency.binding.clause_kind(),
+                )?;
             }
-
-            let resolved = {
-                let (syntax_string_table, _selected_source_texts, syntax_path_fork) =
-                    syntax.source_preparation_inputs_and_path_fork_mut();
-                resolve_directory_dependency_path(
-                    directory_dependency_resolution.with_path_fork(syntax_path_fork),
-                    provider,
-                    &current_file_path,
-                    syntax_string_table,
-                )?
-            };
-            match resolved {
-                ResolvedDependency::SameModuleSource {
-                    source_index: target_source_index,
-                    consumer_module_id,
-                    ..
-                } => {
-                    if consumer_module_id != owner_module_id {
-                        return Err(graph_inventory_mismatch_error(
-                            "Check-only same-module dependency resolved to another module"
-                                .to_owned(),
-                        ));
-                    }
-                    provider.local_source_id = Some(compiler_source_id_for_index(
-                        target_source_index,
-                        source_tree_index,
-                        preparation_context.source_files,
-                    )?);
-                    add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
-                    if queued_module_sources.insert(target_source_index) {
-                        pending_module_sources.push_back(target_source_index);
-                    }
-                }
-                ResolvedDependency::CrossModule {
-                    provider_module_id,
-                    provider_surface,
-                    consumer_module_id,
-                    ..
-                } => {
-                    if consumer_module_id != owner_module_id {
-                        return Err(graph_inventory_mismatch_error("Check-only cross-module dependency resolved to another consumer module"
-                            .to_owned()));
-                    }
-                    let consumer_role = source
-                        .logical_identity()
-                        .module_origin()
-                        .map(|origin| origin.role())
-                        .unwrap_or(ModuleRootRole::Normal);
-                    if !cross_module_support_import_is_visible(
-                        project_module_graph,
+            for occurrence in &mut prepared_output.qualified_references {
+                resolve_authored_directory_dependency(
+                    &mut syntax,
+                    source_spans,
+                    &mut isolated_external_imports,
+                    &services,
+                    &mut walk,
+                    &mut resolved_by_path,
+                    &mut occurrence.dependency,
+                    DependencyClauseKind::DirectSelection,
+                )?;
+            }
+            for effect in walk.effects {
+                match effect {
+                    ResolvedDirectoryDependencyEffect::CrossModule {
                         provider_module_id,
                         provider_surface,
-                        owner_module_id,
-                        consumer_role,
-                    ) {
-                        let path_table = Arc::new(syntax.path_fork_mut().shared_table());
-                        let table = syntax.string_table_mut().take_for_handoff();
-                        let batch = PreparedDiagnosticBatch::capture_with_required_paths(
-                            DiagnosticBag::from(imports::cross_module_import_not_exported(
-                                provider.path,
-                                Some(provider.span),
-                            )),
-                            table,
-                            None,
-                            || Some(path_table),
-                        )?;
-                        return Err(PreparedFailure::Diagnosed(batch));
-                    }
-                    add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
-                    provider_bindings.push(CheckOnlyProviderBinding {
-                        dependency_shell_id: provider.dependency_shell_id,
+                        dependency_shell_id,
+                    } => provider_bindings.push(CheckOnlyProviderBinding {
+                        dependency_shell_id,
                         provider_module_id,
                         provider_surface,
-                    });
-                }
-                ResolvedDependency::SourcePackageSurface {
-                    consumer_module_id,
-                    dependency_prefix,
-                    ..
-                } => {
-                    if consumer_module_id != owner_module_id {
-                        return Err(graph_inventory_mismatch_error("Check-only source-package dependency resolved to another consumer module"
-                            .to_owned()));
-                    }
-                    add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
-                    source_package_dependencies.push(CheckOnlySourcePackageDependency {
-                        dependency_shell_id: provider.dependency_shell_id,
+                    }),
+                    ResolvedDirectoryDependencyEffect::SourcePackage {
                         dependency_prefix,
-                    });
-                }
-                ResolvedDependency::BindingPackage => {
-                    add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+                        dependency_shell_id,
+                    } => source_package_dependencies.push(CheckOnlySourcePackageDependency {
+                        dependency_shell_id,
+                        dependency_prefix,
+                    }),
                 }
             }
         }
@@ -1449,122 +1619,73 @@ fn discover_modules_serial_provider_capable(
             };
             // Already in the premerge lane; propagate without an intermediate vessel.
             let mut prepared_output = syntax.prepare_source(input, source_spans)?;
-            for dependency in &mut prepared_output.file_dependency_clauses {
-                let provider = &mut dependency.dependency;
-                let action = {
-                    let (syntax_string_table, selected_source_texts, syntax_path_fork) =
-                        syntax.source_preparation_inputs_and_path_fork_mut();
-                    let mut provider_sources =
-                        BoundaryProviderSources::new(source_spans, selected_source_texts);
-                    resolve_structural_provider_reference(
-                        provider,
-                        dependency.binding.clause_kind(),
-                        &source_path,
-                        project_path_resolver,
-                        syntax_path_fork,
-                        &mut provider_sources,
+            let consumer_role = source_tree_index
+                .source(source_index)
+                .logical_identity()
+                .module_origin()
+                .map(|origin| origin.role())
+                .unwrap_or(ModuleRootRole::Normal);
+            let services = DirectoryDependencyServices {
+                project_path_resolver,
+                project_module_graph,
+                directory_dependency_resolution,
+                source_tree_index,
+                source_files,
+                consumer_module_id: seed.module_id,
+                consumer_role,
+                source_path: &source_path,
+            };
+            {
+                let mut walk = DirectoryDependencyWalkState {
+                    queued: &mut queued,
+                    queue: &mut queue,
+                    effects: Vec::new(),
+                };
+                let mut resolved_by_path = FxHashMap::default();
+                for dependency in &mut prepared_output.file_dependency_clauses {
+                    resolve_authored_directory_dependency(
+                        &mut syntax,
+                        source_spans,
                         external_imports,
-                        directory_dependency_resolution,
-                        syntax_string_table,
-                    )
-                };
-                let action = match action {
-                    Ok(action) => action,
-                    Err(error) => {
-                        let path_table = Arc::new(syntax.path_fork_mut().shared_table());
-                        return Err(error.into_failure(syntax.string_table_mut(), path_table));
-                    }
-                };
-                if matches!(&action, StructuralProviderAction::Handled) {
-                    continue;
+                        &services,
+                        &mut walk,
+                        &mut resolved_by_path,
+                        &mut dependency.dependency,
+                        dependency.binding.clause_kind(),
+                    )?;
                 }
-
-                let resolved = {
-                    let (syntax_string_table, _selected_source_texts, syntax_path_fork) =
-                        syntax.source_preparation_inputs_and_path_fork_mut();
-                    resolve_directory_dependency_path(
-                        directory_dependency_resolution.with_path_fork(syntax_path_fork),
-                        provider,
-                        &source_path,
-                        syntax_string_table,
-                    )?
-                };
-                match resolved {
-                    ResolvedDependency::SameModuleSource {
-                        source_index: target_source_index,
-                        consumer_module_id,
-                        ..
-                    } => {
-                        add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
-                        if consumer_module_id != seed.module_id {
-                            return Err(graph_inventory_mismatch_error(
-                                "Same-module dependency resolved to another module".to_owned(),
-                            ));
-                        }
-                        provider.local_source_id = Some(compiler_source_id_for_index(
-                            target_source_index,
-                            source_tree_index,
-                            source_files,
-                        )?);
-                        let inserted = queued.insert(target_source_index);
-                        if inserted {
-                            queue.push_back(target_source_index);
-                        }
-                    }
-                    ResolvedDependency::CrossModule {
-                        provider_module_id,
-                        provider_surface,
-                        consumer_module_id,
-                        ..
-                    } => {
-                        add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
-                        let consumer_role = source_tree_index
-                            .source(source_index)
-                            .logical_identity()
-                            .module_origin()
-                            .map(|origin| origin.role())
-                            .unwrap_or(ModuleRootRole::Normal);
-                        if !cross_module_support_import_is_visible(
-                            project_module_graph,
+                for occurrence in &mut prepared_output.qualified_references {
+                    resolve_authored_directory_dependency(
+                        &mut syntax,
+                        source_spans,
+                        external_imports,
+                        &services,
+                        &mut walk,
+                        &mut resolved_by_path,
+                        &mut occurrence.dependency,
+                        DependencyClauseKind::DirectSelection,
+                    )?;
+                }
+                for effect in walk.effects {
+                    match effect {
+                        ResolvedDirectoryDependencyEffect::CrossModule {
                             provider_module_id,
                             provider_surface,
-                            seed.module_id,
-                            consumer_role,
-                        ) {
-                            let path_table = Arc::new(syntax.path_fork_mut().shared_table());
-                            let table = syntax.string_table_mut().take_for_handoff();
-                            let batch = PreparedDiagnosticBatch::capture_with_required_paths(
-                                DiagnosticBag::from(imports::cross_module_import_not_exported(
-                                    provider.path,
-                                    Some(provider.span),
-                                )),
-                                table,
-                                None,
-                                || Some(path_table),
-                            )?;
-                            return Err(PreparedFailure::Diagnosed(batch));
-                        }
-                        resolved_edges.push(ResolvedDependencyEdge {
+                            dependency_shell_id,
+                        } => resolved_edges.push(ResolvedDependencyEdge {
                             provider_module_id,
                             provider_surface,
-                            consumer_module_id,
-                            dependency_shell_id: provider.dependency_shell_id,
-                        });
-                    }
-                    ResolvedDependency::SourcePackageSurface {
-                        consumer_module_id,
-                        dependency_prefix,
-                        ..
-                    } => {
-                        add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
-                        source_package_dependencies.push(ResolvedSourcePackageDependency {
-                            consumer_module_id,
+                            consumer_module_id: seed.module_id,
+                            dependency_shell_id,
+                        }),
+                        ResolvedDirectoryDependencyEffect::SourcePackage {
                             dependency_prefix,
-                            dependency_shell_id: provider.dependency_shell_id,
-                        });
-                    }
-                    ResolvedDependency::BindingPackage => {
-                        add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+                            dependency_shell_id,
+                        } => source_package_dependencies.push(ResolvedSourcePackageDependency {
+                            consumer_module_id: seed.module_id,
+                            dependency_prefix,
+                            dependency_shell_id,
+                        }),
                     }
                 }
             }

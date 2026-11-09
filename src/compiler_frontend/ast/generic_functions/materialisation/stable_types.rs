@@ -982,6 +982,9 @@ pub(super) fn generated_file_value_resolution_services(
     module_resources: Rc<RefCell<ModuleResourceTable>>,
     module_origin: Option<StableModuleOriginIdentity>,
     stage0_resolution_facts: Arc<Stage0ResolutionFacts>,
+    qualified_reference_targets: Arc<
+        crate::compiler_frontend::headers::binding_environment::QualifiedReferenceTargets,
+    >,
 ) -> Rc<FileValueResolutionServices> {
     let frozen_identity_handle = module_origin
         .as_ref()
@@ -990,6 +993,7 @@ pub(super) fn generated_file_value_resolution_services(
     Rc::new(FileValueResolutionServices {
         stage0_resolution_facts: Some(stage0_resolution_facts),
         module_resources,
+        qualified_reference_targets,
         module_origin,
         public_source_trait_origins: Arc::default(),
         frozen_identity_handle,

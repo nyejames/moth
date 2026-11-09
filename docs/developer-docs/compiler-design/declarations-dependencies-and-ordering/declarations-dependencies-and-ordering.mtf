@@ -37,12 +37,12 @@ Header processing keeps four edge families distinct. Mixing them is a reliable w
 
 A dependency-bound declaration is never a node in the consumer's local declaration graph. Copying provider declarations into each consumer would destroy identity and explode work.
 
-[diagram:
+[@diagrams diagram:
     [$in label: Four kinds of edge, four owners]
     [$in caption: One authored path has exactly one role. When a design discussion gets confusing, it is usually because two of these four are being called the same thing.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../project-graphs-and-modules/]
             [$in eyebrow: Stage 0]
             [$in title: Structural references]
@@ -50,8 +50,8 @@ A dependency-bound declaration is never a node in the consumer's local declarati
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../ast-semantics-and-types/]
             [$in eyebrow: Visibility and AST]
             [$in title: Dependency symbol bindings]
@@ -59,8 +59,8 @@ A dependency-bound declaration is never a node in the consumer's local declarati
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Stage 3]
             [$in title: Local ordering edges]

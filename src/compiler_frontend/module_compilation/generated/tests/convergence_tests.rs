@@ -1578,9 +1578,7 @@ fn counter_test_module() -> crate::compiler_frontend::module_compilation::Module
             functions: HirModuleLinkFacts::default(),
         },
         metadata: ModuleCompilerMetadata {
-            entry_point: PathBuf::new(),
-            const_top_level_fragments: Vec::new(),
-            root_activity: ModuleRootActivity::default(),
+            entry: None,
             doc_fragments: Vec::new(),
             materialisation_context: None,
         },

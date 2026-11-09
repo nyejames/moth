@@ -118,14 +118,14 @@ fn api_only_normal_root_rejects_const_root_fragments() {
 }
 
 #[test]
-fn reached_root_discards_body_and_fragments_but_keeps_export_surface() {
+fn reached_root_keeps_export_surface_without_start() {
     let headers = expect_header_success(
         parse_single_file_headers_with_reached_role(
-            "export:\n    Button = | label String |\n;\n[ Button(\"discarded\") ]\n#[html.head: [\"discarded\"]]\n",
+            "export:\n    Button = | label String |\n;\n",
             "src/widgets/@mod.moth",
             FileRole::ReachedApiFacadeRoot(ModuleRootRole::Normal),
         ),
-        "a reached facade should keep its export surface and discard its root body",
+        "a reached facade should keep its export surface",
     );
 
     assert_eq!(
@@ -140,22 +140,80 @@ fn reached_root_discards_body_and_fragments_but_keeps_export_surface() {
     assert_eq!(headers.entry_runtime_fragment_count, 0);
     assert!(!headers.has_non_trivial_root_body);
     assert!(
-        headers.top_level_const_fragments.is_empty(),
-        "a reached facade discards its top-level const fragments"
-    );
-    assert!(
-        headers
-            .headers
-            .iter()
-            .all(|header| !matches!(header.kind, HeaderKind::ConstTemplate { .. })),
-        "a reached facade discards its const-template headers"
-    );
-    assert!(
         headers.headers.iter().any(|header| {
             matches!(header.kind, HeaderKind::Struct { .. })
                 && header.export_mode == HeaderExportMode::Public
         }),
         "a reached facade still parses its export surface"
+    );
+}
+
+#[test]
+fn reached_root_rejects_direct_runtime_statement() {
+    let errors = expect_header_error(
+        parse_single_file_headers_with_reached_role(
+            "value = 1\n",
+            "src/widgets/@mod.moth",
+            FileRole::ReachedApiFacadeRoot(ModuleRootRole::Normal),
+        ),
+        "a reached facade must reject its top-level runtime body",
+    );
+
+    assert_eq!(errors.diagnostics.len(), 1);
+    assert_eq!(
+        errors
+            .diagnostics
+            .first()
+            .expect("expected one diagnostic")
+            .descriptor()
+            .code,
+        "MOTH-RULE-0023"
+    );
+}
+
+#[test]
+fn reached_root_rejects_runtime_fragments() {
+    let errors = expect_header_error(
+        parse_single_file_headers_with_reached_role(
+            "[: [\"discarded\"]]\n",
+            "src/widgets/@mod.moth",
+            FileRole::ReachedApiFacadeRoot(ModuleRootRole::Normal),
+        ),
+        "a reached facade must reject runtime fragments",
+    );
+
+    assert_eq!(errors.diagnostics.len(), 1);
+    assert_eq!(
+        errors
+            .diagnostics
+            .first()
+            .expect("expected one diagnostic")
+            .descriptor()
+            .code,
+        "MOTH-RULE-0023"
+    );
+}
+
+#[test]
+fn reached_root_rejects_const_fragments() {
+    let errors = expect_header_error(
+        parse_single_file_headers_with_reached_role(
+            "#[html.head: [\"discarded\"]]\n",
+            "src/widgets/@mod.moth",
+            FileRole::ReachedApiFacadeRoot(ModuleRootRole::Normal),
+        ),
+        "a reached facade must reject top-level const fragments",
+    );
+
+    assert_eq!(errors.diagnostics.len(), 1);
+    assert_eq!(
+        errors
+            .diagnostics
+            .first()
+            .expect("expected one diagnostic")
+            .descriptor()
+            .code,
+        "MOTH-RULE-0023"
     );
 }
 
@@ -187,6 +245,62 @@ fn entry_root_synthesizes_start_without_export_surface() {
                 || header.export_mode == HeaderExportMode::Private
         }),
         "the synthesized start is never a public surface declaration"
+    );
+}
+
+#[test]
+fn empty_entry_root_keeps_one_start_and_no_fragments() {
+    let headers = expect_header_success(
+        parse_single_file_headers_with_options(
+            "",
+            Path::new("src/@entry.moth"),
+            entry_root_options(),
+        ),
+        "an empty entry root is still a valid entry declaration",
+    );
+
+    assert_eq!(
+        headers
+            .headers
+            .iter()
+            .filter(|header| matches!(header.kind, HeaderKind::StartFunction))
+            .count(),
+        1,
+        "an empty entry root still owns exactly one start function"
+    );
+    assert_eq!(headers.entry_runtime_fragment_count, 0);
+    assert_eq!(headers.const_fragment_count, 0);
+    assert!(!headers.has_non_trivial_root_body);
+}
+
+#[test]
+fn metadata_only_entry_root_keeps_start_and_const_fragment() {
+    let headers = expect_header_success(
+        parse_single_file_headers_with_options(
+            "#[$in title: \"metadata only\"]\n",
+            Path::new("src/@entry.moth"),
+            entry_root_options(),
+        ),
+        "a metadata-only entry root is a valid const-fragment entry",
+    );
+
+    assert_eq!(
+        headers
+            .headers
+            .iter()
+            .filter(|header| matches!(header.kind, HeaderKind::StartFunction))
+            .count(),
+        1,
+        "a metadata-only entry root still owns exactly one start function"
+    );
+    assert_eq!(
+        headers.const_fragment_count, 1,
+        "the direct builder slot is the entry's only const fragment"
+    );
+    assert_eq!(headers.entry_runtime_fragment_count, 0);
+    assert!(
+        !headers.has_non_trivial_root_body,
+        "metadata alone must not fabricate runtime body facts"
     );
 }
 

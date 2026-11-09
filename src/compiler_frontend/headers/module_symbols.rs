@@ -37,6 +37,7 @@ use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderKind, RetainedDependencyClause,
 };
+use crate::compiler_frontend::headers::qualified_references::QualifiedReferenceOccurrence;
 use crate::compiler_frontend::headers::types::DependencySelection;
 use crate::compiler_frontend::source::{SourceDatabase, SourceId, SourceSlot, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
@@ -221,6 +222,14 @@ pub(crate) struct ModuleSymbols {
     /// lookup used by later semantic passes instead of repeating the path on every header.
     pub(crate) source_paths_by_source_id: FxHashMap<SourceId, PathId>,
     pub(crate) file_dependency_clauses_by_source: FxHashMap<PathId, Vec<RetainedDependencyClause>>,
+    /// Expression-qualified occurrences retained per prepared source file.
+    ///
+    /// WHAT: one row per authored `PATH SYMBOL` occurrence with its provider shell and Stage 0
+    ///       same-module source identity.
+    /// WHY: provider-dependency assembly, later semantic binding and AST lowering consume the
+    ///      same per-occurrence facts after the file output is consumed. Occurrences are
+    ///      deliberately separate from dependency clauses because they install no local name.
+    pub(crate) qualified_references_by_source: FxHashMap<PathId, Vec<QualifiedReferenceOccurrence>>,
     // One flat selection table per prepared source file. Clause ranges index this table.
     pub(crate) dependency_selections_by_source: FxHashMap<PathId, Vec<DependencySelection>>,
     // Source declarations eligible for dependency-binding surfaces. Private root-file
@@ -301,6 +310,28 @@ impl ModuleSymbols {
             .filter(|role| role.is_active_module_root())
     }
 
+    /// Return the retained expression-qualified occurrence at one authored path row.
+    ///
+    /// WHAT: `Some(row)` when preparation recognised `PATH SYMBOL` at this source and path row.
+    /// WHY: AST distinguishes an ordinary file value from an occurrence whose binding produced no
+    ///      target. The latter already owns a binding diagnostic and must not fall back to a file
+    ///      value or fabricate a second diagnostic.
+    pub(crate) fn qualified_reference_occurrence(
+        &self,
+        source: SourceId,
+        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId,
+    ) -> Option<&QualifiedReferenceOccurrence> {
+        self.source_paths_by_source_id
+            .get(&source)
+            .and_then(|source_path| self.qualified_references_by_source.get(source_path))
+            .and_then(|occurrences| {
+                occurrences.iter().find(|occurrence| {
+                    occurrence.selected_span.source() == source
+                        && occurrence.dependency.path_syntax == path_syntax
+                })
+            })
+    }
+
     /// Whether a declaration authored in `target_file` may be resolved from `consumer_file`.
     ///
     /// WHAT: an active root file's authored declarations resolve only inside that same file.
@@ -360,6 +391,7 @@ impl ModuleSymbols {
             source_ids_by_source: FxHashMap::default(),
             source_paths_by_source_id: FxHashMap::default(),
             file_dependency_clauses_by_source: FxHashMap::default(),
+            qualified_references_by_source: FxHashMap::default(),
             dependency_selections_by_source: FxHashMap::default(),
             dependency_bindable_source_symbol_paths: FxHashSet::default(),
             declared_paths_by_file: FxHashMap::default(),

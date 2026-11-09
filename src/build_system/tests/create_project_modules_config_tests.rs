@@ -364,8 +364,9 @@ fn loads_canonical_config_file_from_project_root() {
             artefact
                 .module
                 .metadata
-                .entry_point
-                .ends_with(Path::new("alpha/@alpha.moth"))
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with(Path::new("alpha/@alpha.moth")))
         })
         .expect("expected alpha module artefact");
     let alpha_provider_package_paths = alpha

@@ -45,12 +45,12 @@ Exact view identity includes root, phase and value context. Structural walks fol
 
 Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
 
-[diagram:
+[@diagrams diagram:
     [$in label: TIR lives and dies inside AST]
     [$in caption: Template structure gets a real home for exactly as long as the checker needs it, then leaves nothing behind for later stages to misread.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Built]
             [$in title: Structure captured as TIR]
@@ -58,8 +58,8 @@ Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Classified]
             [$in title: prepare_tir_view classifies the value]
@@ -67,14 +67,14 @@ Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Two exits]
-                [fanout:
-                [detail:
+                [@diagrams fanout:
+                [@diagrams detail:
                     [$in href: ../html-assembly-and-output/]
                     Static pieces fold to strings with insertion indexes
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../hir/]
                     Dynamic pieces become neutral runtime handoff data
                 ]
@@ -83,8 +83,8 @@ Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../hir/]
             [$in eyebrow: Gone]
             [$in title: The TIR store drops]

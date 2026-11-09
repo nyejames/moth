@@ -1,0 +1,5 @@
+@child show
+
+value = show("ignored")
+
+[: [value] ]

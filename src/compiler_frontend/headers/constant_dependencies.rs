@@ -21,12 +21,13 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     Header, HeaderKind, HeaderPreparationFailure,
 };
 use crate::compiler_frontend::headers::types::{
-    LocalDeclarationOrderingHint, SyntheticContentPayload,
+    LocalDeclarationOrderingHint, LocalDeclarationOrderingHintOrigin, SyntheticContentPayload,
 };
 use crate::compiler_frontend::public_interface::{
     PublicDeclarationRecord, PublicDeclarationSemantics,
 };
 use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
@@ -230,27 +231,18 @@ pub(crate) fn add_constant_initializer_dependencies(
                         // diagnostic during expression parsing.
                         continue;
                     };
-                    // A Moth template body keeps the existing constant-not-visible diagnostic.
-                    // Its same-directory implicit scope is a TEMPLATE SCOPE MIGRATION BRIDGE
-                    // (removed by qualified-reference plan Phase 5), so templates are not
-                    // ordinary readers of root-local declarations and must not report the
-                    // cross-root rule for a scope QE Phase 5 deletes.
-                    let is_moth_template_content = matches!(
-                        header.synthetic_content_payload,
-                        Some(SyntheticContentPayload::MothTemplate { .. })
-                    );
-                    let root_local = if is_moth_template_content {
-                        None
-                    } else {
-                        candidates.iter().copied().find_map(|path| {
-                            let position = constant_positions.get(&path)?;
-                            (!module_symbols.authored_declarations_visible_from(
-                                &current_source_file,
-                                &position.source_file,
-                            ))
-                            .then_some((path, position.source_file))
-                        })
-                    };
+                    // A Moth template body is an ordinary reader here. Qualified selection of a
+                    // root facade is rejected earlier in binding with MOTH-IMPORT-0005, while
+                    // naming a root-local declaration reaches this rule and reports
+                    // MOTH-IMPORT-0030 like any other reader.
+                    let root_local = candidates.iter().copied().find_map(|path| {
+                        let position = constant_positions.get(&path)?;
+                        (!module_symbols.authored_declarations_visible_from(
+                            &current_source_file,
+                            &position.source_file,
+                        ))
+                        .then_some((path, position.source_file))
+                    });
                     match root_local {
                         Some((path, target_source_file)) => {
                             let diagnostic = crate::compiler_frontend::headers::binding_environment::cross_file_root_local_declaration(
@@ -268,6 +260,55 @@ pub(crate) fn add_constant_initializer_dependencies(
                         None => diagnostic_bag.push(not_visible_constant_error(reference)),
                     }
                 }
+            }
+        }
+    }
+
+    // Expression-qualified occurrences already carry binding-proven targets. Their same-file
+    // forward and self-reference policy is the ordinary constant policy, except that an explicit
+    // `.mtf` self-selection reaches Stage 3 as a real cycle instead of the unqualified
+    // self-constant filter.
+    for (header_index, header) in headers.iter().enumerate() {
+        let Some(current_source_file) = module_symbols.source_path_for_header(header) else {
+            continue;
+        };
+        let is_moth_template_content = matches!(
+            header.synthetic_content_payload,
+            Some(SyntheticContentPayload::MothTemplate { .. })
+        );
+
+        for hint in &header.local_ordering_hints {
+            if hint.origin() != LocalDeclarationOrderingHintOrigin::QualifiedReference {
+                continue;
+            }
+            let Some(position) = constant_positions.get(&hint.path()) else {
+                continue;
+            };
+            if position.source_file != current_source_file {
+                continue;
+            }
+            let span = hint.occurrence_span().or(header.name_span);
+
+            if hint.path() == header.declaration_path {
+                if is_moth_template_content {
+                    // Stage 3's existing cycle diagnostic owns the explicit self-qualified
+                    // template content reference; the unqualified self filter does not apply.
+                    continue;
+                }
+                diagnostic_bag.push(self_reference_error_for(
+                    path_fork.component(header.declaration_path),
+                    span,
+                ));
+                continue;
+            }
+
+            if position.header_index > header_index {
+                diagnostic_bag.push(same_file_forward_reference_error_for(
+                    header.declaration_path,
+                    hint.path(),
+                    span,
+                    path_fork,
+                ));
             }
         }
     }
@@ -495,10 +536,14 @@ fn is_nominal_constructor(
 // ---------------------------------------------------------------------------
 
 fn self_reference_error(reference: &InitializerReference) -> DiagnosticDraft {
+    self_reference_error_for(Some(reference.name), reference.span)
+}
+
+fn self_reference_error_for(name: Option<StringId>, span: Option<SourceSpan>) -> DiagnosticDraft {
     choices_control_flow::compile_time_evaluation_error(
         CompileTimeEvaluationErrorReason::ConstantSelfReference,
-        Some(reference.name),
-        reference.span,
+        name,
+        span,
     )
 }
 
@@ -524,13 +569,22 @@ fn same_file_forward_reference_error(
     reference: &InitializerReference,
     path_fork: &PathInternerFork,
 ) -> DiagnosticDraft {
+    same_file_forward_reference_error_for(*constant_path, *target_path, reference.span, path_fork)
+}
+
+fn same_file_forward_reference_error_for(
+    constant_path: PathId,
+    target_path: PathId,
+    span: Option<SourceSpan>,
+    path_fork: &PathInternerFork,
+) -> DiagnosticDraft {
     let target_name = path_fork
-        .component(*target_path)
-        .or_else(|| path_fork.component(*constant_path));
+        .component(target_path)
+        .or_else(|| path_fork.component(constant_path));
     choices_control_flow::compile_time_evaluation_error(
         CompileTimeEvaluationErrorReason::SameFileForwardConstantReference,
         target_name,
-        reference.span,
+        span,
     )
 }
 

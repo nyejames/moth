@@ -1,6 +1,5 @@
 @overview content as reference_content
 @styles navbar, section, theme_css, theme_head, sidebar, init_docs_sidebar
-@pipeline_diagram compiler_pipeline as compiler_pipeline_diagram
 @diagrams css as diagrams_css
 
 #[$in title:["Compiler design: source to page"]]
@@ -19,6 +18,3 @@ init_docs_sidebar()!
 
 #[section, reference_content]
 
-export:
-    compiler_pipeline #= compiler_pipeline_diagram
-;

@@ -91,6 +91,7 @@ pub(crate) mod expressions {
     pub(crate) mod parse_expression_input;
     pub(crate) mod parse_expression_literals;
     pub(crate) mod parse_expression_places;
+    pub(crate) mod parse_expression_qualified_references;
     pub(crate) mod parse_expression_templates;
     pub(crate) mod source_function_calls;
     pub(crate) mod struct_instance;

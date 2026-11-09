@@ -32,9 +32,9 @@ use crate::compiler_frontend::external_packages::ExternalPackageId;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedValue,
 };
+use crate::compiler_frontend::module_compilation::Module;
 use crate::compiler_frontend::module_compilation::ModuleExternalImport;
 use crate::compiler_frontend::module_compilation::ResolvedConstFragment;
-use crate::compiler_frontend::module_compilation::{Module, ModuleRootActivity};
 use crate::compiler_frontend::paths::file_references::ResourceSourceId;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -273,11 +273,6 @@ fn frontend_surface_registers_core_packages_with_core_binding_metadata() {
             crate::builder_surface::PackageOrigin::Builder,
         )
     );
-    assert!(
-        !frontend_surface
-            .implicit_template_scope_source_packages
-            .contains("web/site")
-    );
 
     let page_package = frontend_surface
         .binding_packages
@@ -367,7 +362,12 @@ fn shared_resource_origin_defers_one_output_file_across_pages() {
             .executable
             .resource_table
             .intern_origin(resource_origin.clone(), None);
-        module.metadata.const_top_level_fragments = vec![ResolvedConstFragment {
+        module
+            .metadata
+            .entry
+            .as_mut()
+            .expect("fixture module represents an entry root")
+            .const_top_level_fragments = vec![ResolvedConstFragment {
             runtime_insertion_index: 0,
             destination: ConstFragmentDestination::Body,
             span: None,
@@ -722,7 +722,12 @@ fn emits_const_fragment_and_calls_start() {
     let entry_path = PathBuf::from("@page.moth");
     let mut string_table = StringTable::new();
     let mut module = create_test_module(entry_path.clone(), &mut string_table);
-    module.metadata.const_top_level_fragments = vec![ResolvedConstFragment {
+    module
+        .metadata
+        .entry
+        .as_mut()
+        .expect("fixture module represents an entry root")
+        .const_top_level_fragments = vec![ResolvedConstFragment {
         runtime_insertion_index: 0,
         destination: ConstFragmentDestination::Body,
         span: None,
@@ -1147,7 +1152,7 @@ fn directory_build_skips_api_only_sibling_from_all_artifact_planning() {
 
     let homepage = create_test_module(entry_root.join("@home.moth"), &mut string_table);
     let mut api_only = create_test_module(entry_root.join("api/@api.moth"), &mut string_table);
-    api_only.metadata.root_activity = ModuleRootActivity::default();
+    api_only.metadata.entry = None;
     api_only.link_facts.external_import_candidates = vec![ModuleExternalImport {
         package_id: ExternalPackageId(1),
         runtime_asset: Some(js_runtime_asset_import(
@@ -1178,7 +1183,7 @@ fn single_file_api_only_build_can_emit_no_artifacts() {
     let entry_path = PathBuf::from("api.moth");
     let mut string_table = StringTable::new();
     let mut api_only = create_test_module(entry_path.clone(), &mut string_table);
-    api_only.metadata.root_activity = ModuleRootActivity::default();
+    api_only.metadata.entry = None;
 
     let project = builder
         .build_backend_with_test_context(

@@ -325,7 +325,9 @@ impl<'a> DependencyGraph<'a> {
         // Content-source hints carry the exact authored path span because synthetic `content`
         // headers intentionally have deferred path tables. Reading a generated header's token
         // stream here would reopen a detached path-table owner and can panic at the stage boundary.
-        let span = if hint.origin() == LocalDeclarationOrderingHintOrigin::ContentSource {
+        let span = if hint.origin() == LocalDeclarationOrderingHintOrigin::ContentSource
+            || hint.origin() == LocalDeclarationOrderingHintOrigin::QualifiedReference
+        {
             hint.occurrence_span().or(header.name_span)
         } else {
             header.name_span

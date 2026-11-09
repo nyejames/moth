@@ -173,6 +173,7 @@ fn test_file_value_resolution_services(
             SourceDatabase::empty().into(),
         ))),
         module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
+        qualified_reference_targets: Arc::default(),
         module_origin: None,
         public_source_trait_origins: Arc::default(),
         frozen_identity_handle: FrozenIdentityHandle::new(),

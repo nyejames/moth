@@ -321,8 +321,9 @@ fn directory_project_remaps_delta_collisions_across_modules() {
         .find(|module| {
             module
                 .metadata
-                .entry_point
-                .file_name()
+                .entry
+                .as_ref()
+                .and_then(|entry| entry.entry_point.file_name())
                 .and_then(|name| name.to_str())
                 == Some("@b.moth")
         })

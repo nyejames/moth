@@ -114,7 +114,7 @@ impl RetainedDependencyPath {
     }
 
     /// Commit the final source identity while preserving module-root-relative paths.
-    pub fn commit_source_rebinding(&mut self, file_id: SourceId, _logical_path: PathId) {
+    pub fn commit_source_rebinding(&mut self, file_id: SourceId) {
         self.span = SourceSpan::new(file_id, self.span.local());
         self.dependency_shell_id.source = file_id;
     }

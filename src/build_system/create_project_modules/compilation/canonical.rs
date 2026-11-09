@@ -7,6 +7,7 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::timing_scope_attributed;
 
 use crate::builder_surface::BuilderSurface;
+use crate::builder_surface::definition::TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::{
@@ -52,7 +53,7 @@ use rustc_hash::FxHashMap;
 
 use super::super::compiled_boundary::{
     BlockedModule, BlockedProvider, CompiledGraphBoundary, CompletedSourcePackageRegistry,
-    DiagnosedModule, PackageBoundaryId, ProjectDiagnosticBudget, SchedulingCutoff,
+    DiagnosedModule, ProjectDiagnosticBudget, SchedulingCutoff,
 };
 use super::super::config_boundary;
 use super::super::generated_store::BoundaryGeneratedFunctionStore;
@@ -129,7 +130,6 @@ pub(super) struct BoundaryCompilationContext<'a> {
     build_config_inputs: BuildConfigInputSet,
     builder_globals: BuilderConfigGlobalSet,
     direct_project_facts: Vec<BuildConfigContractFact>,
-    implicit_template_package_ids: Vec<PackageBoundaryId>,
 }
 
 impl<'a> BoundaryCompilationContext<'a> {
@@ -153,14 +153,6 @@ impl<'a> BoundaryCompilationContext<'a> {
         direct_project_facts: Vec<BuildConfigContractFact>,
         project_globals: Option<&'a ProjectGlobalsInterface>,
     ) -> Self {
-        let mut implicit_template_package_ids = builder_surface
-            .implicit_template_scope_source_packages
-            .iter()
-            .filter_map(|prefix| completed_packages.by_prefix(prefix))
-            .collect::<Vec<_>>();
-        implicit_template_package_ids.sort_unstable();
-        implicit_template_package_ids.dedup();
-
         Self {
             config,
             build_profile,
@@ -176,7 +168,6 @@ impl<'a> BoundaryCompilationContext<'a> {
             builder_globals,
             direct_project_facts,
             project_globals,
-            implicit_template_package_ids,
         }
     }
 
@@ -279,12 +270,20 @@ fn facade_project_globals_dependency(
         return Ok(None);
     }
 
-    for (source_path, clauses) in &prepared
-        .semantic
-        .prepared_header_syntax
-        .module_symbols
+    let module_symbols = &prepared.semantic.prepared_header_syntax.module_symbols;
+    let mut authored_sources: Vec<_> = module_symbols
         .file_dependency_clauses_by_source
-    {
+        .keys()
+        .chain(module_symbols.qualified_references_by_source.keys())
+        .collect();
+    authored_sources.sort_unstable();
+    authored_sources.dedup();
+    for source_path in authored_sources {
+        let clauses = module_symbols
+            .file_dependency_clauses_by_source
+            .get(source_path)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         let Some(source_id) = prepared
             .semantic
             .prepared_header_syntax
@@ -317,6 +316,25 @@ fn facade_project_globals_dependency(
                     clause.binding.clause_kind(),
                     InvalidDependencyClauseReason::ProjectGlobalsFacadeDependencyNotAllowed,
                     Some(clause.dependency.span),
+                );
+                return Ok(Some(diagnostic));
+            }
+        }
+        let qualified_references = module_symbols
+            .qualified_references_by_source
+            .get(source_path)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        for occurrence in qualified_references {
+            if is_project_globals_dependency(
+                occurrence.dependency.path,
+                &prepared.semantic.path_fork,
+                &prepared.semantic.string_table,
+            ) {
+                let diagnostic = project_config::invalid_dependency_clause(
+                    crate::compiler_frontend::compiler_messages::DependencyClauseKind::DirectSelection,
+                    InvalidDependencyClauseReason::ProjectGlobalsFacadeDependencyNotAllowed,
+                    Some(occurrence.dependency.span),
                 );
                 return Ok(Some(diagnostic));
             }
@@ -395,17 +413,42 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         }
 
         let mut dependencies = Vec::new();
-        for file_dependency_clauses in prepared
-            .semantic
-            .prepared_header_syntax
-            .module_symbols
+        // Authored clauses and expression-qualified occurrences share one provider-interface
+        // contract: every retained shell resolves by identity against the same module/package
+        // indexes. Occurrences install no local name, so only their shell and authored path
+        // participate here. A file may contribute only occurrences, so the source set is the
+        // union of both retained maps.
+        let module_symbols = &prepared.semantic.prepared_header_syntax.module_symbols;
+        let mut authored_sources: Vec<_> = module_symbols
             .file_dependency_clauses_by_source
-            .values()
-        {
-            for clause in file_dependency_clauses {
-                let shell_id = clause.dependency.dependency_shell_id;
+            .keys()
+            .chain(module_symbols.qualified_references_by_source.keys())
+            .collect();
+        authored_sources.sort_unstable();
+        authored_sources.dedup();
+        for source_file in authored_sources {
+            let file_dependency_clauses = module_symbols
+                .file_dependency_clauses_by_source
+                .get(source_file)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let qualified_references = module_symbols
+                .qualified_references_by_source
+                .get(source_file)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let authored_dependencies = file_dependency_clauses
+                .iter()
+                .map(|clause| &clause.dependency)
+                .chain(
+                    qualified_references
+                        .iter()
+                        .map(|occurrence| &occurrence.dependency),
+                );
+            for dependency in authored_dependencies {
+                let shell_id = dependency.dependency_shell_id;
                 if is_project_globals_dependency(
-                    clause.dependency.path,
+                    dependency.path,
                     &prepared.semantic.path_fork,
                     &prepared.semantic.string_table,
                 ) {
@@ -526,27 +569,31 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             }
         }
 
-        // Builder source-backed packages are implicitly available only to modules that actually
-        // contain a `.mtf` semantic source. The package capability is supplied by the active
-        // builder surface; generic orchestration must not infer it from a package-name list.
+        // The flat `.mtf` helper prelude is compiler policy, not a builder capability list. The
+        // constants come from the official compiled `@html` source package whenever a module
+        // contains a Moth template, so they keep normal provider identity and diagnostics.
         if prepared.contains_moth_template {
-            let implicit_provider_dependencies: Vec<SourceProviderDependency<'boundary>> = self
+            let package_id = self
                 .boundary
-                .implicit_template_package_ids
-                .iter()
-                .map(|package_id| {
-                    let package = self.boundary.completed_packages.package(*package_id)?;
-                    let interface = package.root_interface()?;
-                    Ok(SourceProviderDependency {
-                        kind: ProviderDependencyKind::ImplicitTemplate {
-                            package_prefix: package.package_prefix(),
-                        },
-                        interface,
-                    })
-                })
-                .collect::<Result<_, InfrastructureFailure>>()?;
+                .completed_packages
+                .by_prefix(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX)
+                .ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "Moth template module cannot bind the template prelude because no \
+                             '@{TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX}' source package is registered"
+                        ),
+                    )
+                })?;
+            let package = self.boundary.completed_packages.package(package_id)?;
 
-            dependencies.extend(implicit_provider_dependencies);
+            dependencies.push(SourceProviderDependency {
+                kind: ProviderDependencyKind::TemplatePrelude {
+                    package_prefix: package.package_prefix(),
+                },
+                interface: package.root_interface()?,
+            });
         }
 
         SourceProviderDependencySet::new(dependencies)

@@ -359,6 +359,7 @@ impl GenericTemplateArtefact {
             Rc::clone(&module_resources),
             context.module_origin.clone(),
             Arc::clone(&materialised_body.resolution_facts),
+            Arc::clone(&materialised_body.qualified_reference_targets),
         );
         let build_context = AstBuildContext {
             external_package_registry: Arc::clone(external_package_registry),
@@ -389,6 +390,7 @@ impl GenericTemplateArtefact {
         let binding_environment = self
             .materialise_binding_environment(
                 context,
+                &materialised_body,
                 &source_file,
                 external_package_registry,
                 path_fork_ref,
@@ -463,6 +465,7 @@ impl GenericTemplateArtefact {
     fn materialise_binding_environment(
         &self,
         context: &ModuleMaterialisationContext,
+        materialised_body: &super::frozen_syntax::MaterialisedBody,
         source_file: &PathId,
         external_package_registry: &ExternalPackageRegistry,
         path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
@@ -477,6 +480,14 @@ impl GenericTemplateArtefact {
                 string_table,
             )?),
         );
+        // Qualified-reference targets are semantic facts, not donor syntax. Reinstall them under
+        // the retained donor source identity so generated AST lowering consumes the declaration
+        // the authored path selected instead of re-resolving the name or treating it as a file.
+        for (key, resolved) in materialised_body.qualified_reference_targets.iter() {
+            environment
+                .qualified_reference_targets
+                .insert(*key, resolved.clone());
+        }
         for binding in &self.declarations {
             let local_path = binding.local_path;
             environment

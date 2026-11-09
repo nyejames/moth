@@ -1807,3 +1807,337 @@ fn canonical_discovery_consumes_moth_tokens_for_every_reachable_file() {
             .any(|dependencies| !dependencies.is_empty())
     }));
 }
+
+// -------------------------
+//  Qualified-reference provider diagnostics
+// -------------------------
+
+/// Write one single-module project whose entry body is supplied verbatim.
+fn write_qualified_reference_probe_project(
+    root: &std::path::Path,
+    entry_body: &str,
+    extra_files: &[(&str, &str)],
+) -> (
+    Config,
+    ProjectPathResolver,
+    StyleDirectiveRegistry,
+    std::path::PathBuf,
+) {
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@page.moth"), entry_body).expect("should write entry");
+    for (relative_path, contents) in extra_files {
+        let path = src.join(relative_path);
+        fs::create_dir_all(path.parent().expect("extra file has a parent"))
+            .expect("should create extra file parent");
+        fs::write(path, contents).expect("should write extra file");
+    }
+
+    let mut config = Config::new(root.to_path_buf());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    (config, resolver, style_directives, src)
+}
+
+#[test]
+fn resource_path_qualified_occurrence_uses_the_provider_lane_without_reading_the_resource() {
+    // An authored resource path without a selection stays a file value. Adding a selection must
+    // not reinterpret the resource as a namespace: it enters the same provider lane as the
+    // explicit direct-selection clause and never becomes a resource read.
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let (config, resolver, style_directives, src) = write_qualified_reference_probe_project(
+        &root,
+        "logo = @images/logo.svg name\n#[:entry]\n",
+        &[("images/logo.svg", "<svg/>")],
+    );
+
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+    let diagnostic = first_error_diagnostic(&failure);
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-IMPORT-0021",
+        "a selected resource path must use the unsupported-provider diagnostic, got {}",
+        diagnostic.descriptor().code
+    );
+    diagnostic
+        .family_view::<UnsupportedExternalExtensionView>()
+        .expect("the provider lane retains typed extension facts");
+    assert_primary_span_text(&failure, &src.join("@page.moth"), "@images/logo.svg");
+
+    // The authored clause form produces the same diagnostic and span for the same path.
+    let _clause_root = tempfile::tempdir().expect("should create temp dir");
+    let clause_root = _clause_root.path().to_path_buf();
+    let (clause_config, clause_resolver, clause_directives, clause_src) =
+        write_qualified_reference_probe_project(
+            &clause_root,
+            "@images/logo.svg name\n#[:entry]\n",
+            &[("images/logo.svg", "<svg/>")],
+        );
+    let clause_failure =
+        discover_modules_for_test(&clause_config, &clause_resolver, &clause_directives);
+    let clause_diagnostic = first_error_diagnostic(&clause_failure);
+    assert_eq!(
+        clause_diagnostic.descriptor().code,
+        diagnostic.descriptor().code,
+        "the occurrence and clause forms share the provider error lane"
+    );
+    assert_primary_span_text(
+        &clause_failure,
+        &clause_src.join("@page.moth"),
+        "@images/logo.svg",
+    );
+}
+
+#[test]
+fn explicit_moth_extension_qualified_occurrence_keeps_the_source_extension_diagnostic() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let (config, resolver, style_directives, src) = write_qualified_reference_probe_project(
+        &root,
+        "value = @helper.moth answer\n#[:entry]\n",
+        &[("helper.moth", "answer #= 1\n")],
+    );
+
+    let failure = discover_modules_for_test(&config, &resolver, &style_directives);
+    let diagnostic = first_error_diagnostic(&failure);
+    assert_eq!(
+        diagnostic.descriptor().code,
+        "MOTH-IMPORT-0020",
+        "an explicit .moth source path keeps its dependency diagnostic, got {}",
+        diagnostic.descriptor().code
+    );
+    assert_primary_span_text(&failure, &src.join("@page.moth"), "@helper.moth");
+
+    let _clause_root = tempfile::tempdir().expect("should create temp dir");
+    let clause_root = _clause_root.path().to_path_buf();
+    let (clause_config, clause_resolver, clause_directives, _clause_src) =
+        write_qualified_reference_probe_project(
+            &clause_root,
+            "@helper.moth answer\n#[:entry]\n",
+            &[("helper.moth", "answer #= 1\n")],
+        );
+    let clause_failure =
+        discover_modules_for_test(&clause_config, &clause_resolver, &clause_directives);
+    assert_eq!(
+        first_error_diagnostic(&clause_failure).descriptor().code,
+        diagnostic.descriptor().code,
+    );
+}
+
+#[test]
+fn entry_only_child_qualified_occurrence_matches_the_clause_error_lane() {
+    let write_entry_only_child_fixture = |root: &std::path::Path, body: &str| {
+        let src = root.join("src");
+        fs::create_dir_all(&src).expect("should create src");
+        fs::write(
+            root.join(settings::CONFIG_FILE_NAME),
+            "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+        )
+        .expect("should write config");
+        fs::write(src.join("@page.moth"), body).expect("should write entry");
+        let child = src.join("child");
+        fs::create_dir_all(&child).expect("should create child");
+        fs::write(child.join("@entry.moth"), "hidden #= 1\n").expect("should write child entry");
+
+        let mut config = Config::new(root.to_path_buf());
+        let style_directives = test_style_directives();
+        parse_project_config_for_test(
+            &mut config,
+            &root.join(settings::CONFIG_FILE_NAME),
+            &style_directives,
+        )
+        .expect("config should parse");
+        let resolver = configured_resolver(&config);
+        (config, resolver, style_directives, src)
+    };
+
+    let _occurrence_root = tempfile::tempdir().expect("should create temp dir");
+    let occurrence_root = _occurrence_root.path().to_path_buf();
+    let (occurrence_config, occurrence_resolver, occurrence_directives, occurrence_src) =
+        write_entry_only_child_fixture(&occurrence_root, "value = @child hidden\n#[:entry]\n");
+    let occurrence_failure = discover_modules_for_test(
+        &occurrence_config,
+        &occurrence_resolver,
+        &occurrence_directives,
+    );
+    let occurrence_diagnostic = first_error_diagnostic(&occurrence_failure);
+    assert_primary_span_text(
+        &occurrence_failure,
+        &occurrence_src.join("@page.moth"),
+        "@child",
+    );
+
+    let _clause_root = tempfile::tempdir().expect("should create temp dir");
+    let clause_root = _clause_root.path().to_path_buf();
+    let (clause_config, clause_resolver, clause_directives, clause_src) =
+        write_entry_only_child_fixture(&clause_root, "@child hidden\n#[:entry]\n");
+    let clause_failure =
+        discover_modules_for_test(&clause_config, &clause_resolver, &clause_directives);
+    let clause_diagnostic = first_error_diagnostic(&clause_failure);
+    assert_primary_span_text(&clause_failure, &clause_src.join("@page.moth"), "@child");
+
+    assert_eq!(
+        occurrence_diagnostic.descriptor().code,
+        clause_diagnostic.descriptor().code,
+        "an entry-only child has no importable surface for either authored form"
+    );
+}
+
+#[test]
+fn duplicate_qualified_occurrences_invoke_a_registered_provider_once() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let (config, resolver, style_directives, _src) = write_qualified_reference_probe_project(
+        &root,
+        "first = @app.js one\nsecond = @app.js two\n#[:entry]\n",
+        &[("app.js", "export const one = 1;\n")],
+    );
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut providers = ExternalImportProviderRegistry::empty();
+    providers.register(Arc::new(CountingExternalImportProvider::new(Arc::clone(
+        &calls,
+    ))));
+
+    let _modules = successful_compilation_value(discover_modules_for_test_with_providers(
+        &config,
+        &resolver,
+        &style_directives,
+        &providers,
+    ));
+    assert_eq!(
+        calls.load(Ordering::Relaxed),
+        1,
+        "two occurrences selecting one provider path must invoke the provider once"
+    );
+}
+
+#[test]
+fn check_only_qualified_occurrence_reaches_the_same_provider_binding_as_a_clause() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    let first = src.join("first");
+    let child = first.join("child");
+    fs::create_dir_all(&child).expect("should create module directories");
+
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        first.join("@first.moth"),
+        "owner || -> I32:\n    return 1\n;\n",
+    )
+    .expect("should write owner root");
+    // Both sources are owned but unreached, so check-only preparation handles them.
+    fs::write(
+        first.join("a_clause.moth"),
+        "@child value\nprobe || -> I32:\n    return value\n;\n",
+    )
+    .expect("should write clause orphan");
+    fs::write(
+        first.join("b_occurrence.moth"),
+        "probe || -> I32:\n    result = @child value\n    return result\n;\n",
+    )
+    .expect("should write occurrence orphan");
+    fs::write(child.join("@mod.moth"), "export:\n    value #= 7\n;\n")
+        .expect("should write child root");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+
+    let (schedule, graph, source_tree_index, _source_files, _string_table) =
+        discover_modules_and_graph_for_test_with_check_only(
+            &config,
+            &resolver,
+            &style_directives,
+            true,
+        );
+    let (_waves, _provider_bindings, _source_package_dependencies, check_only_jobs) =
+        schedule.into_parts();
+    assert_eq!(
+        check_only_jobs.len(),
+        2,
+        "both unreached owned sources become check-only units"
+    );
+
+    let canonical_child = fs::canonicalize(&child).expect("child should canonicalize");
+    let child_id = source_tree_index
+        .module_identities()
+        .module_id_for_directory(&canonical_child)
+        .expect("child module should be a graph node");
+    let canonical_first = fs::canonicalize(&first).expect("first should canonicalize");
+    let first_id = source_tree_index
+        .module_identities()
+        .module_id_for_directory(&canonical_first)
+        .expect("first module should be a graph node");
+
+    let mut check_only_sources = Vec::new();
+    for job in &check_only_jobs {
+        assert_eq!(
+            job.provider_bindings.len(),
+            1,
+            "each check-only unit publishes one cross-module provider binding"
+        );
+        let binding = &job.provider_bindings[0];
+        assert_eq!(binding.provider_module_id, child_id);
+        assert_eq!(binding.provider_surface, ModuleRootRole::Normal);
+        assert_eq!(
+            binding.dependency_shell_id.ordinal, 0,
+            "each source's first authored shell is ordinal zero"
+        );
+        let names: Vec<String> = job
+            .prepared
+            .semantic
+            .prepared_header_syntax
+            .module_symbols
+            .module_file_paths
+            .iter()
+            .map(|path| {
+                job.prepared.semantic.path_fork.render_portable(
+                    *path,
+                    &job.prepared.semantic.string_table,
+                    &mut Vec::new(),
+                )
+            })
+            .collect();
+        check_only_sources.extend(names);
+    }
+    check_only_sources.sort();
+    assert_eq!(
+        check_only_sources,
+        vec![
+            "src/first/a_clause.moth".to_owned(),
+            "src/first/b_occurrence.moth".to_owned(),
+        ],
+        "the clause form and the qualified-occurrence form both reach check-only binding"
+    );
+    assert!(
+        graph
+            .dependency_providers(first_id)
+            .expect("frozen adjacency is readable")
+            .is_empty(),
+        "check-only units must not insert canonical graph edges"
+    );
+}
