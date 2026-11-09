@@ -2,8 +2,9 @@
 semantics; general ownership, context, argument and diagnostic rules live in
 @../directives (Directives).
 
-The template directives documented here are current supported semantics. General
-non-template `$config` remains accepted queued design.
+The template directives documented here are current supported semantics. The
+`$config` source modifier is delivered and its general grammar lives in
+@../directives (Directives).
 Named project and builder settings remain ordinary compile-time records in
 `config.moth`.
 

@@ -329,6 +329,7 @@ pub(crate) fn new_declaration(
                 symbol_id,
                 string_table,
                 &mut span_builder,
+                None,
             )?;
             (syntax, declaration_cursor.position())
         };
@@ -458,7 +459,7 @@ pub fn resolve_declaration_syntax(
         string_table,
         path_fork,
     } = tables;
-    let config_qualifier = declaration_syntax.config_qualifier.clone();
+    let config_contract = declaration_syntax.config_contract.clone();
     let config_constant_context = matches!(context.kind, ContextKind::ConstantHeader);
     let has_config_resolution = context.shared.config_resolution.is_some();
     let config_resolution_context = config_constant_context && has_config_resolution;
@@ -475,25 +476,25 @@ pub fn resolve_declaration_syntax(
                 .is_some_and(|name| names.contains(name))
         });
     let source_build_config_context = config_constant_context && has_source_build_config_contract;
-    if let Some(qualifier) = &declaration_syntax.config_qualifier
+    if let Some(contract) = &declaration_syntax.config_contract
         && (config_resolution_context || source_build_config_context)
-        && build_input_type_from_parsed(&qualifier.type_annotation).is_none()
+        && build_input_type_from_parsed(&contract.type_annotation).is_none()
     {
         return Err(project_config::invalid_config_reason(
             path_fork.component(qualified_name),
             InvalidConfigReason::ConfigQualifierUnsupportedType,
-            parsed_type_span(&qualifier.type_annotation),
+            parsed_type_span(&contract.type_annotation),
         )
         .into());
     }
-    if let Some(qualifier) = &declaration_syntax.config_qualifier
+    if let Some(contract) = &declaration_syntax.config_contract
         && !config_resolution_context
         && !source_build_config_context
     {
         return Err(project_config::invalid_config_reason(
             path_fork.component(qualified_name),
             InvalidConfigReason::ConfigQualifierInvalidPlacement,
-            qualifier.qualifier_span,
+            Some(contract.marker_span),
         )
         .into());
     }
@@ -516,7 +517,7 @@ pub fn resolve_declaration_syntax(
     // permitted use. Compile-time constants and non-runtime declaration contexts always
     // fold at this declaration boundary.
     let retain_pending_origin = !declaration_syntax.binding_mode.is_compile_time()
-        && config_qualifier.is_none()
+        && config_contract.is_none()
         && !context.kind.is_constant_context();
 
     // ----------------------------
@@ -648,7 +649,7 @@ pub fn resolve_declaration_syntax(
             value_mode: value_mode.to_owned(),
             value: DeclarationValue::Initializer(parsed_initializer.id()),
             binding_span: None,
-            config_qualifier,
+            config_contract,
         }));
     }
 
@@ -699,7 +700,7 @@ pub fn resolve_declaration_syntax(
     // The config owner validates the contract and supplies a provider/default before the ordinary
     // constant fold; do not force a second initializer parser or invent a placeholder value here.
     if config_resolution_context
-        && declaration_syntax.config_qualifier.is_some()
+        && declaration_syntax.config_contract.is_some()
         && declaration_syntax.initializer_range.is_none()
     {
         return Ok(DeclarationLowering::Ready(Declaration {
@@ -711,27 +712,29 @@ pub fn resolve_declaration_syntax(
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::PendingConstant,
             binding_span: None,
-            config_qualifier,
+            config_contract,
         }));
     }
-    if source_build_config_context && declaration_syntax.config_qualifier.is_some() {
+    if source_build_config_context && declaration_syntax.config_contract.is_some() {
         let name = path_fork.component(qualified_name).unwrap_or_else(|| {
             crate::compiler_bug!(
                 CompilerStage::AstConstruction,
-                "source #Config declaration has no terminal declaration name"
+                "source $config declaration has no terminal declaration name"
             )
         });
         let name_text = string_table.resolve(name);
         let input_name = BuildInputName::new(name_text).map_err(|_| {
             InfrastructureFailure::internal(
                 CompilerStage::AstConstruction,
-                format!("source #Config declaration has invalid build-input name '{name_text}'"),
+                format!("source $config declaration has invalid build-input name '{name_text}'"),
             )
         })?;
-        let config_span = declaration_syntax.config_qualifier.as_ref().map_or_else(
-            || declaration_syntax.span,
-            |qualifier| qualifier.qualifier_span,
-        );
+        let config_span = declaration_syntax
+            .config_contract
+            .as_ref()
+            .map_or(declaration_syntax.span, |contract| {
+                Some(contract.marker_span)
+            });
         let resolved = context
             .shared
             .source_build_config_values
@@ -761,7 +764,7 @@ pub fn resolve_declaration_syntax(
             value_mode: expression_builder.view_owned(value)?.value_mode(),
             value: DeclarationValue::Initializer(value.id()),
             binding_span: None,
-            config_qualifier,
+            config_contract,
         }));
     }
     let mut initializer_stream = declaration_initializer_stream(
@@ -839,7 +842,7 @@ pub fn resolve_declaration_syntax(
                 value_mode,
                 value: DeclarationValue::StructDefinition(params),
                 binding_span: None,
-                config_qualifier,
+                config_contract,
             }));
         }
 
@@ -1007,7 +1010,7 @@ pub fn resolve_declaration_syntax(
                 }
             };
 
-            if config_resolution_context && declaration_syntax.config_qualifier.is_some() {
+            if config_resolution_context && declaration_syntax.config_contract.is_some() {
                 // Config bootstrap validates the authored fallback itself. Do not let the
                 // declaration's explicit annotation coerce or reject the fallback first, because
                 // an explicit provider must not mask a malformed authored default.
@@ -1102,7 +1105,7 @@ pub fn resolve_declaration_syntax(
         value_mode,
         value: DeclarationValue::Initializer(parsed_initializer),
         binding_span: None,
-        config_qualifier,
+        config_contract,
     }))
 }
 

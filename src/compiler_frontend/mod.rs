@@ -28,7 +28,7 @@
 //! - [`hir`]: HIR lowering, validation and reachability
 //! - [`analysis`]: borrow validation over validated HIR
 //! - [`build_config`]: the compiler-owned typed build-input carriers later command-input and
-//!   `#Config` phases fill and consume
+//!   `$config` phases fill and consume
 //!
 //! # What this module does NOT own
 //! - Which source belongs to a module, when it is prepared and what happens to a compiled result,

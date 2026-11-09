@@ -265,7 +265,7 @@ fn persists_direct_project_config_resolution_records_in_live_config() {
     let config_path = root.join(settings::CONFIG_FILE_NAME);
     fs::write(
         &config_path,
-        "author #Config of String?\nproject #= (\n    name = \"docs\",\n    author = author,\n)\n",
+        "$config\nauthor #String?\nproject #= (\n    name = \"docs\",\n    author = author,\n)\n",
     )
     .expect("should write config");
 

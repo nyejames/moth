@@ -81,17 +81,17 @@ legacy `Number` type alias.
 
 ### Configuration names
 
-The accepted queued source modifier uses the `$` marker: `$config`. Project and active-builder settings remain ordinary named records, so `$project`, `$builder` and `$html_builder` are not directives and no future form restores them. The future `$export` modifier will replace the current `export:` block only in `@mod.moth` and `@package.moth`.
+The delivered source modifier uses the `$` marker: `$config`. Project and active-builder settings remain ordinary named records, so `$project`, `$builder` and `$html_builder` are not directives and no future form restores them. The future `$export` modifier will replace the current `export:` block only in `@mod.moth` and `@package.moth`.
 
-Directive spellings do not reserve ordinary identifiers, so `config`, `Config`, `project`, `html_builder` and `entry` remain ordinary names outside directive syntax.
+Directive spellings do not reserve ordinary identifiers, so `project`, `html_builder` and `entry` remain ordinary names outside directive syntax.
 The file `config.moth` and the dependency root `@project` retain their separate
 path and package semantics.
 
-**Current support and cutover.** The Alpha compiler still supports `#Config` and
-currently reserves its case-insensitive, leading-underscore keyword-shadow names.
-Identifier reclamation is pending until the cutover to `$config`; code targeting
-the current compiler must follow its current reservation policy. Until then the
-shared name law also rejects `config` names in MON.
+**Current support.** `$config` is delivered, and the retired input qualifier no
+longer parses. The shared source-word inventory still reserves `Config` and its
+case-insensitive, leading-underscore shadow names, and the shared name law also
+rejects `config` names in MON. Identifier reclamation is a separate change from the
+directive cutover.
 
 `import` is not a keyword. `Import` is an ordinary valid PascalCase user name:
 

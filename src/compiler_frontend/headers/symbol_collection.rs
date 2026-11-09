@@ -252,7 +252,7 @@ fn is_dependency_bindable_for_symbol_collection(header: &Header) -> bool {
     if matches!(
         &header.kind,
         HeaderKind::Constant { declaration }
-            if declaration.config_qualifier.is_some()
+            if declaration.config_contract.is_some()
     ) {
         return false;
     }

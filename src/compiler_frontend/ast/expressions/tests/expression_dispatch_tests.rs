@@ -486,7 +486,7 @@ fn constant_identifier_uses_module_store_tir() {
                 value_mode: ValueMode::ImmutableOwned,
                 value: DeclarationValue::Initializer(template_expression.id()),
                 binding_span: None,
-                config_qualifier: None,
+                config_contract: None,
             }],
             &path_fork,
             &string_table,

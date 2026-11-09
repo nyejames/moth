@@ -1261,7 +1261,7 @@ fn resolve_multi_bind_targets(
                 value_mode: target_ownership.to_owned(),
                 value: DeclarationValue::Absent,
                 binding_span: target_span,
-                config_qualifier: None,
+                config_contract: None,
             });
             register_direct_producer_witnesses(
                 context,

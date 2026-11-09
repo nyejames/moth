@@ -42,7 +42,7 @@ pub(crate) struct ModuleCompilationContext<'a> {
     pub(crate) global_path_table: Option<&'a PathTable>,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) external_packages: Arc<ExternalPackageRegistry>,
-    /// Boundary-local resolved `#Config` values, collected before semantic AST construction.
+    /// Boundary-local resolved `$config` values, collected before semantic AST construction.
     ///
     /// The map is immutable for this module. Later AST work consumes it as ordinary folded
     /// constant input; it never reaches provider or backend topology.

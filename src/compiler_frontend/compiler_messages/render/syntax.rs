@@ -427,9 +427,6 @@ pub(crate) fn common_syntax_mistake_message(
         CommonSyntaxMistakeReason::InvalidCompileTimeBindingSpacing => {
             "Invalid compile-time binding syntax. Use `name #= value` for inferred constants or `name #Type = value` for explicit constant types. For collection and option types, attach `#` to the first token of the type: `names #{String} = ...` or `value #String? = ...`.".to_string()
         }
-        CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing => {
-            "Invalid `#Config` qualifier spacing. Write `name #Config of Type = value` with no space between `#` and `Config`.".to_string()
-        }
         CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { gap } => {
             let gap_description = match gap {
                 ChoiceVariantSeparatorGap::Before => "before it",
@@ -542,9 +539,6 @@ pub(crate) fn common_syntax_mistake_suggestion(reason: &CommonSyntaxMistakeReaso
         }
         CommonSyntaxMistakeReason::UnsupportedUnaryPlus => {
             "Remove the leading `+`; use the value directly".to_owned()
-        }
-        CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing => {
-            "Write the qualifier as `#Config of Type` without spaces inside `#Config`".to_owned()
         }
         CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { .. } => {
             "Write qualified choices as `Choice::Variant`, with no whitespace, line break, or comment around `::`."

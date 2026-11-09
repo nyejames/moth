@@ -1,8 +1,9 @@
 `$` is the general directive marker. This page covers template-specific meanings.
 For general directive ownership and syntax, see @../directives (Directives).
 
-These template directives are current support; general non-template forms are
-accepted queued design. See @../directives (Directives) for their shared rules.
+These template directives are current support; `$config` is the delivered source
+directive. Later general non-template forms remain accepted design. See
+@../directives (Directives) for their shared rules.
 
 They begin with `$`.
 

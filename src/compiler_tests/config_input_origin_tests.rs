@@ -76,7 +76,7 @@ fn assert_config_input_overflow_build(
     let facade_path = facade_directory.join("@mod.moth");
     fs::write(
         &facade_path,
-        "configured_maximum #Config of I32 = 2147483647\n\nexport:\n    maximum #I32 = configured_maximum\n    counts #= (maximum = configured_maximum)\n;\n",
+        "$config\nconfigured_maximum #I32 = 2147483647\n\nexport:\n    maximum #I32 = configured_maximum\n    counts #= (maximum = configured_maximum)\n;\n",
     )
     .expect("should write facade source");
 

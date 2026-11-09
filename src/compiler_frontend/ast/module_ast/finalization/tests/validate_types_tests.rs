@@ -261,7 +261,7 @@ fn orphan_declaration(expressions: &mut AstExpressionBuilder) -> Declaration {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Initializer(value),
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         }
     }
 }

@@ -1,10 +1,10 @@
-CLI numeric inputs retain their raw spelling until an exact contract selects the destination. Declaration-owned `#Config of T` contracts use the same exact numeric input rules. **Separate directive migration.** `$config` prefixes and explicit-only providers remain accepted queued design. See @../progress (Progress) for implementation status.
+CLI numeric inputs retain their raw spelling until an exact contract selects the destination. `$config` contracts use the same exact numeric input rules. See @../progress (Progress) for implementation status.
 
 Build configuration values are typed primitive values resolved before module AST execution semantics are finalised. They can represent schema-approved settings and similar stable semantic configuration. They do not represent project identity, source-discovery settings, operating-system, architecture, backend or target identity.
 
 ### `$config` declarations
 
-`$config` prefixes one explicitly typed top-level `#` binding. The name is the input name, the type is the contract and `=` is the fallback.
+`$config` marks exactly one explicitly typed top-level `#` binding in `config.moth` or a selected source module. The name is the input name, the type is the contract and `=` is the fallback.
 
 [codeblock, $code "moth":
     $config
@@ -49,7 +49,7 @@ Build configuration values are typed primitive values resolved before module AST
 
 Ordinary constants still require initializers. Only a marked configuration contract may omit one. Reject inferred `#=` configuration contracts, runtime or mutable bindings, multi-bind targets, parameters, fields, function-local declarations and type-position or value-position directives.
 
-The accepted input types are `String`, `Bool`, `Char`, all fixed-width integers (`I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`), all fixed binary floats (`F16`, `F32`, `F64`) and one optional layer around those types. `Byte` and `Dec` remain excluded. This exact numeric input contract applies to the existing input path before the later `$config` syntax migration.
+The accepted input types are `String`, `Bool`, `Char`, all fixed-width integers (`I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`), all fixed binary floats (`F16`, `F32`, `F64`) and one optional layer around those types. `Byte` and `Dec` remain excluded. This exact numeric input contract applies to `$config` input declarations.
 
 @../numbers/#numeric-types (Numeric types) and @../numbers/#numeric-literals (Numeric literals) own the exact ranges, direct rounding and source defaults. Build inputs use explicit contracts rather than unconstrained source defaults. Builders and physical build profiles never select numeric semantics.
 
@@ -72,17 +72,20 @@ In source modules, defaults remain self-contained primitive literals or `none`. 
 
 Bootstrap contracts resolve from explicit input, a compatible builder primitive global, the fallback or a required-input diagnostic. Source contracts resolve from a matching bootstrap contract, explicit source-only input, a compatible builder global, the common source fallback or a required-input diagnostic.
 
-### Current `#Config` spelling
+### Inputs in `config.moth`
 
-Operational source uses declaration-owned `#Config of T` contracts:
+In `config.moth`, the `$config` declaration sits at the top level and the grouped project field carries only `name = expression`; for example:
 
 [codeblock, $code "moth":
-    api_url #Config of String = "https://api.example.com"
-    max_retries #Config of I32 = 3
-    analytics #Config of Bool = false
+    $config
+    version #String = "0.1.0"
+
+    project #= (
+        version = version,
+    )
 ]
 
-In `config.moth`, the input declaration sits at the top level and the grouped project field carries only `name = expression`; for example `version #Config of String = "0.1.0"` declares the input while `project #=` passes `version = version`. Only the future `$config` prefix creates explicit-only providers.
+The `version` binding declares the input and `project #=` passes its resolved value. Only `$config` declarations create explicit-only providers.
 
 ### Command build-input parsing and resolution
 
@@ -126,7 +129,7 @@ checks remain unchanged.
 
 ### Ordinary static `if`
 
-Ordinary `if` is the only conditional source form. There is no `$config if` and no `#Config if`.
+Ordinary `if` is the only conditional source form. There is no `$config if`.
 
 [codeblock, $code "moth":
     $config

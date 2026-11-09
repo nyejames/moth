@@ -497,7 +497,6 @@ impl CompilerFrontend<'static> {
                     path_syntax,
                     local_string_table,
                     local_path_fork,
-                    &mut span_builder,
                 )
             }
         })();

@@ -628,7 +628,7 @@ fn bound_range_headers_are_isolated_by_body_domain_and_copies_keep_their_row() {
                     value_mode: ValueMode::ImmutableOwned,
                     value: DeclarationValue::Initializer(value),
                     binding_span: None,
-                    config_qualifier: None,
+                    config_contract: None,
                 }
             },
         )
@@ -939,7 +939,7 @@ fn bound_range_completion_inspects_each_pending_header_once() {
                                 value_mode: ValueMode::ImmutableOwned,
                                 value: DeclarationValue::Initializer(value),
                                 binding_span: None,
-                                config_qualifier: None,
+                                config_contract: None,
                             }
                         },
                     )

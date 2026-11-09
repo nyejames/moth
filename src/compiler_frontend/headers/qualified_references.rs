@@ -403,7 +403,7 @@ pub(crate) fn push_header_expression_ranges(
     // validation succeeds. The expression lane never scans a config-owned shell, so this range
     // stays ordering-neutral.
     if let HeaderKind::Constant { declaration } = &header.kind
-        && declaration.config_qualifier.is_some()
+        && declaration.config_contract.is_some()
         && let Some(range) = declaration.initializer_range
     {
         ranges.push(HeaderExpressionRange::expression(header_index, range));
@@ -434,7 +434,7 @@ pub(crate) fn push_const_required_expression_ranges(
 
     match &header.kind {
         HeaderKind::Constant { declaration } => {
-            if declaration.config_qualifier.is_some() {
+            if declaration.config_contract.is_some() {
                 return;
             }
             if let Some(range) = declaration.initializer_range {

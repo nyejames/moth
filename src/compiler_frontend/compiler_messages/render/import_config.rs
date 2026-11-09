@@ -89,7 +89,7 @@ pub(crate) fn invalid_config_message(
             format!("Unsupported value for config constant '{key_label}'.")
         }
         InvalidConfigReason::ConfigQualifierFixedField => format!(
-            "Project field '{key_label}' is fixed-only and cannot use `#Config`."
+            "Project field '{key_label}' is fixed-only and cannot use `$config` inputs."
         ),
         InvalidConfigReason::ProjectGlobalsNameReserved => {
             "The name `project` is reserved for the explicit `@project` project-globals dependency and cannot be claimed by a module or source package.".to_owned()
@@ -98,10 +98,11 @@ pub(crate) fn invalid_config_message(
             "Config field '{key_label}' must use a lower_snake_case name so it can be supplied as a build input."
         ),
         InvalidConfigReason::ConfigQualifierInvalidPlacement => {
-            "`#Config` is valid only on a top-level source compile-time declaration.".to_owned()
+            "`$config` is valid only above a top-level compile-time declaration with an explicit type."
+                .to_owned()
         }
         InvalidConfigReason::ConfigQualifierUnsupportedType => {
-            "`#Config` accepts only String, Bool, Char, exact integer and binary-float types, and their optional forms."
+            "`$config` accepts only String, Bool, Char, exact integer and binary-float types, and their optional forms."
                 .to_owned()
         }
         InvalidConfigReason::ConfigContractConflict {

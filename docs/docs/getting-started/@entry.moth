@@ -23,10 +23,9 @@ init_docs_sidebar()!
     You use it from the command line to create projects, check them, build them and run the hot-reloading dev server.
 
     **Support notice.** Live config syntax uses grouped parenthesised `project` and
-    `html` records with declaration-owned `#Config of T` inputs. The `$config`
-    input marker remains queued design. There are no `$project` or `$html_builder`
-    directives. Direct const inserts in `@entry.moth` supply HTML metadata, and a
-    folder with `@entry.moth` produces a page.
+    `html` records with `$config` input declarations. There are no `$project` or
+    `$html_builder` directives. Direct const inserts in `@entry.moth` supply HTML
+    metadata, and a folder with `@entry.moth` produces a page.
 
     Other tooling continues rapid development.
 
@@ -148,7 +147,7 @@ init_docs_sidebar()!
     ]
 
     The selected directory is the source root. To supply a version, add it to the
-    `project` record or pass a configurable value through the queued `$config` input marker.
+    `project` record or pass a configurable value through the `$config` input marker.
 
     `@entry.moth` supplies HTML metadata with direct const builder slots. An empty or
     metadata-only entry still produces a page:

@@ -5624,7 +5624,7 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
                     value_mode: ValueMode::ImmutableOwned,
                     value: DeclarationValue::Absent,
                     binding_span: None,
-                    config_qualifier: None,
+                    config_contract: None,
                 }],
             },
             span: None,
@@ -5762,7 +5762,7 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
                     value_mode: ValueMode::ImmutableOwned,
                     value: DeclarationValue::Absent,
                     binding_span: None,
-                    config_qualifier: None,
+                    config_contract: None,
                 }],
             },
             span: None,
@@ -5896,7 +5896,7 @@ fn hir_route_construct_with_input_missing_leading_capture_rejected() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
     let choice_variants = vec![ChoiceVariant {
         id: rename_name,

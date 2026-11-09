@@ -80,7 +80,7 @@ pub(crate) fn synthetic_content_header(
     let declaration = DeclarationSyntax {
         binding_mode: BindingMode::CompileTimeConstant,
         type_annotation: ParsedTypeRef::BuiltinString { span: None },
-        config_qualifier: None,
+        config_contract: None,
         initializer_range,
         initializer_references: input.initializer_references,
         span: None,
@@ -94,7 +94,6 @@ pub(crate) fn synthetic_content_header(
         name_span: None,
         synthetic_content_payload: Some(input.payload),
         tokens: input.initializer_range,
-        config_input: false,
         declaration_path: header_path,
         token_sequence: None,
         capacity_references: Vec::new(),

@@ -219,7 +219,7 @@ pub(super) fn materialised_nominal_declaration(
         value: DeclarationValue::Shell(shell),
         value_mode: ValueMode::ImmutableReference,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     })
 }
 
@@ -302,7 +302,7 @@ pub(super) fn materialised_struct_fields(
             value_mode: ValueMode::ImmutableReference,
             value,
             binding_span: field_span,
-            config_qualifier: None,
+            config_contract: None,
         });
     }
     Ok(Some(declarations))

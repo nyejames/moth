@@ -137,7 +137,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             value_mode: ValueMode::ImmutableReference,
                             value: DeclarationValue::Shell(DeclarationShell::Struct),
                             binding_span: header.name_span,
-                            config_qualifier: None,
+                            config_contract: None,
                         },
                     )?;
                 }
@@ -180,7 +180,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             value_mode: ValueMode::ImmutableReference,
                             value: DeclarationValue::Shell(DeclarationShell::Choice),
                             binding_span: header.name_span,
-                            config_qualifier: None,
+                            config_contract: None,
                         },
                     )?;
                 }
@@ -570,7 +570,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     value_mode: ValueMode::ImmutableReference,
                     value: DeclarationValue::Shell(DeclarationShell::Choice),
                     binding_span: header.name_span,
-                    config_qualifier: None,
+                    config_contract: None,
                 },
             )?;
         }

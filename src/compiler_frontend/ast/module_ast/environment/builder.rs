@@ -1127,7 +1127,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     value_mode: ValueMode::ImmutableReference,
                     value: DeclarationValue::Shell(DeclarationShell::Struct),
                     binding_span: None,
-                    config_qualifier: None,
+                    config_contract: None,
                 },
             )?;
         }

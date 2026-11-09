@@ -93,7 +93,7 @@ fn write_directory_html_config_input_project(root: &Path) {
     .expect("config should be written");
     fs::write(
         root.join("@entry.moth"),
-        "enabled #Config of Bool\nresult ~= 0\nif enabled:\n    ~result = 1\n;\n",
+        "$config\nenabled #Bool\nresult ~= 0\nif enabled:\n    ~result = 1\n;\n",
     )
     .expect("page source should be written");
 }

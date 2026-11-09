@@ -1,4 +1,4 @@
-**Current support and accepted design.** The Alpha compiler uses an optional `config.moth` with ordinary grouped `project` and active-builder records such as `html`. These named records remain the accepted configuration design. Build-input declarations currently use `#Config of T`; the queued directive plan replaces only that input spelling with `$config`. There are no `$project`, `$builder` or `$html_builder` directives. `entry_root` is retired. See @../progress (Progress) for implementation status.
+**Current support.** The Alpha compiler uses an optional `config.moth` with ordinary grouped `project` and active-builder records such as `html`. These named records remain the accepted configuration design. `$config` marks build-input declarations and replaces only the retired input qualifier spelling. There are no `$project`, `$builder` or `$html_builder` directives. `entry_root` is retired. See @../progress (Progress) for implementation status.
 
 `config.moth` is one self-contained compile-time source at the selected project root. It has no source dependencies, package resolution or authored file-value paths. A nested `config.moth` is inert to an enclosing build.
 
@@ -15,7 +15,7 @@
 
 The `project` record is optional. An omitted name uses the selected directory name, and an omitted version means the project is unversioned. The active builder section follows its existing required/optional presence rule; HTML permits an omitted `html` record and applies its defaults. The selected directory is the source root.
 
-Use an earlier `#Config of T` input (or `$config` when that migration lands) to provide a configurable value. A field is not itself an input declaration.
+Use an earlier `$config` input to provide a configurable value. A field is not itself an input declaration.
 
 ### Project record
 
@@ -195,10 +195,11 @@ Names other than the selected builder's recognised settings section remain ordin
 
 ### Example with typed inputs
 
-Operational config uses declaration-owned `#Config` inputs and parenthesised grouped records:
+Operational config uses `$config` input declarations and parenthesised grouped records:
 
 [codeblock, $code "moth":
-    version #Config of String = "0.1.0"
+    $config
+    version #String = "0.1.0"
     project_error_limit #I32? = none
 
     project #= (

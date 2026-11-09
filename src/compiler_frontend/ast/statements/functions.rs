@@ -210,7 +210,7 @@ impl FunctionParameter {
                 None => DeclarationValue::Absent,
             },
             binding_span: self.binding_span,
-            config_qualifier: None,
+            config_contract: None,
         }
     }
 }
@@ -478,7 +478,7 @@ pub(crate) fn signature_member_to_declaration(
         value_mode: member.value_mode,
         value,
         binding_span: member_span,
-        config_qualifier: None,
+        config_contract: None,
     })
 }
 

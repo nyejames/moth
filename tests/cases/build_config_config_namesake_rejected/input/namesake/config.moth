@@ -1,1 +1,2 @@
-enabled #Config of Bool = false
+$config
+enabled #Bool = false

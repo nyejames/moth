@@ -9,6 +9,7 @@ use super::*;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView,
 };
+use crate::compiler_frontend::declaration_syntax::build_config_contract::BuildConfigContractSyntax;
 use crate::compiler_frontend::tests::parse_support::{
     assert_ast_diagnostic, parse_single_file_ast_diagnostic,
 };
@@ -47,6 +48,16 @@ fn config_header(headers: &BoundModuleHeaders) -> &Header {
         .expect("the marked compile-time binding should produce a constant header")
 }
 
+fn config_contract(headers: &BoundModuleHeaders) -> &BuildConfigContractSyntax {
+    let HeaderKind::Constant { declaration } = &config_header(headers).kind else {
+        panic!("expected a compile-time constant header");
+    };
+    declaration
+        .config_contract
+        .as_ref()
+        .expect("the attached modifier should record a contract on the declaration")
+}
+
 fn config_header_from(headers: &[Header]) -> &Header {
     headers
         .iter()
@@ -68,10 +79,6 @@ fn config_modifier_attaches_to_a_typed_compile_time_binding() {
     );
 
     let header = config_header_from(&output.headers);
-    assert!(
-        header.config_input,
-        "the attached modifier must be recorded on the declaration header"
-    );
     let HeaderKind::Constant { declaration } = &header.kind else {
         panic!("expected a compile-time constant header");
     };
@@ -79,6 +86,10 @@ fn config_modifier_attaches_to_a_typed_compile_time_binding() {
     assert!(
         !matches!(declaration.type_annotation, ParsedTypeRef::Inferred),
         "the attachment requires an explicitly typed binding"
+    );
+    assert!(
+        declaration.config_contract.is_some(),
+        "the attached modifier must be recorded on the declaration shell"
     );
 }
 
@@ -90,7 +101,13 @@ fn config_modifier_attaches_across_comment_only_lines() {
         "comment-only lines must not break attachment",
     );
 
-    assert!(config_header(&headers).config_input);
+    assert!(
+        !matches!(
+            config_contract(&headers).type_annotation,
+            ParsedTypeRef::Inferred
+        ),
+        "the contract keeps the authored explicit annotation"
+    );
 }
 
 #[test]
@@ -198,7 +215,13 @@ fn config_attachment_observes_crlf_boundaries() {
         parse_single_file_headers_with_entry(attached, "src/@entry.moth", "src/@entry.moth"),
         "CRLF after a source modifier should attach like LF",
     );
-    assert!(config_header(&headers).config_input);
+    assert!(
+        !matches!(
+            config_contract(&headers).type_annotation,
+            ParsedTypeRef::Inferred
+        ),
+        "the contract keeps the authored explicit annotation"
+    );
 
     let broken = "$config\r\n\r\napi_url #String = \"x\"\r\n";
     let errors = expect_header_error(

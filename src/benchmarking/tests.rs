@@ -96,7 +96,7 @@ fn frontend_benchmark_threads_typed_build_config_inputs() {
     let file_path = temp_dir.path().join("config_input.moth");
     std::fs::write(
         &file_path,
-        "enabled #Config of Bool\nresult ~= 0\nif enabled:\n    ~result = 1\n;\n",
+        "$config\nenabled #Bool\nresult ~= 0\nif enabled:\n    ~result = 1\n;\n",
     )
     .expect("should write config-input source");
 

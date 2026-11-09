@@ -166,7 +166,7 @@ fn field_declaration(
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     }
 }
 
@@ -458,7 +458,7 @@ fn field_declaration_with_default(
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Default(default),
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     }
 }
 

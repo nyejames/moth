@@ -370,7 +370,7 @@ fn loop_binding(
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     }
 }
 fn declared_entry_block<'b>(builder: &'b HirBuilder<'_>) -> &'b HirBlock {

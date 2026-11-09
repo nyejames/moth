@@ -29,7 +29,7 @@ The ordinary `if` form is the only conditional source form; there is no new stat
     ;
 ]
 
-An implemented `#Config of Bool` value is one source of the same folded value. It uses this ordinary
+A `$config`-marked Bool input is one source of the same folded value. It uses this ordinary
 folded-value path rather than introducing config-specific branch syntax.
 
 ### No statement-level `else if`

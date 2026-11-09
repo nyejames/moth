@@ -1092,7 +1092,7 @@ fn project_build_executor_writes_the_validated_directory_plan() {
     fs::create_dir_all(&source_root).expect("should create source root");
     fs::write(
         root.join("config.moth"),
-        "version #Config of String = \"authored\"\nproject #= (\n    name = \"docs\",\n    version = version,\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
+        "$config\nversion #String = \"authored\"\nproject #= (\n    name = \"docs\",\n    version = version,\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
     )
     .expect("should write project config");
     fs::write(

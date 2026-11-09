@@ -4,9 +4,9 @@ use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 #[test]
 fn source_config_contracts_are_normalized_in_authored_order() {
     let prepared = prepare_source_contract_syntax(
-        "analytics #Config of Bool = false\n\
-         optional_label #Config of String? = none\n\
-         required_count #Config of I32\n",
+        "$config\nanalytics #Bool = false\n\
+         $config\noptional_label #String? = none\n\
+         $config\nrequired_count #I32\n",
     )
     .expect("source config contracts should prepare without providers");
 
@@ -49,7 +49,7 @@ fn source_config_contracts_are_normalized_in_authored_order() {
 
 #[test]
 fn source_config_numeric_defaults_materialise_at_their_declared_scalar() {
-    let prepared = prepare_source_contract_syntax("count #Config of I64 = 4_000_000_000\n")
+    let prepared = prepare_source_contract_syntax("$config\ncount #I64 = 4_000_000_000\n")
         .expect("an I64 default inside its range should prepare");
 
     assert_eq!(
@@ -62,7 +62,7 @@ fn source_config_numeric_defaults_materialise_at_their_declared_scalar() {
         )
     );
 
-    let error = match prepare_source_contract_syntax("count #Config of I32 = 4_000_000_000\n") {
+    let error = match prepare_source_contract_syntax("$config\ncount #I32 = 4_000_000_000\n") {
         Ok(_) => panic!("an I32 default outside its range should fail during header preparation"),
         Err(error) => error,
     };
@@ -83,10 +83,10 @@ fn source_config_numeric_defaults_materialise_at_their_declared_scalar() {
 #[test]
 fn source_config_contracts_reject_invalid_name_type_and_default_during_preparation() {
     let cases = [
-        ("BadName #Config of Bool = false\n", "name"),
-        ("value #Config of Decimal = 1\n", "type"),
-        ("value #Config of I32 = other + 1\n", "default"),
-        ("value #Config of I32 = 1 + 2\n", "default"),
+        ("$config\nBadName #Bool = false\n", "name"),
+        ("$config\nvalue #Decimal = 1\n", "type"),
+        ("$config\nvalue #I32 = other + 1\n", "default"),
+        ("$config\nvalue #I32 = 1 + 2\n", "default"),
     ];
 
     for (source, expected_kind) in cases {
@@ -113,33 +113,11 @@ fn source_config_contracts_reject_invalid_name_type_and_default_during_preparati
 }
 
 #[test]
-fn source_config_contracts_reject_runtime_qualifiers_before_ast() {
-    let source = "load |input Bool| -> Bool:\n\
-         runtime #Config of Bool = true\n\
-         return input\n\
-     ;\n";
-
-    let error = match prepare_source_contract_syntax(source) {
-        Ok(_) => panic!("runtime #Config must fail during header preparation"),
-        Err(error) => error,
-    };
-    let diagnostics = compact_bag_for_test(error, None);
-    let diagnostic = diagnostics
-        .first()
-        .expect("expected source placement diagnostic");
-    assert_eq!(
-        diagnostic.reason_key(),
-        Some("invalid_config.config_qualifier_invalid_placement")
-    );
-}
-
-#[test]
 fn source_config_contracts_stay_out_of_header_topology_and_provider_symbols() {
     let ordinary = prepare_source_contract_syntax("@core/math\nanalytics #= false\n")
         .expect("ordinary source should prepare without providers");
-    let prepared =
-        prepare_source_contract_syntax("@core/math\nanalytics #Config of Bool = false\n")
-            .expect("source config contract should prepare without providers");
+    let prepared = prepare_source_contract_syntax("@core/math\n$config\nanalytics #Bool = false\n")
+        .expect("source config contract should prepare without providers");
     assert_eq!(
         ordinary.module_symbols.module_file_paths, prepared.module_symbols.module_file_paths,
         "contract collection must not change the prepared module file set"
@@ -175,7 +153,7 @@ fn source_config_contracts_stay_out_of_header_topology_and_provider_symbols() {
             matches!(
                 &header.kind,
                 HeaderKind::Constant { declaration }
-                    if declaration.config_qualifier.is_some()
+                    if declaration.config_contract.is_some()
             )
         })
         .expect("expected source config constant header");
@@ -198,7 +176,7 @@ fn source_config_initializer_paths_stay_out_of_structural_file_references() {
     let mut string_table = StringTable::new();
     let file_path = PathBuf::from("src/@entry.moth");
     let (output, _span_builder) = prepare_single_file(
-        "asset #Config of String = @assets/missing.mtf\n",
+        "$config\nasset #String = @assets/missing.mtf\n",
         &file_path,
         &file_path,
         &mut string_table,
@@ -215,7 +193,7 @@ fn source_config_initializer_paths_stay_out_of_structural_file_references() {
             matches!(
                 &header.kind,
                 HeaderKind::Constant { declaration }
-                    if declaration.config_qualifier.is_some()
+                    if declaration.config_contract.is_some()
             )
         })
         .expect("expected source config constant header");
@@ -226,59 +204,19 @@ fn source_config_initializer_paths_stay_out_of_structural_file_references() {
 }
 
 #[test]
-fn active_root_config_marker_after_declaration_gap_hides_file_value_reference() {
-    let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/@entry.moth");
-    let (output, _span_builder) = prepare_single_file(
-        "helper #= 1\nvalue = @assets/missing.mtf #Config of String\n",
-        &file_path,
-        &file_path,
-        &mut string_table,
-    );
-
-    assert!(
-        output.structural_file_references.references().is_empty(),
-        "a gapped start-body config marker must hide its file-value path"
-    );
-}
-
-#[test]
-fn reached_root_discarded_body_config_marker_is_rejected() {
+fn source_config_contracts_reject_comma_termination() {
     let errors = expect_header_error(
-        parse_single_file_headers_with_reached_role(
-            "value = @assets/missing.mtf #Config of String\n",
-            "src/widgets/@mod.moth",
-            FileRole::ReachedApiFacadeRoot(ModuleRootRole::Normal),
+        parse_single_file_headers_with_entry(
+            "$config\nanalytics #Bool,\ntrailing #= 1\n",
+            "src/@entry.moth",
+            "src/@entry.moth",
         ),
-        "discarded reached-root body config markers must be rejected during preparation",
+        "a comma cannot terminate a marked top-level contract",
     );
-
-    assert!(errors.diagnostics.views().any(|diagnostic| {
-        diagnostic
-            .family_view::<project_config::InvalidConfigView>()
-            .is_some_and(|_| {
-                diagnostic.reason_key() == Some("invalid_config.config_qualifier_invalid_placement")
-            })
-    }));
-}
-
-#[test]
-fn source_config_contracts_reject_generic_parameters_and_comma_termination() {
-    let cases = [
-        "analytics type T #Config of Bool = false\n",
-        "analytics #Config of Bool,\ntrailing #= 1\n",
-    ];
-
-    for source in cases {
-        let errors = expect_header_error(
-            parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
-            "malformed source config declaration should fail during header preparation",
-        );
-        assert!(
-            !errors.diagnostics.is_empty(),
-            "expected a source config declaration diagnostic for {source:?}"
-        );
-    }
+    assert!(
+        !errors.diagnostics.is_empty(),
+        "expected a source contract placement diagnostic"
+    );
 }
 
 #[test]

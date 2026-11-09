@@ -235,7 +235,7 @@ fn resolved_default_field_uses_foreign_effective_tir() {
                 value_mode: ValueMode::ImmutableOwned,
                 value: DeclarationValue::Initializer(value.id()),
                 binding_span: None,
-                config_qualifier: None,
+                config_contract: None,
             }
         }],
     )]);
@@ -327,7 +327,7 @@ fn resolved_field_default_uses_constant_content_without_reexpansion() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Default(default),
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         }],
     )]);
     let receiver_path = paths

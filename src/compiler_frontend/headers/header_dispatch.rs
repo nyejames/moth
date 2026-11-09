@@ -16,7 +16,6 @@ use crate::compiler_frontend::datatypes::generic_parameters::GenericParameterLis
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
-use crate::compiler_frontend::declaration_syntax::build_config_contract::starts_build_config_qualifier_at_source;
 use crate::compiler_frontend::declaration_syntax::choice::parse_choice_shell as parse_choice_header_payload;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::{
     DeclarationSyntax, parse_declaration_syntax,
@@ -78,6 +77,8 @@ pub(super) struct HeaderDeclarationMetadata {
     pub(super) declaration_span: SourceSpan,
     pub(super) declaration_order: usize,
     pub(super) export_mode: HeaderExportMode,
+    /// Authored span of a pending `$config` source modifier, if one attaches to this declaration.
+    pub(super) config_input_span: Option<SourceSpan>,
 }
 
 fn source_token_at_index<'a>(
@@ -153,32 +154,6 @@ fn source_next_tag(
     ))
 }
 
-fn starts_build_config_qualifier_at_cursor(
-    cursor: &TokenCursor<'_>,
-    file_id: SourceId,
-    string_table: &StringTable,
-) -> HeaderDispatchResult<bool> {
-    let canonical = cursor.source_tokens();
-    let index = TokenIndex::try_from_index(cursor.position().index()).ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(internal_header_dispatch_error(
-            "Header dispatch token index exceeded its checked domain.",
-            cursor.current().map(|token| token.source_span()),
-        ))
-    })?;
-    if canonical.source() != file_id {
-        return Err(internal_header_dispatch_error(
-            "Header dispatch source token owner does not match its file identity.",
-            cursor.current().map(|token| token.source_span()),
-        )
-        .into());
-    }
-    Ok(starts_build_config_qualifier_at_source(
-        canonical,
-        index,
-        string_table,
-    ))
-}
-
 fn set_cursor_position(
     cursor: &mut TokenCursor<'_>,
     position: TokenIndex,
@@ -218,6 +193,7 @@ pub(super) fn create_header(
         declaration_span,
         declaration_order,
         export_mode,
+        config_input_span,
     } = metadata;
     let name_span = declaration_span;
     let Some(declaration_name) = context.path_fork.component(full_name) else {
@@ -273,7 +249,6 @@ pub(super) fn create_header(
             name_span: Some(name_span),
             synthetic_content_payload: None,
             tokens: body_range,
-            config_input: false,
             declaration_path: conformance_id,
             token_sequence: None,
             capacity_references,
@@ -416,7 +391,6 @@ pub(super) fn create_header(
             name_span: Some(name_span),
             synthetic_content_payload: None,
             tokens: body_range,
-            config_input: false,
             declaration_path: header_id,
             token_sequence: None,
             capacity_references,
@@ -550,16 +524,6 @@ pub(super) fn create_header(
         }
         // `#` (Hash): compile-time constant declaration `name #= value` or `name #Type = value`.
         TokenTag::HASH => {
-            if !generic_parameters.is_empty()
-                && starts_build_config_qualifier_at_cursor(cursor, file_id, context.string_table)?
-            {
-                return Err(project_config::invalid_config_reason(
-                    Some(declaration_name),
-                    InvalidConfigReason::ConfigQualifierInvalidPlacement,
-                    Some(cursor_span(cursor, declaration_span)),
-                )
-                .into());
-            }
             ensure_not_keyword_shadow_identifier(
                 declaration_name,
                 Some(name_span),
@@ -581,6 +545,7 @@ pub(super) fn create_header(
                 &mut local_ordering_hints,
                 &mut capacity_references,
                 span_builder,
+                config_input_span,
             )?;
 
             kind = HeaderKind::Constant {
@@ -724,7 +689,6 @@ pub(super) fn create_header(
         name_span: Some(name_span),
         synthetic_content_payload: None,
         tokens: body_range,
-        config_input: false,
         declaration_path: header_id,
         token_sequence: None,
         capacity_references,
@@ -1037,6 +1001,11 @@ pub(super) fn capture_function_body_range_from_cursor(
         ))
     })
 }
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the constant shell needs the shared cursor, context and two collection outputs \
+              beside the authored spans"
+)]
 fn create_constant_header_payload(
     full_name: &PathId,
     cursor: &mut TokenCursor<'_>,
@@ -1045,6 +1014,7 @@ fn create_constant_header_payload(
     local_ordering_hints: &mut HashSet<LocalDeclarationOrderingHint>,
     capacity_references: &mut Vec<InitializerReference>,
     span_builder: &mut ExtendedSpanBuilder,
+    config_input_span: Option<SourceSpan>,
 ) -> HeaderDispatchResult<DeclarationSyntax> {
     let Some(declaration_name) = context.path_fork.component(*full_name) else {
         return Err(internal_header_dispatch_error(
@@ -1060,6 +1030,7 @@ fn create_constant_header_payload(
             declaration_name,
             context.string_table,
             span_builder,
+            config_input_span,
         )?;
         let cursor_position = declaration_cursor.canonical_cursor().position();
         (declaration_syntax, cursor_position)
@@ -1074,12 +1045,12 @@ fn create_constant_header_payload(
     // malformed source declaration at the header boundary.
     if declaration_syntax.initializer_range.is_none()
         && source_tag_at_cursor(cursor, file_id)? == TokenTag::COMMA
-        && let Some(qualifier) = &declaration_syntax.config_qualifier
+        && let Some(contract) = &declaration_syntax.config_contract
     {
         return Err(project_config::invalid_config_reason(
             Some(declaration_name),
             InvalidConfigReason::ConfigQualifierInvalidPlacement,
-            qualifier.qualifier_span,
+            Some(contract.marker_span),
         )
         .into());
     }

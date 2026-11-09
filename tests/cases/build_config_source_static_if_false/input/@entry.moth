@@ -1,4 +1,5 @@
-enabled #Config of Bool = false
+$config
+enabled #Bool = false
 result ~= 0
 if enabled:
     ~result = 1

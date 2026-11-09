@@ -369,7 +369,7 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
         Ok(Some(self.values.insert_value(metadata, payload)?))
     }
 
-    /// Labels a numeric failure with the #Config inputs its operand constants retained. Each numeric
+    /// Labels a numeric failure with the $config inputs its operand constants retained. Each numeric
     /// operator labels its own operands, as the baseline did.
     fn label_numeric_failure(
         &mut self,
@@ -1834,7 +1834,7 @@ fn attach_source_config_origin_labels(
 
     let Some(scope_context) = scope_context else {
         return Err(InfrastructureFailure::internal(CompilerStage::ConstantEvaluation,
-            "A numeric compile-time diagnostic retained source #Config provenance without its owning scope resolver.",
+            "A numeric compile-time diagnostic retained source $config provenance without its owning scope resolver.",
         )
         .into());
     };
@@ -1844,7 +1844,7 @@ fn attach_source_config_origin_labels(
             scope_context.source_config_diagnostic_origin(input_name)
         else {
             return Err(InfrastructureFailure::internal(CompilerStage::ConstantEvaluation, format!(
-                "A numeric compile-time diagnostic retained source #Config input '{input_name}' without a matching resolver origin and source anchor."
+                "A numeric compile-time diagnostic retained source $config input '{input_name}' without a matching resolver origin and source anchor."
             ))
             .into());
         };

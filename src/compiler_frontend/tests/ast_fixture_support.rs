@@ -62,7 +62,7 @@ pub(crate) fn make_test_variable(
         value_mode: expression.value_mode(),
         value: DeclarationValue::Initializer(value),
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     }
 }
 

@@ -8,7 +8,6 @@
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
-use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker_in_cursor;
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
 use crate::compiler_frontend::headers::qualified_references::{
     HeaderExpressionRange, collect_qualified_references,
@@ -23,7 +22,7 @@ use crate::compiler_frontend::headers::types::{
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenIndex, TokenRange};
@@ -49,7 +48,6 @@ pub(crate) fn prepare_moth_template_file(
     path_syntax: Arc<PathSyntaxTable>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-    span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let file_id = owner.source_id();
     #[cfg(feature = "data_layout_memory_probe")]
@@ -77,39 +75,28 @@ pub(crate) fn prepare_moth_template_file(
                     format!("Moth template body view is invalid: {error:?}"),
                 )
             })?;
-        let body_cursor = owner.cursor(context.body_range)?;
         let content_header = context.content_header(body_facts, string_table, path_fork)?;
-        if find_config_qualifier_marker_in_cursor(body_cursor, string_table, span_builder).is_some()
-        {
-            // A config-qualified body is not expression syntax; every path row stays owned by the
-            // config contract and no qualified occurrence is recognized.
-            let config_owned_path_syntax_ids: Vec<_> = (0..body_facts.len())
-                .filter_map(|index| body_facts.get(index).and_then(|token| token.path_syntax_id))
-                .collect();
-            (content_header, config_owned_path_syntax_ids, Vec::new())
-        } else {
-            // Every `.mtf` qualified occurrence lives inside a template head (including nested
-            // heads), so one bounded scan of the retained body is the complete occurrence set.
-            // The synthetic content body is compile-time content, so every occurrence is
-            // const-required.
-            let occurrences = collect_qualified_references(
-                canonical,
-                [HeaderExpressionRange::const_required(0, context.body_range)],
-                context.file_id,
-                0,
-                path_syntax.as_ref(),
-                string_table,
-                path_fork,
-            )
-            .map_err(|failure| {
-                FileFrontendPrepareFailure::from_header_parse(failure, DiagnosticBag::new())
-            })?;
-            let consumed_path_syntax_ids = occurrences
-                .iter()
-                .map(|occurrence| occurrence.dependency.path_syntax)
-                .collect();
-            (content_header, consumed_path_syntax_ids, occurrences)
-        }
+        // Every `.mtf` qualified occurrence lives inside a template head (including nested
+        // heads), so one bounded scan of the retained body is the complete occurrence set.
+        // The synthetic content body is compile-time content, so every occurrence is
+        // const-required.
+        let occurrences = collect_qualified_references(
+            canonical,
+            [HeaderExpressionRange::const_required(0, context.body_range)],
+            context.file_id,
+            0,
+            path_syntax.as_ref(),
+            string_table,
+            path_fork,
+        )
+        .map_err(|failure| {
+            FileFrontendPrepareFailure::from_header_parse(failure, DiagnosticBag::new())
+        })?;
+        let consumed_path_syntax_ids: Vec<_> = occurrences
+            .iter()
+            .map(|occurrence| occurrence.dependency.path_syntax)
+            .collect();
+        (content_header, consumed_path_syntax_ids, occurrences)
     };
     let mut headers = vec![content_header];
     let structural_file_references = classify_prepared_file_references(

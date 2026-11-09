@@ -91,7 +91,7 @@ impl ScopeContext {
             .flatten()
     }
 
-    /// Resolve retained source-`#Config` provenance from the complete map or bootstrap records.
+    /// Resolve retained source-`$config` provenance from the complete map or bootstrap records.
     pub(crate) fn source_config_diagnostic_origin(
         &self,
         input_name: &str,

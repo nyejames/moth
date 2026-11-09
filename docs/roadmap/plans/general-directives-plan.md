@@ -3,12 +3,14 @@
 ## Status and scope
 
 - Status: ACTIVE. Fixed root roles and builder slots are integrated.
-- Current slice: Typed input cutover.
+- Current slice: Cleanup and validation.
 - Blockers: None known.
-- Next action: Turn the attached `$config` fact into build-input contracts from the binding's ordinary `#T` annotation, migrate authored `#Config of T` sources and remove the qualifier grammar.
+- Next action: Remove dead qualifier paths and stale tests, reconcile the remaining roadmap and design docs, and run the full validation and code-bloat audit.
 - Roadmap file: `docs/roadmap/plans/general-directives-plan.md`.
 - Deliver: a constrained two-context directive grammar, frontend ownership of existing template formatters and `$config` input contracts.
 - Preserve: optional `config.moth` and its existing named `project` and builder-settings records, including the selected builder's current schema, defaults and validation policy.
+
+Delivered: `$config` carries build-input contracts. The marked binding's ordinary `#T` annotation is the contract type, its initializer is the fallback, and only marked bindings may omit one. The retired input qualifier no longer parses, and authored sources, tests, CLI fixtures and docs use the directive.
 
 Delivered: source directives are recognised before context. `$config` is the only source modifier; `$name` lexes in every mode, a known name in the wrong context is a typed error, and attachment breaks on a blank physical line, EOF or a non-declaration item. A marked binding records `Header::config_input`.
 

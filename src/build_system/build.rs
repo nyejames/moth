@@ -1692,7 +1692,7 @@ pub(crate) struct BuildBootstrap {
     /// WHAT: the `BuildConfigInputSet` the command layer parsed or the programmatic caller
     ///       supplied, carried on the bootstrap state so build, check and dev see one
     ///       set of explicit inputs.
-    /// WHY: declaration-owned and grouped-project `#Config` resolution plus later source-contract
+    /// WHY: declaration-owned and grouped-project `$config` resolution plus later source-contract
     ///       barriers consume exactly this set; command and programmatic paths own production up
     ///       to here and the compiler config service reads it from here.
     pub(crate) build_config_inputs: BuildConfigInputSet,

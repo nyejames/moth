@@ -1072,7 +1072,6 @@ define_stable_reason_keys! {
     &CommonSyntaxMistakeCode::SignatureParenthesisDelimiter => "common_syntax_mistake.signature_parenthesis_delimiter",
     &CommonSyntaxMistakeCode::SignatureAsKeyword => "common_syntax_mistake.signature_as_keyword",
     &CommonSyntaxMistakeCode::InvalidCompileTimeBindingSpacing => "common_syntax_mistake.invalid_compile_time_binding_spacing",
-    &CommonSyntaxMistakeCode::InvalidConfigQualifierSpacing => "common_syntax_mistake.invalid_config_qualifier_spacing",
     &CommonSyntaxMistakeCode::InvalidMutableBindingSpacing => "common_syntax_mistake.invalid_mutable_binding_spacing",
     &CommonSyntaxMistakeCode::InvalidSymbolicSpacing => "common_syntax_mistake.invalid_symbolic_spacing",
     &CommonSyntaxMistakeCode::InvalidChoiceVariantSpacing => "common_syntax_mistake.invalid_choice_variant_spacing",

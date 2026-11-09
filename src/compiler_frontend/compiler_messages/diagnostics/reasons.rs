@@ -393,16 +393,16 @@ pub enum InvalidConfigReason {
     NotCompileTimeConstant,
     ValueCouldNotFold,
     EmptyProjectSetting,
-    /// A declaration-owned `#Config` dependency targeted a grouped-project field whose schema
-    /// policy is fixed-only.
+    /// A `$config` input dependency targeted a grouped-project field whose schema policy is
+    /// fixed-only.
     ConfigQualifierFixedField,
     /// A source or project field's name cannot become a build-config contract.
     ConfigContractNameInvalid,
-    /// A `#Config` qualifier appeared outside a top-level source declaration.
+    /// A `$config` modifier could not attach to a top-level source compile-time declaration.
     ConfigQualifierInvalidPlacement,
     /// A filesystem module or source-package prefix claimed the reserved `@project` root.
     ProjectGlobalsNameReserved,
-    /// The qualifier's `of` type is outside the primitive/optional contract vocabulary.
+    /// The marked binding's declared type is outside the primitive/optional contract vocabulary.
     ConfigQualifierUnsupportedType,
     /// An already-typed build-config value did not agree with another contract for the same name.
     ///
@@ -796,8 +796,6 @@ pub enum InvalidCompileTimePathReason {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TypeAnnotationContext {
     DeclarationTarget,
-    /// Required primitive/optional type after a declaration-owned `#Config of` qualifier.
-    BuildConfigContract,
     SignatureParameter,
     SignatureReturn,
     TypeAliasTarget,
@@ -2245,7 +2243,6 @@ pub enum CommonSyntaxMistakeReason {
     SignatureParenthesisDelimiter,
     SignatureAsKeyword,
     InvalidCompileTimeBindingSpacing,
-    InvalidConfigQualifierSpacing,
     InvalidMutableBindingSpacing,
     InvalidSymbolicSpacing { error: SymbolicSpacingError },
     InvalidChoiceVariantSpacing { gap: ChoiceVariantSeparatorGap },

@@ -106,7 +106,6 @@ fn prepare_directly(source: &str) -> (FileFrontendPrepareOutput, StringTable, Ex
         lexed.path_syntax,
         &mut string_table,
         &mut path_fork,
-        &mut span_builder,
     )
     .expect("freshly tokenized Moth template should own a preparing path table");
     (output, string_table, span_builder)
@@ -143,7 +142,6 @@ fn prepare_diagnostic(
         lexed.path_syntax,
         &mut string_table,
         &mut path_fork,
-        &mut span_builder,
     ) {
         Ok(_) => panic!("fixture should be rejected during template preparation"),
         Err(failure) => failure,
@@ -186,24 +184,9 @@ fn canonical_source_keeps_preparing_path_table_separate_until_preparation() {
         lexed.path_syntax,
         &mut string_table,
         &mut path_fork,
-        &mut span_builder,
     )
     .expect("preparation should publish the canonical source owner");
     assert_eq!(output.file_id, SourceId::COMPILATION_ROOT);
-}
-
-#[test]
-fn config_marked_moth_template_paths_stay_out_of_structural_references() {
-    let (output, _, _span_builder) = prepare_directly("[@assets/missing.mtf #Config of String]");
-
-    assert!(
-        !output.path_syntax.table().paths().is_empty(),
-        "fixture should retain the authored path row"
-    );
-    assert!(
-        output.structural_file_references.references().is_empty(),
-        "config-marked Moth-template paths must not reach Stage 0 file references"
-    );
 }
 
 fn prepare_via_pipeline(source: &str) -> SourcePreparationDelta {

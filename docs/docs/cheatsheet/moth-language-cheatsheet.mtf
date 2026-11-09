@@ -1122,8 +1122,8 @@ See @../project-structure (Project structure) and @../packages (Package visibili
 
 ## Directives and project configuration
 
-Template-head directives modify their template. A queued source modifier starts its own line and attaches to the next declaration without a blank
-line between. Each directive takes at most one optional compile-time operand. Directives are provided by the compiler, not defined in source.
+Template-head directives modify their template. A source directive such as `$config` starts its own line and attaches to the next declaration
+without a blank line between. Each directive takes at most one optional compile-time operand. Directives are provided by the compiler, not defined in source.
 
 An authored project-root `config.moth` contains compile-time values and configuration. It uses ordinary named records for the project and the selected
 builder. Source imports, functions and runtime work belong in ordinary modules:
@@ -1143,8 +1143,8 @@ There are no `$project`, `$builder` or `$html_builder` directives.
 ### Build inputs
 
 `$config` marks the next **explicitly typed top-level constant** as a build input. The initializer supplies a fallback.
-Without one, an ordinary input is required while an optional input defaults to `none`. The marker is accepted queued design; the current compiler
-spelling is `#Config of T`.
+Without one, an ordinary input is required while an optional input defaults to `none`. `$config` takes no operand and only a marked binding
+may omit its initializer.
 
 [codeblock, $code "moth":
     $config

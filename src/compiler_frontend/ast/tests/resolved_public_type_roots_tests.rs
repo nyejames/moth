@@ -75,7 +75,6 @@ fn header(
         synthetic_content_payload: None,
         tokens: TokenRange::new(SourceId::COMPILATION_ROOT, token_index, token_index)
             .expect("equal token indexes always form a valid range"),
-        config_input: false,
         declaration_path: src_path,
         token_sequence: None,
         capacity_references: Vec::new(),
@@ -115,7 +114,7 @@ fn constant_kind() -> HeaderKind {
             span: None,
             binding_mode: BindingMode::default(),
             type_annotation: ParsedTypeRef::Inferred,
-            config_qualifier: None,
+            config_contract: None,
             initializer_range: None,
             initializer_references: Vec::new(),
         },
@@ -173,7 +172,7 @@ fn constant_declaration(type_id: TypeId, decl_path: PathId) -> Declaration {
         value_mode: ValueMode::default(),
         value: DeclarationValue::PendingConstant,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     }
 }
 

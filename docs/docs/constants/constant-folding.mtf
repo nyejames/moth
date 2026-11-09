@@ -1,4 +1,4 @@
-**Current support versus accepted design.** The Alpha compiler currently accepts `#Config of T` inputs. The accepted queued form uses `$config` on a typed `#` binding; ordinary constant folding and ordinary `if` syntax remain the language mechanisms.
+**Current support.** The compiler accepts `$config` inputs. The marker sits before a typed `#` binding; ordinary constant folding and ordinary `if` syntax remain the language mechanisms.
 
 A constant initializer must fully evaluate during AST construction.
 
@@ -88,10 +88,9 @@ Those facts do not:
 
 ### Static Bool control flow
 
-An ordinary `if` condition may fold to a known `Bool`. In current Alpha syntax this
-includes an implemented `#Config of Bool` value. In the accepted queued design, a
-`$config`-marked `Bool` input feeds the same ordinary `if`; `$config` does not add a
-separate conditional form.
+An ordinary `if` condition may fold to a known `Bool`. A `$config`-marked `Bool`
+input is one source of that folded value. `$config` does not add a separate
+conditional form.
 
 Both branches first parse, resolve and type-check as normal source. Stage 4 then selects
 one branch, preserving the selected branch's lexical scope; inactive executable work does

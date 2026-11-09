@@ -185,7 +185,7 @@ pub(super) fn first_unknown_build_config_input(
 /// One effective project field shared by fixed source providers and `@project`.
 ///
 /// The snapshot keeps the semantic folded value and canonical type together with the
-/// capability/provenance kind. Declaration-owned `#Config` contracts stay private provider facts;
+/// capability/provenance kind. Declaration-owned `$config` contracts stay private provider facts;
 /// ordinary fixed fields retain fixed provenance; supported extra project metadata remains visible
 /// through `@project`; unregistered top-level names stay private helpers.
 pub(super) struct EffectiveProjectField {

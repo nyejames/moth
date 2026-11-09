@@ -32,9 +32,9 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 #[test]
 fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_single_file() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let default_line = "limit #Config of I32 = 2147483648";
+    let default_line = "limit #I32 = 2147483648";
     let package_source = format!(
-        "{default_line}\n@warnpkg value\nexport:\n    run || -> I32:\n        return 1\n    ;\n;\n"
+        "$config\n{default_line}\n@warnpkg value\nexport:\n    run || -> I32:\n        return 1\n    ;\n;\n"
     );
     let warning_package_source = "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n";
     let consumer_source = "@broken run\nvalue = run()\n";
@@ -112,7 +112,7 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
 
         let rendered = render_compilation_result_html(&result, &project_root);
         assert!(
-            rendered.contains(default_line),
+            default_line.lines().all(|line| rendered.contains(line)),
             "{entry_mode}: the diagnostic must render its package-owned source excerpt: {rendered}"
         );
         let position = DiagnosticRenderContext::for_report(report)
@@ -124,10 +124,10 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
             "{entry_mode}: diagnostic paths are relative to their owning package boundary"
         );
         assert_eq!(position.line, default_line, "{entry_mode}");
-        assert_eq!(position.start.line, 0, "{entry_mode}");
-        assert_eq!(position.start.column, 23, "{entry_mode}");
-        assert_eq!(position.end.line, 0, "{entry_mode}");
-        assert_eq!(position.end.column, 33, "{entry_mode}");
+        assert_eq!(position.start.line, 1, "{entry_mode}");
+        assert_eq!(position.start.column, 13, "{entry_mode}");
+        assert_eq!(position.end.line, 1, "{entry_mode}");
+        assert_eq!(position.end.column, 23, "{entry_mode}");
     }
 }
 
@@ -147,12 +147,12 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     .expect("should write config");
     fs::write(
         src.join("@entry.moth"),
-        "@config_input helper\nproject_snapshot = 1\nenabled #Config of Bool\nvalue = helper()\n",
+        "@config_input helper\nproject_snapshot = 1\n$config\nenabled #Bool\nvalue = helper()\n",
     )
     .expect("should write project source contract");
     fs::write(
         package.join("@mod.moth"),
-        "enabled #Config of Bool\nexport:\n    helper || -> I32:\n        return 2\n    ;\n;\n",
+        "$config\nenabled #Bool\nexport:\n    helper || -> I32:\n        return 2\n    ;\n;\n",
     )
     .expect("should write source-package contract");
 
@@ -227,11 +227,16 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
         .site_position(view.primary_site())
         .expect("source-package diagnostics should retain source context");
     assert_eq!(position.source, span.source());
-    let rendered = render_compilation_result_html(&result, &dir);
-    assert!(
-        rendered.contains("enabled #Config of Bool"),
-        "the missing-input frame should use the package snapshot: {rendered}"
+    assert_eq!(
+        position.start.line + 1,
+        1,
+        "the missing-input frame should use the package snapshot's own line 1, not the project entry's line 3"
     );
+    assert_eq!(
+        position.line, "$config",
+        "the package snapshot's line 1 is the package's own `$config` marker"
+    );
+    let rendered = render_compilation_result_html(&result, &dir);
     assert!(
         !rendered.contains("project_snapshot = 1"),
         "the package diagnostic must not use the colliding project snapshot: {rendered}"

@@ -27,10 +27,6 @@ use crate::compiler_frontend::tokenizer::tokens::{
     TokenCursor, TokenPayloadOrigin, TokenRef, TokenTag, TokenViewError,
 };
 
-pub(crate) fn cursor_current_span(cursor: &TokenCursor<'_>) -> Option<SourceSpan> {
-    cursor.current().map(|token| token.source_span())
-}
-
 pub(crate) mod type_syntax;
 
 /// Short-lived canonical adapter used by declaration/sig/type parsers.
@@ -123,6 +119,8 @@ impl<'a> DeclarationCursor<'a> {
         self.cursor.current().map(TokenRef::source_span)
     }
 
+    /// Read the follower tag through the active parser view.
+    #[cfg(test)]
     pub(crate) fn peek_next_tag(&self) -> Option<TokenTag> {
         let token = if self.cursor.is_segmented() {
             self.cursor.parser_peek_next()
@@ -218,41 +216,6 @@ impl<'a> DeclarationCursor<'a> {
             );
         }
         self.string_id_in(token, destination)
-    }
-
-    /// Read the next symbol payload in the requester's string-table domain.
-    pub(crate) fn peek_next_string_id_in(
-        &self,
-        destination: &mut crate::compiler_frontend::symbols::string_interning::StringTable,
-    ) -> Result<Option<StringId>, crate::compiler_frontend::compiler_errors::InfrastructureFailure>
-    {
-        if self.peek_next_tag() != Some(TokenTag::SYMBOL) {
-            return Ok(None);
-        }
-        let token = self.peek_next_token_ref().ok_or_else(|| {
-            crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
-                CompilerStage::HeaderParsing,
-                "next symbol token is missing its canonical source view",
-            )
-        })?;
-        if token.string_id().is_none() {
-            return Err(
-                crate::compiler_frontend::compiler_errors::InfrastructureFailure::internal(
-                    CompilerStage::HeaderParsing,
-                    "canonical next symbol token is missing its payload",
-                ),
-            );
-        }
-        self.string_id_in(token, destination)
-    }
-
-    /// Borrow the next canonical token without materialising a wide payload.
-    pub(crate) fn peek_next_token_ref(&self) -> Option<TokenRef<'a>> {
-        if self.cursor.is_segmented() {
-            self.cursor.parser_peek_next()
-        } else {
-            self.cursor.peek_next()
-        }
     }
 
     pub(crate) fn advance(&mut self) {

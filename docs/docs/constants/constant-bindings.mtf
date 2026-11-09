@@ -1,4 +1,4 @@
-**Current support versus accepted design.** The Alpha compiler currently uses `#Config of T` for build-input contracts. The accepted queued spelling is `$config` before one explicitly typed top-level `#` binding; see @../project-structure/#build-inputs (Build configuration values).
+**Current support.** The compiler uses `$config` for build-input contracts. It marks one explicitly typed top-level `#` binding; see @../project-structure/#build-inputs (Build configuration values).
 
 `$config` is a marker for an input contract, not a replacement for ordinary constants:
 

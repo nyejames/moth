@@ -345,7 +345,7 @@ pub(in crate::compiler_frontend) struct AstBuildInput {
     /// The project configuration owns the error count; the compiler owns the additional-body token
     /// allowance. Carrying it here keeps the emitter from reading either owner.
     pub recovery_policy: crate::compiler_frontend::module_compilation::AstRecoveryPolicy,
-    /// Names of this module's own source `#Config` contracts.
+    /// Names of this module's own source `$config` contracts.
     ///
     /// The boundary value map is project-wide, but source qualifier materialization must remain
     /// module-local so a namesake declaration in another source cannot borrow its value.

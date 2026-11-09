@@ -129,8 +129,11 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
 #[test]
 fn diagnosed_aggregation_preserves_the_source_span_builder() {
     let quoted = "é".repeat(2 * 1024 * 1024);
-    let source =
-        format!("helper ||:\n    value = \"{quoted}\"\n    setting #Config of I32 = 1\n;\n");
+    // The function keeps the large retained literal; the invalid `$config` default makes
+    // aggregation diagnose the source after the file itself prepared successfully.
+    let source = format!(
+        "helper ||:\n    value = \"{quoted}\"\n    setting #I32 = 1\n;\n$config\nbad #Bool = other\n"
+    );
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@entry.moth");
@@ -192,27 +195,37 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
         &mut path_fork,
     ) {
         Err(failure) => expect_aggregation_diagnostics(failure),
-        Ok(_) => panic!("a nested config qualifier should fail aggregation"),
+        Ok(_) => panic!("an invalid source contract should fail aggregation"),
     };
     let diagnostics = compact_bag_for_test(diagnostics, None);
-    assert!(diagnostics.views().any(|diagnostic| {
-        diagnostic
-            .family_view::<project_config::InvalidConfigView>()
-            .is_some_and(|_| {
-                diagnostic.reason_key() == Some("invalid_config.config_qualifier_invalid_placement")
-            })
-    }));
     let primary_span = diagnostics
         .first()
         .and_then(diagnostic_primary_span)
         .expect("aggregation captures its primary span");
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
-    let marker_range =
+    let primary_range =
         primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
-    assert!(marker_range.start() >= 4 * 1024 * 1024);
+    assert!(primary_range.start() >= 4 * 1024 * 1024);
+    assert_eq!(
+        &source[primary_range.start() as usize..primary_range.end() as usize],
+        "other"
+    );
+    let marker_span = outputs[0]
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Constant { declaration } => declaration
+                .config_contract
+                .as_ref()
+                .map(|contract| contract.marker_span),
+            _ => None,
+        })
+        .expect("the invalid contract should retain its `$config` marker");
+    let marker_range =
+        marker_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
     assert_eq!(
         &source[marker_range.start() as usize..marker_range.end() as usize],
-        "#"
+        "$config"
     );
     let whole_source = LocalSpan::exact(0, source.len() as u32, &mut span_builder)
         .expect("the diagnosed source builder should remain live");
@@ -229,9 +242,11 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
 
 #[test]
 fn aggregation_diagnostics_keep_distinct_source_ids_in_authored_order() {
+    // Each source prepares on its own; contract normalisation during aggregation diagnoses both
+    // in authored order while retaining their distinct source identities.
     let sources = [
-        "helper ||:\n setting #Config of I32 = 1\n;\n",
-        "other ||:\n setting #Config of I32 = 2\n;\n",
+        "$config\nbad_one #Bool = other\n",
+        "$config\nbad_two #Bool = other\n",
     ];
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -277,7 +292,7 @@ fn aggregation_diagnostics_keep_distinct_source_ids_in_authored_order() {
         &mut path_fork,
     )
     .err()
-    .expect("nested qualifiers fail aggregation");
+    .expect("invalid source contracts fail aggregation");
     let diagnostics = compact_bag_for_test(expect_aggregation_diagnostics(failure), None);
     assert_eq!(diagnostics.len(), 2);
     for (index, diagnostic) in diagnostics.views().enumerate() {
@@ -287,7 +302,7 @@ fn aggregation_diagnostics_keep_distinct_source_ids_in_authored_order() {
         let range = span.resolve_with(builders[index].resolver_for(span.source()));
         assert_eq!(
             &sources[index][range.start() as usize..range.end() as usize],
-            "#"
+            "other"
         );
     }
 }

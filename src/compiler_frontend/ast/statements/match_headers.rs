@@ -195,7 +195,7 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span,
-        config_qualifier: None,
+        config_contract: None,
     };
 
     let declaration_span = declaration.binding_span;
@@ -652,7 +652,7 @@ fn build_arm_scope_with_choice_captures(
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: capture.binding_span,
-            config_qualifier: None,
+            config_contract: None,
         };
 
         let declaration_span = declaration.binding_span;
@@ -1033,7 +1033,7 @@ fn convert_choice_payload(payload: &ChoiceVariantPayloadDefinition) -> ChoiceVar
                     value_mode: ValueMode::ImmutableOwned,
                     value: DeclarationValue::Absent,
                     binding_span: field.span,
-                    config_qualifier: None,
+                    config_contract: None,
                 })
                 .collect(),
         },

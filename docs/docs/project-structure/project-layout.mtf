@@ -14,7 +14,7 @@ The optional project config uses ordinary named compile-time records:
 
 The `project` record and its `name` field are optional. An omitted name uses the selected directory name. The active builder section follows its own required or optional presence rule. HTML permits an omitted section and applies its defaults.
 
-A configurable value uses the ordinary typed input spelling until the queued `$config` marker lands. `project` and `html` stay ordinary record values. No `$project`, `$builder` or `$html_builder` directive exists.
+A configurable value uses `$config` before one explicitly typed top-level `#` binding. `project` and `html` stay ordinary record values. No `$project`, `$builder` or `$html_builder` directive exists.
 
 ### Project root contents
 

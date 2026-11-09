@@ -555,7 +555,7 @@ init_docs_sidebar()!
             [: Supported]
             [$md: Targeted grouped-record, builder-schema, input, static-specialisation, provenance and boundary coverage. Builder sections retain independent same-named values, defaults and authored spans. Surface validation accepts plain or singly optional String/Bool section fields and rejects unstorable shapes, nested optionals and duplicate output-root owners before config compilation. @https://github.com/nyejames/moth/tree/main/tests/cases/config_contract_u32_success (config_contract_u32_success) covers a source U32 contract. @https://github.com/nyejames/moth/blob/main/src/compiler_frontend/tests/build_config_tests.rs (build config tests) covers receiving-width materialisation, deferred range failures and direct F16/F32 midpoint rounding.]
             [: Frontend / build system]
-            [: Grouped project and active builder records remain the implemented config surface. Declaration-owned [$html:<code>#Config of T</code>] inputs accept every fixed integer and binary-float contract. Command numbers retain literal spelling until the exact receiving contract materialises them. Typed inputs preserve their exact identity. Build, check and dev share input handling, immutable [$html:<code>@project</code>] fields, provenance and semantic fingerprints. Ordinary static if consumes folded Bool values before HIR. The queued directive design remains separately deferred below.]
+            [: Grouped project and active builder records remain the implemented config surface. [$html:<code>$config</code>] inputs accept every fixed integer and binary-float contract. Command numbers retain literal spelling until the exact receiving contract materialises them. Typed inputs preserve their exact identity. Build, check and dev share input handling, immutable [$html:<code>@project</code>] fields, provenance and semantic fingerprints. Ordinary static if consumes folded Bool values before HIR.]
         ]
 
         [data:
@@ -567,19 +567,19 @@ init_docs_sidebar()!
         ]
 
         [data:
-            [: General non-template directives]
-            [: Deferred]
-            [: None]
+            [: Source directives]
+            [: Supported]
+            [$md: Targeted [$html:<code>$config</code>] source-attachment, duplicate, dangling, wrong-target and typed-contract coverage.]
             [: Frontend]
-            [$md: Accepted queued design. [$html:<code>$</code>] is the general marker. Source modifiers use contiguous next-construct attachment and at most one optional compile-time operand, with no call-style argument list. Template directives remain implemented. See @../directives (Directives).]
+            [$md: [$html:<code>$</code>] is the general marker. [$html:<code>$config</code>] is the delivered source-only modifier: it uses contiguous next-construct attachment, accepts no operand and rejects call-style spelling. Template directives remain implemented. Later compiler-owned source forms remain accepted design. See @../directives (Directives).]
         ]
 
         [data:
             [: [$html:<code>$config</code>] contracts]
-            [: Deferred]
-            [: None]
+            [: Supported]
+            [$md: Targeted explicit input, fallback and absence, exact-type, numeric-materialisation, duplicate and boundary coverage.]
             [: Frontend / build system]
-            [: Accepted queued design. Prefix on one typed top-level [$html:<code>#</code>] binding. Explicit-only providers; project fields never implicitly supply inputs. Current [$html:<code>#Config</code>] remains the implemented spelling.]
+            [: [$html:<code>$config</code>] marks one explicitly typed top-level [$html:<code>#</code>] binding. The binding name is the input key, the declared type is the contract and the initializer is the fallback. Only marked bindings may omit an initializer. Explicit-only providers; project fields never implicitly supply inputs.]
         ]
 
         [data:

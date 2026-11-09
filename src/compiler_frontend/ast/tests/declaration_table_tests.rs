@@ -390,7 +390,7 @@ fn declaration_lanes_reject_missing_semantic_records() {
                 span: None,
                 binding_mode: BindingMode::default(),
                 type_annotation: ParsedTypeRef::Inferred,
-                config_qualifier: None,
+                config_contract: None,
                 initializer_range: None,
                 initializer_references: Vec::new(),
             },
@@ -650,7 +650,7 @@ fn declaration(path: &PathId, type_id: TypeId) -> Declaration {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     }
 }
 
@@ -689,7 +689,6 @@ fn semantic_header(kind: HeaderKind, path: PathId, _string_table: &mut StringTab
         synthetic_content_payload: None,
         tokens: TokenRange::new(SourceId::COMPILATION_ROOT, token_index, token_index)
             .expect("equal token indexes always form a valid range"),
-        config_input: false,
         declaration_path: path,
         token_sequence: None,
         capacity_references: Vec::new(),

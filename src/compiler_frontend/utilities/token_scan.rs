@@ -135,15 +135,15 @@ pub(crate) fn collect_scanned_symbol_references(
     string_table: &StringTable,
 ) -> Vec<InitializerReference> {
     let mut references = Vec::new();
-    let mut in_config_qualifier = false;
+    let mut in_config_contract = false;
 
     for index in 0..tokens.len() {
         let Some(token) = tokens.get(index) else {
             continue;
         };
-        if in_config_qualifier {
+        if in_config_contract {
             if token.tag == TokenTag::ASSIGN || token.tag == TokenTag::COMMA {
-                in_config_qualifier = false;
+                in_config_contract = false;
             } else {
                 continue;
             }
@@ -190,7 +190,7 @@ pub(crate) fn collect_scanned_symbol_references(
                 .and_then(|next_index| tokens.get(next_index))
                 .is_some_and(|t| t.tag == TokenTag::OF)
         {
-            in_config_qualifier = true;
+            in_config_contract = true;
             continue;
         }
 

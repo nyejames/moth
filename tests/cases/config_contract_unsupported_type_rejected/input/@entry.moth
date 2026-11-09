@@ -1,3 +1,4 @@
-limit #Config of {String}
+$config
+limit #Byte
 
 [:unsupported config]

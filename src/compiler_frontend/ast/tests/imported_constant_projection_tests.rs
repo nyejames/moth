@@ -896,6 +896,6 @@ fn declaration(path: &PathId, type_id: TypeId) -> Declaration {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     }
 }

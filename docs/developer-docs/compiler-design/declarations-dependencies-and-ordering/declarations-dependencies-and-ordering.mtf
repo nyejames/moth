@@ -13,7 +13,7 @@ From located tokens, syntax preparation extracts **shells**:
 - const-template, entry-root body and trait-incompatibility shells
 - entry-root activity and fragment-placement metadata
 - structural provider references and structural file references for the graph
-- source configuration-contract shells and retained directive-prefix metadata (`#Config` is the current spelling; `$config` is the accepted queued prefix)
+- source configuration-contract shells and retained `$config` directive metadata
 - local declaration-ordering hints
 - source locations and remap information
 

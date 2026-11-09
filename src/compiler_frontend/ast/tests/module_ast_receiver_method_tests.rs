@@ -303,7 +303,7 @@ fn recursive_runtime_struct_cycles_are_rejected() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         }],
     );
     struct_fields.insert(
@@ -315,7 +315,7 @@ fn recursive_runtime_struct_cycles_are_rejected() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         }],
     );
 
@@ -367,7 +367,7 @@ fn non_recursive_runtime_structs_are_allowed() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         }],
     );
 

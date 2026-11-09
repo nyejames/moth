@@ -1,6 +1,6 @@
 //! AST declaration-owned configuration resolution.
 //!
-//! WHAT: resolves declaration-owned `#Config of T` metadata and seeds one stable
+//! WHAT: resolves `$config` contract metadata on ordinary typed declarations and seeds one stable
 //!       `SyntheticInterfaceProvenance` input fact per declaration-owned input.
 //! WHY: configuration validation and primitive materialisation are a focused semantic phase,
 //!      separate from the ordinary top-level constant session and its compile-time fold.
@@ -44,7 +44,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-/// Resolve declaration-owned `#Config of T` metadata before the ordinary const store fold.
+/// Resolve `$config` contract metadata before the ordinary const store fold.
 ///
 /// Top-level declarations are the bootstrap owner. The declaration-boundary path records the
 /// input contract and seeds the input's stable provenance. Folded `ConstValue` metadata
@@ -65,12 +65,12 @@ pub(super) fn resolve_config_declaration(
     path_fork: &PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     let declaration_name = path_fork.component(declaration.id);
-    if let Some(qualifier) = declaration.config_qualifier.take() {
+    if let Some(contract_syntax) = declaration.config_contract.take() {
         let Some(declaration_name) = declaration_name else {
             return Err(config_expression_error(
                 None,
                 InvalidConfigReason::ConfigContractNameInvalid,
-                qualifier.qualifier_span,
+                Some(contract_syntax.marker_span),
             ));
         };
         let declaration_text = string_table.resolve(declaration_name).to_owned();
@@ -78,14 +78,14 @@ pub(super) fn resolve_config_declaration(
             config_expression_error(
                 Some(declaration_name),
                 InvalidConfigReason::ConfigContractNameInvalid,
-                qualifier.qualifier_span,
+                Some(contract_syntax.marker_span),
             )
         })?;
-        let Some(contract) = build_input_type_from_parsed(&qualifier.type_annotation) else {
+        let Some(contract) = build_input_type_from_parsed(&contract_syntax.type_annotation) else {
             return Err(config_expression_error(
                 Some(declaration_name),
                 InvalidConfigReason::ConfigQualifierUnsupportedType,
-                parsed_type_span(&qualifier.type_annotation),
+                parsed_type_span(&contract_syntax.type_annotation),
             ));
         };
         // Pass the initializer as a bare `ExprId`: the view borrow must end before
@@ -94,8 +94,8 @@ pub(super) fn resolve_config_declaration(
         let authored_default = normalize_config_default(
             ConfigDefaultMetadata {
                 field_name: declaration_name,
-                default_none: qualifier.default_none,
-                default_span: qualifier.qualifier_span,
+                default_none: contract_syntax.default_none,
+                default_span: Some(contract_syntax.marker_span),
                 contract,
             },
             initializer,
@@ -135,7 +135,7 @@ pub(super) fn resolve_config_declaration(
                     error,
                     declaration_name,
                     contract,
-                    qualifier.qualifier_span,
+                    Some(contract_syntax.marker_span),
                     argument_index,
                     string_table,
                 )
@@ -161,7 +161,7 @@ pub(super) fn resolve_config_declaration(
                 contract_default,
                 Some(value),
                 origin,
-                qualifier.qualifier_span,
+                Some(contract_syntax.marker_span),
                 value_location,
             ));
         } else {
@@ -171,13 +171,13 @@ pub(super) fn resolve_config_declaration(
                         return Err(config_expression_error(
                             Some(declaration_name),
                             InvalidConfigReason::MissingConfigInput,
-                            qualifier.qualifier_span,
+                            Some(contract_syntax.marker_span),
                         ));
                     }
                     declaration.value = DeclarationValue::Initializer(
                         option_none_expression(
                             contract,
-                            qualifier.qualifier_span,
+                            Some(contract_syntax.marker_span),
                             type_interner,
                             expression_builder,
                             const_values,
@@ -193,7 +193,7 @@ pub(super) fn resolve_config_declaration(
                         None,
                         None,
                         BuildConfigValueOrigin::DeclarationDefault,
-                        qualifier.qualifier_span,
+                        Some(contract_syntax.marker_span),
                         None,
                     ));
                 }
@@ -219,7 +219,7 @@ pub(super) fn resolve_config_declaration(
                         None,
                         None,
                         BuildConfigValueOrigin::DeclarationDefault,
-                        qualifier.qualifier_span,
+                        Some(contract_syntax.marker_span),
                         span.map(BuildConfigValueLocation::Source),
                     ));
                 }
@@ -264,7 +264,7 @@ pub(super) fn resolve_config_declaration(
                         Some(value.clone()),
                         Some(value),
                         BuildConfigValueOrigin::DeclarationDefault,
-                        qualifier.qualifier_span,
+                        Some(contract_syntax.marker_span),
                         span.map(BuildConfigValueLocation::Source),
                     ));
                 }
@@ -302,9 +302,9 @@ pub(super) fn resolve_config_declaration(
         return Ok(());
     }
 
-    // Non-`#Config` declarations carry whatever provenance the ordinary parse already
-    // attached. The const-store fold propagates that provenance into folded field metadata,
-    // so no pre-fold dependency walk is needed here.
+    // Unmarked declarations carry whatever provenance the ordinary parse already attached. The
+    // const-store fold propagates that provenance into folded field metadata, so no pre-fold
+    // dependency walk is needed here.
     Ok(())
 }
 
@@ -488,10 +488,11 @@ fn config_input_type_mismatch(
 
 /// Map one contract rejection of a configured value onto the declaration's diagnostic.
 ///
-/// WHAT: a type mismatch keeps the `#Config` type diagnostic, with the command argument position
-///       when the value came from the command. A command literal outside its scalar's range keeps
-///       that position too; any other out-of-range literal reports the number-literal diagnostic.
-/// WHY:  the declaration qualifier is the only source span this lane owns for a configured value.
+/// WHAT: a type mismatch keeps the config input type diagnostic, with the command argument
+///       position when the value came from the command. A command literal outside its scalar's
+///       range keeps that position too; any other out-of-range literal reports the number-literal
+///       diagnostic.
+/// WHY:  the `$config` marker is the only source span this lane owns for a configured value.
 fn configured_value_error(
     error: ContractValueError,
     key: StringId,

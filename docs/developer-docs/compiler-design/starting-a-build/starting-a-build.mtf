@@ -4,12 +4,11 @@
 
 Until those answers settle, the compiler has no honest graph to walk. Choose climate and soil first. Then grow the plant.
 
-The Alpha compiler currently uses grouped `project`/`html` records and
-declaration-owned `#Config of T` contracts. HTML document metadata uses direct
-const root builder slots. The `$config` form in this article is accepted queued
-design. Named `project` and `html` records are the accepted configuration
-design and current syntax. Entry eligibility comes from `@entry.moth` presence,
-not config or a source directive.
+The Alpha compiler uses grouped `project`/`html` records and `$config` input
+declarations. HTML document metadata uses direct const root builder slots. Named
+`project` and `html` records are the accepted configuration design and current
+syntax. Entry eligibility comes from `@entry.moth` presence, not config or a
+source directive.
 
 ## Command and capability surface
 
@@ -148,7 +147,7 @@ Config runs through one named **compiler service**, not a build-owned copy of th
 
 ## Build configuration values and `@project`
 
-`$config` prefixes exactly one explicitly typed top-level `#` binding. Its name
+`$config` marks exactly one explicitly typed top-level `#` binding. Its name
 names the input contract, its type fixes the receiving type and its initialiser
 supplies the fallback. Selected-source declarations use the same contract
 where an ordinary compile-time constant is legal.
@@ -259,8 +258,8 @@ The command and config service report these as structured diagnostics. Entry eli
 ## Roadmap and current status
 
 - **Accepted design:** one self-contained `config.moth` service with explicit `$config` contracts, strict `project` and active-builder records, separate bootstrap input results and a specialised `ProjectGlobalsInterface`.
-- **Current implementation:** grouped parenthesised `config.moth`, declaration-owned `#Config`, typed `--input` for build, check and dev, ordinary static-`if` integration and immutable explicit `@project`.
-- **Queued work:** `general-directives-plan.md` for the directive/config cutover and capability-checked runtime title mutation. Builder slots own initial document metadata and entries come from `@entry.moth` presence.
+- **Current implementation:** grouped parenthesised `config.moth`, `$config` input declarations, typed `--input` for build, check and dev, ordinary static-`if` integration and immutable explicit `@project`.
+- **Queued work:** capability-checked runtime title mutation. Builder slots own initial document metadata and entries come from `@entry.moth` presence.
 - **Deferred or outside scope:** structural `$feature` selection, config dependencies and a general Moth build-script system.
 
 ## Exit state

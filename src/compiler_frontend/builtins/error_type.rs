@@ -186,7 +186,7 @@ fn type_declaration(id: PathId, type_id: TypeId, span: Option<SourceSpan>) -> De
         value_mode: ValueMode::ImmutableReference,
         value: DeclarationValue::Shell(DeclarationShell::Struct),
         binding_span: span,
-        config_qualifier: None,
+        config_contract: None,
     }
 }
 fn required_field(id: PathId, type_id: TypeId, span: Option<SourceSpan>) -> Declaration {
@@ -197,7 +197,7 @@ fn required_field(id: PathId, type_id: TypeId, span: Option<SourceSpan>) -> Decl
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: span,
-        config_qualifier: None,
+        config_contract: None,
     }
 }
 
@@ -211,7 +211,7 @@ fn defaulted_u32_field(id: PathId, span: Option<SourceSpan>) -> Declaration {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: span,
-        config_qualifier: None,
+        config_contract: None,
     }
 }
 

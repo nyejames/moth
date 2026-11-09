@@ -1,6 +1,7 @@
 @core/text length
 
-label #Config of String = "a😊b"
+$config
+label #String = "a😊b"
 
 export:
     len #I32 = length(label)

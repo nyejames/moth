@@ -454,7 +454,6 @@ fn compile_fixture(
             path_syntax,
             &mut string_table,
             &mut path_fork,
-            &mut span_builder,
         )
         .expect("Moth template preparation should succeed");
         output

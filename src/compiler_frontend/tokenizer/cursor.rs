@@ -632,6 +632,7 @@ impl<'a> TokenCursor<'a> {
     /// Contiguous cursors always return `false`. Adjacent ranges are still one logical token
     /// stream; only a real source gap must prevent consumers from comparing the two tokens as an
     /// authored pair.
+    #[cfg(test)]
     pub(crate) fn is_at_segment_start(self) -> bool {
         let TokenCursorBounds::Segmented(view) = self.bounds else {
             return false;

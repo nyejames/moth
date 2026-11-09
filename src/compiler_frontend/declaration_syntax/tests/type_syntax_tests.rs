@@ -870,7 +870,7 @@ fn resolves_named_types_recursively_in_composite_types() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Shell(DeclarationShell::Struct),
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     }];
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(declarations, &path_fork));
     let const_values = ConstValueStore::default();
@@ -932,7 +932,7 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Shell(DeclarationShell::Struct),
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     }];
     let mut generic_declarations = FxHashMap::default();
     generic_declarations.insert(box_path.to_owned(), GenericDeclarationKind::Struct);
@@ -1032,7 +1032,7 @@ fn generic_instance_resolution_rejects_wrong_arity() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Shell(DeclarationShell::Struct),
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     }];
     let mut generic_declarations = FxHashMap::default();
     generic_declarations.insert(box_path, GenericDeclarationKind::Struct);
@@ -1107,7 +1107,7 @@ fn bare_generic_type_name_requires_type_arguments() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Shell(DeclarationShell::Struct),
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     }];
     let mut generic_declarations = FxHashMap::default();
     generic_declarations.insert(box_path, GenericDeclarationKind::Struct);
@@ -1231,7 +1231,7 @@ fn unresolved_generic_argument_does_not_intern_instance() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Shell(DeclarationShell::Struct),
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     }];
     let mut generic_declarations = FxHashMap::default();
     generic_declarations.insert(box_path, GenericDeclarationKind::Struct);

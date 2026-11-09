@@ -407,7 +407,6 @@ unit_code! {
 unit_code! {
     impl TypeAnnotationContext {
         DeclarationTarget = 1,
-        BuildConfigContract = 2,
         SignatureParameter = 3,
         SignatureReturn = 4,
         TypeAliasTarget = 5,

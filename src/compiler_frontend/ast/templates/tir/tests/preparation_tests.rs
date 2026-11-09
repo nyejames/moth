@@ -1748,7 +1748,7 @@ fn preparation_const_required_accepts_a_module_constant_collection_step() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         }],
         &path_fork,
     );

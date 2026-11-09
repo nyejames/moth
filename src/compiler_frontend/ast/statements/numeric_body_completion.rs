@@ -3024,7 +3024,7 @@ fn absent_declaration(row: &PendingBindingRow, type_id: TypeId) -> Declaration {
         value_mode: row.value_mode,
         value: DeclarationValue::Absent,
         binding_span: row.binding_span,
-        config_qualifier: None,
+        config_contract: None,
     }
 }
 
@@ -3050,7 +3050,7 @@ fn declaration_for(
         value_mode: row.value_mode,
         value: DeclarationValue::Initializer(value.id()),
         binding_span: row.binding_span,
-        config_qualifier: None,
+        config_contract: None,
     })
 }
 

@@ -1,4 +1,4 @@
-**Current support and accepted design.** Moth supports directives in template heads today. Source directives such as $config are planned. See @../progress (Progress) for current support.
+**Current support.** Moth supports template-head directives and the `$config` source modifier. See @../progress (Progress) for current support.
 
 A directive modifies an existing construct. Template-head directives modify their template and source directives modify the following eligible construct.
 
@@ -12,14 +12,14 @@ A directive in a template head modifies the containing template. For example, $m
 
 The target is the template whose head contains the directive, not an enclosing template. Other template directives declare slots, insert content and control formatting. See @../templates/#template-directives (Template directives).
 
-A source directive modifies the next eligible declaration or statement. The compiler defines which kinds of constructs each directive can modify. For example, the accepted $config design marks a typed compile-time constant as a build input:
+A source directive modifies the next eligible declaration or statement. The compiler defines which kinds of constructs each directive can modify. `$config` marks one explicitly typed top-level compile-time `#` binding as a build input:
 
 [codeblock, $code "moth":
     $config
     api_url #String = "https://example.com"
 ]
 
-This $config syntax is not yet implemented. The current spelling uses #Config of T, described under @../project-structure/#build-inputs (Build configuration values).
+The binding name is the input key, its declared type is the receiving contract and its initializer is the missing-input fallback. Only a marked binding may omit its initializer. See @../project-structure/#build-inputs (Build configuration values).
 
 Source directives use their own line. The next eligible construct must follow without an empty line. Comments may appear between the directive and its target as long as no blank line intervenes:
 
@@ -41,7 +41,9 @@ A directive may accept one compile-time operand, with either a value or a named 
     $name key = value
 ]
 
-A named operand contains one key and one value. It is not a function parameter list, and it cannot have an authored type annotation. Values use Moth's compile-time expression rules and cannot depend on runtime state or cause side effects.
+A named operand contains one key and one value. It is not a function parameter list, and it cannot have an authored type annotation. Values use Moth's compile-time expression rules and cannot depend on runtime state or cause side effects. `$config` accepts no operand.
+
+The compiler registers `$before`, `$after`, `$fresh`, `$slot`, `$in`, `$note`, `$todo`, `$doc`, `$raw`, `$md`, `$html`, `$css`, `$escape_html` and `$code` for template heads, and `$config` as the source-only modifier.
 
 Directive calls such as `$name(...)` are rejected with a placement error rather than parsed as a call. Ordinary function calls such as `f()` are unaffected.
 
@@ -51,15 +53,21 @@ Template heads retain their own separators and slot labels. For example, `$slot 
 
 Module roles come from filenames rather than directives. A directory can contain @mod.moth for its normal public API, @package.moth for its support package API and @entry.moth for its executable entry. The presence of @entry.moth makes the entry eligible for builder selection. No directive marks a module or file as an entry.
 
-The separate config.moth file continues to use ordinary named constants for project and builder settings:
+The separate config.moth file uses ordinary named constants for project and builder settings and the `$config` source modifier for typed inputs:
 
 [codeblock, $code "moth":
+    $config
+    version #String? = "1.0.0"
+
     project #= (
         name = "my_site",
+        version = version,
     )
 
     html #= ()
 ]
+
+`$config` attaches to one explicitly typed top-level compile-time `#` binding. Its name is the input key, its declared type is the contract and its initializer is the fallback. Only a marked binding may omit an initializer. Other top-level names remain ordinary private config helper constants.
 
 There are no $project, $builder or $html_builder directives. See @../project-structure/#project-config (Project configuration) and @../project-structure/#entry-config (Entry metadata and builder slots).
 

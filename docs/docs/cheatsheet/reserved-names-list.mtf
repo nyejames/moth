@@ -46,11 +46,11 @@ The `@project` dependency root is reserved for project globals.
 - `$escape_html` - escape HTML-sensitive content.
 - `$code` - code blocks with optional highlighting, such as `$code "moth"`.
 
-### General directives
+### Source directives
 
-- `$config` - mark a compile-time declaration as a build input (compiler).
+- `$config` - source-only modifier that marks one explicitly typed top-level compile-time `#` binding as a build input (compiler).
 
-`$config` is accepted language design and is queued for implementation. Every template directive above is registered by the compiler and available under every builder.
+`$config` is delivered and takes no operand. It occupies its own line immediately above its binding; comment-only lines may intervene, but a blank physical line breaks attachment. Every template directive above is registered by the compiler and available under every builder.
 
 No `$project`, `$builder` or `$html_builder` directive exists. Project and builder settings use the ordinary named `project` and builder records in `config.moth`.
 
