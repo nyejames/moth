@@ -379,8 +379,8 @@ pub(crate) struct FileValueResolutionServices {
     pub(crate) module_resources: Rc<RefCell<ModuleResourceTable>>,
     /// Expression-qualified targets reachable from constant-header and materialised scopes.
     ///
-    /// WHAT: the same `(owning source, authored path row)` lookup the completed module environment
-    ///       carries, copied behind this shared service.
+    /// WHAT: the same shared `(owning source, authored path row)` map the completed module
+    ///       environment carries, not a copy of it.
     /// WHY: constant headers and generated bodies parse before or outside the completed
     ///      `AstModuleLookups` package, but they still consume the binding proved at Stage 3.
     pub(crate) qualified_reference_targets:

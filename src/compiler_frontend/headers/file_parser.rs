@@ -43,9 +43,9 @@ use crate::compiler_frontend::headers::top_level_classifier::{
     starts_trait_declaration_after_must_at_source, statement_boundary_at_source,
 };
 use crate::compiler_frontend::headers::types::{
-    DependencySelection, FileFrontendPrepareError, FileFrontendPrepareFailure,
-    FileFrontendPrepareOutput, FileRole, Header, HeaderBuildContext, HeaderExportMode, HeaderKind,
-    HeaderParseContext, HeaderParseFailure, RetainedDependencyClause, SourceTokenOwner,
+    DependencySelection, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole, Header,
+    HeaderBuildContext, HeaderExportMode, HeaderKind, HeaderParseContext, HeaderParseFailure,
+    RetainedDependencyClause, SourceTokenOwner,
 };
 use crate::compiler_frontend::paths::const_paths::can_serialize_path_component_bare;
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
@@ -1275,17 +1275,10 @@ pub(super) fn finish_file_output(
         context.string_table,
         context.path_fork,
     ) {
-        return Err(match failure {
-            HeaderParseFailure::Diagnostic(diagnostic) => {
-                FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
-                    warnings: output.warnings,
-                    diagnostic,
-                })
-            }
-            HeaderParseFailure::Infrastructure(error) => {
-                FileFrontendPrepareFailure::Infrastructure(error)
-            }
-        });
+        return Err(FileFrontendPrepareFailure::from_header_parse(
+            failure,
+            output.warnings,
+        ));
     }
     Ok(output)
 }
@@ -1326,11 +1319,8 @@ fn attach_structural_file_facts(
     fn append_source_range_paths(
         output: &mut Vec<crate::compiler_frontend::paths::path_syntax::PathSyntaxId>,
         canonical: &SourceTokens,
-        range: Option<TokenRange>,
+        range: TokenRange,
     ) -> Result<(), InfrastructureFailure> {
-        let Some(range) = range else {
-            return Ok(());
-        };
         let cursor = canonical.cursor(range).map_err(|error| {
             InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
                 "retained declaration range could not be resolved for path collection: {error:?}"
@@ -1353,7 +1343,7 @@ fn attach_structural_file_facts(
         }
     }
 
-    for header in &output.headers {
+    for (header_index, header) in output.headers.iter().enumerate() {
         if header.tokens.source() != output.file_id {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::HeaderParsing,
@@ -1407,75 +1397,20 @@ fn attach_structural_file_facts(
             // body, initializer and defaults. Configuration-qualified bodies stay out of scope.
             push_header_expression_ranges(
                 header,
+                header_index,
                 canonical,
-                output.file_id,
                 &mut qualified_reference_ranges,
             )?;
             continue;
         }
 
-        if let Some(cursor) = body_cursor {
-            append_source_paths(&mut consumed_path_syntax_ids, cursor);
-        }
-        match &header.kind {
-            HeaderKind::Constant { declaration } => {
-                append_source_range_paths(
-                    &mut consumed_path_syntax_ids,
-                    canonical,
-                    declaration.initializer_range,
-                )?;
-            }
-            HeaderKind::Function { signature, .. } => {
-                for parameter in &signature.parameters {
-                    append_source_range_paths(
-                        &mut consumed_path_syntax_ids,
-                        canonical,
-                        parameter.default_range,
-                    )?;
-                }
-            }
-            HeaderKind::Struct { fields, .. } => {
-                for field in fields {
-                    append_source_range_paths(
-                        &mut consumed_path_syntax_ids,
-                        canonical,
-                        field.default_range,
-                    )?;
-                }
-            }
-            HeaderKind::Choice { variants, .. } => {
-                for variant in variants {
-                    let crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax::Record {
-                        fields,
-                    } = &variant.payload
-                    else {
-                        continue;
-                    };
-                    for field in fields {
-                        append_source_range_paths(
-                            &mut consumed_path_syntax_ids,
-                            canonical,
-                            field.default_range,
-                        )?;
-                    }
-                }
-            }
-            HeaderKind::Trait { declaration } => {
-                for requirement in &declaration.requirements {
-                    for parameter in &requirement.signature.parameters {
-                        append_source_range_paths(
-                            &mut consumed_path_syntax_ids,
-                            canonical,
-                            parameter.default_range,
-                        )?;
-                    }
-                }
-            }
-            HeaderKind::StartFunction
-            | HeaderKind::TypeAlias { .. }
-            | HeaderKind::ConstTemplate { .. }
-            | HeaderKind::TraitConformance { .. }
-            | HeaderKind::TraitIncompatibility { .. } => {}
+        // Config-qualified shells are not expression syntax, but their path rows are still
+        // consumed so the file-reference classifier never treats them as file values. Reuse the
+        // same range collection the expression lane uses instead of repeating its header match.
+        let mut config_owned_ranges = Vec::new();
+        push_header_expression_ranges(header, header_index, canonical, &mut config_owned_ranges)?;
+        for (_, range) in config_owned_ranges {
+            append_source_range_paths(&mut consumed_path_syntax_ids, canonical, range)?;
         }
     }
 
@@ -1495,16 +1430,12 @@ fn attach_structural_file_facts(
         string_table,
         path_fork,
     )?;
-    if let Some(alias_span) = qualified_references.unsupported_alias_span {
-        return Err(HeaderParseFailure::Diagnostic(
-            token_lexical::common_syntax_mistake(
-                CommonSyntaxMistakeReason::InvalidAsOperator,
-                Some(alias_span),
-            ),
-        ));
-    }
-    consumed_path_syntax_ids.extend(qualified_references.consumed_path_syntax_ids);
-    output.qualified_references = qualified_references.occurrences;
+    consumed_path_syntax_ids.extend(
+        qualified_references
+            .iter()
+            .map(|occurrence| occurrence.dependency.path_syntax),
+    );
+    output.qualified_references = qualified_references;
 
     output.structural_file_references = classify_prepared_file_references(
         output.path_syntax.table(),

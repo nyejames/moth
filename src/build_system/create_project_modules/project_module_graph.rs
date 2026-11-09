@@ -29,7 +29,7 @@
 
 #[cfg(test)]
 use super::module_identity::ModuleIdentityRecord;
-use super::module_identity::{ModuleId, ModuleIdentityTable, public_surface_role};
+use super::module_identity::{ModuleId, ModuleIdentityTable};
 use super::source_tree_index::SourceTreeIndex;
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
@@ -65,8 +65,6 @@ pub(crate) enum DependencyEdgeOutcome {
 /// The project graph and package-boundary identity tables use one rule owner while retaining
 /// their separate boundary-local identities and storage.
 trait SupportVisibilityTopology {
-    fn role(&self, module_id: ModuleId) -> ModuleRootRole;
-
     fn nearest_parent(&self, module_id: ModuleId) -> Option<ModuleId>;
 
     /// Whether this module occupies the normal consumer/owner position.
@@ -78,9 +76,7 @@ trait SupportVisibilityTopology {
     ///      mistaken for a support-scoped consumer, and no normal interface is manufactured.
     fn occupies_normal_position(&self, module_id: ModuleId) -> bool;
 
-    fn has_support_surface(&self, module_id: ModuleId) -> bool {
-        self.role(module_id) == ModuleRootRole::Support
-    }
+    fn has_support_surface(&self, module_id: ModuleId) -> bool;
 }
 
 /// One canonical module node in the project module graph.
@@ -134,10 +130,7 @@ impl ProjectModuleGraphNode {
 
     /// The role of the package-facing public surface, absent for an entry-only module.
     pub(crate) fn public_surface_role(&self) -> Option<ModuleRootRole> {
-        public_surface_role(
-            self.root_files.normal.is_some(),
-            self.root_files.support.is_some(),
-        )
+        self.root_files.public_surface_role()
     }
 
     /// The stable origin of the package-facing public surface.
@@ -171,14 +164,11 @@ impl ProjectModuleGraphNode {
     }
 
     /// The structural role of the preparation-anchor root.
+    #[cfg(test)]
     pub(crate) fn role(&self) -> ModuleRootRole {
-        if self.root_files.normal.is_some() {
-            ModuleRootRole::Normal
-        } else if self.root_files.support.is_some() {
-            ModuleRootRole::Support
-        } else {
-            ModuleRootRole::Entry
-        }
+        self.root_files
+            .anchor_role()
+            .expect("a structural graph node has at least one root")
     }
 
     /// The module's fixed role-keyed root files.
@@ -259,33 +249,12 @@ impl ProjectModuleGraph {
             .into_iter()
             .enumerate()
             .map(|(index, (stable_origin, root_file))| {
-                let (normal_root, support_root, entry_root) = match stable_origin.role() {
-                    ModuleRootRole::Normal => (Some(root_file), None, None),
-                    ModuleRootRole::Support => (None, Some(root_file), None),
-                    ModuleRootRole::Entry => (None, None, Some(root_file)),
-                    ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => {
-                        (None, None, None)
-                    }
-                };
-                let surface_origins = match stable_origin.role() {
-                    ModuleRootRole::Normal => {
-                        ModuleRootFiles::new(Some(stable_origin.clone()), None, None)
-                    }
-                    ModuleRootRole::Support => {
-                        ModuleRootFiles::new(None, Some(stable_origin.clone()), None)
-                    }
-                    ModuleRootRole::Entry => {
-                        ModuleRootFiles::new(None, None, Some(stable_origin.clone()))
-                    }
-                    ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => {
-                        ModuleRootFiles::new(None, None, None)
-                    }
-                };
+                let role = stable_origin.role();
                 ProjectModuleGraphNode {
                     module_id: ModuleId::from_index(index),
+                    surface_origins: ModuleRootFiles::single(role, stable_origin.clone()),
                     shared_origin: stable_origin,
-                    surface_origins,
-                    root_files: ModuleRootFiles::new(normal_root, support_root, entry_root),
+                    root_files: ModuleRootFiles::single(role, root_file),
                     nearest_parent: None,
                 }
             })
@@ -328,11 +297,7 @@ impl ProjectModuleGraph {
             nodes.push(ProjectModuleGraphNode {
                 module_id: *module_id,
                 shared_origin: record.shared_origin().clone(),
-                surface_origins: ModuleRootFiles::new(
-                    record.surface_origin(ModuleRootRole::Normal).cloned(),
-                    record.surface_origin(ModuleRootRole::Support).cloned(),
-                    record.surface_origin(ModuleRootRole::Entry).cloned(),
-                ),
+                surface_origins: record.surface_origins().clone(),
                 root_files: record.root_files().clone(),
                 nearest_parent,
             });
@@ -380,11 +345,7 @@ impl ProjectModuleGraph {
             nodes.push(ProjectModuleGraphNode {
                 module_id: *module_id,
                 shared_origin: record.shared_origin().clone(),
-                surface_origins: ModuleRootFiles::new(
-                    record.surface_origin(ModuleRootRole::Normal).cloned(),
-                    record.surface_origin(ModuleRootRole::Support).cloned(),
-                    record.surface_origin(ModuleRootRole::Entry).cloned(),
-                ),
+                surface_origins: record.surface_origins().clone(),
                 root_files: record.root_files().clone(),
                 nearest_parent: None,
             });
@@ -847,7 +808,7 @@ impl ProjectModuleGraph {
         let node = &self.nodes[module_id.index()];
         format!(
             "{:?} {:?} (ModuleId {})",
-            node.role(),
+            node.stable_origin().role(),
             node.stable_origin().logical_module_path(),
             module_id.index()
         )
@@ -882,10 +843,6 @@ fn module_on_dependency_cycle(
 }
 
 impl SupportVisibilityTopology for ProjectModuleGraph {
-    fn role(&self, module_id: ModuleId) -> ModuleRootRole {
-        self.nodes[module_id.index()].role()
-    }
-
     fn nearest_parent(&self, module_id: ModuleId) -> Option<ModuleId> {
         self.nodes[module_id.index()].nearest_parent
     }
@@ -901,10 +858,6 @@ impl SupportVisibilityTopology for ProjectModuleGraph {
 }
 
 impl SupportVisibilityTopology for ModuleIdentityTable {
-    fn role(&self, module_id: ModuleId) -> ModuleRootRole {
-        self.record(module_id).role()
-    }
-
     fn nearest_parent(&self, module_id: ModuleId) -> Option<ModuleId> {
         self.nearest_ancestor_module(module_id)
     }
@@ -959,7 +912,9 @@ fn module_consumer_role(
     if topology.occupies_normal_position(module_id) {
         ModuleRootRole::Normal
     } else {
-        topology.role(module_id)
+        // Every structural module holds at least one root, so a module outside the normal
+        // position is support-only and consumes at the strict support scope.
+        ModuleRootRole::Support
     }
 }
 

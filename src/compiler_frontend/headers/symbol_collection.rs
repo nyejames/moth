@@ -11,6 +11,7 @@ use crate::compiler_frontend::builtins::error_type::{
     is_reserved_builtin_symbol, is_reserved_parameter_contract_symbol, register_builtin_error_types,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::{DiagnosticBag, ReservedNameOwner};
@@ -89,7 +90,9 @@ pub(super) fn build_module_symbols(
 
     // The retained clause and selection tables have completed validation above. Move them into
     // the module-owned package now so binding reads one canonical table without cloning every
-    // prepared file's selections before the file output is consumed.
+    // prepared file's selections before the file output is consumed. Occurrence header indexes
+    // are file-local, so rebase them onto the module-wide header order aggregation will produce.
+    let mut header_base = 0usize;
     for file_output in prepared_files.iter_mut() {
         if !file_output.file_dependency_clauses.is_empty() {
             module_symbols.file_dependency_clauses_by_source.insert(
@@ -98,10 +101,24 @@ pub(super) fn build_module_symbols(
             );
         }
         if !file_output.qualified_references.is_empty() {
-            module_symbols.qualified_references_by_source.insert(
-                file_output.source_file.to_owned(),
-                std::mem::take(&mut file_output.qualified_references),
-            );
+            let mut occurrences = std::mem::take(&mut file_output.qualified_references);
+            for occurrence in &mut occurrences {
+                occurrence.owning_header_index = occurrence
+                    .owning_header_index
+                    .checked_add(header_base)
+                    .ok_or_else(|| {
+                        HeaderPreparationFailure::Infrastructure(
+                            InfrastructureFailure::internal(
+                                CompilerStage::HeaderParsing,
+                                "qualified-reference header index overflowed the module header domain",
+                            )
+                            .into(),
+                        )
+                    })?;
+            }
+            module_symbols
+                .qualified_references_by_source
+                .insert(file_output.source_file.to_owned(), occurrences);
         }
         if !file_output.dependency_selections.is_empty() {
             module_symbols.dependency_selections_by_source.insert(
@@ -115,6 +132,17 @@ pub(super) fn build_module_symbols(
                 std::mem::take(&mut file_output.start_body_binding_spans),
             );
         }
+        header_base = header_base
+            .checked_add(file_output.headers.len())
+            .ok_or_else(|| {
+                HeaderPreparationFailure::Infrastructure(
+                    InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
+                        "module header count overflowed the header index domain",
+                    )
+                    .into(),
+                )
+            })?;
     }
 
     register_builtin_symbols(&mut module_symbols, string_table, path_fork);

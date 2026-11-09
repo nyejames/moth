@@ -556,10 +556,7 @@ impl MothTemplateScopeFixture {
     ) -> Result<(Ast, StringTable, PathInternerFork), PreparedFailure> {
         let html_interface = empty_provider_interface("html");
         let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-            kind:
-                crate::compiler_frontend::public_interface::ProviderDependencyKind::TemplatePrelude {
-                    package_prefix: "html",
-                },
+            kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::TemplatePrelude,
             interface: &html_interface,
         }])
         .expect("one standard template prelude provider should register");
@@ -594,15 +591,16 @@ impl MothTemplateScopeFixture {
         let external_package_registry = Arc::new(self.external_package_registry.clone());
         // Production installs shared value services for every module. The fixture keeps no Stage 0
         // file facts, but qualified primaries still need the binding-owned target map.
-        let qualified_reference_targets = sorted_headers
-            .binding_environment
-            .qualified_reference_targets
-            .clone();
+        let qualified_reference_targets = Arc::clone(
+            &sorted_headers
+                .binding_environment
+                .qualified_reference_targets,
+        );
         let file_value_resolution = (!qualified_reference_targets.is_empty()).then(|| {
             Rc::new(FileValueResolutionServices {
                 stage0_resolution_facts: None,
                 module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
-                qualified_reference_targets: Arc::new(qualified_reference_targets),
+                qualified_reference_targets,
                 module_origin: None,
                 public_source_trait_origins: Arc::default(),
                 frozen_identity_handle: FrozenIdentityHandle::new(),
@@ -671,10 +669,7 @@ impl MothTemplateScopeFixture {
     > {
         let html_interface = empty_provider_interface("html");
         let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-            kind:
-                crate::compiler_frontend::public_interface::ProviderDependencyKind::TemplatePrelude {
-                    package_prefix: "html",
-                },
+            kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::TemplatePrelude,
             interface: &html_interface,
         }])
         .expect("one standard template prelude provider should register");
@@ -1624,9 +1619,7 @@ fn moth_template_sees_standard_html_prelude_constants_without_provider_headers()
     };
 
     let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
-        kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::TemplatePrelude {
-            package_prefix: "html",
-        },
+        kind: crate::compiler_frontend::public_interface::ProviderDependencyKind::TemplatePrelude,
         interface: &html_interface,
     }])
     .expect("the standard template prelude provider should register");

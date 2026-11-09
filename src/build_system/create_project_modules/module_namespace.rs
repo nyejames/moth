@@ -37,6 +37,9 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDepende
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source_packages::root_file::{
+    dependency_component_is_config_file, dependency_component_is_legacy_support_marker,
+};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
@@ -1009,7 +1012,7 @@ fn resolve_entry(
             let root_file = index
                 .module_identities()
                 .record(*target_module_id)
-                .root_file_for_surface(*surface)
+                .root_file(*surface)
                 .unwrap_or_else(|| {
                     panic!(
                         "cross-module namespace selected missing {surface:?} surface for ModuleId {}",
@@ -1042,12 +1045,8 @@ fn reject_direct_special_file_dependency(
         .component(provider.path)
         .map(|component| string_table.resolve(component));
     if source_component.is_some_and(|component| {
-        component == "config.moth"
-            || component == "config"
-            || (component.starts_with('+') && !component.contains('.') && component.len() > 1)
-            || (component.starts_with('+')
-                && component.ends_with(".moth")
-                && component.len() > "+.moth".len())
+        dependency_component_is_config_file(component)
+            || dependency_component_is_legacy_support_marker(component)
     }) {
         return Err(imports::direct_special_file_import(
             provider.path,

@@ -44,12 +44,9 @@ fn authored(
     }
 }
 
-fn template_prelude<'a>(
-    package_prefix: &'a str,
-    interface: &'a PublicSemanticInterface,
-) -> SourceProviderDependency<'a> {
+fn template_prelude(interface: &PublicSemanticInterface) -> SourceProviderDependency<'_> {
     SourceProviderDependency {
-        kind: ProviderDependencyKind::TemplatePrelude { package_prefix },
+        kind: ProviderDependencyKind::TemplatePrelude,
         interface,
     }
 }
@@ -138,8 +135,8 @@ fn duplicate_template_prelude_fails() {
     let provider = provider_interface("html");
 
     let error = SourceProviderDependencySet::new(vec![
-        template_prelude("html", &provider),
-        template_prelude("html", &provider),
+        template_prelude(&provider),
+        template_prelude(&provider),
     ])
     .expect_err("the template prelude must not register twice");
 
@@ -290,13 +287,12 @@ fn unbound_shell_stays_outside_the_provider_map() {
 #[test]
 fn template_prelude_has_no_shell_and_keeps_its_prefix() {
     let provider = provider_interface("html");
-    let set = SourceProviderDependencySet::new(vec![template_prelude("html", &provider)])
+    let set = SourceProviderDependencySet::new(vec![template_prelude(&provider)])
         .expect("one template prelude provider should register");
 
-    let (prefix, provider_id) = set
+    let provider_id = set
         .template_prelude_provider()
         .expect("the fixed template prelude should resolve");
-    assert_eq!(prefix, "html");
     assert!(std::ptr::eq(
         set.interface(provider_id)
             .expect("prelude provider resolves"),

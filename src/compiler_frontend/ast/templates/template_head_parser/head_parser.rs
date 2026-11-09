@@ -36,7 +36,7 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
 use crate::compiler_frontend::ast::expressions::parse_expression_qualified_references::{
-    QualifiedPathStatus, diagnosed_occurrence_failure, qualified_path_status,
+    QualifiedPathStatus, qualified_path_status,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ValueDeclarationRef;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
@@ -906,11 +906,6 @@ pub fn parse_template_head(
                             string_table,
                         )?;
                         defer_comma_advance = true;
-                    }
-                    // Preparation recognised this occurrence, so its binding diagnostic owns the
-                    // failure. Never reinterpret the path as a file value or emit a second one.
-                    QualifiedPathStatus::Diagnosed => {
-                        return Err(diagnosed_occurrence_failure(path_id).into());
                     }
                 }
                 apply_head_compatibility(

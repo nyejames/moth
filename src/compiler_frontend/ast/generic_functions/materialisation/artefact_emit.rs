@@ -480,14 +480,11 @@ impl GenericTemplateArtefact {
                 string_table,
             )?),
         );
-        // Qualified-reference targets are semantic facts, not donor syntax. Reinstall them under
-        // the retained donor source identity so generated AST lowering consumes the declaration
-        // the authored path selected instead of re-resolving the name or treating it as a file.
-        for (key, resolved) in materialised_body.qualified_reference_targets.iter() {
-            environment
-                .qualified_reference_targets
-                .insert(*key, resolved.clone());
-        }
+        // Qualified-reference targets are semantic facts, not donor syntax. Share the exact map
+        // the materialised body and its value services use, so generated AST lowering consumes
+        // the declaration the authored path selected without copying it or re-resolving a name.
+        environment.qualified_reference_targets =
+            Arc::clone(&materialised_body.qualified_reference_targets);
         for binding in &self.declarations {
             let local_path = binding.local_path;
             environment

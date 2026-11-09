@@ -254,28 +254,16 @@ fn prepare_single_file_with_fork_role(
             ..Default::default()
         });
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let interned_path = path_fork
-        .try_intern_filesystem_path(file_path, string_table)
-        .expect("test path should be UTF-8");
+    let context = HeaderTestPrepareContext {
+        source_id: SourceId::COMPILATION_ROOT,
+        options: &options,
+        style_directives: &style_directives,
+    };
     let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = tokenize(
+    let output = prepare_test_source_file(
         source,
-        interned_path,
-        TokenizerEntryMode::SourceFile,
-        &style_directives,
-        string_table,
-        path_fork,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
-    .expect("tokenization should succeed");
-
-    let (owner, path_syntax) = owner_from_lexed_source(file_tokens);
-    let output = prepare_file_from_tokens(
-        owner,
-        interned_path,
-        path_syntax,
-        &options,
+        file_path,
+        &context,
         string_table,
         0,
         0,

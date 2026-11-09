@@ -1551,12 +1551,10 @@ fn counter_test_module() -> crate::compiler_frontend::module_compilation::Module
     use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
     use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
     use crate::compiler_frontend::hir::reachability::HirModuleLinkFacts;
-    use crate::compiler_frontend::module_compilation::ModuleRootActivity;
     use crate::compiler_frontend::module_compilation::artefact::{
         ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
     };
     use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
-    use std::path::PathBuf;
     use std::sync::Arc;
 
     crate::compiler_frontend::module_compilation::Module {

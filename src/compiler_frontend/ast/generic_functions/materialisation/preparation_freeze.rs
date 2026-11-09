@@ -1,9 +1,7 @@
 //! Declaring-module preparation capture and publication freeze.
 use super::super::GenericFunctionTemplate;
 use super::artefact_emit::ModuleMaterialisationContext;
-use super::frozen_syntax::{
-    SharedDonorIdentity, StableBodyCaptureFacts, StableBodySyntax, StableQualifiedReference,
-};
+use super::frozen_syntax::{SharedDonorIdentity, StableBodyCaptureFacts, StableBodySyntax};
 use super::nominal_blueprints::NominalMaterialisationBlueprint;
 use super::semantic_closure::{StableSemanticClosure, stable_body_symbol_names};
 use super::sidecar_build::bootstrap_call_summary_from_signature;
@@ -51,11 +49,12 @@ use crate::compiler_frontend::folded_value::{
     PublicConstTemplate, PublicFoldedValue, convert_const_value_to_folded_value,
 };
 use crate::compiler_frontend::headers::binding_environment::{
-    HeaderBindingEnvironment, ResolvedQualifiedTarget, SourceDeclarationTarget,
-    SourceFunctionTarget,
+    HeaderBindingEnvironment, ResolvedQualifiedReference, ResolvedQualifiedTarget,
+    SourceDeclarationTarget, SourceFunctionTarget,
 };
 
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_interface::{
     ConcreteCallSummaryRecord, PublicDeclarationRecord, PublicDeclarationSemantics,
@@ -177,7 +176,7 @@ struct TemplateDeclarationSelection<'template> {
     referenced_names: FxHashSet<String>,
     selected_paths: FxHashSet<PathId>,
     local_declarations: Box<[PathId]>,
-    qualified_references: Vec<StableQualifiedReference>,
+    qualified_references: Vec<(PathSyntaxId, ResolvedQualifiedReference)>,
 }
 
 impl ModuleMaterialisationPreparationBuilder {
@@ -826,7 +825,7 @@ impl ModuleMaterialisationCapture {
         &self,
         body: &super::super::GenericFunctionBody,
         selected_paths: &mut FxHashSet<PathId>,
-    ) -> Result<Vec<StableQualifiedReference>, InfrastructureFailure> {
+    ) -> Result<Vec<(PathSyntaxId, ResolvedQualifiedReference)>, InfrastructureFailure> {
         let donor_file_id = body.donor_source_id();
         let (source_tokens, token_range, token_sequence) = body.canonical_view();
         let mut cursor = crate::compiler_frontend::ast::generic_functions::templates::body_cursor(
@@ -835,11 +834,11 @@ impl ModuleMaterialisationCapture {
             token_sequence,
             "qualified-reference capture",
         )?;
-        let mut seen_paths = FxHashSet::default();
         let mut references = Vec::new();
+        // Each authored path token owns its own path-syntax row, and the body cursor yields
+        // tokens in source order, so rows arrive once and already sorted.
         while let Some(token) = cursor.advance() {
             if let Some(path_syntax) = token.path_syntax_id()
-                && seen_paths.insert(path_syntax)
                 && let Some(resolved) = self
                     .binding_environment
                     .qualified_reference_target(donor_file_id, path_syntax)
@@ -853,17 +852,12 @@ impl ModuleMaterialisationCapture {
                     }
                     ResolvedQualifiedTarget::External { .. } => {}
                 }
-                references.push(StableQualifiedReference {
-                    path_syntax,
-                    selected_span: resolved.selected_span,
-                    target: resolved.target.clone(),
-                });
+                references.push((path_syntax, resolved.clone()));
             }
             if token.is_eof() {
                 break;
             }
         }
-        references.sort_by_key(|reference| reference.path_syntax);
         Ok(references)
     }
 

@@ -8,7 +8,8 @@
 //!      later owners' decisions.
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::CompilerStage;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::{CommonSyntaxMistakeReason, CompilerStage};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
 use crate::compiler_frontend::headers::dependency_paths::validate_dependency_path;
@@ -16,7 +17,7 @@ use crate::compiler_frontend::headers::dependency_target::{
     checked_provider_target, classify_dependency_target,
 };
 use crate::compiler_frontend::headers::types::{Header, HeaderKind, HeaderParseFailure};
-use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::path_interner::{PathIdRemap, PathInternerFork};
@@ -37,6 +38,12 @@ use crate::compiler_frontend::utilities::token_scan::{
 ///      deliberately not a dependency clause and never enters file visibility.
 #[derive(Clone, Debug)]
 pub struct QualifiedReferenceOccurrence {
+    /// Index of the header shell that authored this occurrence in source order.
+    ///
+    /// WHAT: file preparation numbers its own headers from zero; symbol collection rebases the
+    ///       index into the module-wide header vector.
+    /// WHY: Stage 3 ordering reads occurrences per header without rescanning token ranges.
+    pub owning_header_index: usize,
     /// Authored provider path and shell identity, shared with ordinary direct-selection clauses.
     pub dependency: RetainedDependencyPath,
     /// The single selected symbol immediately after the path on the same physical line.
@@ -67,24 +74,6 @@ impl QualifiedReferenceOccurrence {
     }
 }
 
-/// Recognized occurrences of one scan pass.
-pub(crate) struct QualifiedReferenceCollection {
-    /// Occurrences in canonical source order.
-    pub(crate) occurrences: Vec<QualifiedReferenceOccurrence>,
-    /// Path rows owned by an occurrence.
-    ///
-    /// WHY: the prepared file-reference table must not file these rows as extensionless or
-    /// resource file values; one authored path token has exactly one semantic role.
-    pub(crate) consumed_path_syntax_ids: Vec<PathSyntaxId>,
-    /// Span of the first `as` authored directly after a selected symbol.
-    ///
-    /// WHAT: an alias in expression position, which is not dependency-clause or expression
-    ///       syntax.
-    /// WHY: the ordinary header lane reports it as a typed syntax diagnostic. The scanner itself
-    ///      owns no diagnostic policy.
-    pub(crate) unsupported_alias_span: Option<SourceSpan>,
-}
-
 /// Recognize every expression-qualified selection inside the supplied token ranges.
 ///
 /// WHAT: sorts and trims the caller's expression ranges, walks them once and emits one occurrence
@@ -94,16 +83,18 @@ pub(crate) struct QualifiedReferenceCollection {
 ///
 /// Every occurrence validates its authored path through the same `validate_dependency_path`
 /// contract an ordinary dependency clause uses, so `@/`, `@./x`, `@../x` and `@x.moth` produce the
-/// identical typed diagnostics in expression position.
+/// identical typed diagnostics in expression position. An alias after the selected symbol is the
+/// same invalid-`as` syntax diagnostic the clause lane reports, raised here because no later
+/// caller can see the authored `as`.
 pub(crate) fn collect_qualified_references(
     canonical: &SourceTokens,
-    ranges: impl IntoIterator<Item = TokenRange>,
+    ranges: impl IntoIterator<Item = (usize, TokenRange)>,
     file_id: SourceId,
     first_shell_ordinal: u32,
     path_syntax: &PathSyntaxTable,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
-) -> Result<QualifiedReferenceCollection, HeaderParseFailure> {
+) -> Result<Vec<QualifiedReferenceOccurrence>, HeaderParseFailure> {
     if canonical.source() != file_id {
         return Err(InfrastructureFailure::internal(
             CompilerStage::HeaderParsing,
@@ -112,17 +103,17 @@ pub(crate) fn collect_qualified_references(
         .into());
     }
 
-    let mut ranges: Vec<TokenRange> = ranges
+    let mut ranges: Vec<(usize, TokenRange)> = ranges
         .into_iter()
-        .filter(|range| !range.is_empty())
+        .filter(|(_, range)| !range.is_empty())
         .collect();
-    ranges.sort_by_key(|range| range.start().index());
+    ranges.sort_by_key(|(_, range)| range.start().index());
 
     let mut scanned = Vec::new();
     let mut unsupported_alias_span = None;
     let mut next_unscanned_index = 0usize;
 
-    for range in ranges {
+    for (header_index, range) in ranges {
         if range.source() != file_id {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::HeaderParsing,
@@ -167,12 +158,12 @@ pub(crate) fn collect_qualified_references(
             {
                 unsupported_alias_span = Some(SourceSpan::new(file_id, follower.span));
             }
-            scanned.push(selection);
+            scanned.push((header_index, selection));
         }
     }
 
     let mut occurrences = Vec::with_capacity(scanned.len());
-    for (index, selection) in scanned.into_iter().enumerate() {
+    for (index, (owning_header_index, selection)) in scanned.into_iter().enumerate() {
         let index = u32::try_from(index).map_err(|_| {
             InfrastructureFailure::internal(
                 CompilerStage::HeaderParsing,
@@ -198,6 +189,7 @@ pub(crate) fn collect_qualified_references(
         let target = classify_dependency_target(row.root, path_fork, string_table);
         let provider_target = checked_provider_target(row.root, &target, path_fork, string_table)?;
         occurrences.push(QualifiedReferenceOccurrence {
+            owning_header_index,
             dependency: RetainedDependencyPath {
                 dependency_shell_id: DependencyShellId::new(file_id, ordinal),
                 path: row.root,
@@ -212,15 +204,18 @@ pub(crate) fn collect_qualified_references(
         });
     }
 
-    let consumed_path_syntax_ids = occurrences
-        .iter()
-        .map(|occurrence| occurrence.dependency.path_syntax)
-        .collect();
-    Ok(QualifiedReferenceCollection {
-        occurrences,
-        consumed_path_syntax_ids,
-        unsupported_alias_span,
-    })
+    // Path validation above ran for every selection first, so an invalid path keeps diagnostic
+    // precedence over an alias later in the same expression.
+    if let Some(alias_span) = unsupported_alias_span {
+        return Err(HeaderParseFailure::Diagnostic(
+            token_lexical::common_syntax_mistake(
+                CommonSyntaxMistakeReason::InvalidAsOperator,
+                Some(alias_span),
+            ),
+        ));
+    }
+
+    Ok(occurrences)
 }
 
 /// Append the expression-bearing token ranges owned by one header shell.
@@ -232,17 +227,10 @@ pub(crate) fn collect_qualified_references(
 ///       so occurrence recognition needs one bounded range list instead of rescanning the file.
 pub(crate) fn push_header_expression_ranges(
     header: &Header,
+    header_index: usize,
     canonical: &SourceTokens,
-    file_id: SourceId,
-    ranges: &mut Vec<TokenRange>,
+    ranges: &mut Vec<(usize, TokenRange)>,
 ) -> Result<(), InfrastructureFailure> {
-    if header.tokens.source() != file_id {
-        return Err(InfrastructureFailure::internal(
-            CompilerStage::HeaderParsing,
-            "retained header range does not match its source token owner",
-        ));
-    }
-
     if let Some(sequence) = header.token_sequence {
         let view = canonical.token_sequence(sequence).map_err(|error| {
             InfrastructureFailure::internal(
@@ -250,32 +238,40 @@ pub(crate) fn push_header_expression_ranges(
                 format!("retained header token sequence could not be resolved: {error:?}"),
             )
         })?;
-        ranges.extend(view.ranges());
+        ranges.extend(view.ranges().map(|range| (header_index, range)));
     } else if !header.tokens.is_empty() {
-        ranges.push(header.tokens);
+        ranges.push((header_index, header.tokens));
     }
 
     match &header.kind {
         HeaderKind::Constant { declaration } => {
-            ranges.extend(declaration.initializer_range);
+            ranges.extend(
+                declaration
+                    .initializer_range
+                    .map(|range| (header_index, range)),
+            );
         }
         HeaderKind::Function { signature, .. } => {
-            push_signature_default_ranges(&signature.parameters, ranges);
+            push_signature_default_ranges(&signature.parameters, header_index, ranges);
         }
         HeaderKind::Struct { fields, .. } => {
-            push_signature_default_ranges(fields, ranges);
+            push_signature_default_ranges(fields, header_index, ranges);
         }
         HeaderKind::Choice { variants, .. } => {
             for variant in variants {
                 let ChoiceVariantPayloadSyntax::Record { fields } = &variant.payload else {
                     continue;
                 };
-                push_signature_default_ranges(fields, ranges);
+                push_signature_default_ranges(fields, header_index, ranges);
             }
         }
         HeaderKind::Trait { declaration } => {
             for requirement in &declaration.requirements {
-                push_signature_default_ranges(&requirement.signature.parameters, ranges);
+                push_signature_default_ranges(
+                    &requirement.signature.parameters,
+                    header_index,
+                    ranges,
+                );
             }
         }
         HeaderKind::StartFunction
@@ -290,9 +286,10 @@ pub(crate) fn push_header_expression_ranges(
 
 fn push_signature_default_ranges(
     members: &[crate::compiler_frontend::declaration_syntax::signature_members::SignatureMemberSyntax],
-    ranges: &mut Vec<TokenRange>,
+    header_index: usize,
+    ranges: &mut Vec<(usize, TokenRange)>,
 ) {
     for member in members {
-        ranges.extend(member.default_range);
+        ranges.extend(member.default_range.map(|range| (header_index, range)));
     }
 }

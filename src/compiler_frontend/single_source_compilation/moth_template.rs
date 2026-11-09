@@ -722,10 +722,8 @@ fn fold_template_semantics(
         .unwrap_or_else(FrozenIdentityHandle::new);
 
     let source_database = source_builder.sources();
-    let qualified_reference_targets = sorted
-        .binding_environment
-        .qualified_reference_targets
-        .clone();
+    let qualified_reference_targets =
+        Arc::clone(&sorted.binding_environment.qualified_reference_targets);
     let file_value_resolution =
         (resolved_references.is_some() || !qualified_reference_targets.is_empty()).then(|| {
             Rc::new(FileValueResolutionServices {
@@ -736,7 +734,7 @@ fn fold_template_semantics(
                     ))
                 }),
                 module_resources: Rc::clone(&module_resources),
-                qualified_reference_targets: Arc::new(qualified_reference_targets),
+                qualified_reference_targets,
                 module_origin,
                 public_source_trait_origins: Arc::default(),
                 frozen_identity_handle,

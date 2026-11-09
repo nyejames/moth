@@ -13,6 +13,7 @@
 
 use super::interface_view::ProviderBindingView;
 use super::model::PublicSemanticInterface;
+use crate::builder_surface::definition::TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -50,19 +51,19 @@ pub(crate) struct ResolvedDependencyClause {
 /// Explicit provider-dependency state for one binding.
 ///
 /// WHAT: an authored dependency carries its retained clause-shell identity, while the single
-///       compiler-standard template prelude carries the standard package prefix.
+///       compiler-standard template prelude names the provider kind alone.
 /// WHY: optional shells, optional prefixes and boolean flags form invalid combinations; the
 ///      two-arm enum makes every provider input state representable and complete. The template
-///      prelude is fixed by compiler policy, not selected by the active builder.
+///      prelude package prefix is fixed by compiler policy, not selected by the active builder.
 #[derive(Debug)]
-pub(crate) enum ProviderDependencyKind<'a> {
+pub(crate) enum ProviderDependencyKind {
     Authored { shell: DependencyShellId },
-    TemplatePrelude { package_prefix: &'a str },
+    TemplatePrelude,
 }
 
 #[derive(Debug)]
 pub(crate) struct SourceProviderDependency<'a> {
-    pub(crate) kind: ProviderDependencyKind<'a>,
+    pub(crate) kind: ProviderDependencyKind,
     pub(crate) interface: &'a PublicSemanticInterface,
 }
 
@@ -78,7 +79,7 @@ pub(crate) struct SourceProviderDependencySet<'a> {
     interfaces: Vec<&'a PublicSemanticInterface>,
     binding_views: Vec<ProviderBindingView<'a>>,
     by_shell: FxHashMap<DependencyShellId, ProviderInterfaceId>,
-    template_prelude: Option<(&'a str, ProviderInterfaceId)>,
+    template_prelude: Option<ProviderInterfaceId>,
     by_origin: FxHashMap<StableModuleOriginIdentity, ProviderInterfaceId>,
 }
 
@@ -109,18 +110,17 @@ impl<'a> SourceProviderDependencySet<'a> {
                     let provider_id = set.register(dependency.interface)?;
                     set.by_shell.insert(shell, provider_id);
                 }
-                ProviderDependencyKind::TemplatePrelude { package_prefix } => {
+                ProviderDependencyKind::TemplatePrelude => {
                     if set.template_prelude.is_some() {
                         return Err(InfrastructureFailure::internal(
                             CompilerStage::AstConstruction,
                             format!(
-                                "source provider input set registered the template prelude @{} more than once",
-                                package_prefix
+                                "source provider input set registered the template prelude @{TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX} more than once"
                             ),
                         ));
                     }
                     let provider_id = set.register(dependency.interface)?;
-                    set.template_prelude = Some((package_prefix, provider_id));
+                    set.template_prelude = Some(provider_id);
                 }
             }
         }
@@ -254,11 +254,11 @@ impl<'a> SourceProviderDependencySet<'a> {
 
     /// The fixed compiler-standard template prelude provider, when the builder supplies it.
     ///
-    /// WHAT: exposes the standard package prefix together with its provider ID so header binding
-    ///       can register the flat `.mtf` constant prelude.
+    /// WHAT: exposes the prelude provider ID so header binding can register the flat `.mtf`
+    ///       constant prelude.
     /// WHY: the package is chosen by compiler policy, not by a builder capability list or by an
     ///       explicit dependency clause in the template source.
-    pub(crate) fn template_prelude_provider(&self) -> Option<(&'a str, ProviderInterfaceId)> {
+    pub(crate) fn template_prelude_provider(&self) -> Option<ProviderInterfaceId> {
         self.template_prelude
     }
 }

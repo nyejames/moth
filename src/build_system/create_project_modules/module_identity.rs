@@ -48,23 +48,6 @@ impl ModuleId {
     }
 }
 
-/// The package-facing public-surface role for a directory with the given API facade roots.
-///
-/// A support root is the external surface when present; otherwise the normal root is public. An
-/// entry-only module has no public surface and reports `None` rather than manufacturing a facade.
-pub(crate) fn public_surface_role(
-    has_normal_root: bool,
-    has_support_root: bool,
-) -> Option<ModuleRootRole> {
-    if has_support_root {
-        Some(ModuleRootRole::Support)
-    } else if has_normal_root {
-        Some(ModuleRootRole::Normal)
-    } else {
-        None
-    }
-}
-
 /// One structural module root directory with its durable identity and fixed root inventory.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ModuleIdentityRecord {
@@ -171,6 +154,7 @@ impl ModuleIdentityRecord {
         self.normal_root_file().is_some()
     }
 
+    #[cfg(test)]
     pub(crate) fn has_support_root(&self) -> bool {
         self.support_root_file().is_some()
     }
@@ -181,7 +165,7 @@ impl ModuleIdentityRecord {
 
     /// The role of the package-facing public surface, when this module owns an API facade.
     pub(crate) fn public_surface_role(&self) -> Option<ModuleRootRole> {
-        public_surface_role(self.has_normal_root(), self.has_support_root())
+        self.root_files.public_surface_role()
     }
 
     /// The canonical package-facing public-surface root file.
@@ -190,21 +174,12 @@ impl ModuleIdentityRecord {
             .and_then(|role| self.root_file(role))
     }
 
-    /// The canonical root file for one explicit role.
-    #[cfg(test)]
-    pub(crate) fn root_file_for_surface(&self, role: ModuleRootRole) -> Option<&Path> {
-        self.root_file(role)
-    }
-
     /// The structural role of the preparation anchor root.
+    #[cfg(test)]
     pub(crate) fn role(&self) -> ModuleRootRole {
-        if self.has_normal_root() {
-            ModuleRootRole::Normal
-        } else if self.has_support_root() {
-            ModuleRootRole::Support
-        } else {
-            ModuleRootRole::Entry
-        }
+        self.root_files
+            .anchor_role()
+            .expect("a structural module has at least one root")
     }
 
     /// The role-qualified origin for one present surface.
@@ -213,6 +188,11 @@ impl ModuleIdentityRecord {
         role: ModuleRootRole,
     ) -> Option<&StableModuleOriginIdentity> {
         self.surface_origins.get(role)
+    }
+
+    /// The complete role-keyed surface-origin inventory.
+    pub(crate) fn surface_origins(&self) -> &ModuleRootFiles<StableModuleOriginIdentity> {
+        &self.surface_origins
     }
 
     /// The role-neutral origin used by helper files and as the structural module identity.

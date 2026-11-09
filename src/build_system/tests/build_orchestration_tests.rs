@@ -491,7 +491,7 @@ fn build_project_calls_validate_project_config() {
 }
 
 #[test]
-fn project_compilation_selects_only_modules_with_root_activity_as_entries() {
+fn project_compilation_selects_only_modules_with_entry_roots_as_entries() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let temp = tempfile::tempdir().expect("should create temp dir");
     let root = temp.path().to_path_buf();

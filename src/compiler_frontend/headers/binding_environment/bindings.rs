@@ -369,12 +369,14 @@ pub(crate) struct HeaderBindingEnvironment {
     pub(crate) imported_declarations_by_local_path: FxHashMap<PathId, OriginDeclarationId>,
     /// Resolved targets for authored expression-qualified references.
     ///
-    /// WHAT: one entry per `(owning source, authored path row)` occurrence. Imported entries also
-    ///       register their consumer-local path in `imported_declarations_by_local_path` so AST
-    ///       projects the declaration without receiving a visible local name.
-    /// WHY: AST lowering and Stage 3 ordering consume the binding proved here; neither may look
-    ///      the selected name up by text or probe provider state again.
-    pub(crate) qualified_reference_targets: QualifiedReferenceTargets,
+    /// WHAT: one shared map with one entry per `(owning source, authored path row)` occurrence.
+    ///       Imported entries also register their consumer-local path in
+    ///       `imported_declarations_by_local_path` so AST projects the declaration without
+    ///       receiving a visible local name.
+    /// WHY: AST lowering, value services and Stage 3 ordering consume the binding proved here;
+    ///      neither may look the selected name up by text or probe provider state again. Sharing
+    ///      one handle keeps a module-wide map from being deep-copied per consumer.
+    pub(crate) qualified_reference_targets: Arc<QualifiedReferenceTargets>,
     /// Stable declaration closure supplied by completed provider interfaces.
     ///
     /// AST projects these records into consumer-local semantic handles. Keeping the stable

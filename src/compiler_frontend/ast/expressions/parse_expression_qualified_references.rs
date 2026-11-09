@@ -35,16 +35,14 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 
 /// Why a value-position path token is or is not an expression-qualified occurrence.
+///
+/// A recognised occurrence always carries a bound target by the time AST runs: binding resolves
+/// every occurrence or rejects the module, so there is no unresolved third state to report here.
 pub(crate) enum QualifiedPathStatus<'a> {
     /// No authored occurrence was recognised at this path row.
     FileValue,
     /// The occurrence is bound to exactly one selected declaration.
     Resolved(&'a ResolvedQualifiedReference),
-    /// Preparation recognised the occurrence, but binding produced no target.
-    ///
-    /// The binding lane owns the user-facing diagnostic. AST must neither emit a second
-    /// diagnostic nor reinterpret the path as a file value.
-    Diagnosed,
 }
 
 /// Classify one value-position path row against the prepared qualified-reference facts.
@@ -54,7 +52,7 @@ pub(crate) fn qualified_path_status<'a>(
 ) -> QualifiedPathStatus<'a> {
     let Some(lookups) = context.shared.lookups.as_ref() else {
         // Constant headers and generated bodies parse outside the completed lookup package. They
-        // still share the binding-owned qualified targets through value services.
+        // consume the same binding-owned target map through value services.
         return match context
             .shared
             .file_value_resolution
@@ -68,32 +66,13 @@ pub(crate) fn qualified_path_status<'a>(
             None => QualifiedPathStatus::FileValue,
         };
     };
-    if let Some(resolved) = lookups
+    match lookups
         .binding_environment
         .qualified_reference_target(context.shared.declaring_file_id, path_syntax)
     {
-        return QualifiedPathStatus::Resolved(resolved);
+        Some(resolved) => QualifiedPathStatus::Resolved(resolved),
+        None => QualifiedPathStatus::FileValue,
     }
-    if let Some(resolved) = context
-        .shared
-        .file_value_resolution
-        .as_ref()
-        .and_then(|services| {
-            services
-                .qualified_reference_targets
-                .get(&(context.shared.declaring_file_id, path_syntax))
-        })
-    {
-        return QualifiedPathStatus::Resolved(resolved);
-    }
-    if lookups
-        .module_symbols
-        .qualified_reference_occurrence(context.shared.declaring_file_id, path_syntax)
-        .is_some()
-    {
-        return QualifiedPathStatus::Diagnosed;
-    }
-    QualifiedPathStatus::FileValue
 }
 
 /// Consume and lower one qualified reference primary.
@@ -123,9 +102,6 @@ pub(crate) fn try_parse_qualified_reference_primary(
     let resolved = match qualified_path_status(context, path_syntax) {
         QualifiedPathStatus::FileValue => return Ok(false),
         QualifiedPathStatus::Resolved(resolved) => resolved,
-        QualifiedPathStatus::Diagnosed => {
-            return Err(diagnosed_occurrence_failure(path_syntax));
-        }
     };
 
     // The selected symbol is the immediately following token and must be the exact authored
@@ -148,34 +124,19 @@ pub(crate) fn try_parse_qualified_reference_primary(
     token_stream.advance();
 
     match &resolved.target {
-        ResolvedQualifiedTarget::Source { declaration_path } => {
-            let declaration = context
-                .shared
-                .top_level_declarations
-                .get_by_path(declaration_path)
-                .ok_or_else(|| missing_target_declaration_failure(*declaration_path))?;
-            lower_resolved_declaration_expression(
-                selected_name,
-                declaration,
-                token_stream,
-                context,
-                type_interner,
-                expression_builder,
-                const_values,
-                expression,
-                allow_boundary_catch,
-                expected_result_evidence_allowed,
-                route_argument_context,
-                string_table,
-                path_fork,
-            )?;
+        // A source declaration and an imported declaration both live in the consumer's
+        // top-level table; only the path that names the row differs.
+        ResolvedQualifiedTarget::Source {
+            declaration_path: path,
         }
-        ResolvedQualifiedTarget::Imported { local_path, .. } => {
+        | ResolvedQualifiedTarget::Imported {
+            local_path: path, ..
+        } => {
             let declaration = context
                 .shared
                 .top_level_declarations
-                .get_by_path(local_path)
-                .ok_or_else(|| missing_target_declaration_failure(*local_path))?;
+                .get_by_path(path)
+                .ok_or_else(|| missing_target_declaration_failure(*path))?;
             lower_resolved_declaration_expression(
                 selected_name,
                 declaration,
@@ -294,16 +255,6 @@ fn lower_external_qualified_target(
             .into())
         }
     }
-}
-
-pub(crate) fn diagnosed_occurrence_failure(path_syntax: PathSyntaxId) -> ExpressionParseError {
-    InfrastructureFailure::internal(
-        CompilerStage::AstConstruction,
-        format!(
-            "qualified-reference path row {path_syntax:?} was recognised during preparation but has no bound target; its binding diagnostic owns this failure"
-        ),
-    )
-    .into()
 }
 
 fn missing_selected_symbol_failure(path_syntax: PathSyntaxId) -> ExpressionParseError {

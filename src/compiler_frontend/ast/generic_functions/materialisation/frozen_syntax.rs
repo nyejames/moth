@@ -9,53 +9,15 @@ use super::frozen_file_references::StableResolvedFileReference;
 use crate::compiler_frontend::ast::module_ast::scope_context::Stage0ResolutionFacts;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
-use crate::compiler_frontend::headers::binding_environment::{
-    ResolvedQualifiedReference, ResolvedQualifiedTarget,
-};
+use crate::compiler_frontend::headers::binding_environment::ResolvedQualifiedReference;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
-use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId, SourceSpan};
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{
     PathId, PathIdRemap, PathInternerFork, PathTable,
 };
 use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{SourceTokens, TokenRange, TokenSequenceId};
 use std::sync::Arc;
-
-/// One qualified-reference target retained across the generic materialisation boundary.
-///
-/// WHAT: carries the authored path row, the selected-symbol span and the resolved target.
-/// WHY: the target is already semantic identity. Retaining it lets a materialised body lower the
-///      same declaration without resolving the selected name again or reopening donor syntax.
-#[derive(Clone, Debug)]
-pub(super) struct StableQualifiedReference {
-    pub(super) path_syntax: PathSyntaxId,
-    pub(super) selected_span: SourceSpan,
-    pub(super) target: ResolvedQualifiedTarget,
-}
-
-impl StableQualifiedReference {
-    fn remap_path_ids(&mut self, remap: &PathIdRemap) {
-        match &mut self.target {
-            ResolvedQualifiedTarget::Source { declaration_path } => {
-                *declaration_path = remap.get(*declaration_path);
-            }
-            ResolvedQualifiedTarget::Imported { local_path, .. } => {
-                *local_path = remap.get(*local_path);
-            }
-            ResolvedQualifiedTarget::External { .. } => {}
-        }
-    }
-
-    pub(super) fn materialise(&self) -> (PathSyntaxId, ResolvedQualifiedReference) {
-        (
-            self.path_syntax,
-            ResolvedQualifiedReference {
-                target: self.target.clone(),
-                selected_span: self.selected_span,
-            },
-        )
-    }
-}
 
 /// Shared donor string identity for one declaring source/module domain.
 ///
@@ -104,8 +66,9 @@ pub(super) struct StableBodySyntax {
     /// strings for a donor body. `(Some, None)` is rejected at the materialisation boundary.
     pub(super) source_string_table: Option<Arc<FrozenStringTable>>,
     pub(super) resolved_file_references: Box<[StableResolvedFileReference]>,
-    /// Qualified-reference targets authored in this body, sorted by authored path row.
-    pub(super) qualified_references: Box<[StableQualifiedReference]>,
+    /// Qualified-reference targets authored in this body, keyed by authored path row in source
+    /// order.
+    pub(super) qualified_references: Box<[(PathSyntaxId, ResolvedQualifiedReference)]>,
 }
 impl Clone for StableBodySyntax {
     fn clone(&self) -> Self {
@@ -211,19 +174,16 @@ impl std::fmt::Debug for MaterialisedBody {
 /// WHY: they travel together through every capture call and keep the syntax-owning arguments
 ///      separate from the metadata that is not derived from the token range itself.
 pub(super) struct StableBodyCaptureFacts<'a> {
-    pub(super) qualified_references: &'a [StableQualifiedReference],
+    pub(super) qualified_references: &'a [(PathSyntaxId, ResolvedQualifiedReference)],
     pub(super) stage0_resolution_facts: Option<&'a Stage0ResolutionFacts>,
     pub(super) frozen_identity_handle: FrozenIdentityHandle,
 }
 
 impl StableBodySyntax {
-    pub(super) fn remap_path_ids(
-        &mut self,
-        remap: &crate::compiler_frontend::symbols::path_interner::PathIdRemap,
-    ) {
+    pub(super) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         self.declaration_path = remap.get(self.declaration_path);
-        for reference in &mut self.qualified_references {
-            reference.remap_path_ids(remap);
+        for (_, reference) in &mut self.qualified_references {
+            reference.target.remap_path_ids(remap);
         }
     }
 
@@ -304,7 +264,7 @@ impl StableBodySyntax {
                     // target is retained separately and consumed by expression lowering.
                     if qualified_references
                         .iter()
-                        .any(|reference| reference.path_syntax == source_path_id)
+                        .any(|(path_syntax, _)| *path_syntax == source_path_id)
                     {
                         continue;
                     }
@@ -384,16 +344,14 @@ impl StableBodySyntax {
             .iter()
             .map(StableResolvedFileReference::materialise)
             .collect::<Result<Vec<_>, InfrastructureFailure>>()?;
-        let mut qualified_reference_targets =
-            crate::compiler_frontend::headers::binding_environment::QualifiedReferenceTargets::default();
-        for (path_syntax, resolved) in self
-            .qualified_references
-            .iter()
-            .map(StableQualifiedReference::materialise)
-        {
-            qualified_reference_targets.insert((self.donor_file_id, path_syntax), resolved);
-        }
-        let qualified_reference_targets = Arc::new(qualified_reference_targets);
+        let qualified_reference_targets = Arc::new(
+            self.qualified_references
+                .iter()
+                .map(|(path_syntax, resolved)| {
+                    ((self.donor_file_id, *path_syntax), resolved.clone())
+                })
+                .collect(),
+        );
         let resolution_facts = Arc::new(Stage0ResolutionFacts::frozen_generic(
             self.donor_file_id,
             resolved_file_references,

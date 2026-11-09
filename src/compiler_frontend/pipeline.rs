@@ -576,11 +576,8 @@ impl<'a> CompilerFrontend<'a> {
                 Arc::clone(self.source_files),
             ))),
             module_resources: Rc::new(RefCell::new(ModuleResourceTable::new())),
-            qualified_reference_targets: Arc::new(
-                sorted
-                    .binding_environment
-                    .qualified_reference_targets
-                    .clone(),
+            qualified_reference_targets: Arc::clone(
+                &sorted.binding_environment.qualified_reference_targets,
             ),
             module_origin,
             public_source_trait_origins,

@@ -6,10 +6,8 @@
 //! should see an ordinary constant header instead of a Moth template-specific AST path
 //! or textually wrapped source.
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::CommonSyntaxMistakeReason;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker_in_cursor;
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
 use crate::compiler_frontend::headers::qualified_references::collect_qualified_references;
@@ -17,8 +15,8 @@ use crate::compiler_frontend::headers::synthetic_content_header::{
     SyntheticContentHeaderInput, synthetic_content_header,
 };
 use crate::compiler_frontend::headers::types::{
-    FileFrontendPrepareError, FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole,
-    HeaderParseFailure, PreparedFilePathSyntax, SourceTokenOwner, SyntheticContentPayload,
+    FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole, PreparedFilePathSyntax,
+    SourceTokenOwner, SyntheticContentPayload,
 };
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
@@ -83,39 +81,30 @@ pub(crate) fn prepare_moth_template_file(
         {
             // A config-qualified body is not expression syntax; every path row stays owned by the
             // config contract and no qualified occurrence is recognized.
-            let config_owned_path_syntax_ids = (0..body_facts.len())
+            let config_owned_path_syntax_ids: Vec<_> = (0..body_facts.len())
                 .filter_map(|index| body_facts.get(index).and_then(|token| token.path_syntax_id))
                 .collect();
             (content_header, config_owned_path_syntax_ids, Vec::new())
         } else {
             // Every `.mtf` qualified occurrence lives inside a template head (including nested
             // heads), so one bounded scan of the retained body is the complete occurrence set.
-            let collection = collect_qualified_references(
+            let occurrences = collect_qualified_references(
                 canonical,
-                [context.body_range],
+                [(0, context.body_range)],
                 context.file_id,
                 0,
                 path_syntax.as_ref(),
                 string_table,
                 path_fork,
             )
-            .map_err(moth_template_prepare_failure)?;
-            if let Some(alias_span) = collection.unsupported_alias_span {
-                return Err(FileFrontendPrepareFailure::Diagnosed(
-                    FileFrontendPrepareError {
-                        warnings: DiagnosticBag::new(),
-                        diagnostic: token_lexical::common_syntax_mistake(
-                            CommonSyntaxMistakeReason::InvalidAsOperator,
-                            Some(alias_span),
-                        ),
-                    },
-                ));
-            }
-            (
-                content_header,
-                collection.consumed_path_syntax_ids,
-                collection.occurrences,
-            )
+            .map_err(|failure| {
+                FileFrontendPrepareFailure::from_header_parse(failure, DiagnosticBag::new())
+            })?;
+            let consumed_path_syntax_ids = occurrences
+                .iter()
+                .map(|occurrence| occurrence.dependency.path_syntax)
+                .collect();
+            (content_header, consumed_path_syntax_ids, occurrences)
         }
     };
     let mut headers = vec![content_header];
@@ -157,25 +146,6 @@ pub(crate) fn prepare_moth_template_file(
         start_body_binding_spans: rustc_hash::FxHashMap::default(),
         warnings: DiagnosticBag::new(),
     })
-}
-
-/// Convert one occurrence-scan failure into the per-file preparation lane.
-///
-/// The scan validates authored path and alias syntax at the header stage, so its typed diagnostic
-/// reaches the caller as a source diagnostic; only genuine retained-state failures stay
-/// infrastructure.
-fn moth_template_prepare_failure(failure: HeaderParseFailure) -> FileFrontendPrepareFailure {
-    match failure {
-        HeaderParseFailure::Diagnostic(diagnostic) => {
-            FileFrontendPrepareFailure::Diagnosed(FileFrontendPrepareError {
-                warnings: DiagnosticBag::new(),
-                diagnostic,
-            })
-        }
-        HeaderParseFailure::Infrastructure(error) => {
-            FileFrontendPrepareFailure::Infrastructure(error)
-        }
-    }
 }
 
 /// File-local data needed to synthesize the normal constant header.

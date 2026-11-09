@@ -7,6 +7,7 @@
 //!      makes the module structure easier to navigate.
 
 use crate::builder_surface::SourceFileKind;
+use crate::builder_surface::definition::TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
@@ -992,7 +993,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         self.remove_moth_template_generated_self_constants(file_visibility, registry, source_file);
 
-        let Some((prefix, provider_id)) = self
+        let Some(provider_id) = self
             .source_provider_dependencies
             .template_prelude_provider()
         else {
@@ -1000,7 +1001,7 @@ impl<'a> BindingEnvironmentBuilder<'a> {
         };
 
         let mut prelude_constants = Vec::new();
-        self.collect_html_template_prelude_constants(prefix, provider_id, &mut prelude_constants)?;
+        self.collect_html_template_prelude_constants(provider_id, &mut prelude_constants)?;
 
         for (name, path, span) in prelude_constants {
             registry.register(
@@ -1066,10 +1067,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
     fn collect_html_template_prelude_constants(
         &mut self,
-        prefix: &str,
         provider_id: ProviderInterfaceId,
         prelude_constants: &mut Vec<(StringId, PathId, Option<SourceSpan>)>,
     ) -> BuilderResult<()> {
+        let prefix = TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
         self.register_provider_semantics_once(provider_id)?;
         let view = self
             .source_provider_dependencies
@@ -1663,76 +1664,81 @@ impl<'a> BindingEnvironmentBuilder<'a> {
             return Ok(());
         };
 
-        let mut resolved_by_selection: FxHashMap<(PathId, StringId), ResolvedSelectedTarget> =
+        // A repeated provider selection resolves and registers provenance once per file. The
+        // cache holds the final target so cache hits skip path resolution, namespace checks and
+        // provider registration.
+        let mut resolved_by_selection: FxHashMap<(PathId, StringId), ResolvedQualifiedTarget> =
             FxHashMap::default();
 
         for occurrence in occurrences {
-            let selection = DependencySelection {
-                source_name: occurrence.selected,
-                source_span: occurrence.selected_span,
-                local_alias: None,
-            };
             let memo_key = (occurrence.dependency.path, occurrence.selected);
             let target = if let Some(target) = resolved_by_selection.get(&memo_key) {
                 target.clone()
             } else {
-                let target =
+                let selection = DependencySelection {
+                    source_name: occurrence.selected,
+                    source_span: occurrence.selected_span,
+                    local_alias: None,
+                };
+                let selected_target =
                     self.resolve_selected_target(&occurrence.dependency, &selection, source_file)?;
+                let target = match selected_target {
+                    ResolvedSelectedTarget::ProviderDeclaration {
+                        provider_id,
+                        origin,
+                        local_path,
+                        ..
+                    } => {
+                        self.register_imported_qualified_target(
+                            file_visibility,
+                            provider_id,
+                            &origin,
+                            local_path,
+                            occurrence.selected,
+                            occurrence.selected_span,
+                        )?;
+                        ResolvedQualifiedTarget::Imported { origin, local_path }
+                    }
+                    ResolvedSelectedTarget::Source { symbol_path, .. } => {
+                        // A type alias or trait is dependency-bindable as a type, but a value
+                        // expression can never consume it. Report the ordinary lane's namespace
+                        // diagnostic here, at the selected span, instead of recording a target
+                        // AST cannot project into its declaration table.
+                        if self.module_symbols.type_alias_paths.contains(&symbol_path) {
+                            return Err(names_declarations::namespace_misuse(
+                                occurrence.selected,
+                                NameNamespace::Value,
+                                NameNamespace::Type,
+                                Some(occurrence.selected_span),
+                            )
+                            .into());
+                        }
+                        if self.module_symbols.trait_paths.contains(&symbol_path) {
+                            return Err(generics_traits_api::trait_name_used_as_type(
+                                occurrence.selected,
+                                Some(occurrence.selected_span),
+                            )
+                            .into());
+                        }
+                        ResolvedQualifiedTarget::Source {
+                            declaration_path: symbol_path,
+                        }
+                    }
+                    ResolvedSelectedTarget::External { symbol_id } => {
+                        ResolvedQualifiedTarget::External { symbol_id }
+                    }
+                };
                 resolved_by_selection.insert(memo_key, target.clone());
                 target
-            };
-            let target = match target {
-                ResolvedSelectedTarget::ProviderDeclaration {
-                    provider_id,
-                    origin,
-                    local_path,
-                    ..
-                } => {
-                    self.register_imported_qualified_target(
-                        file_visibility,
-                        provider_id,
-                        &origin,
-                        local_path,
-                        occurrence.selected,
-                        occurrence.selected_span,
-                    )?;
-                    ResolvedQualifiedTarget::Imported { origin, local_path }
-                }
-                ResolvedSelectedTarget::Source { symbol_path, .. } => {
-                    // A type alias or trait is dependency-bindable as a type, but a value
-                    // expression can never consume it. Report the ordinary lane's namespace
-                    // diagnostic here, at the selected span, instead of recording a target AST
-                    // cannot project into its declaration table.
-                    if self.module_symbols.type_alias_paths.contains(&symbol_path) {
-                        return Err(names_declarations::namespace_misuse(
-                            occurrence.selected,
-                            NameNamespace::Value,
-                            NameNamespace::Type,
-                            Some(occurrence.selected_span),
-                        )
-                        .into());
-                    }
-                    if self.module_symbols.trait_paths.contains(&symbol_path) {
-                        return Err(generics_traits_api::trait_name_used_as_type(
-                            occurrence.selected,
-                            Some(occurrence.selected_span),
-                        )
-                        .into());
-                    }
-                    ResolvedQualifiedTarget::Source {
-                        declaration_path: symbol_path,
-                    }
-                }
-                ResolvedSelectedTarget::External { symbol_id } => {
-                    ResolvedQualifiedTarget::External { symbol_id }
-                }
             };
 
             let key = (
                 occurrence.selected_span.source(),
                 occurrence.dependency.path_syntax,
             );
-            let previous = self.environment.qualified_reference_targets.insert(
+            // Binding construction holds the only handle, so `make_mut` completes the map in
+            // place instead of copying it per inserted occurrence.
+            let previous = Arc::make_mut(&mut self.environment.qualified_reference_targets).insert(
                 key,
                 ResolvedQualifiedReference {
                     target,

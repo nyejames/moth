@@ -2960,6 +2960,7 @@ fn qualified_occurrence(
     string_table: &mut StringTable,
 ) -> QualifiedReferenceOccurrence {
     QualifiedReferenceOccurrence {
+        owning_header_index: 0,
         dependency: clause_dependency,
         selected: string_table.intern(selected),
         selected_span: SourceSpan::new(SourceId::from_index(0), LocalSpan::source_start()),

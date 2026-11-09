@@ -271,26 +271,8 @@ fn facade_project_globals_dependency(
     }
 
     let module_symbols = &prepared.semantic.prepared_header_syntax.module_symbols;
-    let mut authored_sources: Vec<_> = module_symbols
-        .file_dependency_clauses_by_source
-        .keys()
-        .chain(module_symbols.qualified_references_by_source.keys())
-        .collect();
-    authored_sources.sort_unstable();
-    authored_sources.dedup();
-    for source_path in authored_sources {
-        let clauses = module_symbols
-            .file_dependency_clauses_by_source
-            .get(source_path)
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        let Some(source_id) = prepared
-            .semantic
-            .prepared_header_syntax
-            .module_symbols
-            .source_ids_by_source
-            .get(source_path)
-        else {
+    for (source_path, dependency, clause_kind) in module_symbols.authored_dependencies() {
+        let Some(source_id) = module_symbols.source_ids_by_source.get(source_path) else {
             continue;
         };
         let Some(source_origin) = prepared
@@ -306,38 +288,17 @@ fn facade_project_globals_dependency(
         ) {
             continue;
         }
-        for clause in clauses {
-            if is_project_globals_dependency(
-                clause.dependency.path,
-                &prepared.semantic.path_fork,
-                &prepared.semantic.string_table,
-            ) {
-                let diagnostic = project_config::invalid_dependency_clause(
-                    clause.binding.clause_kind(),
-                    InvalidDependencyClauseReason::ProjectGlobalsFacadeDependencyNotAllowed,
-                    Some(clause.dependency.span),
-                );
-                return Ok(Some(diagnostic));
-            }
-        }
-        let qualified_references = module_symbols
-            .qualified_references_by_source
-            .get(source_path)
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        for occurrence in qualified_references {
-            if is_project_globals_dependency(
-                occurrence.dependency.path,
-                &prepared.semantic.path_fork,
-                &prepared.semantic.string_table,
-            ) {
-                let diagnostic = project_config::invalid_dependency_clause(
-                    crate::compiler_frontend::compiler_messages::DependencyClauseKind::DirectSelection,
-                    InvalidDependencyClauseReason::ProjectGlobalsFacadeDependencyNotAllowed,
-                    Some(occurrence.dependency.span),
-                );
-                return Ok(Some(diagnostic));
-            }
+        if is_project_globals_dependency(
+            dependency.path,
+            &prepared.semantic.path_fork,
+            &prepared.semantic.string_table,
+        ) {
+            let diagnostic = project_config::invalid_dependency_clause(
+                clause_kind,
+                InvalidDependencyClauseReason::ProjectGlobalsFacadeDependencyNotAllowed,
+                Some(dependency.span),
+            );
+            return Ok(Some(diagnostic));
         }
     }
     Ok(None)
@@ -419,59 +380,33 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         // participate here. A file may contribute only occurrences, so the source set is the
         // union of both retained maps.
         let module_symbols = &prepared.semantic.prepared_header_syntax.module_symbols;
-        let mut authored_sources: Vec<_> = module_symbols
-            .file_dependency_clauses_by_source
-            .keys()
-            .chain(module_symbols.qualified_references_by_source.keys())
-            .collect();
-        authored_sources.sort_unstable();
-        authored_sources.dedup();
-        for source_file in authored_sources {
-            let file_dependency_clauses = module_symbols
-                .file_dependency_clauses_by_source
-                .get(source_file)
-                .map(Vec::as_slice)
-                .unwrap_or_default();
-            let qualified_references = module_symbols
-                .qualified_references_by_source
-                .get(source_file)
-                .map(Vec::as_slice)
-                .unwrap_or_default();
-            let authored_dependencies = file_dependency_clauses
-                .iter()
-                .map(|clause| &clause.dependency)
-                .chain(
-                    qualified_references
-                        .iter()
-                        .map(|occurrence| &occurrence.dependency),
-                );
-            for dependency in authored_dependencies {
-                let shell_id = dependency.dependency_shell_id;
-                if is_project_globals_dependency(
-                    dependency.path,
-                    &prepared.semantic.path_fork,
-                    &prepared.semantic.string_table,
-                ) {
-                    let Some(project_globals) = self.boundary.project_globals else {
-                        return Err(InfrastructureFailure::internal(
-                            CompilerStage::ProjectBuildAssembly,
-                            format!(
-                                "ModuleId {} attempted to bind reserved @project outside its owning project boundary",
-                                consumer_module_id.index()
-                            ),
-                        ));
-                    };
-                    dependencies.push(SourceProviderDependency {
-                        kind: ProviderDependencyKind::Authored { shell: shell_id },
-                        interface: project_globals.interface(),
-                    });
-                    continue;
-                }
-                if check_only {
-                    if let Some((provider_module_id, provider_surface)) =
-                        transient_provider_index.get(&shell_id).copied()
-                    {
-                        let interface = self
+        for (_, dependency, _) in module_symbols.authored_dependencies() {
+            let shell_id = dependency.dependency_shell_id;
+            if is_project_globals_dependency(
+                dependency.path,
+                &prepared.semantic.path_fork,
+                &prepared.semantic.string_table,
+            ) {
+                let Some(project_globals) = self.boundary.project_globals else {
+                    return Err(InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "ModuleId {} attempted to bind reserved @project outside its owning project boundary",
+                            consumer_module_id.index()
+                        ),
+                    ));
+                };
+                dependencies.push(SourceProviderDependency {
+                    kind: ProviderDependencyKind::Authored { shell: shell_id },
+                    interface: project_globals.interface(),
+                });
+                continue;
+            }
+            if check_only {
+                if let Some((provider_module_id, provider_surface)) =
+                    transient_provider_index.get(&shell_id).copied()
+                {
+                    let interface = self
                             .provider_store
                             .interface_for_surface(provider_module_id, provider_surface)?
                             .ok_or_else(|| {
@@ -481,16 +416,15 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                                     provider_module_id.index()
                                 ))
                             })?;
-                        dependencies.push(SourceProviderDependency {
-                            kind: ProviderDependencyKind::Authored { shell: shell_id },
-                            interface,
-                        });
-                        continue;
-                    }
+                    dependencies.push(SourceProviderDependency {
+                        kind: ProviderDependencyKind::Authored { shell: shell_id },
+                        interface,
+                    });
+                    continue;
+                }
 
-                    if let Some(dependency_prefix) = transient_package_index.get(&shell_id).copied()
-                    {
-                        let package_id = self
+                if let Some(dependency_prefix) = transient_package_index.get(&shell_id).copied() {
+                    let package_id = self
                             .boundary
                             .completed_packages
                             .by_prefix(dependency_prefix)
@@ -501,26 +435,25 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                                     dependency_prefix
                                 ))
                             })?;
-                        let completed_package =
-                            self.boundary.completed_packages.package(package_id)?;
-                        dependencies.push(SourceProviderDependency {
-                            kind: ProviderDependencyKind::Authored { shell: shell_id },
-                            interface: completed_package.root_interface()?,
-                        });
-                    }
-
-                    // Same-owner source dependencies and provider clauses handled by the external
-                    // registry intentionally have no transient interface record. Do not consult
-                    // the canonical indexes for this shell.
-                    continue;
+                    let completed_package = self.boundary.completed_packages.package(package_id)?;
+                    dependencies.push(SourceProviderDependency {
+                        kind: ProviderDependencyKind::Authored { shell: shell_id },
+                        interface: completed_package.root_interface()?,
+                    });
                 }
 
-                if let Some(binding_index) = self
-                    .provider_binding_index
-                    .get(&(consumer_module_id, shell_id))
-                {
-                    let binding = &self.provider_bindings[*binding_index];
-                    let interface = self
+                // Same-owner source dependencies and provider clauses handled by the external
+                // registry intentionally have no transient interface record. Do not consult
+                // the canonical indexes for this shell.
+                continue;
+            }
+
+            if let Some(binding_index) = self
+                .provider_binding_index
+                .get(&(consumer_module_id, shell_id))
+            {
+                let binding = &self.provider_bindings[*binding_index];
+                let interface = self
                         .provider_store
                         .interface_for_surface(
                             binding.provider_module_id,
@@ -535,21 +468,21 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                             ))
                         })?;
 
-                    dependencies.push(SourceProviderDependency {
-                        kind: ProviderDependencyKind::Authored { shell: shell_id },
-                        interface,
-                    });
-                    continue;
-                }
+                dependencies.push(SourceProviderDependency {
+                    kind: ProviderDependencyKind::Authored { shell: shell_id },
+                    interface,
+                });
+                continue;
+            }
 
-                let Some(package_index) = self
-                    .source_package_dependency_index
-                    .get(&(consumer_module_id, shell_id))
-                else {
-                    continue;
-                };
-                let package_dependency = &self.source_package_dependencies[*package_index];
-                let package_id = self
+            let Some(package_index) = self
+                .source_package_dependency_index
+                .get(&(consumer_module_id, shell_id))
+            else {
+                continue;
+            };
+            let package_dependency = &self.source_package_dependencies[*package_index];
+            let package_id = self
                     .boundary
                     .completed_packages
                     .by_prefix(package_dependency.dependency_prefix.as_str())
@@ -560,13 +493,12 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                             package_dependency.dependency_prefix
                         ))
                     })?;
-                let completed_package = self.boundary.completed_packages.package(package_id)?;
+            let completed_package = self.boundary.completed_packages.package(package_id)?;
 
-                dependencies.push(SourceProviderDependency {
-                    kind: ProviderDependencyKind::Authored { shell: shell_id },
-                    interface: completed_package.root_interface()?,
-                });
-            }
+            dependencies.push(SourceProviderDependency {
+                kind: ProviderDependencyKind::Authored { shell: shell_id },
+                interface: completed_package.root_interface()?,
+            });
         }
 
         // The flat `.mtf` helper prelude is compiler policy, not a builder capability list. The
@@ -589,9 +521,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
             let package = self.boundary.completed_packages.package(package_id)?;
 
             dependencies.push(SourceProviderDependency {
-                kind: ProviderDependencyKind::TemplatePrelude {
-                    package_prefix: package.package_prefix(),
-                },
+                kind: ProviderDependencyKind::TemplatePrelude,
                 interface: package.root_interface()?,
             });
         }

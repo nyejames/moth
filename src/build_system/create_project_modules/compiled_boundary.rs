@@ -49,7 +49,7 @@ use super::module_artifact_store::{
     ModuleArtifactStore, ProviderSlot, publication_surface_mismatch,
 };
 use super::module_identity::ModuleId;
-use super::project_module_graph::ProjectModuleGraph;
+use super::project_module_graph::{ProjectModuleGraph, ProjectModuleGraphNode};
 use super::resource_inputs::ResourceInputRegistry;
 
 struct PreparedAppendMetrics {
@@ -586,23 +586,7 @@ impl CompiledSourcePackage {
     pub(crate) fn validate(&self) -> Result<(), InfrastructureFailure> {
         self.boundary.validate_invariants()?;
 
-        let root_index = self.root_module_id.index();
-        let node = self
-            .boundary
-            .structure
-            .nodes()
-            .get(root_index)
-            .ok_or_else(|| {
-                InfrastructureFailure::internal(
-                    CompilerStage::ProjectBuildAssembly,
-                    format!(
-                        "Source package @{} root ModuleId {} is out of range for {} graph nodes",
-                        self.package_prefix(),
-                        root_index,
-                        self.boundary.structure.nodes().len()
-                    ),
-                )
-            })?;
+        let node = self.root_node()?;
         if node.stable_origin().package() != &self.package_identity {
             return Err(InfrastructureFailure::internal(
                 CompilerStage::ProjectBuildAssembly,
@@ -614,40 +598,20 @@ impl CompiledSourcePackage {
                 ),
             ));
         }
-        let public_surface_role = node.public_surface_role();
-        let public_surface_origin = node.public_surface_origin();
 
         match self.boundary.modules.slot(self.root_module_id)? {
             ProviderSlot::Successful(_) => {
-                // Discovery rejects a registered package root without an API facade, so the
-                // selected role is present for every boundary that can reach a successful slot.
-                let surface_role = public_surface_role.ok_or_else(|| {
-                    InfrastructureFailure::internal(
-                        CompilerStage::ProjectBuildAssembly,
-                        format!(
-                            "Source package @{} root ModuleId {root_index} reached a successful slot without a public facade root",
-                            self.package_prefix()
-                        ),
-                    )
-                })?;
-                let interface = self
-                    .boundary
-                    .modules
-                    .interface_for_surface(self.root_module_id, surface_role)?
-                    .ok_or_else(|| {
-                        InfrastructureFailure::internal(CompilerStage::ProjectBuildAssembly, format!(
-                            "Source package @{} root ModuleId {root_index} published no {surface_role:?} interface for its selected public-surface root",
-                            self.package_prefix()
-                        ))
-                    })?;
-                if Some(&interface.module_origin) != public_surface_origin {
+                // Discovery rejects a registered package root without an API facade, so a
+                // successful slot always publishes the selected public-surface interface.
+                let interface = self.root_interface()?;
+                if Some(&interface.module_origin) != node.public_surface_origin() {
                     return Err(InfrastructureFailure::internal(
                         CompilerStage::ProjectBuildAssembly,
                         format!(
-                            "Source package @{} root interface origin {:?} disagrees with its selected {surface_role:?} public-surface origin {:?}",
+                            "Source package @{} root interface origin {:?} disagrees with its public-surface origin {:?}",
                             self.package_prefix(),
                             interface.module_origin,
-                            public_surface_origin
+                            node.public_surface_origin()
                         ),
                     ));
                 }
@@ -663,7 +627,7 @@ impl CompiledSourcePackage {
                         format!(
                             "Source package @{} root ModuleId {} never reached a completed outcome",
                             self.package_prefix(),
-                            root_index
+                            self.root_module_id.index()
                         ),
                     ));
                 }
@@ -678,10 +642,9 @@ impl CompiledSourcePackage {
         self.boundary.modules.slot(self.root_module_id)
     }
 
-    /// The completed facade interface for this package boundary.
-    pub(crate) fn root_interface(&self) -> Result<&PublicSemanticInterface, InfrastructureFailure> {
-        let node = self
-            .boundary
+    /// The graph node this boundary selected as its root.
+    fn root_node(&self) -> Result<&ProjectModuleGraphNode, InfrastructureFailure> {
+        self.boundary
             .structure
             .nodes()
             .get(self.root_module_id.index())
@@ -689,12 +652,18 @@ impl CompiledSourcePackage {
                 InfrastructureFailure::internal(
                     CompilerStage::ProjectBuildAssembly,
                     format!(
-                        "Source package @{} root ModuleId {} is out of range",
+                        "Source package @{} root ModuleId {} is out of range for {} graph nodes",
                         self.package_prefix(),
-                        self.root_module_id.index()
+                        self.root_module_id.index(),
+                        self.boundary.structure.nodes().len()
                     ),
                 )
-            })?;
+            })
+    }
+
+    /// The completed facade interface for this package boundary.
+    pub(crate) fn root_interface(&self) -> Result<&PublicSemanticInterface, InfrastructureFailure> {
+        let node = self.root_node()?;
         let surface_role = node.public_surface_role().ok_or_else(|| {
             InfrastructureFailure::internal(
                 CompilerStage::ProjectBuildAssembly,

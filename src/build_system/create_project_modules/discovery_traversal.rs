@@ -426,10 +426,9 @@ fn walk_reachable_sources(
         let Ok(prepared) = prepared else {
             return Ok(DiscoveryWalkOutcome::PreparationFailed);
         };
-        let dependency_clauses = &prepared.file_dependency_clauses;
         #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
         {
-            dependency_clauses_scanned += dependency_clauses.len();
+            dependency_clauses_scanned += prepared.file_dependency_clauses.len();
         }
 
         {
@@ -445,35 +444,18 @@ fn walk_reachable_sources(
                 canonical_file: &canonical_file,
                 project_path_resolver,
             };
-            for clause in dependency_clauses {
+            for (dependency, clause_kind) in prepared.authored_dependencies() {
                 process_reachable_authored_dependency(
                     &mut context,
-                    &clause.dependency,
-                    clause.binding.clause_kind(),
+                    dependency,
+                    clause_kind,
                     string_table,
                     path_fork,
                     &mut reachable_queue,
                     source_package_dependencies,
                     &mut resolved_by_path,
                 )
-                .map_err(|error| {
-                    with_provider_dependency_error(error, Some(clause.dependency.span))
-                })?;
-            }
-            for occurrence in &prepared.qualified_references {
-                process_reachable_authored_dependency(
-                    &mut context,
-                    &occurrence.dependency,
-                    DependencyClauseKind::DirectSelection,
-                    string_table,
-                    path_fork,
-                    &mut reachable_queue,
-                    source_package_dependencies,
-                    &mut resolved_by_path,
-                )
-                .map_err(|error| {
-                    with_provider_dependency_error(error, Some(occurrence.dependency.span))
-                })?;
+                .map_err(|error| with_provider_dependency_error(error, Some(dependency.span)))?;
             }
         }
 

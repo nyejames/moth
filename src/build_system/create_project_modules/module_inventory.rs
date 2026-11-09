@@ -1110,7 +1110,7 @@ fn prepare_check_only_module(
                 effects: Vec::new(),
             };
             let mut resolved_by_path = FxHashMap::default();
-            for dependency in &mut prepared_output.file_dependency_clauses {
+            for (dependency, clause_kind) in prepared_output.authored_dependencies_mut() {
                 resolve_authored_directory_dependency(
                     &mut syntax,
                     source_spans,
@@ -1118,20 +1118,8 @@ fn prepare_check_only_module(
                     &services,
                     &mut walk,
                     &mut resolved_by_path,
-                    &mut dependency.dependency,
-                    dependency.binding.clause_kind(),
-                )?;
-            }
-            for occurrence in &mut prepared_output.qualified_references {
-                resolve_authored_directory_dependency(
-                    &mut syntax,
-                    source_spans,
-                    &mut isolated_external_imports,
-                    &services,
-                    &mut walk,
-                    &mut resolved_by_path,
-                    &mut occurrence.dependency,
-                    DependencyClauseKind::DirectSelection,
+                    dependency,
+                    clause_kind,
                 )?;
             }
             for effect in walk.effects {
@@ -1642,7 +1630,7 @@ fn discover_modules_serial_provider_capable(
                     effects: Vec::new(),
                 };
                 let mut resolved_by_path = FxHashMap::default();
-                for dependency in &mut prepared_output.file_dependency_clauses {
+                for (dependency, clause_kind) in prepared_output.authored_dependencies_mut() {
                     resolve_authored_directory_dependency(
                         &mut syntax,
                         source_spans,
@@ -1650,20 +1638,8 @@ fn discover_modules_serial_provider_capable(
                         &services,
                         &mut walk,
                         &mut resolved_by_path,
-                        &mut dependency.dependency,
-                        dependency.binding.clause_kind(),
-                    )?;
-                }
-                for occurrence in &mut prepared_output.qualified_references {
-                    resolve_authored_directory_dependency(
-                        &mut syntax,
-                        source_spans,
-                        external_imports,
-                        &services,
-                        &mut walk,
-                        &mut resolved_by_path,
-                        &mut occurrence.dependency,
-                        DependencyClauseKind::DirectSelection,
+                        dependency,
+                        clause_kind,
                     )?;
                 }
                 for effect in walk.effects {

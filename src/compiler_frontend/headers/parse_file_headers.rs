@@ -50,7 +50,7 @@ use crate::compiler_frontend::headers::types::{
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
-use crate::compiler_frontend::semantic_identity::{ModuleRootFiles, ModuleRootRole};
+use crate::compiler_frontend::semantic_identity::ModuleRootFiles;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::file_name_is_config_file;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -70,16 +70,10 @@ fn root_inventory_file_role(
     root_file_ids: &ModuleRootFiles<SourceId>,
     file_id: SourceId,
 ) -> Option<FileRole> {
-    if root_file_ids.entry == Some(file_id) {
-        return Some(FileRole::ActiveEntryRoot);
-    }
-    if root_file_ids.support == Some(file_id) {
-        return Some(FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Support));
-    }
-    if root_file_ids.normal == Some(file_id) {
-        return Some(FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal));
-    }
-    None
+    root_file_ids
+        .present()
+        .find(|(_, root_file_id)| **root_file_id == file_id)
+        .and_then(|(role, _)| FileRole::for_standalone_root(role))
 }
 
 /// Derive one reached foreign root's file role from Stage 0's bounded root inventory.
@@ -88,7 +82,7 @@ fn root_inventory_file_role(
 ///      source set. Those roots keep their authored API-facade role but never become this
 ///      compilation's active surface. Entry roots are executable-only and stay ordinary sources,
 ///      because they publish no importable declarations.
-fn reached_root_file_role(
+fn reached_file_role_for_source(
     reached_root_roles: &[(SourceId, FileRole)],
     file_id: SourceId,
 ) -> Option<FileRole> {
@@ -142,7 +136,7 @@ pub fn parse_file_headers_with_table(
         .filter(|(selected_id, _)| *selected_id == file_id)
         .map(|(_, role)| role)
         .or_else(|| root_inventory_file_role(&options.root_file_ids, file_id))
-        .or_else(|| reached_root_file_role(options.reached_root_roles, file_id))
+        .or_else(|| reached_file_role_for_source(options.reached_root_roles, file_id))
         .unwrap_or(FileRole::Normal);
 
     let mut parse_context = HeaderParseContext {
@@ -809,13 +803,8 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         path_fork,
     })?;
 
-    collect_qualified_reference_ordering_hints(
-        &mut headers,
-        &source_token_owners,
-        &module_symbols,
-        &binding_environment,
-    )
-    .map_err(|error| HeaderPreparationFailure::Infrastructure(error.into()))?;
+    collect_qualified_reference_ordering_hints(&mut headers, &module_symbols, &binding_environment)
+        .map_err(|error| HeaderPreparationFailure::Infrastructure(error.into()))?;
 
     canonicalize_local_ordering_hints(
         &mut headers,

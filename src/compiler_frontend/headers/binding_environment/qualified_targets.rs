@@ -35,6 +35,28 @@ pub(crate) enum ResolvedQualifiedTarget {
     External { symbol_id: ExternalSymbolId },
 }
 
+impl ResolvedQualifiedTarget {
+    /// Remap every consumer-local path identity after a path-fork merge.
+    ///
+    /// A source target names its declaration and an imported target names the consumer-local
+    /// path direct-selection binding uses; both live in the merged path domain. External targets
+    /// carry only a stable symbol identity.
+    pub(crate) fn remap_path_ids(
+        &mut self,
+        remap: &crate::compiler_frontend::symbols::path_interner::PathIdRemap,
+    ) {
+        match self {
+            Self::Source { declaration_path } => {
+                *declaration_path = remap.get(*declaration_path);
+            }
+            Self::Imported { local_path, .. } => {
+                *local_path = remap.get(*local_path);
+            }
+            Self::External { .. } => {}
+        }
+    }
+}
+
 /// One occurrence's resolved target and the authored span it must report diagnostics at.
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedQualifiedReference {

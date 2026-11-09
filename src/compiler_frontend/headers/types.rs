@@ -1771,6 +1771,24 @@ pub enum FileFrontendPrepareFailure {
 }
 
 impl FileFrontendPrepareFailure {
+    /// Convert one header-parser failure into the per-file preparation lane.
+    ///
+    /// WHAT: attaches the warnings already accumulated for this file to a header-stage source
+    ///       diagnostic and leaves infrastructure failures unchanged.
+    /// WHY: header parsing and Moth template preparation end at the same boundary and must not
+    ///      repeat the two-lane conversion.
+    pub(crate) fn from_header_parse(failure: HeaderParseFailure, warnings: DiagnosticBag) -> Self {
+        match failure {
+            HeaderParseFailure::Diagnostic(diagnostic) => {
+                Self::Diagnosed(FileFrontendPrepareError {
+                    warnings,
+                    diagnostic,
+                })
+            }
+            HeaderParseFailure::Infrastructure(error) => Self::Infrastructure(error),
+        }
+    }
+
     pub(crate) fn from_tokenization(failure: TokenizeFailure) -> Self {
         match failure {
             TokenizeFailure::Diagnosed(diagnostic) => Self::Diagnosed(FileFrontendPrepareError {
@@ -1914,6 +1932,44 @@ impl FileFrontendPrepareOutput {
         self.path_syntax.table_mut()?.remap_path_ids(remap);
         Ok(())
     }
+
+    /// Every authored dependency path in this file, paired with its clause kind.
+    ///
+    /// WHAT: yields dependency clauses first, then expression-qualified occurrences. Both
+    ///       collections are stored in source order, so this is also the order Stage 0
+    ///       discovered their provider shells.
+    /// WHY: provider discovery and directory resolution consume the same sequence; one iterator
+    ///      keeps that order defined in the file that owns both retained collections.
+    pub(crate) fn authored_dependencies(
+        &self,
+    ) -> impl Iterator<Item = (&RetainedDependencyPath, DependencyClauseKind)> {
+        self.file_dependency_clauses
+            .iter()
+            .map(|clause| (&clause.dependency, clause.binding.clause_kind()))
+            .chain(self.qualified_references.iter().map(|occurrence| {
+                (
+                    &occurrence.dependency,
+                    DependencyClauseKind::DirectSelection,
+                )
+            }))
+    }
+
+    /// Mutable form of [`Self::authored_dependencies`] for resolution that rewrites retained
+    /// paths.
+    pub(crate) fn authored_dependencies_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (&mut RetainedDependencyPath, DependencyClauseKind)> {
+        self.file_dependency_clauses
+            .iter_mut()
+            .map(|clause| (&mut clause.dependency, clause.binding.clause_kind()))
+            .chain(self.qualified_references.iter_mut().map(|occurrence| {
+                (
+                    &mut occurrence.dependency,
+                    DependencyClauseKind::DirectSelection,
+                )
+            }))
+    }
+
     /// Rebind every retained source identity to its consuming file.
     ///
     /// WHAT: updates the canonical file identity, retained declaration syntax, fragment metadata

@@ -274,10 +274,7 @@ impl<T> ModuleRootFiles<T> {
     /// The one deterministic root selected to anchor preparation: normal, then support, then
     /// entry. The anchor carries no semantic authority beyond preparing the structural module.
     pub(crate) fn preparation_anchor(&self) -> Option<&T> {
-        self.normal
-            .as_ref()
-            .or(self.support.as_ref())
-            .or(self.entry.as_ref())
+        self.present().next().map(|(_, root)| root)
     }
 
     /// Present roots in the fixed normal, support, entry order.
@@ -289,6 +286,38 @@ impl<T> ModuleRootFiles<T> {
         ]
         .into_iter()
         .filter_map(|(role, root)| root.map(|root| (role, root)))
+    }
+
+    /// One inventory holding only the given role's value.
+    ///
+    /// A shared or synthetic role has no root slot, so its value is not retained. Synthetic
+    /// single-file modules use this to place an explicitly selected root in its authored slot.
+    pub(crate) fn single(role: ModuleRootRole, value: T) -> Self {
+        match role {
+            ModuleRootRole::Normal => Self::new(Some(value), None, None),
+            ModuleRootRole::Support => Self::new(None, Some(value), None),
+            ModuleRootRole::Entry => Self::new(None, None, Some(value)),
+            ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => Self::default(),
+        }
+    }
+
+    /// The role of the package-facing public surface: support when present, otherwise normal.
+    ///
+    /// An entry-only inventory reports `None` because an entry root publishes no facade.
+    pub(crate) fn public_surface_role(&self) -> Option<ModuleRootRole> {
+        if self.support.is_some() {
+            Some(ModuleRootRole::Support)
+        } else if self.normal.is_some() {
+            Some(ModuleRootRole::Normal)
+        } else {
+            None
+        }
+    }
+
+    /// The role of the preparation anchor root, absent when the inventory holds no root.
+    #[cfg(test)]
+    pub(crate) fn anchor_role(&self) -> Option<ModuleRootRole> {
+        self.present().next().map(|(role, _)| role)
     }
 
     pub(crate) fn into_parts(self) -> (Option<T>, Option<T>, Option<T>) {

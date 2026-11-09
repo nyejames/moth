@@ -27,6 +27,7 @@ use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, DeclarationShell, DeclarationValue,
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
+use crate::compiler_frontend::compiler_messages::DependencyClauseKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
@@ -34,6 +35,7 @@ use crate::compiler_frontend::declaration_syntax::declaration_shell::Declaration
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 
+use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderKind, RetainedDependencyClause,
 };
@@ -310,26 +312,53 @@ impl ModuleSymbols {
             .filter(|role| role.is_active_module_root())
     }
 
-    /// Return the retained expression-qualified occurrence at one authored path row.
+    /// Every authored dependency path in this module, paired with its source and clause kind.
     ///
-    /// WHAT: `Some(row)` when preparation recognised `PATH SYMBOL` at this source and path row.
-    /// WHY: AST distinguishes an ordinary file value from an occurrence whose binding produced no
-    ///      target. The latter already owns a binding diagnostic and must not fall back to a file
-    ///      value or fabricate a second diagnostic.
-    pub(crate) fn qualified_reference_occurrence(
+    /// WHAT: walks prepared sources in canonical path order and yields each source's clauses
+    ///       followed by its expression-qualified occurrences.
+    /// WHY: provider dependency assembly and facade validation consume exactly the sequence
+    ///      Stage 0 discovered; one iterator keeps the union of both per-source maps and their
+    ///      order owned here instead of rebuilt at each call site.
+    pub(crate) fn authored_dependencies(
         &self,
-        source: SourceId,
-        path_syntax: crate::compiler_frontend::paths::path_syntax::PathSyntaxId,
-    ) -> Option<&QualifiedReferenceOccurrence> {
-        self.source_paths_by_source_id
-            .get(&source)
-            .and_then(|source_path| self.qualified_references_by_source.get(source_path))
-            .and_then(|occurrences| {
-                occurrences.iter().find(|occurrence| {
-                    occurrence.selected_span.source() == source
-                        && occurrence.dependency.path_syntax == path_syntax
-                })
-            })
+    ) -> impl Iterator<Item = (&PathId, &RetainedDependencyPath, DependencyClauseKind)> + '_ {
+        let mut sources: Vec<&PathId> = self
+            .file_dependency_clauses_by_source
+            .keys()
+            .chain(self.qualified_references_by_source.keys())
+            .collect();
+        sources.sort_unstable();
+        sources.dedup();
+
+        sources.into_iter().flat_map(move |source_path| {
+            let clauses = self
+                .file_dependency_clauses_by_source
+                .get(source_path)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                .iter()
+                .map(move |clause| {
+                    (
+                        source_path,
+                        &clause.dependency,
+                        clause.binding.clause_kind(),
+                    )
+                });
+            let occurrences = self
+                .qualified_references_by_source
+                .get(source_path)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                .iter()
+                .map(move |occurrence| {
+                    (
+                        source_path,
+                        &occurrence.dependency,
+                        DependencyClauseKind::DirectSelection,
+                    )
+                });
+            clauses.chain(occurrences)
+        })
     }
 
     /// Whether a declaration authored in `target_file` may be resolved from `consumer_file`.
