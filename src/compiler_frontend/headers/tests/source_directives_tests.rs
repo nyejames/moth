@@ -168,6 +168,39 @@ fn config_modifier_before_a_non_declaration_is_dangling() {
 }
 
 #[test]
+fn config_followed_directive_matrix_orders_context_before_duplicate() {
+    // Name resolution precedes the pending-modifier comparison. A known template-only name is a
+    // wrong-context use, while the same source-modifier name is the duplicate case.
+    let cases = [
+        (
+            "$config\n$html\nvalue #= 1\n",
+            InvalidTemplateDirectiveCode::WrongContext,
+            "$html",
+            0,
+        ),
+        (
+            "$config\n$config\nvalue #= 1\n",
+            InvalidTemplateDirectiveCode::DuplicateModifier,
+            "$config",
+            1,
+        ),
+    ];
+
+    for (source, expected, directive, occurrence) in cases {
+        let errors = expect_header_error(
+            parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
+            "the second directive must be classified before attachment",
+        );
+        let diagnostic = assert_directive_reason(&errors, expected);
+        assert_eq!(
+            diagnostic_primary_span(diagnostic),
+            Some(source_span_for(source, directive, occurrence)),
+            "the diagnostic is reported at the incoming directive's authored span"
+        );
+    }
+}
+
+#[test]
 fn duplicate_config_modifiers_cite_both_authored_spans() {
     let source = "$config\n$config\napi_url #String = \"x\"\n";
     let errors = expect_header_error(

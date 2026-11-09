@@ -378,6 +378,11 @@ fn parse_headers_in_file_inner(
             }
 
             HeaderFileItem::StyleDirective(name_id) => {
+                // Resolve the incoming name before comparing it with a pending modifier. A
+                // template-only directive that follows `$config` is a wrong-context use, not a
+                // duplicate of the pending source modifier.
+                let target = source_modifier_target_for(context, name_id, current_span)?;
+
                 if let Some(previous) = pending_source_modifier {
                     return Err(diagnostic_failure(
                         templates::invalid_template_directive(
@@ -391,8 +396,6 @@ fn parse_headers_in_file_inner(
                         ),
                     ));
                 }
-
-                let target = source_modifier_target_for(context, name_id, current_span)?;
 
                 // A source modifier owns its line. Any token before the line break is an operand
                 // or the removed call spelling, which every current source modifier rejects.

@@ -18,7 +18,7 @@ fn frontend_builtin_directives_work_with_a_minimal_builder() {
     let entry_file = root.join("builtins.moth");
     fs::write(
         &entry_file,
-        "[$before [:<li>], $after [:</li>]:\n<ul>\n  [$md:\n# Docs\n]\n  [$raw:\n  keep\n]\n  [$fresh:\n    [: plain ]\n  ]\n</ul>\n]",
+        "[$before [:<li>], $after [:</li]:\n<ul>\n  [$md:\n# Docs\n]\n  [$raw:\n  keep\n]\n  [$fresh:\n    [: plain ]\n  ]\n</ul>\n]\n[$code \"moth\":\n    loop value\n]\n[$html:\n    <p>Hello</p>\n]",
     )
     .expect("should write source file");
 
@@ -40,5 +40,20 @@ fn frontend_builtin_directives_work_with_a_minimal_builder() {
     assert_eq!(
         result.project.output_files[0].relative_output_path(),
         PathBuf::from("index.html")
+    );
+    let FileKind::Html(rendered) = result.project.output_files[0].file_kind() else {
+        panic!("the minimal builder should emit HTML");
+    };
+    assert!(
+        rendered.contains("<span class='moth-code-keyword'>loop</span>"),
+        "`$code` must format under a minimal builder, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("<p>Hello</p>"),
+        "`$html` must format under a minimal builder, got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("\n    <p>Hello</p>"),
+        "`$html` formatting must remove template-body indentation, got: {rendered}"
     );
 }

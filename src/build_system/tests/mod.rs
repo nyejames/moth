@@ -16,6 +16,7 @@ use crate::build_system::output::{
 use crate::builder_surface::BuilderSurface;
 use crate::builder_surface::PackageOrigin;
 use crate::compiler_frontend::Flag;
+use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::compiler_messages::compiler_errors::{
     CompilationOutcome, CompilationResult, InfrastructureFailure,
 };
@@ -30,6 +31,8 @@ use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnos
 use crate::compiler_frontend::compiler_messages::{
     CompilerStage, DiagnosticBag, InvalidConfigReason, NamingConvention, PreparedFailure,
 };
+use crate::compiler_frontend::hir::expressions::HirExpressionKind;
+use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::settings::{Config, ProjectConfigError};
@@ -430,22 +433,57 @@ impl BackendBuilder for FailingValidationBuilder {
     }
 }
 
+/// Concatenate the executed template text retained in HIR.
+///
+/// The minimal builder owns no renderer, so this exposes the formatter output that the frontend
+/// already produced. A moved formatter must change this text without any builder participation.
+fn rendered_hir_text(
+    project_compilation: &super::ProjectCompilation,
+    strings: &StringTable,
+) -> String {
+    let mut rendered = String::new();
+    for module in project_compilation.modules() {
+        let hir = &module.executable.hir;
+        for index in 0..hir.expressions.expression_count() {
+            let Ok(index) = u32::try_from(index) else {
+                continue;
+            };
+            let Some(expression) = hir.expressions.get_expression(HirValueId(index)) else {
+                continue;
+            };
+            match &expression.kind {
+                HirExpressionKind::StringLiteral(text) => rendered.push_str(text),
+                HirExpressionKind::StructuralString { pieces } => {
+                    for piece in hir.expressions.string_pieces(*pieces) {
+                        if let ConstStringPiece::Text(text) = piece {
+                            rendered.push_str(strings.resolve(*text));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    rendered
+}
+
 struct MinimalBuilder;
 
 impl BackendBuilder for MinimalBuilder {
     type Error = std::convert::Infallible;
     fn build_backend(
         &self,
-        _project_compilation: super::ProjectCompilation,
+        project_compilation: super::ProjectCompilation,
         _config: &Config,
         _build_profile: BuildProfile,
         _flags: &[Flag],
-        _context: &mut BackendBuildContext<'_>,
+        context: &mut BackendBuildContext<'_>,
     ) -> Result<Project, BackendInvocationFailure<Self::Error>> {
+        let rendered = rendered_hir_text(&project_compilation, context.strings());
         Ok(Project {
             output_files: vec![OutputFile::new(
                 PathBuf::from("index.html"),
-                FileKind::Html(String::new()),
+                FileKind::Html(rendered),
             )],
             entry_page_rel: Some(PathBuf::from("index.html")),
             cleanup_policy: CleanupPolicy::generic([".html"]),
