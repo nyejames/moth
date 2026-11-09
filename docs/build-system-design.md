@@ -182,7 +182,7 @@ AST receives an ordinary folded constant. A Bool input uses ordinary `if`, with 
 
 ### Active builder configuration record
 
-An authored HTML directory config contains the named `html` record. An empty record uses defaults and the record stays required even when every field takes its default. The command already selected the builder, so this record never chooses a backend or runtime platform.
+An authored HTML directory config may contain the named `html` record. An empty or omitted record uses defaults. The command already selected the builder, so this record never chooses a backend or runtime platform.
 
 The canonical project-config reference owns the field set and defaults. Shared record validation fills defaults once. The typed HTML settings owner checks domains such as URL style, origin path, non-empty language/present favicon and output-root containment/profile conflicts.
 

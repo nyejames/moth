@@ -127,7 +127,7 @@ tokenization
 
 Then config **stops**. No borrow checker. No backend.
 
-The accepted shape contains explicit `$config` declarations, at most one `project` record constant and, for an authored HTML project, the required `html` record. It may also contain private helper constants, scalars and other foldable values allowed by the single-file compile-time surface. An empty `html #= ()` supplies its defaults.
+The accepted shape contains explicit `$config` declarations, at most one `project` record constant and an optional `html` record for an HTML project. It may also contain private helper constants, scalars and other foldable values allowed by the single-file compile-time surface. An empty or omitted `html` record supplies its defaults.
 
 Rejected shape includes dependency clauses, runtime declarations, functions, traits, entry fragments, `export:` and nested config files. Config does not select the builder; the command already did.
 

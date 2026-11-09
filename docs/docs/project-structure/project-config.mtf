@@ -13,7 +13,7 @@
     html #= ()
 ]
 
-The `project` record is optional. An omitted name uses the selected directory name, and an omitted version means the project is unversioned. The active builder section follows its existing required/optional presence rule; HTML currently requires `html #= ()` even when every field takes a default. The selected directory is the source root.
+The `project` record is optional. An omitted name uses the selected directory name, and an omitted version means the project is unversioned. The active builder section follows its existing required/optional presence rule; HTML permits an omitted `html` record and applies its defaults. The selected directory is the source root.
 
 Use an earlier `#Config of T` input (or `$config` when that migration lands) to provide a configurable value. A field is not itself an input declaration.
 
@@ -93,7 +93,7 @@ A present value must be an `I32` from 1 to 2147483647. Zero, negative values and
 
 ### HTML builder settings record
 
-An authored HTML directory project uses the named `html #= (...)` compile-time record. The command selects the builder first; this record never selects a backend or platform. The active HTML section is required even when its fields use defaults.
+An HTML directory project may use the named `html #= (...)` compile-time record. The command selects the builder first; this record never selects a backend or platform. Omitting the record applies its schema defaults.
 
 The recognised setting names and defaults are:
 
@@ -211,7 +211,7 @@ Operational config uses declaration-owned `#Config` inputs and parenthesised gro
     html #= ()
 ]
 
-The `project` record may omit `name`, `version`, or both. An omitted name uses the selected directory name; an omitted version means unversioned. The record has no `entry_root`; the selected directory is the source root. An authored HTML directory config still includes `html #= ()`; omitting the active builder section is diagnosed. Its schema defaults include `_dev` and `_release` outputs.
+The `project` record may omit `name`, `version`, or both. An omitted name uses the selected directory name; an omitted version means unversioned. The record has no `entry_root`; the selected directory is the source root. The HTML section is optional and its schema defaults include `_dev` and `_release` outputs.
 
 The grouped `project` record accepts `max_errors_per_module` and `max_errors_per_project` as fixed-only `I32?` compiler controls. Omission uses the default of 5 module errors or 30 project errors. An explicit `none` disables that one limit and leaves the other unchanged. A present value must be an exact `I32` from 1 to 2147483647. The grouped record has no field type context, so write an explicit absence through a typed `I32?` constant as the example does. Writing `none` directly in the record is a language type error. The loader validates and stores both settings today. The module limit governs file preparation and ordinary-body diagnostic recovery. The project threshold is a soft scheduling cutoff for new work in check, build and dev. When discovery ends early, one line after the diagnostics names the reason and says that later code was not checked. The CLI, the dev server's terminal and browser error page and the builder SDK's error text all show it.
 

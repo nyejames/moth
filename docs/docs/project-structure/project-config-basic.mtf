@@ -13,7 +13,7 @@
     html #= ()
 ]
 
-The `project` record is optional. Omitting `name` uses the selected directory name and omitting `version` means unversioned. The active HTML builder section currently requires `html #= ()`, even when all fields take defaults. The command selects the builder; these records never select one. There is no `entry_root` setting.
+The `project` record is optional. Omitting `name` uses the selected directory name and omitting `version` means unversioned. The HTML builder section is also optional and uses defaults when omitted. The command selects the builder; these records never select one. There is no `entry_root` setting.
 
 ### Typed configuration inputs
 
