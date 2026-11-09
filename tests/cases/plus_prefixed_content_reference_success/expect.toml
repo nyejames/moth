@@ -1,0 +1,16 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["same-module plus content"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["same-module plus content"]
+
+[[backends.html_wasm.artifact_assertions]]
+path = "page.js"
+kind = "js"
+must_contain = ["same-module plus content"]

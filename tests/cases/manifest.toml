@@ -11825,13 +11825,6 @@ contract = "language.dependencies.direct_special_file_dependency_rejected"
 role = "boundary"
 
 [[case]]
-id = "direct_nested_support_root_dependency_rejected"
-path = "direct_nested_support_root_dependency_rejected"
-tags = ["integration", "dependencies", "diagnostics", "special-files", "source-packages"]
-contract = "language.dependencies.direct_special_file_dependency_rejected"
-role = "boundary"
-
-[[case]]
 id = "paired_root_support_diagnostic_rejects_normal"
 path = "paired_root_support_diagnostic_rejects_normal"
 tags = ["integration", "modules", "visibility", "root-boundaries", "negative", "publication"]
@@ -19444,6 +19437,13 @@ contract = "language.modules.plus_prefixed_content_reference_reports_explicit_ex
 role = "primary"
 
 [[case]]
+id = "plus_prefixed_content_reference_success"
+path = "plus_prefixed_content_reference_success"
+tags = ["integration", "project-structure", "dependencies", "root-roles"]
+contract = "language.modules.plus_prefixed_content_source_binds_ordinary_dependency"
+role = "primary"
+
+[[case]]
 id = "closed_root_build_config_filename_rejected"
 path = "closed_root_build_config_filename_rejected"
 tags = ["integration", "project-structure", "diagnostics", "root-roles"]
@@ -19458,10 +19458,10 @@ contract = "language.modules.case_variant_root_filename_rejected"
 role = "primary"
 
 [[case]]
-id = "closed_root_retired_name_directory_rejected"
-path = "closed_root_retired_name_directory_rejected"
+id = "closed_root_invalid_name_directory_rejected"
+path = "closed_root_invalid_name_directory_rejected"
 tags = ["integration", "project-structure", "diagnostics", "root-roles"]
-contract = "language.modules.retired_root_filename_directory_rejected"
+contract = "language.modules.invalid_root_filename_directory_rejected"
 role = "boundary"
 
 [[case]]

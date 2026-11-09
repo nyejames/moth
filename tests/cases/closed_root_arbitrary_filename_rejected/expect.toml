@@ -4,10 +4,10 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-CONFIG-0001"]
-message_contains = ["Invalid module root filename", "@page.moth", "Rename '@page.moth' to '@entry.moth'"]
+message_contains = ["Invalid module root filename", "@page.moth", "'@mod.moth'", "'@package.moth'", "'@entry.moth'", "'config.moth'"]
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-CONFIG-0001"]
-message_contains = ["Invalid module root filename", "@page.moth", "Rename '@page.moth' to '@entry.moth'"]
+message_contains = ["Invalid module root filename", "@page.moth", "'@mod.moth'", "'@package.moth'", "'@entry.moth'", "'config.moth'"]

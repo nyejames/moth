@@ -870,22 +870,21 @@ mod source_package_boundary_indexes_tests {
     }
 
     #[test]
-    fn legacy_normal_root_beside_canonical_facade_is_rejected() {
+    fn invalid_normal_root_beside_canonical_facade_is_rejected() {
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
         fs::create_dir_all(&package_root).expect("should create package root");
         fs::write(package_root.join("@mod.moth"), "")
             .expect("should write canonical normal facade root");
-        fs::write(package_root.join("@page.moth"), "")
-            .expect("should write stale legacy root filename");
+        fs::write(package_root.join("@page.moth"), "").expect("should write invalid root filename");
 
         let mut source_packages = SourcePackageRegistry::new();
         register_pkg(&mut source_packages, &package_root);
 
         let mut string_table = StringTable::new();
         let failure = build_indexes(&source_packages, &mut string_table)
-            .expect_err("a stale @page.moth root is rejected, never silently a helper file");
+            .expect_err("an invalid @page.moth root is rejected, never silently a helper file");
         assert_invalid_config_reason(failure, InvalidConfigCode::InvalidModuleRootFileName);
     }
 
@@ -1683,7 +1682,7 @@ mod module_identity_tests {
     }
 
     #[test]
-    fn legacy_support_root_beside_canonical_support_root_is_rejected() {
+    fn plus_root_beside_canonical_support_root_is_rejected() {
         use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
             InvalidConfigCode, InvalidConfigView,
         };
@@ -1693,7 +1692,7 @@ mod module_identity_tests {
         let src = root.join("src");
         fs::create_dir_all(&src).expect("should create entry root");
         fs::write(src.join("@package.moth"), "").expect("should write canonical support root");
-        fs::write(src.join("+package.moth"), "").expect("should write legacy support marker");
+        fs::write(src.join("+package.moth"), "").expect("should write invalid plus root marker");
 
         let failure = discover_result(&root, "src")
             .expect_err("an authored + root is rejected, never treated as an ordinary helper");
@@ -1701,10 +1700,10 @@ mod module_identity_tests {
         let (_, diagnostic) = reports
             .iter_severity(DiagnosticSeverity::Error)
             .next()
-            .expect("a legacy root marker should diagnose");
+            .expect("an invalid root marker should diagnose");
         let facts = diagnostic
             .family_view::<InvalidConfigView>()
-            .expect("a legacy root marker keeps typed structure facts");
+            .expect("an invalid root marker keeps typed structure facts");
         assert_eq!(
             facts.reason,
             InvalidConfigCode::InvalidModuleRootFileName,
@@ -2220,7 +2219,7 @@ mod module_identity_tests {
             module_root_role_for_file_name("@entry.moth"),
             Some(ModuleRootRole::Entry)
         );
-        for stale in [
+        for invalid in [
             "@page.moth",
             "@home.moth",
             "@site.moth",
@@ -2234,9 +2233,9 @@ mod module_identity_tests {
             "config.moth",
         ] {
             assert_eq!(
-                module_root_role_for_file_name(stale),
+                module_root_role_for_file_name(invalid),
                 None,
-                "{stale} is not one of the three fixed root filenames"
+                "{invalid} is not one of the three fixed root filenames"
             );
         }
     }
@@ -2509,7 +2508,7 @@ mod module_identity_tests {
     }
 
     #[test]
-    fn source_tree_rejects_legacy_support_root_markers() {
+    fn source_tree_rejects_plus_root_markers() {
         use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
             InvalidConfigCode, InvalidConfigView,
         };
@@ -2518,7 +2517,7 @@ mod module_identity_tests {
         let root = _tmp_root.path().to_path_buf();
         let src = root.join("src");
         fs::create_dir_all(src.join("pkg")).expect("should create support directory");
-        fs::write(src.join("pkg/+one.moth"), "").expect("should write legacy support marker");
+        fs::write(src.join("pkg/+one.moth"), "").expect("should write invalid plus root marker");
 
         let entry_root = root.join("src");
         let config = Config::new(root.clone());
@@ -2539,15 +2538,15 @@ mod module_identity_tests {
             &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
             &mut string_table,
         )
-        .expect_err("an authored + support marker is rejected");
+        .expect_err("an authored + root marker is rejected");
         let reports = prepared_failure_reports(failure);
         let (_, diagnostic) = reports
             .iter_severity(DiagnosticSeverity::Error)
             .next()
-            .expect("a legacy support marker should diagnose");
+            .expect("an invalid root marker should diagnose");
         let facts = diagnostic
             .family_view::<InvalidConfigView>()
-            .expect("a legacy support marker keeps typed structure facts");
+            .expect("an invalid root marker keeps typed structure facts");
         assert_eq!(facts.reason, InvalidConfigCode::InvalidModuleRootFileName);
     }
 

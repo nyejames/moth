@@ -175,7 +175,30 @@ fn explicit_source_extension_suggests_the_extensionless_binding() {
 }
 
 #[test]
-fn plus_prefixed_source_extension_asks_for_a_rename_instead_of_a_dead_binding() {
+fn invalid_module_root_filename_names_the_closed_vocabulary_without_a_replacement() {
+    let mut string_table = StringTable::new();
+    let file_name = string_table.intern("@page.moth");
+    let directory = string_table.intern("src/pages");
+    let message = invalid_config_message(
+        None,
+        &InvalidConfigReason::InvalidModuleRootFileName {
+            file_name,
+            directory,
+        },
+        &string_table,
+    );
+
+    assert!(message.contains("'@page.moth'"), "{message}");
+    assert!(message.contains("'@mod.moth'"), "{message}");
+    assert!(message.contains("'@package.moth'"), "{message}");
+    assert!(message.contains("'@entry.moth'"), "{message}");
+    assert!(message.contains("'config.moth'"), "{message}");
+    assert!(!message.contains("Rename"), "{message}");
+    assert!(!message.contains("instead"), "{message}");
+}
+
+#[test]
+fn plus_prefixed_source_extension_uses_the_ordinary_extensionless_binding() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let path = path_fork
@@ -189,17 +212,8 @@ fn plus_prefixed_source_extension_asks_for_a_rename_instead_of_a_dead_binding() 
         DiagnosticRenderContext::new(&string_table).with_path_table(&path_table),
     );
 
-    assert!(message.contains("`@+notes.mtf`"), "{message}");
-    assert!(
-        message.contains("the retired support-marker rule reserves"),
-        "{message}"
-    );
-    assert!(
-        message.contains("Rename the file without the `+` prefix"),
-        "{message}"
-    );
-    assert!(
-        !message.contains("Use `@+notes`"),
-        "the plus-prefixed stem must not be suggested as a binding: {message}"
+    assert_eq!(
+        message,
+        "Dependency paths must not include the `.mtf` source-file extension: `@+notes.mtf`.\nUse `@+notes` instead.",
     );
 }

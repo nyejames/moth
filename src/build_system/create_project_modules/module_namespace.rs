@@ -37,9 +37,7 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDepende
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::source_packages::root_file::{
-    dependency_component_is_config_file, dependency_component_is_legacy_support_marker,
-};
+use crate::compiler_frontend::source_packages::root_file::dependency_component_is_config_file;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
@@ -1035,7 +1033,7 @@ fn resolve_entry(
     }
 }
 
-/// Reject direct support-root and config paths before namespace absence can change the diagnostic.
+/// Reject direct config paths before namespace absence can change the diagnostic.
 fn reject_direct_special_file_dependency(
     provider: &RetainedDependencyPath,
     string_table: &StringTable,
@@ -1044,10 +1042,7 @@ fn reject_direct_special_file_dependency(
     let source_component = path_fork
         .component(provider.path)
         .map(|component| string_table.resolve(component));
-    if source_component.is_some_and(|component| {
-        dependency_component_is_config_file(component)
-            || dependency_component_is_legacy_support_marker(component)
-    }) {
+    if source_component.is_some_and(dependency_component_is_config_file) {
         return Err(imports::direct_special_file_import(
             provider.path,
             Some(provider.span),

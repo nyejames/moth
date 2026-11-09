@@ -39,7 +39,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::source_packages::root_file::{
-    file_name_is_module_root_file, invalid_module_root_file_name_suggestion,
+    file_name_is_invalid_module_root_marker, file_name_is_module_root_file,
     module_root_role_for_file_name,
 };
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -351,10 +351,10 @@ fn compile_single_file_frontend_with_target(
         }
     };
 
-    // The selected file shares the closed root vocabulary with directory discovery. A retired
+    // The selected file shares the closed root vocabulary with directory discovery. An invalid
     // `@*.moth`, `+*.moth` or `#*.moth` spelling is rejected here rather than routed to a page
     // output or treated as an ordinary source file.
-    if invalid_module_root_file_name_suggestion(entry_file_name).is_some() {
+    if file_name_is_invalid_module_root_marker(entry_file_name) {
         let directory = entry_path.parent().unwrap_or_else(|| Path::new("."));
         return Err(BoundaryPremergeFailure::from(
             invalid_module_root_file_name_error(directory, entry_file_name, string_table),

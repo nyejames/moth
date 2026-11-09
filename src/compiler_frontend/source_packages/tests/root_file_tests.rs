@@ -1,7 +1,7 @@
 use super::root_file::{
-    PreparedSourcePackageRoots, dependency_component_is_legacy_support_marker,
-    dependency_path_references_config_file, dependency_path_references_legacy_support_marker,
-    file_name_is_config_file, file_name_is_module_root_file, module_root_role_for_file_name,
+    PreparedSourcePackageRoots, dependency_path_references_config_file, file_name_is_config_file,
+    file_name_is_invalid_module_root_marker, file_name_is_module_root_file,
+    module_root_role_for_file_name,
 };
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -33,7 +33,7 @@ fn classifies_only_the_fixed_root_filenames() {
         module_root_role_for_file_name("@entry.moth"),
         Some(ModuleRootRole::Entry)
     );
-    for stale in [
+    for invalid in [
         "@page.moth",
         "@home.moth",
         "@site.moth",
@@ -51,9 +51,9 @@ fn classifies_only_the_fixed_root_filenames() {
         "@entry",
     ] {
         assert_eq!(
-            module_root_role_for_file_name(stale),
+            module_root_role_for_file_name(invalid),
             None,
-            "{stale} is not one of the three fixed root filenames"
+            "{invalid} is not one of the three fixed root filenames"
         );
     }
     assert!(file_name_is_config_file("config.moth"));
@@ -65,7 +65,7 @@ fn classifies_the_closed_three_role_root_filenames() {
     assert!(file_name_is_module_root_file("@mod.moth"));
     assert!(file_name_is_module_root_file("@package.moth"));
     assert!(file_name_is_module_root_file("@entry.moth"));
-    for stale in [
+    for invalid in [
         "@page.moth",
         "@home.moth",
         "@site.moth",
@@ -78,25 +78,56 @@ fn classifies_the_closed_three_role_root_filenames() {
         "config.moth",
     ] {
         assert!(
-            !file_name_is_module_root_file(stale),
-            "{stale} is not one of the three closed root filenames"
+            !file_name_is_module_root_file(invalid),
+            "{invalid} is not one of the three closed root filenames"
         );
     }
 }
 
 #[test]
-fn legacy_support_marker_dependency_components_are_flagged() {
-    assert!(dependency_component_is_legacy_support_marker("+pkg"));
-    assert!(dependency_component_is_legacy_support_marker("+pkg.moth"));
-    assert!(!dependency_component_is_legacy_support_marker("pkg"));
-    assert!(!dependency_component_is_legacy_support_marker("@package"));
-    assert!(!dependency_component_is_legacy_support_marker(
-        "@package.moth"
-    ));
-    for ordinary_plus_name in ["+pkg.js", "+notes.mtf", "+.moth", "+"] {
+fn invalid_special_moth_names_are_recognized_without_a_role_guess() {
+    for invalid in [
+        "@page.moth",
+        "@home.moth",
+        "@site.moth",
+        "@api.moth",
+        "@config.moth",
+        "@anything.moth",
+        "@Entry.moth",
+        "@MOD.moth",
+        "@.moth",
+        "+pkg.moth",
+        "+shared.moth",
+        "+.moth",
+        "#pkg.moth",
+        "#.moth",
+    ] {
         assert!(
-            !dependency_component_is_legacy_support_marker(ordinary_plus_name),
-            "{ordinary_plus_name} is not a retired support marker"
+            file_name_is_invalid_module_root_marker(invalid),
+            "{invalid} is an invalid special .moth filename"
+        );
+    }
+
+    for accepted in ["@mod.moth", "@package.moth", "@entry.moth"] {
+        assert!(
+            !file_name_is_invalid_module_root_marker(accepted),
+            "{accepted} is an accepted root filename"
+        );
+    }
+
+    for ordinary in [
+        "config.moth",
+        "helper.moth",
+        "page.moth",
+        "+notes.mtf",
+        "+runtime.js",
+        "@theme.css",
+        "@entry",
+        ".moth",
+    ] {
+        assert!(
+            !file_name_is_invalid_module_root_marker(ordinary),
+            "{ordinary} is not an invalid special .moth filename"
         );
     }
 }
@@ -130,40 +161,6 @@ fn config_dependency_classification_uses_the_source_component() {
         &path_fork,
         &string_table
     ));
-}
-
-#[test]
-fn legacy_support_marker_dependency_paths_are_flagged() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-
-    let bare_support_marker = path(&["modules", "+pkg"], &mut string_table, &mut path_fork);
-    assert!(dependency_path_references_legacy_support_marker(
-        bare_support_marker,
-        &path_fork,
-        &string_table
-    ));
-
-    let ordinary_module = path(
-        &["modules", "+pkg.moth", "symbol"],
-        &mut string_table,
-        &mut path_fork,
-    );
-    assert!(!dependency_path_references_legacy_support_marker(
-        ordinary_module,
-        &path_fork,
-        &string_table
-    ));
-
-    let ordinary_plus_extension = path(&["modules", "+pkg.js"], &mut string_table, &mut path_fork);
-    assert!(
-        !dependency_path_references_legacy_support_marker(
-            ordinary_plus_extension,
-            &path_fork,
-            &string_table
-        ),
-        "an ordinary + resource name is not a retired support marker"
-    );
 }
 
 #[test]

@@ -1118,18 +1118,11 @@ fn direct_special_file_import_message(
 ) -> String {
     let special_file = special_file_name_from_path(path, context);
     let path_text = context.render_path(path);
-    let suggestion = support_root_import_suggestion(path, context);
-    if suggestion.is_empty() {
-        // The only non-support special file this diagnostic names is the build-only config
-        // source, which has no authored facade or importable surface.
-        format!(
-            "Cannot depend directly on '{special_file}' via '{path_text}'. `config.moth` is a build-only source and is not importable."
-        )
-    } else {
-        format!(
-            "Cannot depend directly on '{special_file}' via '{path_text}'. Support facades are authored as '@package.moth' and are referenced through their module directory, not by a special filename.{suggestion}"
-        )
-    }
+    // The direct-special-file diagnostic covers only the build-only config source, which has no
+    // authored facade or importable surface.
+    format!(
+        "Cannot depend directly on '{special_file}' via '{path_text}'. `config.moth` is a build-only source and is not importable."
+    )
 }
 
 /// Renders a direct special-file dependency from its compact path fact.

@@ -517,12 +517,12 @@ pub enum InvalidConfigReason {
         folder_name: StringId,
         directory: StringId,
     },
-    /// An authored `.moth` filename uses a retired special-root marker.
+    /// An authored `.moth` filename uses a special marker outside the accepted root vocabulary.
     ///
     /// The closed vocabulary is `@mod.moth`, `@package.moth` and `@entry.moth`; `config.moth`
     /// remains the one build-only special source name. Every other `@*.moth`, `+*.moth` and
-    /// legacy `#*.moth` marker is a structure error that names the file. The renderer derives
-    /// the canonical replacement from that filename.
+    /// `#*.moth` marker is a structure error that names the file and lists the three accepted
+    /// root files. The renderer never infers a replacement role from the filename.
     InvalidModuleRootFileName {
         file_name: StringId,
         directory: StringId,

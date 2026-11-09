@@ -33,12 +33,12 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::source::{SourceKind, SourceRegistrationIndex};
 use crate::compiler_frontend::source_packages::root_file::{
-    file_name_is_config_file, file_name_is_module_root_file,
-    invalid_module_root_file_name_suggestion, module_root_role_for_file_name,
+    file_name_is_config_file, file_name_is_invalid_module_root_marker,
+    file_name_is_module_root_file, module_root_role_for_file_name,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::counter_observation;
-use crate::projects::settings::{Config, LANGUAGE_SOURCE_SUFFIX};
+use crate::projects::settings::Config;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
@@ -514,10 +514,11 @@ impl SourceTreeIndex {
     ///
     /// Each source directory may contain one `@mod.moth`, one `@package.moth` and one
     /// `@entry.moth` root. Aliased or multiply-claimed roots are rejected through
-    /// the existing structured config diagnostic lane. Every other `@*.moth`, `+*.moth` and legacy
-    /// `#*.moth` marker is rejected with a structured diagnostic that names the canonical
-    /// replacement. Entry roots carry the `Entry` role used by the project module graph to select
-    /// entries; the graph, not this index, owns that selection. A project-root support root is an
+    /// the existing structured config diagnostic lane. Every other `@*.moth`, `+*.moth` and
+    /// `#*.moth` marker is rejected with a structured diagnostic that names the invalid filename
+    /// and the three accepted root files. Entry roots carry the `Entry` role used by the project
+    /// module graph to select entries; the graph, not this index, owns that selection. A
+    /// project-root support root is an
     /// ordinary structural module when it lies inside the selected directory; it is never an entry
     /// candidate.
     ///
@@ -659,10 +660,10 @@ impl SourceTreeIndex {
                 if is_dir {
                     // Root markers are reserved source filenames. A directory or directory
                     // symlink reachable under one of those names is a malformed authored root,
-                    // not a traversable module directory. A retired marker name stays a closed
+                    // not a traversable module directory. An invalid marker name stays a closed
                     // vocabulary error even when it is not a regular file.
                     if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
-                        if invalid_module_root_file_name_suggestion(file_name).is_some() {
+                        if file_name_is_invalid_module_root_marker(file_name) {
                             return Err(invalid_module_root_file_name_error(
                                 &directory,
                                 file_name,
@@ -721,10 +722,10 @@ impl SourceTreeIndex {
                     // non-regular entries. A reserved root-marker name in any existing form is an
                     // authored root, so canonicalize it and reject it instead of silently dropping
                     // the required root. A dangling marker symlink still fails canonicalization.
-                    // A retired marker spelling is a closed-vocabulary error without resolving the
-                    // link, so a dangling retired-name symlink is still visible to the author.
+                    // An invalid marker spelling is a closed-vocabulary error without resolving
+                    // the link, so a dangling invalid-name symlink is still visible to the author.
                     if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
-                        if invalid_module_root_file_name_suggestion(file_name).is_some() {
+                        if file_name_is_invalid_module_root_marker(file_name) {
                             return Err(invalid_module_root_file_name_error(
                                 &directory,
                                 file_name,
@@ -761,9 +762,8 @@ impl SourceTreeIndex {
 
                 if let SourceTreeBoundaryKind::Project { .. } = kind
                     && directory == entry_root
-                    && (source_stem_from_file_name(file_name)
+                    && source_stem_from_file_name(file_name)
                         .is_some_and(claims_project_globals_name)
-                        || file_name_claims_project_globals_root(file_name))
                 {
                     let diagnostic = project_structure_diagnostic(
                         InvalidConfigReason::ProjectGlobalsNameReserved,
@@ -780,9 +780,9 @@ impl SourceTreeIndex {
                 }
 
                 // The authored root vocabulary is closed: only `@mod.moth`, `@package.moth` and
-                // `@entry.moth` are roots. Retired `@*.moth`, `+*.moth` and legacy `#*.moth`
-                // markers are authored structure errors, never ordinary helpers or no-ops.
-                if invalid_module_root_file_name_suggestion(file_name).is_some() {
+                // `@entry.moth` are roots. Every other `@*.moth`, `+*.moth` and `#*.moth` marker
+                // is an authored structure error, never an ordinary helper or a no-op.
+                if file_name_is_invalid_module_root_marker(file_name) {
                     return Err(invalid_module_root_file_name_error(
                         &directory,
                         file_name,
@@ -1142,9 +1142,12 @@ impl SourceTreeIndex {
             if is_directory {
                 keys.insert(file_name.to_owned());
             } else if !file_name.starts_with('@')
-                && !file_name.starts_with('+')
+                && !file_name_is_invalid_module_root_marker(file_name)
                 && let Some(stem) = source_stem_from_file_name(file_name)
             {
+                // Ordinary supported sources may use a `+` stem (`+notes.mtf` contributes
+                // `+notes`). Invalid `@*.moth`, `+*.moth` and `#*.moth` markers never become
+                // helper identities, and canonical root files keep their `@` exclusion.
                 keys.insert(stem.to_owned());
             }
         }
@@ -1666,16 +1669,6 @@ fn package_parent_matches(parent: &str, relative_directory: &Path) -> bool {
                 .is_some_and(|component| component.eq_ignore_ascii_case(segment))
         })
         && components.next().is_none()
-}
-
-/// Whether a canonical module-root filename uses the reserved project-globals dependency name.
-fn file_name_claims_project_globals_root(file_name: &str) -> bool {
-    ["@", "+"].into_iter().any(|marker| {
-        file_name
-            .strip_prefix(marker)
-            .and_then(|name| name.strip_suffix(LANGUAGE_SOURCE_SUFFIX))
-            .is_some_and(claims_project_globals_name)
-    })
 }
 
 /// Extract the dependency-name stem from a compiler-recognized source file name.

@@ -4,8 +4,8 @@
 //!      validation and diagnostic rendering share one filename policy.
 //! WHY: `@mod.moth`, `@package.moth` and `@entry.moth` are the only authored root filenames and
 //!      `config.moth` is the only build-only special source name. Every other `@*.moth`,
-//!      `+*.moth` and legacy `#*.moth` marker is an authored structure error diagnosed during
-//!      Stage 0 discovery.
+//!      `+*.moth` or `#*.moth` filename is an authored structure error diagnosed during Stage 0
+//!      discovery.
 
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -84,103 +84,29 @@ pub(crate) fn file_name_is_config_file(file_name: &str) -> bool {
     file_name == CONFIG_FILE_NAME
 }
 
-/// Canonical replacement advice for one rejected authored root marker.
+/// Whether a `.moth` filename uses a special marker outside the accepted root vocabulary.
 ///
-/// WHAT: names the legal root role an author should use instead of a retired spelling.
-/// WHY: the suggestion is derived from the filename rather than stored as rendered text, so the
-///      frozen diagnostic retains only filename facts and the renderer owns the prose.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum InvalidRootFilenameSuggestion {
-    /// Executable root work belongs in the entry root.
-    Entry,
-    /// Exported API belongs in the normal facade.
-    Normal,
-    /// The scoped support facade replaces the retired support marker.
-    Support,
-    /// The retired stem does not identify a role: runtime work and exported API have different
-    /// fixed roots, so both legal replacements are named.
-    EntryOrNormal,
-}
-
-impl InvalidRootFilenameSuggestion {
-    /// The replacement phrase used by the invalid-root-filename diagnostic.
-    pub(crate) fn replacement(self) -> &'static str {
-        match self {
-            Self::Entry => "'@entry.moth'",
-            Self::Normal => "'@mod.moth'",
-            Self::Support => "'@package.moth'",
-            Self::EntryOrNormal => "'@entry.moth' for runtime work or '@mod.moth' for exported API",
-        }
-    }
-}
-
-/// The canonical replacement for an invalid authored root marker, when the filename uses one.
-///
-/// WHAT: recognises the retired `@*.moth`, `+*.moth` and `#*.moth` marker spellings and returns
-///       the fixed root role the author should use instead.
-/// WHY: Stage 0 rejects these files instead of treating them as helpers or no-ops. Keeping the
-///      recognition and the suggestion in one place prevents the directory traversal, the
-///      single-file selection and the diagnostic text from disagreeing about the vocabulary.
-pub(crate) fn invalid_module_root_file_name_suggestion(
-    file_name: &str,
-) -> Option<InvalidRootFilenameSuggestion> {
+/// WHAT: recognizes a case-sensitive `.moth` stem that starts with `@`, `+` or `#` but is not
+///       exactly `@mod.moth`, `@package.moth` or `@entry.moth`.
+/// WHY: Stage 0 discovery, synthetic single-file selection and helper-name inventory must agree
+///      that these spellings are invalid authored root markers, never ordinary helpers. The
+///      recognition is exact: case variants such as `@Entry.moth` are invalid, and `config.moth`
+///      has no marker, so it retains its separate build-only config meaning.
+pub(crate) fn file_name_is_invalid_module_root_marker(file_name: &str) -> bool {
     if module_root_role_for_file_name(file_name).is_some() {
-        return None;
+        return false;
     }
 
-    let stem = file_name.strip_suffix(LANGUAGE_SOURCE_SUFFIX)?;
-    let (marker, name) = stem.split_at_checked(1)?;
+    let Some(stem) = file_name.strip_suffix(LANGUAGE_SOURCE_SUFFIX) else {
+        return false;
+    };
 
-    match marker {
-        "@" => Some(suggestion_for_retired_at_name(name)),
-        "+" => Some(InvalidRootFilenameSuggestion::Support),
-        "#" => Some(suggestion_for_retired_at_name(name)),
-        _ => None,
-    }
-}
-
-/// Map the stem after a retired root marker to the fixed root role that role should use.
-fn suggestion_for_retired_at_name(name: &str) -> InvalidRootFilenameSuggestion {
-    if name.eq_ignore_ascii_case("entry")
-        || name.eq_ignore_ascii_case("page")
-        || name.eq_ignore_ascii_case("site")
-    {
-        return InvalidRootFilenameSuggestion::Entry;
-    }
-    if name.eq_ignore_ascii_case("package") {
-        return InvalidRootFilenameSuggestion::Support;
-    }
-    if name.eq_ignore_ascii_case("mod") {
-        return InvalidRootFilenameSuggestion::Normal;
-    }
-
-    // `config.moth` is build-only, not a module root, and an unknown retired stem has no
-    // inferable role. Never advise a `config.moth` rename: it drops source in a nested
-    // directory and usually collides with the existing project config at the root.
-    InvalidRootFilenameSuggestion::EntryOrNormal
+    stem.starts_with('@') || stem.starts_with('+') || stem.starts_with('#')
 }
 
 /// Whether a dependency component identifies the canonical project config file.
 pub(crate) fn dependency_component_is_config_file(component: &str) -> bool {
     component == "config" || file_name_is_config_file(component)
-}
-
-/// Whether a dependency component uses the retired `+` support-root marker.
-///
-/// WHAT: detects the retired `+name` and `+name.moth` support-root spellings, and only those.
-/// WHY: support facades are authored as `@package.moth` and are bound through their containing
-///      module directory, never by a special file filename. The recognition is exact because a
-///      leading `+` also names ordinary resource files (`+notes.mtf`, `+runtime.js`); treating
-///      every `+` component as a retired marker would mask their real path diagnostics.
-pub(crate) fn dependency_component_is_legacy_support_marker(component: &str) -> bool {
-    let Some(name) = component.strip_prefix('+') else {
-        return false;
-    };
-
-    !name.is_empty()
-        && (!name.contains('.')
-            || (name.ends_with(LANGUAGE_SOURCE_SUFFIX)
-                && name.len() > LANGUAGE_SOURCE_SUFFIX.len()))
 }
 
 pub(crate) fn dependency_path_references_config_file(
@@ -190,16 +116,6 @@ pub(crate) fn dependency_path_references_config_file(
 ) -> bool {
     dependency_source_component(path, path_fork, string_table)
         .is_some_and(dependency_component_is_config_file)
-}
-
-/// Whether a dependency provider root's source component uses the retired `+` marker.
-pub(crate) fn dependency_path_references_legacy_support_marker(
-    path: PathId,
-    path_fork: &PathInternerFork,
-    string_table: &StringTable,
-) -> bool {
-    dependency_source_component(path, path_fork, string_table)
-        .is_some_and(dependency_component_is_legacy_support_marker)
 }
 
 fn dependency_source_component<'a>(

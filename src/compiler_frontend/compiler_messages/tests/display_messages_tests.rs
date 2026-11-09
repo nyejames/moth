@@ -5,7 +5,6 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::render::infrastructure::format_error_guidance_lines;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, relative_display_path_from_root, special_file_name_from_path,
-    support_root_import_suggestion,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -39,42 +38,31 @@ fn guidance_lines_name_the_stage_without_details() {
 }
 
 #[test]
-fn special_file_renderer_names_retired_support_markers() {
+fn special_file_renderer_names_only_the_build_only_config_source() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let extensionless_path = path_fork
-        .try_intern_portable_path("input/+pkg", &mut string_table)
+    let extensionless_config = path_fork
+        .try_intern_portable_path("input/config", &mut string_table)
+        .expect("test path fits");
+    let explicit_config = path_fork
+        .try_intern_portable_path("input/config.moth", &mut string_table)
+        .expect("test path fits");
+    let ordinary_plus_source = path_fork
+        .try_intern_portable_path("input/+notes", &mut string_table)
         .expect("test path fits");
     let context = DiagnosticRenderContext::new(&string_table).with_path_fork(&path_fork);
 
     assert_eq!(
-        special_file_name_from_path(extensionless_path, context),
-        "+pkg.moth"
+        special_file_name_from_path(extensionless_config, context),
+        "config.moth"
     );
-
-    let explicit_path = path_fork
-        .try_intern_portable_path("input/@package.moth", &mut string_table)
-        .expect("test path fits");
-    let context = DiagnosticRenderContext::new(&string_table).with_path_fork(&path_fork);
-
     assert_eq!(
-        special_file_name_from_path(explicit_path, context),
+        special_file_name_from_path(explicit_config, context),
+        "config.moth"
+    );
+    assert_eq!(
+        special_file_name_from_path(ordinary_plus_source, context),
         "special file"
-    );
-}
-
-#[test]
-fn support_root_renderer_suggests_containing_package_directory() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let path = path_fork
-        .try_intern_portable_path("tools/helpers/+package", &mut string_table)
-        .expect("test path fits");
-    let context = DiagnosticRenderContext::new(&string_table).with_path_fork(&path_fork);
-
-    assert_eq!(
-        support_root_import_suggestion(path, context),
-        " Bind the module directory `@tools/helpers` instead of the special file."
     );
 }
 

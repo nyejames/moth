@@ -34,9 +34,7 @@ use crate::compiler_frontend::public_interface::{
 };
 use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
 use crate::compiler_frontend::source::{SourceDatabase, SourceKind, SourceSpan};
-use crate::compiler_frontend::source_packages::root_file::{
-    dependency_path_references_config_file, dependency_path_references_legacy_support_marker,
-};
+use crate::compiler_frontend::source_packages::root_file::dependency_path_references_config_file;
 use crate::compiler_frontend::symbols::identifier_policy::ensure_not_keyword_shadow_identifier;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -475,16 +473,11 @@ impl<'a> BindingEnvironmentBuilder<'a> {
                 let selections = dependency
                     .selections(selection_table)
                     .map_err(BindingEnvironmentError::Internal)?;
-                // Reject direct dependencies of retired support markers and canonical config
-                // files. Canonical `@` root references are already caught by the path parser's
-                // LeadingAtInPathComponent rejection. The retired support spelling and config
-                // files need this later check because `+` and `config` are valid path component
-                // characters.
-                if dependency_path_references_legacy_support_marker(
-                    dependency.dependency.path,
-                    &*self.path_fork,
-                    self.string_table,
-                ) || dependency_path_references_config_file(
+                // Reject direct dependencies of canonical config files. Canonical `@` root
+                // references are already caught by the path parser's LeadingAtInPathComponent
+                // rejection. The config file needs this later check because `config` is a valid
+                // path component character.
+                if dependency_path_references_config_file(
                     dependency.dependency.path,
                     &*self.path_fork,
                     self.string_table,

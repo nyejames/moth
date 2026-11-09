@@ -50,23 +50,23 @@ A root marker may be a symlink, but every root must resolve to a distinct physic
 
 ### The root vocabulary is closed
 
-Only `@mod.moth`, `@package.moth` and `@entry.moth` are authored root files. Any other special source spelling is a Stage 0 structure error with a rename suggestion:
+Only `@mod.moth`, `@package.moth` and `@entry.moth` are authored root files. Any other `.moth` filename whose stem starts with `@`, `+` or `#` is a Stage 0 structure error:
 
 [codeblock, $code("text"):
-    @page.moth          rejected, use @entry.moth
-    @home.moth          rejected, use @entry.moth or @mod.moth
-    @api.moth           rejected, use @entry.moth or @mod.moth
-    @Entry.moth         rejected, use @entry.moth
-    +package.moth       rejected, use @package.moth
-    #package.moth       rejected, use @package.moth
-    @config.moth        rejected, use @entry.moth or @mod.moth
+    @page.moth          rejected
+    @home.moth          rejected
+    @api.moth           rejected
+    @Entry.moth         rejected
+    +package.moth       rejected
+    #package.moth       rejected
+    @config.moth        rejected
 ]
 
-The rejected spellings are never reclassified as ordinary helper files. The diagnostic is `MOTH-CONFIG-0001` (`InvalidModuleRootFileName`).
+The diagnostic is `MOTH-CONFIG-0001` (`InvalidModuleRootFileName`). It names the invalid filename and lists the three accepted root files. It does not guess whether the author meant an entry, a normal facade or a support facade.
 
-`config.moth` without a leading `@` keeps its config meaning. Non-`.moth` files with an `@` prefix, such as `@theme.css`, remain ordinary resources.
+The rejected spellings are never reclassified as ordinary helper files. `config.moth` without a leading `@` keeps its config meaning. Non-`.moth` files with an `@` prefix, such as `@theme.css`, remain ordinary resources.
 
-A `+`-prefixed source name such as `+notes.mtf` is not a bindable dependency name: the retired support-marker rule reserves the leading `+`, so rename the file without the prefix.
+A `+` prefix is not a root marker in a non-`.moth` filename. An ordinary supported source such as `+notes.mtf` resolves through the same dependency path and visibility rules as any other helper source.
 
 ### Root-local declarations stay in their root
 

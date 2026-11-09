@@ -4,10 +4,10 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-IMPORT-0024"]
-message_contains = ["`@+notes.mtf`", "Rename the file without the `+` prefix", "bind the new name without the source extension"]
+message_contains = ["`@+notes.mtf`", "Use `@+notes` instead"]
 
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-IMPORT-0024"]
-message_contains = ["`@+notes.mtf`", "Rename the file without the `+` prefix", "bind the new name without the source extension"]
+message_contains = ["`@+notes.mtf`", "Use `@+notes` instead"]

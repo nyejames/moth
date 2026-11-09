@@ -553,13 +553,13 @@ fn bounded_module_roots_for_single_file_rejects_dependency_name_collisions() {
 }
 
 #[test]
-fn legacy_normal_root_beside_canonical_facade_is_rejected() {
+fn invalid_root_beside_canonical_facade_is_rejected() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
     let entry_root = root.join("src");
     fs::create_dir_all(&entry_root).expect("should create entry root");
     fs::write(entry_root.join("@mod.moth"), "").expect("should write canonical facade root");
-    fs::write(entry_root.join("@page.moth"), "").expect("should write stale root filename");
+    fs::write(entry_root.join("@page.moth"), "").expect("should write invalid root filename");
 
     let config = Config::new(root.clone());
     let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
@@ -578,13 +578,53 @@ fn legacy_normal_root_beside_canonical_facade_is_rejected() {
         &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
         &mut string_table,
     )
-    .expect_err("a stale @page.moth root is rejected by the closed vocabulary");
+    .expect_err("an invalid @page.moth root is rejected by the closed vocabulary");
     let boundary = diagnosed_reports(failure);
     let (_report, diagnostic) = first_invalid_config(&boundary);
     let facts = diagnostic
         .family_view::<InvalidConfigView>()
         .expect("config failure should retain typed facts");
     assert_eq!(facts.reason, InvalidConfigCode::InvalidModuleRootFileName);
+}
+
+#[test]
+fn marked_project_root_follows_the_invalid_root_lane() {
+    for invalid_root in ["@project.moth", "+project.moth", "#project.moth"] {
+        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+        let root = _tmp_root.path().to_path_buf();
+        let entry_root = root.join("src");
+        fs::create_dir_all(&entry_root).expect("should create entry root");
+        fs::write(entry_root.join(invalid_root), "").expect("should write invalid root marker");
+
+        let config = Config::new(root.clone());
+        let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
+        let canonical_entry_root =
+            fs::canonicalize(&entry_root).expect("entry root should canonicalize");
+        let mut string_table = StringTable::new();
+        let failure = super::source_tree_index::SourceTreeIndex::discover(
+            canonical_entry_root,
+            super::source_tree_index::SourceTreeProjectContext {
+                project_root: &canonical_root,
+                validated_output_settings: None,
+            },
+            &config,
+            &crate::builder_surface::SourcePackageRegistry::default(),
+            &crate::builder_surface::SourceFileKindRegistry::default(),
+            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
+            &mut string_table,
+        )
+        .expect_err("a marked project root name is an invalid root filename");
+        let boundary = diagnosed_reports(failure);
+        let (_report, diagnostic) = first_invalid_config(&boundary);
+        let facts = diagnostic
+            .family_view::<InvalidConfigView>()
+            .expect("invalid root failure should retain typed facts");
+        assert_eq!(
+            facts.reason,
+            InvalidConfigCode::InvalidModuleRootFileName,
+            "{invalid_root} must use the invalid-root lane, not the project-globals reservation"
+        );
+    }
 }
 
 #[test]
@@ -788,6 +828,30 @@ fn directory_alias_outside_entry_root_does_not_create_a_folder_claim() {
             .iter()
             .all(|source| !source.canonical_path().starts_with(&outside))
     );
+}
+
+#[test]
+fn single_file_dependency_keys_include_ordinary_plus_sources_and_reject_invalid_roots() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    fs::write(root.join("@entry.moth"), "").expect("should write entry root");
+    fs::write(root.join("ordinary.moth"), "").expect("should write ordinary source");
+    fs::write(root.join("+notes.mtf"), "").expect("should write ordinary plus content source");
+    fs::write(root.join("+bad.moth"), "").expect("should write invalid plus root marker");
+    fs::write(root.join("#bad.moth"), "").expect("should write invalid hash root marker");
+    fs::write(root.join("@bad.moth"), "").expect("should write invalid at root marker");
+
+    let canonical_root = fs::canonicalize(&root).expect("source root should canonicalize");
+    let keys =
+        super::source_tree_index::SourceTreeIndex::single_file_dependency_keys(&canonical_root)
+            .expect("synthetic dependency keys should classify ordinary and invalid names");
+
+    assert!(keys.contains("+notes"), "{keys:?}");
+    assert!(keys.contains("ordinary"), "{keys:?}");
+    assert!(!keys.contains("+bad"), "{keys:?}");
+    assert!(!keys.contains("#bad"), "{keys:?}");
+    assert!(!keys.contains("@bad"), "{keys:?}");
+    assert!(!keys.contains("@entry"), "{keys:?}");
 }
 
 #[test]
