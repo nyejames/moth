@@ -853,6 +853,18 @@ fn resolve_public_export_dependency(
                 .canonical_source_by_symbol_path
                 .get(&symbol_path)
             {
+                if let Some(diagnostic) =
+                    crate::compiler_frontend::headers::binding_environment::cross_file_root_local_declaration(
+                        module_symbols,
+                        root_file,
+                        target_file,
+                        &symbol_path,
+                        Some(selection.source_span),
+                    )
+                {
+                    return Err(HeaderParseFailure::Diagnostic(diagnostic));
+                }
+
                 check_source_package_boundary(SourcePackageBoundaryCheckInput {
                     consumer_file: root_file,
                     target_file,

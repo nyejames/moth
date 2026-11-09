@@ -10,7 +10,7 @@ diagnostic_codes = ["MOTH-RULE-0047"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0047"
 reason = "invalid_receiver_call.unneeded_mutable_access_marker"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 12
 column = 1
 
@@ -22,6 +22,6 @@ diagnostic_codes = ["MOTH-RULE-0047"]
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0047"
 reason = "invalid_receiver_call.unneeded_mutable_access_marker"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 12
 column = 1

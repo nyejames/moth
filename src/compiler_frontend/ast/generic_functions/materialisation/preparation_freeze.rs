@@ -1,7 +1,7 @@
 //! Declaring-module preparation capture and publication freeze.
 use super::super::GenericFunctionTemplate;
 use super::artefact_emit::ModuleMaterialisationContext;
-use super::frozen_syntax::{SharedDonorIdentity, StableBodySyntax};
+use super::frozen_syntax::{SharedDonorIdentity, StableBodyCaptureFacts, StableBodySyntax};
 use super::nominal_blueprints::NominalMaterialisationBlueprint;
 use super::semantic_closure::{StableSemanticClosure, stable_body_symbol_names};
 use super::sidecar_build::bootstrap_call_summary_from_signature;
@@ -49,10 +49,12 @@ use crate::compiler_frontend::folded_value::{
     PublicConstTemplate, PublicFoldedValue, convert_const_value_to_folded_value,
 };
 use crate::compiler_frontend::headers::binding_environment::{
-    HeaderBindingEnvironment, SourceDeclarationTarget, SourceFunctionTarget,
+    HeaderBindingEnvironment, ResolvedQualifiedReference, ResolvedQualifiedTarget,
+    SourceDeclarationTarget, SourceFunctionTarget,
 };
 
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
+use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_interface::{
     ConcreteCallSummaryRecord, PublicDeclarationRecord, PublicDeclarationSemantics,
@@ -174,6 +176,7 @@ struct TemplateDeclarationSelection<'template> {
     referenced_names: FxHashSet<String>,
     selected_paths: FxHashSet<PathId>,
     local_declarations: Box<[PathId]>,
+    qualified_references: Vec<(PathSyntaxId, ResolvedQualifiedReference)>,
 }
 
 impl ModuleMaterialisationPreparationBuilder {
@@ -696,6 +699,7 @@ impl ModuleMaterialisationCapture {
             referenced_names,
             selected_paths,
             local_declarations,
+            qualified_references,
         } = selection;
         // Share one lazily frozen declaring-domain owner across every artefact in this freeze.
         let donor_identity = self.donor_identity();
@@ -791,8 +795,11 @@ impl ModuleMaterialisationCapture {
                 template.source_file,
                 path_fork,
                 Some(donor_identity),
-                stage0_resolution_facts,
-                frozen_identity_handle,
+                StableBodyCaptureFacts {
+                    qualified_references: &qualified_references,
+                    stage0_resolution_facts,
+                    frozen_identity_handle,
+                },
                 &content_value_at_path,
             )?,
             signature,
@@ -804,6 +811,54 @@ impl ModuleMaterialisationCapture {
             nominals,
             nominal_blueprints,
         })
+    }
+
+    /// Retain every qualified-reference target authored in one generic body.
+    ///
+    /// WHAT: scans the body's canonical token owner for path rows that binding resolved as
+    ///       expression-qualified occurrences, records their targets, and adds each selected
+    ///       declaration path to `selected_paths`.
+    /// WHY: a qualified occurrence installs no local name, so name-based visibility selection
+    ///      never captures its declaration. The declaration must still cross the freeze boundary
+    ///      for generated lowering to find it in the declaration table.
+    fn stable_qualified_references_for_body(
+        &self,
+        body: &super::super::GenericFunctionBody,
+        selected_paths: &mut FxHashSet<PathId>,
+    ) -> Result<Vec<(PathSyntaxId, ResolvedQualifiedReference)>, InfrastructureFailure> {
+        let donor_file_id = body.donor_source_id();
+        let (source_tokens, token_range, token_sequence) = body.canonical_view();
+        let mut cursor = crate::compiler_frontend::ast::generic_functions::templates::body_cursor(
+            source_tokens,
+            token_range,
+            token_sequence,
+            "qualified-reference capture",
+        )?;
+        let mut references = Vec::new();
+        // Each authored path token owns its own path-syntax row, and the body cursor yields
+        // tokens in source order, so rows arrive once and already sorted.
+        while let Some(token) = cursor.advance() {
+            if let Some(path_syntax) = token.path_syntax_id()
+                && let Some(resolved) = self
+                    .binding_environment
+                    .qualified_reference_target(donor_file_id, path_syntax)
+            {
+                match &resolved.target {
+                    ResolvedQualifiedTarget::Source { declaration_path } => {
+                        selected_paths.insert(*declaration_path);
+                    }
+                    ResolvedQualifiedTarget::Imported { local_path, .. } => {
+                        selected_paths.insert(*local_path);
+                    }
+                    ResolvedQualifiedTarget::External { .. } => {}
+                }
+                references.push((path_syntax, resolved.clone()));
+            }
+            if token.is_eof() {
+                break;
+            }
+        }
+        Ok(references)
     }
 
     fn template_declaration_selection<'template>(
@@ -837,11 +892,16 @@ impl ModuleMaterialisationCapture {
         )?;
         // Retained names only grow, so an unchanged count means the selection above still holds.
         // Bound spellings can select more paths, so only then is the selection rebuilt.
-        let selected_paths = if referenced_names.len() == names_before_bounds {
+        let mut selected_paths = if referenced_names.len() == names_before_bounds {
             selection_before_bounds
         } else {
             self.selected_visible_paths(&template.source_file, &referenced_names, path_fork)?
         };
+        // Qualified references install no local name, so name-based visibility selection missed
+        // their declarations. Retain the targets and add their paths before local declarations
+        // and the semantic closure decide what crosses the materialisation boundary.
+        let qualified_references =
+            self.stable_qualified_references_for_body(body, &mut selected_paths)?;
         let local_declarations =
             self.stable_local_declaration_bindings(const_values, &selected_paths);
         Ok(TemplateDeclarationSelection {
@@ -850,6 +910,7 @@ impl ModuleMaterialisationCapture {
             referenced_names,
             selected_paths,
             local_declarations,
+            qualified_references,
         })
     }
 

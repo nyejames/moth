@@ -6,7 +6,7 @@ message_contains = ["Unknown value name 'name'"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0034"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1
 column = 55
 count = 1

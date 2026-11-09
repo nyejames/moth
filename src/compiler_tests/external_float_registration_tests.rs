@@ -136,7 +136,7 @@ fn compile_raw_fixed_f64_fixture(
     let root = temporary_project.path().to_path_buf();
     fs::write(root.join(CONFIG_FILE_NAME), CONFIG_SOURCE)
         .expect("fixture should write config.moth");
-    fs::write(root.join("@page.moth"), source).expect("fixture should write the entry module");
+    fs::write(root.join("@entry.moth"), source).expect("fixture should write the entry module");
 
     // The registered boundary lives on the builder surface's external registry, the same surface
     // the canonical service clones into each module's effective registry for frontend resolution
@@ -187,8 +187,9 @@ fn compile_raw_fixed_f64_fixture(
             artefact
                 .module
                 .metadata
-                .entry_point
-                .ends_with(Path::new("@page.moth"))
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with(Path::new("@entry.moth")))
         })
         .map(|artefact| &artefact.module)
         .expect("the fixture project should compile its entry module");

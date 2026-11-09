@@ -1,0 +1,5 @@
+@provider Label
+@impl identity
+
+result = identity(Label(text = "free"))
+[:result=[result]]

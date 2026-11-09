@@ -1,4 +1,0 @@
-@internal NormalOnly
-export: @internal NormalOnly ;
-
-[:ok]

@@ -34,12 +34,14 @@ pub(crate) enum ModuleCompilationOutcome {
 /// Everything one successful module compilation produced, before boundary publication.
 ///
 /// WHAT: the validated base module lanes, the generated delta completed in the same transaction,
-///       the closed public interface, and module-local string/path deltas.
+///       the closed API surfaces for the facade roots the module actually owns, and module-local
+///       string/path deltas.
 /// WHY: publication is atomic. Keeping every semantic result and both identity deltas in one value
 ///      means the build boundary merges strings first, then paths, and commits the whole
-///      transaction or none of it. The stable module origin travels through `public_interface`;
-///      no dense `ModuleId` crosses this boundary, because standalone compilation has no
-///      graph-assigned identity.
+///      transaction or none of it. Each present surface carries its own role origin; the module's
+///      identity comes from the graph node and the source-origin table, and no dense `ModuleId`
+///      crosses this boundary, because standalone compilation has no graph-assigned identity. An
+///      entry-only module carries neither surface.
 pub(crate) struct ModuleSemanticResult {
     /// Validated base HIR, paired type environment, borrow facts, link facts and metadata.
     pub(crate) module: Module,
@@ -55,10 +57,12 @@ pub(crate) struct ModuleSemanticResult {
     /// Merged into the boundary path table after the string delta, so source-prefix identities
     /// stay stable and every retained path is remapped before publication.
     pub(crate) path_fork: PathInternerFork,
-    /// The closed and publication-validated semantic interface. Provider-owned re-export facts
-    /// have already joined through immutable completed interfaces, so the graph can publish this
-    /// value directly after the deterministic string-then-path merge.
-    pub(crate) public_interface: PublicSemanticInterface,
-    /// The paired support surface interface, when this structural module owns one.
-    pub(crate) support_public_interface: Option<PublicSemanticInterface>,
+    /// The closed and publication-validated normal `@mod` facade interface, present exactly when
+    /// the module owns a normal root. Provider-owned re-export facts have already joined through
+    /// immutable completed interfaces, so the graph can publish this value directly after the
+    /// deterministic string-then-path merge.
+    pub(crate) normal_interface: Option<PublicSemanticInterface>,
+    /// The closed and publication-validated support `@package` facade interface, present exactly
+    /// when the module owns a support root.
+    pub(crate) support_interface: Option<PublicSemanticInterface>,
 }

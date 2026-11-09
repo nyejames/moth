@@ -1,3 +1,0 @@
-import @core/math { sin as sine }
-
-value = sine(0.0)

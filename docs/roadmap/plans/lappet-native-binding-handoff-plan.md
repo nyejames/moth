@@ -109,8 +109,8 @@ The user approved these. Do not reopen them without new evidence.
   `Infrastructure` and `CompilerBug`. `Error::build` creates builder failures
   and `Error::messages` returns rendered terse compiler lines. A structured
   diagnostic view comes later. A missing facade is a `Build` error.
-- **Definition rules:** `finish` rejects relative `from_dir` paths and
-  `available_in_templates` without `moth_templates`.
+- **Definition rules:** `finish` rejects relative or missing `from_dir`
+  directories.
 - **Build profile:** the SDK re-exports the existing `BuildProfile` enum.
   `BuildRequest::profile` selects it and builders read it through
   `BuildContext::profile`.

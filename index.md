@@ -21,8 +21,8 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 - [Lappet crate](crates/lappet/README.md) and [library entry](crates/lappet/src/lib.rs): dependency-free initial workspace library, with no runtime API yet.
 - [Runtime design](crates/lappet/docs/design.md), [package-manager design](crates/lappet/docs/package-manager.md) and [independent roadmap](crates/lappet/roadmap.md): accepted contracts and isolated-worktree implementation checkpoints.
 - [Host ABI adapter responsibilities](crates/lappet/docs/host-abi.md): Lappet's installation, conversion, staging-table and resource-table duties over the compiler-owned [native host ABI](docs/developer-docs/memory-management/native-host-abi/native-host-abi.mtf).
-- [Wasm optimisation reference](docs/developer-docs/wasm-optimisation/overview.mtf) and [detailed authority](docs/developer-docs/wasm-optimisation/wasm-optimisation.mtf): shared compiler/native-code policy. Its [page](docs/developer-docs/wasm-optimisation/@page.moth) composes the site.
-- [Lappet introduction](docs/docs/lappet/lappet.mtf) and [page](docs/docs/lappet/@page.moth): application and embedding overview, with implementation status explicit.
+- [Wasm optimisation reference](docs/developer-docs/wasm-optimisation/overview.mtf) and [detailed authority](docs/developer-docs/wasm-optimisation/wasm-optimisation.mtf): shared compiler/native-code policy. Its [page](docs/developer-docs/wasm-optimisation/@entry.moth) composes the site.
+- [Lappet introduction](docs/docs/lappet/lappet.mtf) and [page](docs/docs/lappet/@entry.moth): application and embedding overview, with implementation status explicit.
 
 ## Standalone lexical and MON crates
 
@@ -293,12 +293,12 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 - [compiler design overview](docs/compiler-design-overview.md)
 - [build system design overview](docs/build-system-design.md)
 - [language semantics reference index](docs/developer-docs/language/overview.mtf)
-- [Wiring](docs/docs/wiring/@page.moth), Basic lessons and the sole canonical reference [wiring.mtf](docs/docs/wiring/wiring.mtf): accepted parameter contracts and the bounded Wire/Route foundation; current support status lives in the progress matrix.
+- [Wiring](docs/docs/wiring/@entry.moth), Basic lessons and the sole canonical reference [wiring.mtf](docs/docs/wiring/wiring.mtf): accepted parameter contracts and the bounded Wire/Route foundation; current support status lives in the progress matrix.
 - [general directives](docs/docs/directives/directives.mtf); [directive contributor routing](docs/docs/directives/overview.mtf)
-- [entry metadata and page directives](docs/docs/project-structure/entry-config.mtf)
+- [entry metadata and builder slots](docs/docs/project-structure/entry-config.mtf)
 - [memory management design](docs/developer-docs/memory-management/overview.mtf)
 - [codebase style guide](docs/developer-docs/style-guide/style-guide.mtf)
 - [language cheatsheet](docs/docs/cheatsheet/moth-language-cheatsheet.mtf)
 - [docs website source](docs/docs/); [developer docs source](docs/developer-docs/); [generated output](docs/_release/)
-- [language support progress matrix](docs/docs/progress/@page.moth)
+- [language support progress matrix](docs/docs/progress/@entry.moth)
 - [planned work and implementation plans](docs/roadmap/)

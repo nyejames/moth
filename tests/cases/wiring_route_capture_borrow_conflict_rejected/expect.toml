@@ -8,5 +8,5 @@ message_contains = ["Cannot mutably access `source` while shared alias `source` 
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-BORROW-0003"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 10

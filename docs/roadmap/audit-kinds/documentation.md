@@ -22,7 +22,7 @@ When canonical authorities conflict, record the exact incompatible statements an
 
 ## Status against reality
 
-Compare canonical design with the [progress matrix](../../docs/progress/@page.moth):
+Compare canonical design with the [progress matrix](../../docs/progress/@entry.moth):
 
 - supported rows describe behaviour the compiler actually claims
 - partial rows name the implemented subset and the important gaps

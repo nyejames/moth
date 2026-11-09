@@ -10,7 +10,7 @@ use crate::compiler_frontend::headers::ordering_hints::collect_content_source_or
 use crate::compiler_frontend::headers::parse_file_headers::{
     Header, HeaderKind, LocalDeclarationOrderingHint, prepare_file_from_tokens,
 };
-use crate::compiler_frontend::headers::types::{HeaderParseOptions, SourceTokenOwner};
+use crate::compiler_frontend::headers::types::SourceTokenOwner;
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
@@ -32,7 +32,7 @@ fn prepare_source(
 ) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = Path::new("@page.moth");
+    let file_path = Path::new("@entry.moth");
     let interned_path = path_fork
         .try_intern_filesystem_path(file_path, &mut string_table)
         .expect("test path should be UTF-8");
@@ -49,12 +49,14 @@ fn prepare_source(
     )
     .expect("source should tokenize");
     let owner = SourceTokenOwner::new(lexed.tokens);
+    let options = crate::compiler_frontend::tests::parse_support::synthetic_entry_options(
+        SourceId::COMPILATION_ROOT,
+    );
     let output = prepare_file_from_tokens(
         owner,
         interned_path,
         lexed.path_syntax,
-        file_path,
-        &HeaderParseOptions::default(),
+        &options,
         &mut string_table,
         0,
         0,

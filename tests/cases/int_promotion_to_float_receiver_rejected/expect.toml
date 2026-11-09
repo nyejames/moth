@@ -6,21 +6,21 @@ diagnostic_codes = ["MOTH-TYPE-0001", "MOTH-TYPE-0001", "MOTH-TYPE-0001", "MOTH-
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
 occurrence = 1
-path = "input/call_argument/@mod.moth"
+path = "input/call_argument/@entry.moth"
 line = 5
 column = 20
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
 occurrence = 2
-path = "input/declaration/@mod.moth"
+path = "input/declaration/@entry.moth"
 line = 2
 column = 16
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
 occurrence = 3
-path = "input/f32_receiver/@mod.moth"
+path = "input/f32_receiver/@entry.moth"
 line = 2
 column = 16
 
@@ -41,7 +41,7 @@ column = 12
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
 occurrence = 6
-path = "input/u64_declaration/@mod.moth"
+path = "input/u64_declaration/@entry.moth"
 line = 2
 column = 16
 
@@ -53,21 +53,21 @@ diagnostic_codes = ["MOTH-TYPE-0001", "MOTH-TYPE-0001", "MOTH-TYPE-0001", "MOTH-
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
 occurrence = 1
-path = "input/call_argument/@mod.moth"
+path = "input/call_argument/@entry.moth"
 line = 5
 column = 20
 
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
 occurrence = 2
-path = "input/declaration/@mod.moth"
+path = "input/declaration/@entry.moth"
 line = 2
 column = 16
 
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
 occurrence = 3
-path = "input/f32_receiver/@mod.moth"
+path = "input/f32_receiver/@entry.moth"
 line = 2
 column = 16
 
@@ -88,6 +88,6 @@ column = 12
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
 occurrence = 6
-path = "input/u64_declaration/@mod.moth"
+path = "input/u64_declaration/@entry.moth"
 line = 2
 column = 16

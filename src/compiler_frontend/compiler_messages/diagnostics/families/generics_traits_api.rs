@@ -9,7 +9,7 @@ use crate::compiler_frontend::compiler_messages::diagnostic_types::TypeDisplayId
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::facts::{
     CountFact, FactCapacityError, FactCodec, IdRemap, OptStringFact, OptTokenFact, OptTypeFact,
-    OptUnitFact, StringFact, TypeFact, UnitCode, UnitFact, unit_code,
+    OptUnitFact, PathFact, StringFact, TypeFact, UnitCode, UnitFact, unit_code,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::labels::{
     LabelDraftMessage, LabelMessageCode,
@@ -19,18 +19,18 @@ use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
 };
 use crate::compiler_frontend::compiler_messages::render::{
     render_duplicate_public_export, render_duplicate_trait_requirement,
-    render_generic_bound_private_surface_leak, render_invalid_function_signature,
-    render_invalid_generic_application, render_invalid_generic_instantiation,
-    render_invalid_generic_parameter, render_invalid_parameter_contract,
-    render_invalid_receiver_declaration, render_invalid_this_usage,
-    render_invalid_trait_conformance, render_invalid_trait_incompatibility,
-    render_invalid_trait_keyword_usage, render_private_type_in_exported_api, render_title_only,
-    render_trait_name_used_as_type, render_trait_private_surface_leak, render_unknown_trait,
-    render_unsupported_trait_feature,
+    render_export_outside_module_root, render_generic_bound_private_surface_leak,
+    render_invalid_function_signature, render_invalid_generic_application,
+    render_invalid_generic_instantiation, render_invalid_generic_parameter,
+    render_invalid_parameter_contract, render_invalid_receiver_declaration,
+    render_invalid_this_usage, render_invalid_trait_conformance,
+    render_invalid_trait_incompatibility, render_invalid_trait_keyword_usage,
+    render_private_type_in_exported_api, render_title_only, render_trait_name_used_as_type,
+    render_trait_private_surface_leak, render_unknown_trait, render_unsupported_trait_feature,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticSeverity, GenericApplicationErrorReason, GenericInferenceSubject,
-    InvalidFunctionSignatureReason, InvalidGenericInstantiationReason,
+    DiagnosticSeverity, ExportOutsideModuleRootReason, GenericApplicationErrorReason,
+    GenericInferenceSubject, InvalidFunctionSignatureReason, InvalidGenericInstantiationReason,
     InvalidGenericParameterReason, InvalidParameterContractReason,
     InvalidReceiverDeclarationReason, InvalidThisUsageReason, InvalidTraitConformanceReason,
     InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, ParameterContractKind,
@@ -39,6 +39,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
 unit_code! {
@@ -1053,7 +1054,6 @@ diagnostic_family! {
 
 unit_code! {
     pub(crate) enum InvalidTraitConformanceCode {
-        ImportedModuleRoot = 1,
         AliasTarget = 2,
         NonCanonicalTarget = 3,
         NonlocalSourceTarget = 4,
@@ -1080,7 +1080,6 @@ impl InvalidTraitConformanceCode {
     pub(crate) fn of(reason: &InvalidTraitConformanceReason) -> Self {
         use InvalidTraitConformanceReason as Reason;
         match reason {
-            Reason::ImportedModuleRoot => Self::ImportedModuleRoot,
             Reason::AliasTarget => Self::AliasTarget,
             Reason::NonCanonicalTarget => Self::NonCanonicalTarget,
             Reason::NonlocalSourceTarget => Self::NonlocalSourceTarget,
@@ -1108,7 +1107,6 @@ impl InvalidTraitConformanceCode {
 /// type and word 3 the found type.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum InvalidTraitConformanceShape<Type> {
-    ImportedModuleRoot,
     AliasTarget,
     NonCanonicalTarget,
     NonlocalSourceTarget,
@@ -1154,7 +1152,6 @@ impl<Type> InvalidTraitConformanceShape<Type> {
     pub(crate) fn code(&self) -> InvalidTraitConformanceCode {
         use InvalidTraitConformanceShape as Shape;
         match self {
-            Shape::ImportedModuleRoot => InvalidTraitConformanceCode::ImportedModuleRoot,
             Shape::AliasTarget => InvalidTraitConformanceCode::AliasTarget,
             Shape::NonCanonicalTarget => InvalidTraitConformanceCode::NonCanonicalTarget,
             Shape::NonlocalSourceTarget => InvalidTraitConformanceCode::NonlocalSourceTarget,
@@ -1257,7 +1254,6 @@ impl FactCodec for InvalidTraitConformanceFact {
         use InvalidTraitConformanceShape as Shape;
         let code = Code::from_code(*words.first()?)?;
         Some(match code {
-            Code::ImportedModuleRoot => Shape::ImportedModuleRoot,
             Code::AliasTarget => Shape::AliasTarget,
             Code::NonCanonicalTarget => Shape::NonCanonicalTarget,
             Code::NonlocalSourceTarget => Shape::NonlocalSourceTarget,
@@ -1365,7 +1361,6 @@ fn split_invalid_trait_conformance(
     use InvalidTraitConformanceShape as Shape;
     let mut reason_name = None;
     let shape = match reason {
-        Reason::ImportedModuleRoot => Shape::ImportedModuleRoot,
         Reason::AliasTarget => Shape::AliasTarget,
         Reason::NonCanonicalTarget => Shape::NonCanonicalTarget,
         Reason::NonlocalSourceTarget => Shape::NonlocalSourceTarget,
@@ -1566,14 +1561,40 @@ diagnostic_family! {
         stable: "MOTH-RULE-0077",
         category: DiagnosticCategory::Rule,
         severity: DiagnosticSeverity::Error,
-        title: "`export:` is only valid in a module root file",
-        facts: [],
+        title: "`export:` is only valid in an API facade root file (`@mod.moth` or `@package.moth`)",
+        facts: [
+            file: PathFact,
+            reason: UnitFact<ExportOutsideModuleRootReason>,
+        ],
         labels: [],
         extra: None,
-        ctor: generated export_outside_module_root,
+        ctor: manual,
         view: ExportOutsideModuleRootView,
-        render: render_title_only,
+        render: render_export_outside_module_root,
     }
+}
+
+unit_code! {
+    impl ExportOutsideModuleRootReason {
+        NoExportSurface = 1,
+        EntryRoot = 2,
+    }
+}
+
+/// Stores an `export:` role rejection, the offending source file and its typed reason.
+///
+/// WHY: the entry-root reason must name the selected file. That file can be any explicitly
+///      selected single-file source, not only `@entry.moth`.
+pub(crate) fn export_outside_module_root(
+    file: PathId,
+    reason: ExportOutsideModuleRootReason,
+    span: Option<SourceSpan>,
+) -> DiagnosticDraft {
+    DiagnosticDraft::with_facts(&EXPORT_OUTSIDE_MODULE_ROOT, span, |cursor| {
+        cursor.push::<PathFact>(&file)?;
+        cursor.push::<UnitFact<ExportOutsideModuleRootReason>>(&reason)?;
+        Ok(())
+    })
 }
 
 diagnostic_family! {

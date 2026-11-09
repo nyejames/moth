@@ -1,26 +1,43 @@
-A `.mtf` file sees exported compile-time constants from its same-directory
-module root and compile-time helpers supplied by `@html`.
+A `.mtf` file sees the fixed `@html` helpers and values from helper files in the same module. It does not see module root declarations.
 
-### A constant capture
+### Selecting a helper value
 
 [codeblock, $code("moth"):
-    -- docs/@docs.moth
-    export:
-        site_name #= "Moth"
-    ;
+    -- docs/settings.moth
+    site_name #= "Moth"
 ]
 
 [codeblock, $code("md"):
     -- docs/intro.mtf
-    # Welcome to [site_name]
+    # Welcome to [@settings site_name]
 ]
 
-The compile-time constant is inserted into the Markdown at that position.
+The path names the helper file and the symbol names one compile-time value. Keep them on one line. No `@mod.moth` file is needed.
 
-### A nested $raw override
+The selected name does not become a local name. It cannot clash with an `@html` helper.
+
+### Root files stay private
+
+A value written in `@mod.moth`, `@package.moth` or `@entry.moth` is not visible to a `.mtf` file, even when the root exports it. Move shared values into an ordinary helper file and select them with a qualified reference.
+
+### The HTML helpers
+
+`.mtf` files see constants from `@html` without a dependency clause:
+
+[codeblock, $code("text"):
+    [p: A paragraph.]
+]
+
+That prelude always comes from the official HTML package set. It supplies HTML constants only.
+
+### A nested override
 
 [codeblock, $code("text"):
     [$raw: <div>Raw HTML here</div>]
 ]
 
 Nested templates default to `$md`, but an explicit directive overrides that.
+
+### Compile-time only
+
+Everything in a `.mtf` body folds during compilation. A runtime value cannot be used there. The file produces one `content` string and makes no page fragment of its own.

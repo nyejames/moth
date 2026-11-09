@@ -22,20 +22,20 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(dir.join("@page.moth"), "@provider run\nvalue = run()\n")
+    fs::write(dir.join("@entry.moth"), "@provider run\nvalue = run()\n")
         .expect("should write blocked consumer");
     fs::write(
-        dir.join("consumer/@mod.moth"),
+        dir.join("consumer/@entry.moth"),
         "@provider run\nvalue = run()\n",
     )
     .expect("should write second blocked consumer");
     fs::write(
-        dir.join("provider/+mod.moth"),
+        dir.join("provider/@package.moth"),
         "export:\n    run || -> I32:\n        return missing_provider_value\n    ;\n;\n",
     )
     .expect("should write diagnosed provider");
     fs::write(
-        dir.join("independent/@mod.moth"),
+        dir.join("independent/@entry.moth"),
         "value = missing_independent_value\n",
     )
     .expect("should write independent diagnosed module");
@@ -69,19 +69,19 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     assert!(
         diagnosed_paths
             .iter()
-            .any(|path| path.ends_with("provider/+mod.moth")),
+            .any(|path| path.ends_with("provider/@package.moth")),
         "provider diagnostic should be retained: {diagnosed_paths:?}"
     );
     assert!(
         diagnosed_paths
             .iter()
-            .any(|path| path.ends_with("independent/@mod.moth")),
+            .any(|path| path.ends_with("independent/@entry.moth")),
         "independent branch should continue and retain its diagnostic: {diagnosed_paths:?}"
     );
     assert!(
         diagnosed_paths
             .iter()
-            .all(|path| { !path.ends_with("@page.moth") && !path.ends_with("consumer/@mod.moth") }),
+            .all(|path| { !path.ends_with("consumer/@entry.moth") }),
         "blocked consumers should not be semantically compiled: {diagnosed_paths:?}"
     );
 }
@@ -100,8 +100,9 @@ fn registered_source_database_retains_exact_text_for_multiple_compiled_sources()
     .expect("should write config");
     let root_source = "title String = \"home\"\n";
     let nested_source = "title String = \"about\"\n";
-    fs::write(dir.join("src/@page.moth"), root_source).expect("should write root source");
-    fs::write(dir.join("src/about/@page.moth"), nested_source).expect("should write nested source");
+    fs::write(dir.join("src/@entry.moth"), root_source).expect("should write root source");
+    fs::write(dir.join("src/about/@entry.moth"), nested_source)
+        .expect("should write nested source");
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -129,8 +130,8 @@ fn registered_source_database_retains_exact_text_for_multiple_compiled_sources()
         .as_ref()
         .expect("compiled project should retain source database");
     for (relative_path, expected_text) in [
-        ("src/@page.moth", root_source),
-        ("src/about/@page.moth", nested_source),
+        ("src/@entry.moth", root_source),
+        ("src/about/@entry.moth", nested_source),
     ] {
         let path =
             fs::canonicalize(dir.join(relative_path)).expect("source path should canonicalize");
@@ -157,7 +158,7 @@ fn selected_preload_invalid_utf8_is_a_source_diagnostic() {
         "project #= (\n    name = \"selected_failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    let selected_path = dir.join("src/@page.moth");
+    let selected_path = dir.join("src/@entry.moth");
     fs::write(&selected_path, [b'o', b'k', 0xff, b'\n'])
         .expect("should write invalid UTF-8 source");
 
@@ -186,7 +187,7 @@ fn selected_preload_invalid_utf8_is_a_source_diagnostic() {
         DiagnosticRenderContext::for_report(report),
     );
     assert!(
-        rendered.contains("Source 'src/@page.moth' is not valid UTF-8"),
+        rendered.contains("Source 'src/@entry.moth' is not valid UTF-8"),
         "the non-UTF-8 diagnostic must name the selected logical path: {rendered}"
     );
 }
@@ -203,7 +204,7 @@ fn unselected_preload_read_failure_stays_inert() {
         "project #= (\n    name = \"unselected_failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(dir.join("src/@page.moth"), "title String = \"home\"\n")
+    fs::write(dir.join("src/@entry.moth"), "title String = \"home\"\n")
         .expect("should write selected source");
     let unselected_path = dir.join("src/unreachable.moth");
     fs::write(&unselected_path, [b'o', b'k', 0xff, b'\n'])
@@ -271,11 +272,11 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(dir.join("src/@page.moth"), "value = 1\n").expect("should write project entry");
+    fs::write(dir.join("src/@entry.moth"), "value = 1\n").expect("should write project entry");
     // Keep the dependency unused so declaration-time validation cannot rely on binding or
     // reachability analysis to reject the facade's self-dependency.
     fs::write(
-        dir.join("+package.moth"),
+        dir.join("@package.moth"),
         "SITE_TITLE #= \"Moth\"\n@project\n",
     )
     .expect("should write project facade with a header naming warning");
@@ -318,7 +319,7 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
         .site_position(view.primary_site())
         .expect("facade diagnostic should retain its authored source position");
     assert!(
-        position.path.ends_with("+package.moth"),
+        position.path.ends_with("@package.moth"),
         "self-dependency diagnostic should point to the facade source"
     );
 }
@@ -333,21 +334,21 @@ fn project_facade_rejects_own_project_globals_dependency_for_paired_root_surface
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project entry");
+    fs::write(dir.join("@entry.moth"), "value = 1\n").expect("should write project entry");
     fs::write(
-        dir.join("+package.moth"),
+        dir.join("@package.moth"),
         "SITE_TITLE #= \"Moth\"\n@project\n",
     )
     .expect("should write paired project facade");
     fs::create_dir_all(dir.join("components")).expect("should create nested support directory");
     fs::write(
-        dir.join("components/+ui.moth"),
+        dir.join("components/@package.moth"),
         "SITE_TITLE #= \"Moth\"\n@project\n",
     )
     .expect("should write unrelated nested support module");
     fs::create_dir_all(dir.join("pages")).expect("should create nested normal directory");
     fs::write(
-        dir.join("pages/@pages.moth"),
+        dir.join("pages/@mod.moth"),
         "SITE_TITLE #= \"Moth\"\n@project\n",
     )
     .expect("should write unrelated nested normal module");
@@ -390,7 +391,8 @@ fn project_facade_rejects_own_project_globals_dependency_for_paired_root_surface
         .site_position(view.primary_site())
         .expect("facade diagnostic should retain its authored source position");
     assert!(
-        position.path.ends_with("+package.moth") && !position.path.ends_with("components/+ui.moth"),
+        position.path.ends_with("@package.moth")
+            && !position.path.ends_with("components/@package.moth"),
         "the paired facade diagnostic should point at the project root support root, not a nested support root"
     );
 }
@@ -410,7 +412,7 @@ fn failed_directory_preparation_keeps_unfinished_module_metadata_out_of_completi
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(dir.join("@page.moth"), "@core/math sin,\n#[:ok]\n")
+    fs::write(dir.join("@entry.moth"), "@core/math sin,\n#[:ok]\n")
         .expect("should write malformed entry");
 
     let mut config = Config::new(dir.clone());
@@ -497,7 +499,7 @@ fn directory_frontend_registers_package_and_project_boundaries() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project root");
+    fs::write(dir.join("@entry.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         package_root.join("@mod.moth"),
         "export:\n    helper || -> I32:\n        return 7\n    ;\n;\n",
@@ -681,7 +683,7 @@ fn directory_frontend_records_incremental_file_prepare_with_module_attribution()
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project root");
+    fs::write(dir.join("@entry.moth"), "value = 1\n").expect("should write project root");
 
     let mut config = Config::new(dir.clone());
     config.project_name = "moth_incremental_file_prepare_fixture".to_owned();
@@ -980,7 +982,7 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
         format!("project #= (\n    name = \"{project_a_name}\",\n)\nhtml #= ()\n"),
     )
     .expect("should write config");
-    fs::write(dir_a.join("@page.moth"), "@core/math sin,\n#[:ok]\n")
+    fs::write(dir_a.join("@entry.moth"), "@core/math sin,\n#[:ok]\n")
         .expect("should write malformed entry");
     let dir_b_temp = tempfile::tempdir().expect("should create temp dir");
     let dir_b = dir_b_temp.path().to_path_buf();
@@ -990,7 +992,7 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
         format!("project #= (\n    name = \"{project_b_name}\",\n)\nhtml #= ()\n"),
     )
     .expect("should write config");
-    fs::write(dir_b.join("src/@page.moth"), [b'o', b'k', 0xff, b'\n'])
+    fs::write(dir_b.join("src/@entry.moth"), [b'o', b'k', 0xff, b'\n'])
         .expect("should write invalid UTF-8 source");
     let dir_unrelated_temp = tempfile::tempdir().expect("should create unrelated temp project");
     let dir_unrelated = dir_unrelated_temp.path().to_path_buf();
@@ -1001,7 +1003,7 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
     )
     .expect("should write unrelated config");
     fs::write(
-        dir_unrelated.join("src/@page.moth"),
+        dir_unrelated.join("src/@entry.moth"),
         [b'o', b'k', 0xff, b'\n'],
     )
     .expect("should write unrelated invalid UTF-8 source");
@@ -1176,7 +1178,7 @@ fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
     .expect("should write config");
     // The entry is HTML-selected by its authored root fragment and imports the public value.
     fs::write(
-        dir.join("src/@page.moth"),
+        dir.join("src/@entry.moth"),
         "@components label\n[:[label]]\n",
     )
     .expect("should write entry page");
@@ -1185,12 +1187,12 @@ fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
         ("collection", "values = {\n    1,\n    2,\n", "}"),
         ("grouping", "value = (\n    1 + 2\n", ")"),
     ] {
-        let dependency_source = format!("export:\n    label #= \"components\"\n;\n{dormant_work}");
-        fs::write(
-            dir.join("src/components/@components.moth"),
-            &dependency_source,
-        )
-        .expect("should write dependency module root");
+        let facade_source = "export:\n    label #= \"components\"\n;\n";
+        let dependency_source = dormant_work.to_owned();
+        fs::write(dir.join("src/components/@mod.moth"), facade_source)
+            .expect("should write dependency facade");
+        fs::write(dir.join("src/components/@entry.moth"), &dependency_source)
+            .expect("should write dependency entry root");
 
         let mut config = Config::new(dir.clone());
         let style_directives = StyleDirectiveRegistry::built_ins();
@@ -1236,7 +1238,7 @@ fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
         let context = DiagnosticRenderContext::for_report(report);
         let identity = report.context();
 
-        let dependency_path = fs::canonicalize(dir.join("src/components/@components.moth"))
+        let dependency_path = fs::canonicalize(dir.join("src/components/@entry.moth"))
             .expect("dependency source path should canonicalize");
         let source_slot = identity
             .get(span.source())

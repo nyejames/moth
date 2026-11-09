@@ -234,7 +234,7 @@ fn rejects_trailing_comma_missing_comma_and_braces() {
     );
     assert_eq!(
         clause_error("@core/math { sin }\n"),
-        InvalidDependencyClauseReason::LegacyBraceSelections
+        InvalidDependencyClauseReason::InvalidSelectionDelimiter
     );
 }
 

@@ -49,16 +49,14 @@ The `@project` dependency root is reserved for project globals.
 - `$escape_html` - escape HTML-sensitive content.
 - `$code` - code blocks with optional highlighting, such as `$code("moth")`.
 
-### General and HTML project directives
+### General directives
 
 - `$config` - mark a compile-time declaration as a build input (compiler).
-- `$project` - declare project settings in the project config (compiler).
-- `$html_builder` - configure the HTML builder.
 
-These three general directives are accepted language design and are queued for implementation. The template directives above
-are already registered by the compiler or HTML builder.
+`$config` is accepted language design and is queued for implementation. The template directives above are already registered by the compiler or HTML builder.
 
-The former `$page` metadata design is superseded. HTML metadata uses direct top-level const `$in` builder slots, and a general `$entry`
-purpose remains deferred.
+No `$project`, `$builder` or `$html_builder` directive exists. Project and builder settings use the ordinary named `project` and builder records in `config.moth`.
+
+The former `$page` design is superseded and there is no `$entry` directive. Entry eligibility comes from the `@entry.moth` file role. HTML metadata uses direct top-level const `$in` builder slots in that entry.
 
 See @../directives (Directives) and @../templates/#template-directives (Template directives) for their syntax and use.

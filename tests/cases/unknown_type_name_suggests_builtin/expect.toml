@@ -8,6 +8,6 @@ message_contains = ["Did you mean 'String'"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0035"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1
 column = 3

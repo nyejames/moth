@@ -7,5 +7,5 @@ message_contains = ["Inspect the optional value"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0051"
 reason = "invalid_fallible_handling.catch_on_optional"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 2

@@ -1,9 +1,10 @@
 //! Build-resolved source-provider inputs consumed by header interface binding.
 //!
-//! WHAT: associates one retained dependency shell or implicit template scope with the immutable
-//! public semantic interface selected by Stage 0 through one dense provider set. The set assigns
-//! a build-local [`ProviderInterfaceId`] per unique completed interface and validates duplicate
-//! shells, duplicate implicit scopes and equal-origin interface agreement while it builds.
+//! WHAT: associates one retained dependency shell or the fixed template prelude with the
+//! immutable public semantic interface selected by Stage 0 through one dense provider set. The
+//! set assigns a build-local [`ProviderInterfaceId`] per unique completed interface and validates
+//! duplicate shells, a duplicate template prelude and equal-origin interface agreement while it
+//! builds.
 //! WHY: the compiler binds names and semantic facts, while the build system owns graph and
 //! namespace resolution. This narrow borrowed input keeps build-local `ModuleId` values out of
 //! the compiler, prevents header binding from probing the filesystem or comparing path
@@ -12,6 +13,7 @@
 
 use super::interface_view::ProviderBindingView;
 use super::model::PublicSemanticInterface;
+use crate::builder_surface::definition::TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -48,27 +50,28 @@ pub(crate) struct ResolvedDependencyClause {
 
 /// Explicit provider-dependency state for one binding.
 ///
-/// WHAT: an authored dependency always carries its retained clause-shell identity, while an implicit
-/// template scope provider is selected by the active builder and carries its package prefix.
+/// WHAT: an authored dependency carries its retained clause-shell identity, while the single
+///       compiler-standard template prelude names the provider kind alone.
 /// WHY: optional shells, optional prefixes and boolean flags form invalid combinations; the
-/// two-arm enum makes every provider input state representable and complete.
+///      two-arm enum makes every provider input state representable and complete. The template
+///      prelude package prefix is fixed by compiler policy, not selected by the active builder.
 #[derive(Debug)]
-pub(crate) enum ProviderDependencyKind<'a> {
+pub(crate) enum ProviderDependencyKind {
     Authored { shell: DependencyShellId },
-    ImplicitTemplate { package_prefix: &'a str },
+    TemplatePrelude,
 }
 
 #[derive(Debug)]
 pub(crate) struct SourceProviderDependency<'a> {
-    pub(crate) kind: ProviderDependencyKind<'a>,
+    pub(crate) kind: ProviderDependencyKind,
     pub(crate) interface: &'a PublicSemanticInterface,
 }
 
 /// One dense provider interface set per module binding operation.
 ///
-/// WHAT: maps `ProviderInterfaceId` to the borrowed completed interface, retained shells and
-/// implicit template scopes to provider IDs, and validates equal-origin agreement once per
-/// unique origin while it is constructed.
+/// WHAT: maps `ProviderInterfaceId` to the borrowed completed interface, retained shells and the
+/// fixed template prelude to provider IDs, and validates equal-origin agreement once per unique
+/// origin while it is constructed.
 /// WHY: header binding and re-export caches query provider facts by dense identity, so the
 /// module never re-runs publication validation or compares origins per shell.
 #[derive(Debug, Default)]
@@ -76,8 +79,7 @@ pub(crate) struct SourceProviderDependencySet<'a> {
     interfaces: Vec<&'a PublicSemanticInterface>,
     binding_views: Vec<ProviderBindingView<'a>>,
     by_shell: FxHashMap<DependencyShellId, ProviderInterfaceId>,
-    implicit_by_prefix: FxHashMap<&'a str, ProviderInterfaceId>,
-    implicit_providers: Vec<(&'a str, ProviderInterfaceId)>,
+    template_prelude: Option<ProviderInterfaceId>,
     by_origin: FxHashMap<StableModuleOriginIdentity, ProviderInterfaceId>,
 }
 
@@ -89,8 +91,7 @@ impl<'a> SourceProviderDependencySet<'a> {
             interfaces: Vec::with_capacity(dependencies.len()),
             binding_views: Vec::with_capacity(dependencies.len()),
             by_shell: FxHashMap::default(),
-            implicit_by_prefix: FxHashMap::default(),
-            implicit_providers: Vec::new(),
+            template_prelude: None,
             by_origin: FxHashMap::default(),
         };
 
@@ -109,19 +110,17 @@ impl<'a> SourceProviderDependencySet<'a> {
                     let provider_id = set.register(dependency.interface)?;
                     set.by_shell.insert(shell, provider_id);
                 }
-                ProviderDependencyKind::ImplicitTemplate { package_prefix } => {
-                    if set.implicit_by_prefix.contains_key(package_prefix) {
+                ProviderDependencyKind::TemplatePrelude => {
+                    if set.template_prelude.is_some() {
                         return Err(InfrastructureFailure::internal(
                             CompilerStage::AstConstruction,
                             format!(
-                                "source provider input set registered implicit template scope @{} more than once",
-                                package_prefix
+                                "source provider input set registered the template prelude @{TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX} more than once"
                             ),
                         ));
                     }
                     let provider_id = set.register(dependency.interface)?;
-                    set.implicit_by_prefix.insert(package_prefix, provider_id);
-                    set.implicit_providers.push((package_prefix, provider_id));
+                    set.template_prelude = Some(provider_id);
                 }
             }
         }
@@ -253,16 +252,13 @@ impl<'a> SourceProviderDependencySet<'a> {
         })
     }
 
-    /// Iterate builder-selected implicit template scope providers in deterministic registration
-    /// order.
+    /// The fixed compiler-standard template prelude provider, when the builder supplies it.
     ///
-    /// WHAT: exposes the provider prefix together with its provider ID so header binding can
-    ///       register every capability-selected constant surface.
-    /// WHY: implicit template scope is builder capability metadata, not a hard-coded `@html`
-    ///       special case or a side effect of explicit dependencies.
-    pub(crate) fn implicit_template_scope_providers(
-        &self,
-    ) -> impl Iterator<Item = (&'a str, ProviderInterfaceId)> + '_ {
-        self.implicit_providers.iter().copied()
+    /// WHAT: exposes the prelude provider ID so header binding can register the flat `.mtf`
+    ///       constant prelude.
+    /// WHY: the package is chosen by compiler policy, not by a builder capability list or by an
+    ///       explicit dependency clause in the template source.
+    pub(crate) fn template_prelude_provider(&self) -> Option<ProviderInterfaceId> {
+        self.template_prelude
     }
 }

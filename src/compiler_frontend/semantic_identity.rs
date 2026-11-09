@@ -212,22 +212,120 @@ impl StablePackageIdentity {
 
 /// The structural role of one canonical module origin.
 ///
-/// `Normal` roots (`@*.moth`) are entry candidates. `Support` roots (`+*.moth`) are scoped package
-/// roots that are never entry candidates. `Shared` is the role-neutral defining origin for helper
-/// files that are owned once by a structural directory module and may be reached by both root
-/// surfaces. `SyntheticProjectContext` is retained only for the synthetic `@project` context; it has
-/// no filesystem or graph meaning.
+/// `Normal` (`@mod.moth`) is the API-only normal facade. `Support` (`@package.moth`) is the
+/// scoped support or external package facade. Both are the only public interface roles. `Entry`
+/// (`@entry.moth`) is the executable entry root: it owns the implicit `start`, root runtime and
+/// direct output, and it never publishes a public interface. `Shared` is the role-neutral
+/// defining origin for helper files that are owned once by a structural directory module and may
+/// be reached by every root. `SyntheticProjectContext` is retained only for the synthetic
+/// `@project` context; it has no filesystem or graph meaning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ModuleRootRole {
     Normal,
     Support,
+    Entry,
     Shared,
     SyntheticProjectContext,
 }
 
-impl ModuleRootRole {
-    pub(crate) fn has_implicit_start(self) -> bool {
-        matches!(self, Self::Normal)
+/// One structural module's fixed role-keyed root inventory.
+///
+/// WHAT: stores at most one root value per authored special role. Stage 0 uses it with canonical
+///       `PathBuf` roots, while the prepared inputs and header options use the same type with
+///       `SourceId` identities so file roles come from membership rather than filename spelling.
+/// WHY: a rooted directory is one structural module with up to three separate root scopes. One
+///      small fixed inventory keeps the roles visible, gives the preparation anchor one
+///      deterministic owner, and prevents parallel normal/support/entry fields from drifting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ModuleRootFiles<T> {
+    pub(crate) normal: Option<T>,
+    pub(crate) support: Option<T>,
+    pub(crate) entry: Option<T>,
+}
+
+impl<T> Default for ModuleRootFiles<T> {
+    fn default() -> Self {
+        Self {
+            normal: None,
+            support: None,
+            entry: None,
+        }
+    }
+}
+
+impl<T> ModuleRootFiles<T> {
+    pub(crate) fn new(normal: Option<T>, support: Option<T>, entry: Option<T>) -> Self {
+        Self {
+            normal,
+            support,
+            entry,
+        }
+    }
+
+    pub(crate) fn get(&self, role: ModuleRootRole) -> Option<&T> {
+        match role {
+            ModuleRootRole::Normal => self.normal.as_ref(),
+            ModuleRootRole::Support => self.support.as_ref(),
+            ModuleRootRole::Entry => self.entry.as_ref(),
+            ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => None,
+        }
+    }
+
+    /// The one deterministic root selected to anchor preparation: normal, then support, then
+    /// entry. The anchor carries no semantic authority beyond preparing the structural module.
+    pub(crate) fn preparation_anchor(&self) -> Option<&T> {
+        self.present().next().map(|(_, root)| root)
+    }
+
+    /// Present roots in the fixed normal, support, entry order.
+    pub(crate) fn present(&self) -> impl Iterator<Item = (ModuleRootRole, &T)> {
+        [
+            (ModuleRootRole::Normal, self.normal.as_ref()),
+            (ModuleRootRole::Support, self.support.as_ref()),
+            (ModuleRootRole::Entry, self.entry.as_ref()),
+        ]
+        .into_iter()
+        .filter_map(|(role, root)| root.map(|root| (role, root)))
+    }
+
+    /// One inventory holding only the given role's value.
+    ///
+    /// A shared or synthetic role has no root slot, so its value is not retained. Synthetic
+    /// single-file modules use this to place an explicitly selected root in its authored slot.
+    pub(crate) fn single(role: ModuleRootRole, value: T) -> Self {
+        match role {
+            ModuleRootRole::Normal => Self::new(Some(value), None, None),
+            ModuleRootRole::Support => Self::new(None, Some(value), None),
+            ModuleRootRole::Entry => Self::new(None, None, Some(value)),
+            ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => Self::default(),
+        }
+    }
+
+    /// The role of the package-facing public surface: support when present, otherwise normal.
+    ///
+    /// An entry-only inventory reports `None` because an entry root publishes no facade.
+    pub(crate) fn public_surface_role(&self) -> Option<ModuleRootRole> {
+        if self.support.is_some() {
+            Some(ModuleRootRole::Support)
+        } else if self.normal.is_some() {
+            Some(ModuleRootRole::Normal)
+        } else {
+            None
+        }
+    }
+
+    /// The role of the preparation anchor root, absent when the inventory holds no root.
+    #[cfg(test)]
+    pub(crate) fn anchor_role(&self) -> Option<ModuleRootRole> {
+        self.present().next().map(|(role, _)| role)
+    }
+
+    pub(crate) fn into_parts(self) -> (Option<T>, Option<T>, Option<T>) {
+        (self.normal, self.support, self.entry)
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.normal.is_none() && self.support.is_none() && self.entry.is_none()
     }
 }
 
@@ -349,11 +447,6 @@ impl StableModuleOriginIdentity {
         }
         self.role == ModuleRootRole::Shared || other.role == ModuleRootRole::Shared
     }
-
-    /// Whether two origins name the same rooted directory, regardless of root surface role.
-    pub(crate) fn is_same_structural_directory(&self, other: &Self) -> bool {
-        self.package == other.package && self.logical_module_path == other.logical_module_path
-    }
 }
 
 /// Convert a base-relative logical path into a portable forward-slash spelling.
@@ -410,7 +503,7 @@ pub(crate) fn portable_relative_logical_path_from(
 /// `PathId`, dense `SourceId`, traversal index, `SourceDatabase` or absolute filesystem path,
 /// so identity is stable across checkout roots and traversal order. The module-relative source
 /// path intentionally includes the actual root filename, so renaming the root file (for example
-/// `@page.moth` to `@pages.moth`) changes the owned-source identity even though the module origin
+/// `@entry.moth` to `@mod.moth`) changes the owned-source identity even though the module origin
 /// remains stable.
 /// WHY: the source tree index records this identity as the logical identity of every owned source
 /// file (`SourceLogicalIdentity::Owned`). Keeping the dense

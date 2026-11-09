@@ -253,8 +253,7 @@ not reapply the initial title prefix or postfix, mutate builder slot metadata,
 change the route or rewrite the static output file.
 
 Initial document metadata comes from a direct root builder slot, not from
-`io.set_title`. The earlier `$page` proposal is superseded and has no runtime
-title argument.
+`io.set_title`.
 
 A stable binding identity carries a title-capability requirement in
 per-function link facts. HTML-JS will supply that capability through the browser

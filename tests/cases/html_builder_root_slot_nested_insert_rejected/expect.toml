@@ -8,7 +8,7 @@ diagnostic_codes = ["MOTH-RULE-0052"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0052"
 reason = "invalid_template_slot.named_insert_outside_parent_slot"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 2
 
 [backends.html_wasm]
@@ -19,5 +19,5 @@ diagnostic_codes = ["MOTH-RULE-0052"]
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0052"
 reason = "invalid_template_slot.named_insert_outside_parent_slot"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 2

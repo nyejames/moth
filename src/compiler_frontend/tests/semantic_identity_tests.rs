@@ -9,8 +9,8 @@
 
 use crate::compiler_frontend::compiler_errors::InfrastructureFailureKind;
 use crate::compiler_frontend::semantic_identity::{
-    FunctionOriginKind, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
-    OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
+    ExportBinding, FunctionOriginKind, ModuleRootRole, OriginConstantId, OriginDeclarationId,
+    OriginFunctionId, OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
     StableOwnedSourceIdentity, StablePackageIdentity,
 };
 
@@ -282,8 +282,8 @@ fn owned_source_identity(
 
 #[test]
 fn owned_source_identity_is_equal_for_equal_module_origin_and_relative_path() {
-    let first = owned_source_identity("ui/button", "@page.moth");
-    let second = owned_source_identity("ui/button", "@page.moth");
+    let first = owned_source_identity("ui/button", "@entry.moth");
+    let second = owned_source_identity("ui/button", "@entry.moth");
 
     assert_eq!(
         first, second,
@@ -299,21 +299,21 @@ fn owned_source_identity_is_equal_for_equal_module_origin_and_relative_path() {
 
 #[test]
 fn owned_source_identity_carries_no_absolute_path_or_source_file_field() {
-    let identity = owned_source_identity("ui/button", "@page.moth");
+    let identity = owned_source_identity("ui/button", "@entry.moth");
     let debug = format!("{identity:?}");
 
     assert!(
-        !debug.contains("ui/button/@page.moth"),
+        !debug.contains("ui/button/@entry.moth"),
         "the canonical physical source path must not be embedded in the stable identity: {debug}"
     );
-    assert_eq!(identity.relative_source_path(), "@page.moth");
+    assert_eq!(identity.relative_source_path(), "@entry.moth");
     assert_eq!(identity.module_origin().logical_module_path(), "ui/button");
 }
 
 #[test]
 fn changing_module_origin_changes_owned_source_identity() {
-    let button = owned_source_identity("ui/button", "@page.moth");
-    let card = owned_source_identity("ui/card", "@page.moth");
+    let button = owned_source_identity("ui/button", "@entry.moth");
+    let card = owned_source_identity("ui/card", "@entry.moth");
 
     assert_ne!(
         button, card,
@@ -323,25 +323,25 @@ fn changing_module_origin_changes_owned_source_identity() {
 
 #[test]
 fn changing_relative_source_path_changes_owned_source_identity() {
-    let root_file = owned_source_identity("ui/button", "@page.moth");
+    let root_file = owned_source_identity("ui/button", "@entry.moth");
     let nested_file = owned_source_identity("ui/button", "internal/renderer.moth");
 
     assert_ne!(
         root_file, nested_file,
         "changing the module-relative source path must change identity"
     );
-    assert_eq!(root_file.relative_source_path(), "@page.moth");
+    assert_eq!(root_file.relative_source_path(), "@entry.moth");
     assert_eq!(nested_file.relative_source_path(), "internal/renderer.moth");
 }
 
 #[test]
 fn owned_source_identity_distinguishes_same_name_in_different_modules() {
-    let alpha = owned_source_identity("alpha", "@page.moth");
-    let inner = owned_source_identity("alpha/inner", "@page.moth");
+    let alpha = owned_source_identity("alpha", "@entry.moth");
+    let inner = owned_source_identity("alpha/inner", "@entry.moth");
 
     assert_ne!(
         alpha, inner,
-        "two root files named @page.moth in different modules must keep distinct identities"
+        "two root files named @entry.moth in different modules must keep distinct identities"
     );
 }
 
@@ -368,11 +368,69 @@ fn owned_source_identity_rejects_invalid_relative_path_components() {
 fn owned_source_identity_rejects_absolute_relative_path() {
     let result = StableOwnedSourceIdentity::from_relative_source_path(
         module_origin("ui/button"),
-        Path::new("/abs/@page.moth"),
+        Path::new("/abs/@entry.moth"),
     );
     assert!(
         matches!(result, Err(ref e) if e.kind == InfrastructureFailureKind::Internal && e.message.contains("invalid component")),
         "an absolute relative source path must be rejected through the compiler-error lane"
+    );
+}
+
+#[test]
+fn helper_reexported_through_both_facades_keeps_one_defining_origin_and_two_export_bindings() {
+    let shared = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local("my-project"),
+        "ui/button".to_owned(),
+        ModuleRootRole::Shared,
+    );
+    let normal_facade = shared.with_role(ModuleRootRole::Normal);
+    let support_facade = shared.with_role(ModuleRootRole::Support);
+
+    let defining_origin = OriginDeclarationId::Function(OriginFunctionId::new_free(
+        shared.clone(),
+        "render".to_owned(),
+    ));
+    let normal_binding = ExportBinding::new(
+        normal_facade.clone(),
+        "render".to_owned(),
+        defining_origin.clone(),
+    );
+    let support_binding = ExportBinding::new(
+        support_facade.clone(),
+        "render".to_owned(),
+        defining_origin.clone(),
+    );
+
+    assert_eq!(
+        normal_binding.origin(),
+        support_binding.origin(),
+        "both facades must keep the one Shared defining origin"
+    );
+    assert_eq!(
+        normal_binding.origin().module_origin(),
+        &shared,
+        "the defining origin must stay Shared-rooted rather than becoming a facade origin"
+    );
+    assert_ne!(
+        normal_binding, support_binding,
+        "the two facade exports must remain distinct export bindings"
+    );
+    assert_ne!(
+        normal_binding.exporting_module(),
+        support_binding.exporting_module(),
+        "each export binding must carry its own facade origin"
+    );
+    assert!(
+        !normal_binding
+            .exporting_module()
+            .is_same_structural_module(support_binding.exporting_module()),
+        "the two root surfaces of one directory remain isolated scopes"
+    );
+    assert!(
+        normal_binding
+            .exporting_module()
+            .is_same_structural_module(&shared),
+        "a facade origin and the shared helper belong to one structural module"
     );
 }
 

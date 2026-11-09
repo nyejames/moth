@@ -6,7 +6,7 @@ diagnostic_codes = ["MOTH-SYNTAX-0022"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0022"
 reason = "invalid_template_structure.non_foldable_const_template"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 4
 column = 10
 count = 1

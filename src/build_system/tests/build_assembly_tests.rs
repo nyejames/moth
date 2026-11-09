@@ -56,7 +56,8 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::module_compilation::artefact::{
-    ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts, ResolvedConstFragment,
+    EntryRootMetadata, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
+    ResolvedConstFragment,
 };
 use crate::compiler_frontend::module_compilation::{
     CompiledModuleArtifact, Module, ModuleRootActivity,
@@ -73,8 +74,8 @@ use crate::compiler_frontend::public_interface::{
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
-    ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId, OriginTypeCategory,
-    OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
+    ModuleRootFiles, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
+    OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -268,24 +269,24 @@ fn synthetic_module(
             functions: function_link_facts,
         },
         metadata: ModuleCompilerMetadata {
-            entry_point: PathBuf::from(entry_point),
-            const_top_level_fragments: const_fragments
-                .into_iter()
-                .enumerate()
-                .map(|(runtime_insertion_index, origin)| ResolvedConstFragment {
-                    runtime_insertion_index,
-                    destination: ConstFragmentDestination::Body,
-                    span: None,
-                    value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Resource(
-                        origin,
-                    )]),
-                })
-                .collect(),
-            root_activity: ModuleRootActivity {
-                has_non_trivial_root_body: start_function.is_some(),
-                const_fragment_count: usize::from(!function_rows.is_empty()),
-                ..ModuleRootActivity::default()
-            },
+            entry: start_function.map(|_| EntryRootMetadata {
+                entry_point: PathBuf::from(entry_point),
+                const_top_level_fragments: const_fragments
+                    .into_iter()
+                    .enumerate()
+                    .map(|(runtime_insertion_index, origin)| ResolvedConstFragment {
+                        runtime_insertion_index,
+                        destination: ConstFragmentDestination::Body,
+                        span: None,
+                        value: OwnedFoldedString::Pieces(vec![OwnedFoldedStringPiece::Resource(
+                            origin,
+                        )]),
+                    })
+                    .collect(),
+                root_activity: ModuleRootActivity {
+                    runtime_fragment_count: usize::from(!function_rows.is_empty()),
+                },
+            }),
             doc_fragments: Vec::new(),
             materialisation_context: None,
         },
@@ -309,12 +310,30 @@ fn empty_interface(module_origin: StableModuleOriginIdentity) -> PublicSemanticI
     }
 }
 
-fn artifact(module: Module, interface: PublicSemanticInterface) -> CompiledModuleArtifact {
+fn entry_artifact(module: Module) -> CompiledModuleArtifact {
     CompiledModuleArtifact {
         module,
-        interface,
+        normal_interface: None,
         support_interface: None,
     }
+}
+
+fn artifact(module: Module, interface: PublicSemanticInterface) -> CompiledModuleArtifact {
+    let mut artifact = CompiledModuleArtifact {
+        module,
+        normal_interface: None,
+        support_interface: None,
+    };
+    match interface.module_origin.role() {
+        ModuleRootRole::Normal => artifact.normal_interface = Some(interface),
+        ModuleRootRole::Support => artifact.support_interface = Some(interface),
+        ModuleRootRole::Entry
+        | ModuleRootRole::Shared
+        | ModuleRootRole::SyntheticProjectContext => {
+            panic!("a compiled module fixture must publish a normal or support facade interface")
+        }
+    }
+    artifact
 }
 
 fn boundary(
@@ -344,17 +363,18 @@ fn module_record(
     logical_module_path: &str,
     package: &StablePackageIdentity,
 ) -> ModuleIdentityRecord {
-    let (normal_root_file, support_root_file) = match role {
-        ModuleRootRole::Normal => (Some(PathBuf::from(root_file)), None),
-        ModuleRootRole::Support | ModuleRootRole::SyntheticProjectContext => {
-            (None, Some(PathBuf::from(root_file)))
+    let root_files = match role {
+        ModuleRootRole::Normal => ModuleRootFiles::new(Some(PathBuf::from(root_file)), None, None),
+        ModuleRootRole::Support => ModuleRootFiles::new(None, Some(PathBuf::from(root_file)), None),
+        ModuleRootRole::Entry => ModuleRootFiles::new(None, None, Some(PathBuf::from(root_file))),
+        ModuleRootRole::Shared => ModuleRootFiles::new(None, None, None),
+        ModuleRootRole::SyntheticProjectContext => {
+            panic!("a synthetic project context is not a filesystem module root")
         }
-        ModuleRootRole::Shared => (None, None),
     };
     ModuleIdentityRecord::new(
         PathBuf::from(root_directory),
-        normal_root_file,
-        support_root_file,
+        root_files,
         PathBuf::from(logical_module_path),
         package,
     )
@@ -416,7 +436,7 @@ fn package_facade_rejects_project_context_declaration_provenance() {
 
     let graph = ProjectModuleGraph::from_test_records(vec![module_record(
         "/synthetic/provenance-declaration",
-        "/synthetic/provenance-declaration/+package.moth",
+        "/synthetic/provenance-declaration/@package.moth",
         ModuleRootRole::Support,
         "",
         &package,
@@ -424,7 +444,7 @@ fn package_facade_rejects_project_context_declaration_provenance() {
     let project_boundary = boundary(
         graph,
         vec![artifact(
-            synthetic_module("+package.moth", Vec::new(), None, Vec::new()),
+            synthetic_module("@package.moth", Vec::new(), None, Vec::new()),
             facade_interface,
         )],
     );
@@ -481,13 +501,13 @@ fn source_package_facade_rejects_project_context_reachable_private_helper() {
     );
     let child_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
-        "external/lib/@lib.moth".to_owned(),
+        "external/lib/@package.moth".to_owned(),
         ModuleRootRole::Support,
     );
     let exported_origin = OriginFunctionId::new_free(child_origin.clone(), "public".to_owned());
     let private_identity = ModulePrivateExecutableIdentity::new(
         child_origin.clone(),
-        "@lib.moth".to_owned(),
+        "@package.moth".to_owned(),
         ModulePrivateExecutableCategory::FreeFunction,
         "helper".to_owned(),
         None,
@@ -495,7 +515,7 @@ fn source_package_facade_rejects_project_context_reachable_private_helper() {
     let helper_origin = OriginFunctionId::new_free(child_origin.clone(), "helper".to_owned());
 
     let mut child_module = synthetic_module(
-        "external/lib/@lib.moth",
+        "external/lib/@package.moth",
         vec![
             (
                 exported_origin.clone(),
@@ -558,9 +578,9 @@ fn source_package_facade_rejects_project_context_reachable_private_helper() {
         ),
         module_record(
             "/synthetic/external/lib",
-            "/synthetic/external/lib/@lib.moth",
+            "/synthetic/external/lib/@package.moth",
             ModuleRootRole::Support,
-            "external/lib/@lib.moth",
+            "external/lib/@package.moth",
             &package,
         ),
     ]);
@@ -588,7 +608,7 @@ fn source_package_facade_rejects_project_context_reachable_private_helper() {
 
     let result = ProjectCompilation::from_successful_boundaries(
         boundary(
-            ProjectModuleGraph::from_normal_roots(Vec::new()),
+            ProjectModuleGraph::from_standalone_roots(Vec::new()),
             Vec::new(),
         ),
         source_packages,
@@ -662,7 +682,7 @@ fn source_package_facade_rejects_project_context_public_declaration() {
 
     let result = ProjectCompilation::from_successful_boundaries(
         boundary(
-            ProjectModuleGraph::from_normal_roots(Vec::new()),
+            ProjectModuleGraph::from_standalone_roots(Vec::new()),
             Vec::new(),
         ),
         source_packages,
@@ -684,12 +704,12 @@ fn entry_union_keeps_entry_fragment_and_excludes_linked_module_fragment() {
         StablePackageIdentity::source_package(PackageOrigin::ProjectLocal, "provider");
     let page_origin = StableModuleOriginIdentity::from_portable_path(
         project_package.clone(),
-        "src/@page.moth".to_owned(),
-        ModuleRootRole::Normal,
+        "src/@entry.moth".to_owned(),
+        ModuleRootRole::Entry,
     );
     let provider_module_origin = StableModuleOriginIdentity::from_portable_path(
         provider_package.clone(),
-        "provider/@provider.moth".to_owned(),
+        "provider/@mod.moth".to_owned(),
         ModuleRootRole::Normal,
     );
     let helper_origin =
@@ -697,12 +717,12 @@ fn entry_union_keeps_entry_fragment_and_excludes_linked_module_fragment() {
     let entry_resource = resource(&page_origin, "assets/entry.svg");
     let linked_resource = resource(&provider_module_origin, "assets/linked.svg");
 
-    let project_graph = ProjectModuleGraph::from_normal_roots(vec![(
+    let project_graph = ProjectModuleGraph::from_standalone_roots(vec![(
         page_origin.clone(),
-        PathBuf::from("src/@page.moth"),
+        PathBuf::from("src/@entry.moth"),
     )]);
     let page_module = synthetic_module(
-        "@page.moth",
+        "@entry.moth",
         vec![(
             OriginFunctionId::new_free(page_origin.clone(), "page_start".to_owned()),
             vec![CallTarget::CrossModule(helper_origin.clone())],
@@ -711,19 +731,16 @@ fn entry_union_keeps_entry_fragment_and_excludes_linked_module_fragment() {
         Some(FunctionId(0)),
         vec![entry_resource.clone()],
     );
-    let project_boundary = boundary(
-        project_graph,
-        vec![artifact(page_module, empty_interface(page_origin))],
-    );
+    let project_boundary = boundary(project_graph, vec![entry_artifact(page_module)]);
 
-    let package_graph = ProjectModuleGraph::from_normal_roots(vec![(
+    let package_graph = ProjectModuleGraph::from_standalone_roots(vec![(
         provider_module_origin.clone(),
-        PathBuf::from("provider/@provider.moth"),
+        PathBuf::from("provider/@mod.moth"),
     )]);
     let provider_module = synthetic_module(
-        "provider/@provider.moth",
+        "provider/@mod.moth",
         vec![(helper_origin, Vec::new(), None)],
-        None,
+        Some(FunctionId(0)),
         vec![linked_resource],
     );
     let provider_boundary = boundary(
@@ -777,7 +794,7 @@ fn package_owner_lookup_registers_the_structural_shared_origin() {
     let package = StablePackageIdentity::project_local("shared-owner-map");
     let record = module_record(
         "/synthetic/shared-owner-map",
-        "/synthetic/shared-owner-map/+package.moth",
+        "/synthetic/shared-owner-map/@package.moth",
         ModuleRootRole::Support,
         "",
         &package,
@@ -794,7 +811,7 @@ fn package_owner_lookup_registers_the_structural_shared_origin() {
     let project = boundary(
         graph,
         vec![artifact(
-            synthetic_module("+package.moth", Vec::new(), None, Vec::new()),
+            synthetic_module("@package.moth", Vec::new(), None, Vec::new()),
             empty_interface(stable_origin.clone()),
         )],
     );
@@ -830,17 +847,17 @@ fn package_facade_rejects_project_context_reachable_private_helper() {
     let facade_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
         "".to_owned(),
-        ModuleRootRole::SyntheticProjectContext,
+        ModuleRootRole::Support,
     );
     let child_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
-        "provider/@provider.moth".to_owned(),
+        "provider/@mod.moth".to_owned(),
         ModuleRootRole::Support,
     );
     let exported_origin = OriginFunctionId::new_free(child_origin.clone(), "exported".to_owned());
     let private_identity = ModulePrivateExecutableIdentity::new(
         child_origin.clone(),
-        "@provider.moth".to_owned(),
+        "@mod.moth".to_owned(),
         ModulePrivateExecutableCategory::FreeFunction,
         "helper".to_owned(),
         None,
@@ -848,7 +865,7 @@ fn package_facade_rejects_project_context_reachable_private_helper() {
     let helper_origin = OriginFunctionId::new_free(child_origin.clone(), "helper".to_owned());
 
     let mut child_module = synthetic_module(
-        "provider/+provider.moth",
+        "provider/@package.moth",
         vec![
             (
                 exported_origin.clone(),
@@ -897,16 +914,16 @@ fn package_facade_rejects_project_context_reachable_private_helper() {
     let graph = ProjectModuleGraph::from_test_records(vec![
         module_record(
             "/synthetic/provenance-helper",
-            "/synthetic/provenance-helper/+package.moth",
-            ModuleRootRole::SyntheticProjectContext,
+            "/synthetic/provenance-helper/@package.moth",
+            ModuleRootRole::Support,
             "",
             &package,
         ),
         module_record(
             "/synthetic/provenance-helper/provider",
-            "/synthetic/provenance-helper/provider/+provider.moth",
+            "/synthetic/provenance-helper/provider/@package.moth",
             ModuleRootRole::Support,
-            "provider/@provider.moth",
+            "provider/@mod.moth",
             &package,
         ),
     ]);
@@ -914,7 +931,7 @@ fn package_facade_rejects_project_context_reachable_private_helper() {
         graph,
         vec![
             artifact(
-                synthetic_module("+package.moth", Vec::new(), None, Vec::new()),
+                synthetic_module("@package.moth", Vec::new(), None, Vec::new()),
                 facade_interface,
             ),
             artifact(child_module, empty_interface(child_origin)),
@@ -939,11 +956,11 @@ fn package_union_follows_facade_export_and_excludes_hidden_child_export() {
     let facade_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
         "".to_owned(),
-        ModuleRootRole::SyntheticProjectContext,
+        ModuleRootRole::Support,
     );
     let child_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
-        "provider/@provider.moth".to_owned(),
+        "provider/@mod.moth".to_owned(),
         ModuleRootRole::Support,
     );
     let exported_origin = OriginConstantId::new(child_origin.clone(), "A".to_owned());
@@ -995,16 +1012,16 @@ fn package_union_follows_facade_export_and_excludes_hidden_child_export() {
     let graph = ProjectModuleGraph::from_test_records(vec![
         module_record(
             "/synthetic/project",
-            "/synthetic/project/+package.moth",
-            ModuleRootRole::SyntheticProjectContext,
+            "/synthetic/project/@package.moth",
+            ModuleRootRole::Support,
             "",
             &package,
         ),
         module_record(
             "/synthetic/project/provider",
-            "/synthetic/project/provider/+provider.moth",
+            "/synthetic/project/provider/@package.moth",
             ModuleRootRole::Support,
-            "provider/@provider.moth",
+            "provider/@mod.moth",
             &package,
         ),
     ]);
@@ -1012,11 +1029,11 @@ fn package_union_follows_facade_export_and_excludes_hidden_child_export() {
         graph,
         vec![
             artifact(
-                synthetic_module("+package.moth", Vec::new(), None, Vec::new()),
+                synthetic_module("@package.moth", Vec::new(), None, Vec::new()),
                 facade_interface,
             ),
             artifact(
-                synthetic_module("provider/+provider.moth", Vec::new(), None, Vec::new()),
+                synthetic_module("provider/@package.moth", Vec::new(), None, Vec::new()),
                 child_interface,
             ),
         ],
@@ -1068,11 +1085,11 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
     let facade_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
         "".to_owned(),
-        ModuleRootRole::SyntheticProjectContext,
+        ModuleRootRole::Support,
     );
     let child_origin = StableModuleOriginIdentity::from_portable_path(
         package.clone(),
-        "provider/@provider.moth".to_owned(),
+        "provider/@mod.moth".to_owned(),
         ModuleRootRole::Support,
     );
     let card_origin = OriginTypeId::new(
@@ -1140,21 +1157,21 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
     let graph = ProjectModuleGraph::from_test_records(vec![
         module_record(
             "/synthetic/nominal",
-            "/synthetic/nominal/+package.moth",
-            ModuleRootRole::SyntheticProjectContext,
+            "/synthetic/nominal/@package.moth",
+            ModuleRootRole::Support,
             "",
             &package,
         ),
         module_record(
             "/synthetic/nominal/provider",
-            "/synthetic/nominal/provider/+provider.moth",
+            "/synthetic/nominal/provider/@package.moth",
             ModuleRootRole::Support,
-            "provider/@provider.moth",
+            "provider/@mod.moth",
             &package,
         ),
     ]);
     let child_module = synthetic_module(
-        "provider/+provider.moth",
+        "provider/@package.moth",
         vec![
             (make_origin, Vec::new(), None),
             (render_origin, Vec::new(), Some(card_resource.clone())),
@@ -1166,7 +1183,7 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
         graph,
         vec![
             artifact(
-                synthetic_module("+package.moth", Vec::new(), None, Vec::new()),
+                synthetic_module("@package.moth", Vec::new(), None, Vec::new()),
                 facade_interface,
             ),
             artifact(child_module, empty_interface(child_origin)),

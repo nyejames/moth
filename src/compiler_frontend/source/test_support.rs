@@ -13,7 +13,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{LexedSource, TokenizeResult, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// One focused-test source context with an explicit identity and one live span owner.
 pub(crate) struct TestSourceContext {
@@ -44,10 +44,6 @@ impl TestSourceContext {
 
     pub(crate) fn source_id(&self) -> SourceId {
         self.source_id
-    }
-
-    pub(crate) fn path(&self) -> &Path {
-        &self.path
     }
 
     pub(crate) fn span_builder(&self) -> &ExtendedSpanBuilder {

@@ -3597,13 +3597,6 @@ contract = "language.bindings.disjoint_field_borrows_allowed"
 role = "primary"
 
 [[case]]
-id = "duplicate_module_root_files_rejected"
-path = "duplicate_module_root_files_rejected"
-tags = ["integration", "project-structure", "diagnostics"]
-contract = "language.modules.duplicate_root_files_rejected"
-role = "primary"
-
-[[case]]
 id = "duplicate_function_names"
 path = "duplicate_function_names"
 tags = ["integration", "functions", "diagnostics"]
@@ -3982,24 +3975,17 @@ contract = "backend.html.builder_wasm_script_placement"
 role = "primary"
 
 [[case]]
-id = "html_duplicate_route_reports_config_error"
-path = "html_duplicate_route_reports_config_error"
-tags = ["integration", "html", "diagnostics"]
-contract = "backend.html.duplicate_route_config_error"
+id = "html_descendant_only_entry_builds"
+path = "html_descendant_only_entry_builds"
+tags = ["integration", "html", "entry-start", "root-roles"]
+contract = "backend.html.descendant_only_entry_builds_without_homepage"
 role = "primary"
 
 [[case]]
-id = "html_missing_homepage_reports_config_error"
-path = "html_missing_homepage_reports_config_error"
-tags = ["integration", "html", "diagnostics"]
-contract = "backend.html.missing_homepage_config_error"
-role = "primary"
-
-[[case]]
-id = "html_api_only_directory_missing_homepage"
-path = "html_api_only_directory_missing_homepage"
-tags = ["integration", "html", "diagnostics"]
-contract = "backend.html.missing_homepage_config_error"
+id = "html_api_only_directory_no_entry_rejected"
+path = "html_api_only_directory_no_entry_rejected"
+tags = ["integration", "html", "diagnostics", "root-roles"]
+contract = "backend.html.api_only_directory_reports_no_entry"
 role = "boundary"
 
 [[case]]
@@ -9978,23 +9964,17 @@ role = "boundary"
 [[case]]
 id = "dependency_selection_braces_rejected"
 path = "dependency_selection_braces_rejected"
-tags = ["integration", "diagnostics", "dependencies", "migration"]
+tags = ["integration", "diagnostics", "dependencies", "selections"]
 contract = "language.dependencies.selection_braces_rejected"
 role = "primary"
 
 [[case]]
-id = "legacy_import_keyword_migration_rejected"
-path = "legacy_import_keyword_migration_rejected"
-tags = ["integration", "diagnostics", "dependencies", "migration"]
-contract = "language.dependencies.legacy_import_keyword_migration"
+id = "obsolete_import_clause_rejected"
+path = "obsolete_import_clause_rejected"
+tags = ["integration", "diagnostics", "dependencies", "selections"]
+contract = "language.dependencies.obsolete_import_clause_is_ordinary_syntax"
 role = "primary"
 
-[[case]]
-id = "legacy_import_multiline_migration_rejected"
-path = "legacy_import_multiline_migration_rejected"
-tags = ["integration", "diagnostics", "dependencies", "migration"]
-contract = "language.dependencies.legacy_import_multiline_migration"
-role = "primary"
 
 [[case]]
 id = "dependency_continuation_into_binding_rejected"
@@ -11845,13 +11825,6 @@ contract = "language.dependencies.direct_special_file_dependency_rejected"
 role = "boundary"
 
 [[case]]
-id = "direct_nested_support_root_dependency_rejected"
-path = "direct_nested_support_root_dependency_rejected"
-tags = ["integration", "dependencies", "diagnostics", "special-files", "source-packages"]
-contract = "language.dependencies.direct_special_file_dependency_rejected"
-role = "boundary"
-
-[[case]]
 id = "paired_root_support_diagnostic_rejects_normal"
 path = "paired_root_support_diagnostic_rejects_normal"
 tags = ["integration", "modules", "visibility", "root-boundaries", "negative", "publication"]
@@ -11870,6 +11843,55 @@ id = "paired_root_support_helper_lateral_import_rejected"
 path = "paired_root_support_helper_lateral_import_rejected"
 tags = ["integration", "modules", "visibility", "root-boundaries", "negative"]
 contract = "language.project_structure.shared_helper_support_visibility"
+role = "primary"
+
+[[case]]
+id = "entry_owner_support_visible_to_entry_and_siblings"
+path = "entry_owner_support_visible_to_entry_and_siblings"
+tags = ["integration", "modules", "visibility", "root-boundaries", "entry", "positive"]
+contract = "language.project_structure.entry_owner_support_visibility"
+role = "primary"
+
+[[case]]
+id = "support_only_intermediate_owner_success"
+path = "support_only_intermediate_owner_success"
+tags = ["integration", "modules", "visibility", "root-boundaries", "entry", "positive"]
+contract = "language.project_structure.support_only_intermediate_owner"
+role = "primary"
+
+[[case]]
+id = "entry_only_child_import_rejected"
+path = "entry_only_child_import_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "entry", "negative"]
+contract = "language.project_structure.entry_only_child_no_normal_api"
+role = "primary"
+
+[[case]]
+id = "paired_entry_support_facade_import_rejected"
+path = "paired_entry_support_facade_import_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "entry", "negative"]
+contract = "language.project_structure.paired_entry_support_facade_scope"
+role = "primary"
+
+[[case]]
+id = "paired_entry_support_entry_import_success"
+path = "paired_entry_support_entry_import_success"
+tags = ["integration", "modules", "visibility", "root-boundaries", "entry", "positive"]
+contract = "language.project_structure.paired_entry_support_entry_import"
+role = "primary"
+
+[[case]]
+id = "entry_support_shared_helper_import_rejected"
+path = "entry_support_shared_helper_import_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "entry", "negative"]
+contract = "language.project_structure.entry_support_shared_helper_scope"
+role = "primary"
+
+[[case]]
+id = "triple_root_module_success"
+path = "triple_root_module_success"
+tags = ["integration", "modules", "visibility", "root-boundaries", "entry", "publication", "positive"]
+contract = "language.project_structure.triple_root_module_publication"
 role = "primary"
 
 [[case]]
@@ -11912,6 +11934,13 @@ id = "paired_shared_template_root_constant_rejected"
 path = "paired_shared_template_root_constant_rejected"
 tags = ["integration", "modules", "visibility", "root-boundaries", "templates", "negative"]
 contract = "language.project_structure.paired_shared_template_isolation"
+role = "primary"
+
+[[case]]
+id = "root_local_helper_read_of_facade_declaration_rejected"
+path = "root_local_helper_read_of_facade_declaration_rejected"
+tags = ["integration", "modules", "visibility", "root-boundaries", "diagnostics", "negative"]
+contract = "language.project_structure.helper_cannot_read_root_local_declaration"
 role = "primary"
 
 [[case]]
@@ -13070,13 +13099,6 @@ contract = "language.dependencies.moth_without_template_implicit_provider_reject
 role = "primary"
 
 [[case]]
-id = "moth_template_provider_constant_collision_rejected"
-path = "moth_template_provider_constant_collision_rejected"
-tags = ["integration", "moth_template", "html", "diagnostics", "dependencies", "source-packages"]
-contract = "language.dependencies.moth_template_provider_constant_collision_rejected"
-role = "primary"
-
-[[case]]
 id = "moth_template_unrelated_source_package_implicit_rejected"
 path = "moth_template_unrelated_source_package_implicit_rejected"
 tags = ["integration", "moth_template", "html", "diagnostics", "dependencies", "source-packages"]
@@ -14225,6 +14247,13 @@ contract = "language.dependencies.export_outside_module_root_rejected"
 role = "boundary"
 
 [[case]]
+id = "entry_root_export_block_rejected"
+path = "entry_root_export_block_rejected"
+tags = ["integration", "modules", "root-boundaries", "entry", "diagnostics", "negative"]
+contract = "language.project_structure.entry_root_export_rejected"
+role = "primary"
+
+[[case]]
 id = "export_block_missing_colon_rejected"
 path = "export_block_missing_colon_rejected"
 tags = ["integration", "diagnostics", "dependencies", "facades"]
@@ -14288,17 +14317,10 @@ contract = "language.dependencies.legacy_inline_export_rejected"
 role = "primary"
 
 [[case]]
-id = "moth_template_same_directory_root_constant"
-path = "moth_template_same_directory_root_constant"
+id = "moth_template_explicit_helper_constant"
+path = "moth_template_explicit_helper_constant"
 tags = ["integration", "moth_template", "html", "dependencies", "module-roots"]
-contract = "language.dependencies.moth_template_same_directory_root_constant_acceptance"
-role = "primary"
-
-[[case]]
-id = "normal_module_root_config_namesake_is_module_root"
-path = "normal_module_root_config_namesake_is_module_root"
-tags = ["integration", "config", "html", "module-roots"]
-contract = "language.modules.normal_module_root_config_namesake_is_module_root_acceptance"
+contract = "language.dependencies.moth_template_explicit_helper_constant_acceptance"
 role = "primary"
 
 [[case]]
@@ -18727,11 +18749,11 @@ contract = "compiler.import.public_selection_must_be_exported"
 role = "adversarial"
 
 [[case]]
-id = "html_single_file_empty_route_name_rejected"
-path = "html_single_file_empty_route_name_rejected"
-tags = ["adversarial", "bug-hunt"]
-contract = "backend.html.single_file_route_name_must_not_be_empty"
-role = "adversarial"
+id = "closed_root_single_file_marker_only_rejected"
+path = "closed_root_single_file_marker_only_rejected"
+tags = ["integration", "project-structure", "diagnostics", "root-roles", "single-file"]
+contract = "language.modules.single_file_invalid_root_filename_rejected"
+role = "primary"
 
 [[case]]
 id = "missing_js_provider_prefix_rejected"
@@ -19237,3 +19259,257 @@ path = "never_call_fallible_argument_rejected"
 tags = ["integration", "language", "functions", "diagnostics", "never"]
 contract = "language.functions.never_return_contract"
 role = "boundary"
+
+[[case]]
+id = "qe_qualified_expression_primaries_moth"
+path = "qe_qualified_expression_primaries_moth"
+tags = ["integration", "language", "templates", "dependencies", "expression-qualified"]
+contract = "language.expression.qualified_reference_is_an_ordinary_primary"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_reference_in_mtf_folds"
+path = "qe_qualified_reference_in_mtf_folds"
+tags = ["integration", "language", "templates", "dependencies", "expression-qualified"]
+contract = "language.expression.qualified_reference_in_mtf_folds"
+role = "primary"
+
+[[case]]
+id = "qe_two_qualified_references_with_local_value"
+path = "qe_two_qualified_references_with_local_value"
+tags = ["integration", "language", "dependencies", "expression-qualified"]
+contract = "language.expression.qualified_reference_installs_no_local_name"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_selected_name_not_local"
+path = "qe_qualified_selected_name_not_local"
+tags = ["integration", "language", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.expression.qualified_selection_does_not_bind_the_selected_name"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_reference_cycle_rejected"
+path = "qe_qualified_reference_cycle_rejected"
+tags = ["integration", "language", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.qualified_reference_cycle_is_rejected"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_reference_self_cycle_rejected"
+path = "qe_qualified_reference_self_cycle_rejected"
+tags = ["integration", "language", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.qualified_reference_self_cycle_is_rejected"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_default_ordering"
+path = "qe_qualified_default_ordering"
+tags = ["integration", "language", "dependencies", "expression-qualified"]
+contract = "language.dependencies.qualified_default_orders_provider"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_default_cycle_rejected"
+path = "qe_qualified_default_cycle_rejected"
+tags = ["integration", "language", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.qualified_default_cycle_is_rejected"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_default_same_file_forward_success"
+path = "qe_qualified_default_same_file_forward_success"
+tags = ["integration", "language", "structs", "dependencies", "expression-qualified"]
+contract = "language.dependencies.qualified_default_same_file_forward_reference_succeeds"
+role = "primary"
+
+
+[[case]]
+id = "qe_cross_module_qualified_constant"
+path = "qe_cross_module_qualified_constant"
+tags = ["integration", "language", "dependencies", "expression-qualified"]
+contract = "language.dependencies.cross_module_qualified_constant_is_visible"
+role = "primary"
+
+[[case]]
+id = "qe_entry_only_child_qualified_reference_rejected"
+path = "qe_entry_only_child_qualified_reference_rejected"
+tags = ["integration", "language", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.entry_only_child_is_not_an_import_surface"
+role = "primary"
+
+[[case]]
+id = "qe_runtime_value_in_mtf_rejected"
+path = "qe_runtime_value_in_mtf_rejected"
+tags = ["integration", "language", "templates", "diagnostics", "expression-qualified"]
+contract = "language.templates.mtf_head_requires_compile_time_values"
+role = "primary"
+
+[[case]]
+id = "qe_unassigned_qualified_path_rejected"
+path = "qe_unassigned_qualified_path_rejected"
+tags = ["integration", "language", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.statement_path_is_not_an_expression"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_reference_in_generic_body"
+path = "qe_qualified_reference_in_generic_body"
+tags = ["integration", "language", "templates", "dependencies", "generics", "expression-qualified"]
+contract = "language.generics.qualified_reference_survives_materialisation"
+role = "primary"
+
+[[case]]
+id = "qe_missing_qualified_target_moth_rejected"
+path = "qe_missing_qualified_target_moth_rejected"
+tags = ["integration", "language", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.missing_qualified_target_reports_only_binding_diagnostic"
+role = "primary"
+
+[[case]]
+id = "qe_missing_qualified_target_mtf_rejected"
+path = "qe_missing_qualified_target_mtf_rejected"
+tags = ["integration", "language", "templates", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.templates.missing_qualified_target_reports_only_binding_diagnostic"
+role = "primary"
+
+[[case]]
+id = "qe_helper_selected_next_to_all_roots"
+path = "qe_helper_selected_next_to_all_roots"
+tags = ["integration", "language", "templates", "dependencies", "expression-qualified"]
+contract = "language.templates.helper_selection_is_visible_next_to_all_roots"
+role = "primary"
+
+[[case]]
+id = "qe_mixed_format_cycle_rejected"
+path = "qe_mixed_format_cycle_rejected"
+tags = ["integration", "language", "templates", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.mixed_format_cycle_is_rejected"
+role = "primary"
+
+[[case]]
+id = "qe_cross_module_same_name_qualified_values"
+path = "qe_cross_module_same_name_qualified_values"
+tags = ["integration", "language", "dependencies", "expression-qualified"]
+contract = "language.dependencies.cross_module_same_name_targets_stay_distinct"
+role = "primary"
+
+[[case]]
+id = "qe_external_qualified_lowering"
+path = "qe_external_qualified_lowering"
+tags = ["integration", "language", "dependencies", "expression-qualified"]
+contract = "language.expression.external_symbol_is_lowered_from_qualified_reference"
+role = "primary"
+
+[[case]]
+id = "qe_qualified_constructors"
+path = "qe_qualified_constructors"
+tags = ["integration", "language", "dependencies", "expression-qualified"]
+contract = "language.expression.qualified_reference_constructs_struct_and_choice_values"
+role = "primary"
+
+[[case]]
+id = "qe_root_local_qualified_reference_rejected"
+path = "qe_root_local_qualified_reference_rejected"
+tags = ["integration", "language", "templates", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.root_roots_are_not_same_module_namespace_entries"
+role = "primary"
+
+[[case]]
+id = "closed_root_arbitrary_filename_rejected"
+path = "closed_root_arbitrary_filename_rejected"
+tags = ["integration", "project-structure", "diagnostics", "root-roles"]
+contract = "language.modules.arbitrary_at_root_filename_rejected"
+role = "primary"
+
+[[case]]
+id = "closed_root_plus_filename_rejected"
+path = "closed_root_plus_filename_rejected"
+tags = ["integration", "project-structure", "diagnostics", "root-roles"]
+contract = "language.modules.plus_root_filename_rejected"
+role = "primary"
+
+[[case]]
+id = "plus_prefixed_content_reference_rejected"
+path = "plus_prefixed_content_reference_rejected"
+tags = ["integration", "project-structure", "diagnostics", "root-roles"]
+contract = "language.modules.plus_prefixed_content_reference_reports_explicit_extension"
+role = "primary"
+
+[[case]]
+id = "plus_prefixed_content_reference_success"
+path = "plus_prefixed_content_reference_success"
+tags = ["integration", "project-structure", "dependencies", "root-roles"]
+contract = "language.modules.plus_prefixed_content_source_binds_ordinary_dependency"
+role = "primary"
+
+[[case]]
+id = "closed_root_build_config_filename_rejected"
+path = "closed_root_build_config_filename_rejected"
+tags = ["integration", "project-structure", "diagnostics", "root-roles"]
+contract = "language.modules.at_config_root_filename_rejected"
+role = "primary"
+
+[[case]]
+id = "closed_root_case_variant_entry_rejected"
+path = "closed_root_case_variant_entry_rejected"
+tags = ["integration", "project-structure", "diagnostics", "root-roles"]
+contract = "language.modules.case_variant_root_filename_rejected"
+role = "primary"
+
+[[case]]
+id = "closed_root_invalid_name_directory_rejected"
+path = "closed_root_invalid_name_directory_rejected"
+tags = ["integration", "project-structure", "diagnostics", "root-roles"]
+contract = "language.modules.invalid_root_filename_directory_rejected"
+role = "boundary"
+
+[[case]]
+id = "normal_root_runtime_statement_rejected"
+path = "normal_root_runtime_statement_rejected"
+tags = ["integration", "project-structure", "diagnostics", "root-roles"]
+contract = "language.modules.normal_root_rejects_runtime_statements"
+role = "primary"
+
+[[case]]
+id = "empty_entry_produces_homepage"
+path = "empty_entry_produces_homepage"
+tags = ["integration", "html", "entry-start", "root-roles"]
+contract = "language.entry.empty_entry_presence_selects_homepage"
+role = "primary"
+
+[[case]]
+id = "synthetic_single_file_non_special_name_builds"
+path = "synthetic_single_file_non_special_name_builds"
+tags = ["integration", "html", "single-file", "root-roles"]
+contract = "language.entry.explicit_single_file_selection_accepts_any_moth_file"
+role = "primary"
+
+[[case]]
+id = "synthetic_entry_file_maps_to_homepage"
+path = "synthetic_entry_file_maps_to_homepage"
+tags = ["integration", "html", "single-file", "root-roles"]
+contract = "language.entry.synthetic_entry_file_maps_to_homepage"
+role = "primary"
+
+[[case]]
+id = "single_file_selected_support_facade_build_rejected"
+path = "single_file_selected_support_facade_build_rejected"
+tags = ["integration", "html", "single-file", "diagnostics", "root-roles"]
+contract = "language.entry.explicit_single_file_facade_selection_is_not_an_entry"
+role = "primary"
+
+[[case]]
+id = "single_file_selected_entry_export_rejected"
+path = "single_file_selected_entry_export_rejected"
+tags = ["integration", "html", "single-file", "diagnostics", "root-roles"]
+contract = "language.entry.selected_single_file_entry_rejects_export_surface"
+role = "primary"
+
+[[case]]
+id = "qe_cross_module_qualified_cycle_rejected"
+path = "qe_cross_module_qualified_cycle_rejected"
+tags = ["integration", "language", "dependencies", "diagnostics", "expression-qualified"]
+contract = "language.dependencies.cross_module_qualified_cycle_is_rejected"
+role = "primary"
+

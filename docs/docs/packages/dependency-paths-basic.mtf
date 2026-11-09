@@ -1,5 +1,11 @@
 Dependencies make names visible. Every source dependency resolves from the binding file's owning module root, not the file's directory.
 
+A path has three jobs:
+
+- `@card render_card` at the start of a statement is a dependency clause. It binds `render_card`.
+- `@settings site_name` inside an expression reads one value. It binds nothing.
+- `@docs/intro.mtf` is a file value. It gives a `String`.
+
 ### A module-root-relative dependency
 
 [codeblock, $code("moth"):
@@ -14,7 +20,24 @@ Dependencies make names visible. Every source dependency resolves from the bindi
     @markdown render
 ]
 
-`@markdown` resolves to a scoped `+*.moth` support package visible in the binding module's lexical scope.
+`@markdown` resolves to a scoped `@package.moth` support package visible in the binding module's lexical scope.
 
-`export:` remains current; a later `$export` migration is accepted direction with
-block support undecided. It does not change module-root-relative resolution.
+### A qualified read
+
+[codeblock, $code("moth"):
+    title = @settings site_name
+]
+
+`@settings` names a module or helper and `site_name` names one declaration. The path and the symbol stay on one line. The read creates no local `site_name`.
+
+### A file value
+
+[codeblock, $code("moth"):
+    intro = @docs/intro.mtf
+]
+
+The extension makes this a file value, not a dependency. A `.moth` path has no file value. Depend on its declarations instead.
+
+Root files such as `@mod.moth`, `@package.moth` and `@entry.moth` are never dependency targets. Depend on the module folder.
+
+`export:` remains current. A later `$export` migration will replace it only in `@mod.moth` and `@package.moth`. It does not change module-root-relative resolution.

@@ -35,7 +35,7 @@ fn case(
         contract: contract.map(str::to_owned),
         role,
         backend_id,
-        entry_path: PathBuf::from("input/@page.moth"),
+        entry_path: PathBuf::from("input/@entry.moth"),
         flags: Vec::new(),
         expected,
     }

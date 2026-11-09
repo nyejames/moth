@@ -1,0 +1,144 @@
+@project-layout content as project_layout
+@project-layout-basic content as project_layout_basic
+@project-config content as project_config
+@project-config-basic content as project_config_basic
+@module-roots content as module_roots
+@module-roots-basic content as module_roots_basic
+@public-api content as public_api
+@public-api-basic content as public_api_basic
+@entry-runtime-and-fragments content as entry_runtime_and_fragments
+@entry-runtime-and-fragments-basic content as entry_runtime_and_fragments_basic
+@html-routing-and-artifacts content as html_routing_and_artifacts
+@html-routing-and-artifacts-basic content as html_routing_and_artifacts_basic
+@build-inputs content as build_inputs
+@build-inputs-basic content as build_inputs_basic
+@entry-config content as entry_config
+@entry-config-basic content as entry_config_basic
+@project-package-facade content as project_package_facade
+@project-package-facade-basic content as project_package_facade_basic
+@styles navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager,
+    sidebar,
+    init_docs_sidebar
+
+#[$in title:["Project structure"]]
+#[$in description:["How Moth projects are structured, how modules are discovered and how the HTML builder emits pages."]]
+#[$in head:[language_theme_head]]
+
+#[navbar]
+#[sidebar]
+init_docs_sidebar()!
+#[section, $md:
+    # Project structure
+
+    A Moth project combines directory-scoped modules, an optional root-level
+    project config and a builder that selects the final artefacts.
+
+    A module recognises three optional root files: `@mod.moth` publishes the
+    normal API, `@package.moth` publishes a scoped support API and `@entry.moth`
+    owns page runtime work. Any subset is valid. `export:` currently defines a
+    facade's public API. The HTML builder emits one directory-derived page for
+    each `@entry.moth`; no root-purpose directive exists.
+]
+
+#[section:
+    [doc_level:
+        [$in key:project-layout]
+        [$in title:Project layout]
+        [$in advanced:[project_layout]]
+
+        [project_layout_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$in key:project-config]
+        [$in title:Project config]
+        [$in advanced:[project_config]]
+
+        [project_config_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$in key:module-roots]
+        [$in title:Module roots]
+        [$in advanced:[module_roots]]
+
+        [module_roots_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$in key:public-api]
+        [$in title:Public API]
+        [$in advanced:[public_api]]
+
+        [public_api_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$in key:entry-runtime-and-fragments]
+        [$in title:Entry runtime and fragments]
+        [$in advanced:[entry_runtime_and_fragments]]
+
+        [entry_runtime_and_fragments_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$in key:html-routing-and-artifacts]
+        [$in title:HTML routing and artefacts]
+        [$in advanced:[html_routing_and_artifacts]]
+
+        [html_routing_and_artifacts_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$in key:build-inputs]
+        [$in title:Build configuration values]
+        [$in advanced:[build_inputs]]
+
+        [build_inputs_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$in key:entry-config]
+        [$in title:Entry metadata and builder slots]
+        [$in advanced:[entry_config]]
+
+        [entry_config_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$in key:project-package-facade]
+        [$in title:Project package facade]
+        [$in advanced:[project_package_facade]]
+
+        [project_package_facade_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$in previous_path:../memory/]
+        [$in previous_title:Memory and lifetimes]
+        [$in next_path:../packages/]
+        [$in next_title:Packages and dependencies]
+    ]
+]

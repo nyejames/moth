@@ -160,22 +160,19 @@ define_stable_reason_keys! {
         &InvalidConfigCode::MissingRequiredRecordField => "invalid_config.missing_required_record_field",
         &InvalidConfigCode::InvalidConfigValueShape => "invalid_config.invalid_config_value_shape",
         &InvalidConfigCode::InvalidProjectSettingValue => "invalid_config.invalid_project_setting_value",
-        &InvalidConfigCode::MissingHtmlHomepage => "invalid_config.missing_html_homepage",
         &InvalidConfigCode::DuplicateHtmlOutputPath => "invalid_config.duplicate_html_output_path",
         &InvalidConfigCode::ResourceOutputPathCollision => "invalid_config.resource_output_path_collision",
         &InvalidConfigCode::ResourceOutputPathReserved => "invalid_config.resource_output_path_reserved",
         &InvalidConfigCode::EntryRootPackagePrefixCollision => "invalid_config.entry_root_package_prefix_collision",
         &InvalidConfigCode::SourcePackageMissingRoot => "invalid_config.source_package_missing_root",
-        &InvalidConfigCode::SourcePackageMultipleRoots => "invalid_config.source_package_multiple_roots",
         &InvalidConfigCode::NoRootModuleEntries => "invalid_config.no_root_module_entries",
-        &InvalidConfigCode::MultipleModuleRootFiles => "invalid_config.multiple_module_root_files",
         &InvalidConfigCode::AliasedModuleRootFiles => "invalid_config.aliased_module_root_files",
         &InvalidConfigCode::ModuleRootFileOutsideClaimingModule => "invalid_config.module_root_file_outside_claiming_module",
         &InvalidConfigCode::ModuleRootFileNotRegularFile => "invalid_config.module_root_file_not_regular_file",
         &InvalidConfigCode::ConfigImportUnsupported => "invalid_config.config_import_unsupported",
         &InvalidConfigCode::FileValuePathUnsupported => "invalid_config.file_value_path_unsupported",
         &InvalidConfigCode::SourceFileFolderCollision => "invalid_config.source_file_folder_collision",
-        &InvalidConfigCode::LegacyModuleRootFileName => "invalid_config.legacy_module_root_file_name",
+        &InvalidConfigCode::InvalidModuleRootFileName => "invalid_config.invalid_module_root_file_name",
         &InvalidConfigCode::InvalidOutputFolderEmpty => "invalid_config.invalid_output_folder.empty",
         &InvalidConfigCode::InvalidOutputFolderNonUtf8 => "invalid_config.invalid_output_folder.non_utf8",
         &InvalidConfigCode::InvalidOutputFolderAbsolutePathWithoutFolder
@@ -301,7 +298,6 @@ define_stable_reason_keys! {
     &InvalidDependencyClauseReason::ExpectedAliasName => "invalid_dependency_clause.expected_alias_name",
     &InvalidDependencyClauseReason::DuplicateSelectionName => "invalid_dependency_clause.duplicate_selection_name",
     &InvalidDependencyClauseReason::DuplicateSelectionLocalName => "invalid_dependency_clause.duplicate_selection_local_name",
-    &InvalidDependencyClauseReason::LegacyBraceSelections => "invalid_dependency_clause.legacy_brace_selections",
     &InvalidDependencyClauseReason::MissingSelectionAfterComma => "invalid_dependency_clause.missing_selection_after_comma",
     &InvalidDependencyClauseReason::MissingCommaBetweenSelections => "invalid_dependency_clause.missing_comma_between_selections",
     &InvalidDependencyClauseReason::NamespaceAliasWithSelections => "invalid_dependency_clause.namespace_alias_with_selections",
@@ -312,10 +308,6 @@ define_stable_reason_keys! {
     &InvalidDependencyClauseReason::ProjectGlobalsReexportNotAllowed => "invalid_dependency_clause.project_globals_reexport_not_allowed",
     &InvalidDependencyClauseReason::ProviderRequiresBinding => "invalid_dependency_clause.provider_requires_binding",
     &InvalidDependencyClauseReason::ContinuationEnteredStatement => "invalid_dependency_clause.continuation_entered_statement",
-    },
-
-    LegacyDependencyClauseReason => {
-    &LegacyDependencyClauseReason::ImportKeyword => "legacy_dependency_clause.import_keyword",
     },
 
     InvalidImportPathReason => {
@@ -660,7 +652,6 @@ define_stable_reason_keys! {
     },
 
     InvalidTraitConformanceCode => {
-        &InvalidTraitConformanceCode::ImportedModuleRoot => "invalid_trait_conformance.imported_module_root",
         &InvalidTraitConformanceCode::AliasTarget => "invalid_trait_conformance.alias_target",
         &InvalidTraitConformanceCode::NonCanonicalTarget => "invalid_trait_conformance.non_canonical_target",
         &InvalidTraitConformanceCode::NonlocalSourceTarget => "invalid_trait_conformance.nonlocal_source_target",

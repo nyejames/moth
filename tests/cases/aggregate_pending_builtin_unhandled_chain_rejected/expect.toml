@@ -10,6 +10,6 @@ diagnostic_codes = ["MOTH-RULE-0046"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0046"
 reason = "invalid_builtin_call.unhandled_fallible_call"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 6
 column = 14

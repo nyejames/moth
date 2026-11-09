@@ -24,10 +24,11 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::{
 };
 use crate::compiler_frontend::headers::dependency_target::DependencyTargetKind;
 use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
+use crate::compiler_frontend::headers::qualified_references::QualifiedReferenceOccurrence;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceTable;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
+use crate::compiler_frontend::semantic_identity::{ModuleRootFiles, ModuleRootRole};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
@@ -174,11 +175,6 @@ pub struct PreparedHeaderSyntax {
     pub entry_runtime_fragment_count: usize,
     /// Number of top-level const fragments in the active module root.
     pub const_fragment_count: usize,
-    /// Whether the active module root contains non-trivial top-level root/start code.
-    ///
-    /// WHY: header parsing is the first stage that can classify root activity without asking
-    /// AST or a builder to rediscover it from tokens or HIR.
-    pub has_non_trivial_root_body: bool,
     /// Aggregate cheap token classification for this module.
     ///
     /// WHAT: the sum of per-file `TokenStats` gathered during tokenization.
@@ -217,7 +213,6 @@ pub struct BoundModuleHeaders {
     pub top_level_const_fragments: Vec<TopLevelConstFragment>,
     pub entry_runtime_fragment_count: usize,
     pub const_fragment_count: usize,
-    pub has_non_trivial_root_body: bool,
     pub token_stats: TokenStats,
     pub header_stats: HeaderStats,
     pub module_symbols: ModuleSymbols,
@@ -246,41 +241,27 @@ pub struct TopLevelConstFragment {
 
 /// Optional settings that affect module header parsing.
 ///
-/// WHAT: bundles optional entry identity and the semantic role of the active module root.
-/// WHY: role selection is a caller-owned decision; filesystem and provider resolution stay in the
-///      later header-binding stage.
-#[derive(Clone, Copy)]
-pub struct HeaderParseOptions {
-    pub entry_file_id: Option<SourceId>,
-    /// The paired support root for a structural module whose normal root is the active entry.
+/// WHAT: carries Stage 0's role-keyed root source inventory, the one explicit standalone
+///       selection used by synthetic, check-only and template preparation, and the roles of
+///       module roots reached by a flattened synthetic unit.
+/// WHY: a file's role is decided by membership in a Stage 0 root inventory, never by re-deriving a
+///      special-file name or by comparing canonical paths. Standalone callers have no structural
+///      module inventory, so they name their selected source and, when their call follows module
+///      dependencies into other directories, the reached roots Stage 0 already classified.
+#[derive(Clone, Copy, Default)]
+pub struct HeaderParseOptions<'reached> {
+    /// The structural module's present root sources, keyed by their authored root role.
+    pub root_file_ids: ModuleRootFiles<SourceId>,
+    /// The single source selected for a standalone/synthetic/check-only unit, with its role.
     ///
-    /// A paired module prepares both roots in one source set. The normal root uses
-    /// `active_root_role`; this identity marks the support root as its own API-only surface rather
-    /// than an imported module root.
-    pub support_root_file_id: Option<SourceId>,
-    /// An explicit role for the active entry file, when the caller is compiling a transient
-    /// selection rather than a graph-owned module root.
+    /// `None` for Stage 0 directory modules, whose roots are already in `root_file_ids`.
+    pub selected_file: Option<(SourceId, FileRole)>,
+    /// Module roots reached in a flattened synthetic source set, with the header role each one
+    /// takes except the explicit standalone selection.
     ///
-    /// WHY: check-only source selections retain their real source semantics and must not acquire
-    ///      active-root privileges merely because their selected file is the entry path.
-    pub entry_file_role: Option<FileRole>,
-    /// The graph-owned semantic role of the root currently being compiled.
-    ///
-    /// WHY: entry-path equality identifies which file is active but cannot decide whether that
-    ///      root owns dormant runtime work. Support and project-facade roots are API-only even
-    ///      while they are the active compilation root.
-    pub active_root_role: ModuleRootRole,
-}
-
-impl Default for HeaderParseOptions {
-    fn default() -> Self {
-        Self {
-            entry_file_id: None,
-            support_root_file_id: None,
-            entry_file_role: None,
-            active_root_role: ModuleRootRole::Normal,
-        }
-    }
+    /// Empty for Stage 0 directory modules, which never flatten another module's roots into their
+    /// own source set.
+    pub reached_root_roles: &'reached [(SourceId, FileRole)],
 }
 
 #[allow(
@@ -316,8 +297,8 @@ pub enum HeaderKind {
     ///
     /// WHAT: captures top-level executable statements that are not declarations.
     /// WHY: only the active module root produces a start function. Ordinary source files with
-    /// non-trivial top-level executable code are rejected as a rule error; imported roots discard
-    /// their root body before this output is assembled.
+    /// non-trivial top-level executable code are rejected as a rule error; an API-only or reached
+    /// foreign root discards its root body before this output is assembled.
     /// Start functions are build-system-only; they are not dependency-bindable or callable from modules.
     StartFunction,
 
@@ -382,6 +363,13 @@ pub enum LocalDeclarationOrderingHintOrigin {
     ProviderSpelling,
     /// A namespace-qualified type spelling resolved directly through bound namespace visibility.
     QualifiedTypeSpelling,
+    /// A resolved expression-qualified reference target.
+    ///
+    /// WHAT: binding already resolved the authored `PATH SYMBOL` occurrence to a canonical
+    ///       module-local declaration path or an imported provider interface path.
+    /// WHY: the hint is a proven target, not a spelling, so canonicalization must preserve it and
+    ///      Stage 3 must classify imported targets through the existing provider edge path.
+    QualifiedReference,
     /// A content source's synthetic `content` constant.
     ///
     /// WHAT: the path targets `<content source>/content` of another prepared file, recorded from a
@@ -455,7 +443,22 @@ impl LocalDeclarationOrderingHint {
         }
     }
 
-    /// Attach the exact authored span for a content-source occurrence.
+    /// Record one resolved expression-qualified reference target.
+    ///
+    /// WHAT: `path` is either a module-local declaration path or the imported provider path the
+    ///       target map recorded; both are already canonical.
+    /// WHY: Stage 3 must sort this occurrence without canonicalizing it through an authored
+    ///      dependency spelling that the occurrence never installed.
+    pub fn qualified_reference(path: PathId) -> Self {
+        Self {
+            path,
+            origin: LocalDeclarationOrderingHintOrigin::QualifiedReference,
+            occurrence: None,
+            occurrence_span: None,
+        }
+    }
+
+    /// Attach the exact authored span for a content-source or qualified-reference occurrence.
     pub fn with_occurrence_span(mut self, span: SourceSpan) -> Self {
         self.occurrence_span = Some(span);
         self
@@ -516,6 +519,7 @@ impl LocalDeclarationOrderingHint {
             }
             LocalDeclarationOrderingHintOrigin::ProviderSpelling
             | LocalDeclarationOrderingHintOrigin::QualifiedTypeSpelling
+            | LocalDeclarationOrderingHintOrigin::QualifiedReference
             | LocalDeclarationOrderingHintOrigin::ContentSource => self.path,
         };
         Ok(Self {
@@ -586,7 +590,7 @@ pub struct Header {
     pub kind: HeaderKind,
     /// The role of the source file that produced this header.
     ///
-    /// WHAT: distinguishes active roots, imported roots, and normal source files.
+    /// WHAT: distinguishes active roots, reached foreign roots and ordinary source files.
     /// WHY: visibility and export decisions depend on file role and declaration kind,
     /// not file role alone.
     pub file_role: FileRole,
@@ -694,9 +698,8 @@ impl RetainedDependencyClause {
 
     /// Commit the source identity after `FileFrontendPrepareOutput` has preflighted every
     /// required source-owned retained path.
-    pub fn commit_source_rebinding(&mut self, file_id: SourceId, logical_path: PathId) {
-        self.dependency
-            .commit_source_rebinding(file_id, logical_path);
+    pub fn commit_source_rebinding(&mut self, file_id: SourceId) {
+        self.dependency.commit_source_rebinding(file_id);
         self.binding.rebind_source_identity(file_id);
     }
 }
@@ -1452,45 +1455,136 @@ impl RetainedDependencyClause {
 
 /// Classification of a source file's role within the current module compilation.
 ///
-/// WHAT: distinguishes the active module root, an imported module root used as an export surface,
+/// WHAT: distinguishes the start-bearing root, the API-only facade roots, reached foreign roots
 ///       and ordinary source.
-/// WHY: root identity and compilation context are independent: a root can expose declarations
-///       when imported without contributing its own top-level runtime body.
+/// WHY: root identity and compilation context are independent. The entry root owns start and
+///       runtime, the API-only roots own export surfaces, and an ordinary helper owns neither.
+///       The role is derived from Stage 0's root inventory, never from the file name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileRole {
-    /// A normal root file for the module currently being compiled.
-    ActiveModuleRoot,
-    /// A support or project-facade root currently being compiled as an API-only module.
-    ActiveApiOnlyModuleRoot,
-    /// A foreign root file compiled only to validate its public declaration surface.
-    ImportedModuleRoot,
+    /// The entry root. It owns the implicit start, root runtime and direct output, and it never
+    /// publishes an export surface. A standalone synthetic application selection also takes this
+    /// role because the selected file is that unit's explicit entry.
+    ActiveEntryRoot,
+    /// An API-only facade root in the module currently being compiled. The carried role is any
+    /// non-entry module root role.
+    ///
+    /// Only `Normal` and `Support` project an active public surface; a standalone
+    /// `SyntheticProjectContext` unit carries its role for provenance and projects none.
+    ActiveApiOnlyModuleRoot(ModuleRootRole),
+    /// A facade root of another structural module reached inside a flattened synthetic unit.
+    ///
+    /// The synthetic single-file path prepares every module root its dependency clauses reach in
+    /// one flat source set. Such a root keeps its export surface so its declarations parse like the
+    /// facade they are, but it is not the compiled module's own surface: it publishes no
+    /// interface and owns no start or root runtime, so authored root runtime, fragments and
+    /// direct builder slots are rejected rather than silently discarded. The carried role is
+    /// `Normal` or `Support` and comes from Stage 0's bounded root inventory, never from the
+    /// filename.
+    ReachedApiFacadeRoot(ModuleRootRole),
+    /// The self-contained `config.moth` bootstrap unit.
+    ///
+    /// It is deliberately not a module root: the fixed build-only file creates no structural
+    /// module, publishes no export surface and never enters the module graph. Its top-level
+    /// statements are captured as one start-shaped body only so the config dialect validator can
+    /// classify each authored statement with its own `MOTH-CONFIG` diagnostics.
+    ConfigBootstrap,
     /// An ordinary source file.
     Normal,
 }
 
 impl FileRole {
+    /// Whether this file is a structural module root, including a foreign root reached by a
+    /// flattened synthetic unit.
     pub(crate) fn is_module_root(self) -> bool {
-        matches!(
-            self,
-            Self::ActiveModuleRoot | Self::ActiveApiOnlyModuleRoot | Self::ImportedModuleRoot
-        )
+        self.is_active_module_root() || matches!(self, Self::ReachedApiFacadeRoot(_))
     }
 
     /// Whether this root belongs to the module currently being compiled.
     pub(crate) fn is_active_module_root(self) -> bool {
-        matches!(self, Self::ActiveModuleRoot | Self::ActiveApiOnlyModuleRoot)
+        matches!(
+            self,
+            Self::ActiveEntryRoot | Self::ActiveApiOnlyModuleRoot(_)
+        )
     }
 
+    /// Whether this root may author an export surface.
+    ///
+    /// WHAT: only the normal (`@mod.moth`) and support (`@package.moth`) API facades own one,
+    ///       including a facade reached by a flattened synthetic unit.
+    /// WHY: `@entry.moth` owns start/runtime and publishes no importable surface; a synthetic
+    ///      project-context root projects no surface at all.
     pub(crate) fn is_export_capable(self) -> bool {
-        self.is_module_root()
+        matches!(
+            self,
+            Self::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal | ModuleRootRole::Support)
+                | Self::ReachedApiFacadeRoot(ModuleRootRole::Normal | ModuleRootRole::Support)
+        )
     }
 
-    /// The active public surface this file role declares, when it is an active root.
+    /// Whether this file synthesizes the compiler-owned entry start.
+    ///
+    /// `ConfigBootstrap` is included because the config service captures the authored top-level
+    /// statements through the same start-shaped body lane before applying its own dialect
+    /// validator. It publishes no executable entry.
+    pub(crate) fn synthesizes_entry_start(self) -> bool {
+        matches!(self, Self::ActiveEntryRoot | Self::ConfigBootstrap)
+    }
+
+    /// The active public surface this file role declares, when it declares one.
     pub(crate) fn active_surface(self) -> Option<ModuleRootRole> {
         match self {
-            Self::ActiveModuleRoot => Some(ModuleRootRole::Normal),
-            Self::ActiveApiOnlyModuleRoot => Some(ModuleRootRole::Support),
-            Self::ImportedModuleRoot | Self::Normal => None,
+            Self::ActiveApiOnlyModuleRoot(role) => match role {
+                ModuleRootRole::Normal | ModuleRootRole::Support => Some(role),
+                ModuleRootRole::Entry
+                | ModuleRootRole::Shared
+                | ModuleRootRole::SyntheticProjectContext => None,
+            },
+            // A reached foreign facade belongs to another structural module, so this compilation
+            // never projects it as its own public surface.
+            Self::ReachedApiFacadeRoot(_)
+            | Self::ActiveEntryRoot
+            | Self::ConfigBootstrap
+            | Self::Normal => None,
+        }
+    }
+
+    /// The provider surface this file role consumes module-root namespaces as.
+    ///
+    /// WHAT: normal-position roles consume the normal surface; a support facade consumes the
+    ///       support surface.
+    /// WHY: an entry root publishes no surface of its own but is a normal-position consumer, so
+    ///      it must select the provider surfaces a normal root would. A role with no authored
+    ///      consumer position returns `None` rather than silently falling back to another
+    ///      surface.
+    pub(crate) fn consumer_surface(self) -> Option<ModuleRootRole> {
+        match self {
+            Self::ActiveEntryRoot | Self::Normal => Some(ModuleRootRole::Normal),
+            Self::ActiveApiOnlyModuleRoot(role) | Self::ReachedApiFacadeRoot(role) => match role {
+                ModuleRootRole::Normal | ModuleRootRole::Support => Some(role),
+                ModuleRootRole::Entry
+                | ModuleRootRole::Shared
+                | ModuleRootRole::SyntheticProjectContext => None,
+            },
+            Self::ConfigBootstrap => None,
+        }
+    }
+
+    /// The role used for a standalone source compiled as its own synthetic module root.
+    ///
+    /// WHAT: an ordinary explicitly selected file takes the entry role because the single-file
+    ///       application command selected it as that unit's executable output. A selected
+    ///       canonical root keeps its authored facade role instead.
+    /// WHY: single-file compilation has no authored root inventory, so the synthetic selection
+    ///      contract is the source of entry eligibility. A selected `@mod.moth`, `@package.moth`
+    ///      or project-context root stays API-only and publishes no start.
+    pub(crate) fn for_standalone_root(role: ModuleRootRole) -> Option<Self> {
+        match role {
+            ModuleRootRole::Entry => Some(Self::ActiveEntryRoot),
+            ModuleRootRole::Normal
+            | ModuleRootRole::Support
+            | ModuleRootRole::SyntheticProjectContext => Some(Self::ActiveApiOnlyModuleRoot(role)),
+            ModuleRootRole::Shared => None,
         }
     }
 }
@@ -1525,7 +1619,7 @@ pub struct FileFrontendPrepareOutput {
     pub token_stats: TokenStats,
     /// The role of this source file within the module.
     ///
-    /// WHAT: distinguishes active roots, imported roots and normal source files.
+    /// WHAT: distinguishes active roots, reached foreign roots and ordinary source files.
     /// WHY: module-wide symbol collection needs file roles for every prepared file,
     /// including dependency-only files that may produce no headers.
     pub file_role: FileRole,
@@ -1538,6 +1632,14 @@ pub struct FileFrontendPrepareOutput {
     pub file_dependency_clauses: Vec<RetainedDependencyClause>,
     /// Graph-active file-value paths authored by this file, excluding dependency-clause rows.
     pub structural_file_references: PreparedFileReferenceTable,
+    /// Expression-qualified `PATH SYMBOL` occurrences authored by this file.
+    ///
+    /// WHAT: one fact per authored occurrence in canonical source order, with its unique
+    ///       provider-handoff shell.
+    /// WHY: the same fact feeds Stage 0 provider discovery, later semantic binding and AST
+    ///      lowering. A qualified occurrence installs no file-local name, so it is deliberately
+    ///      not a dependency clause and never enters file visibility.
+    pub qualified_references: Vec<QualifiedReferenceOccurrence>,
     /// One flat selection store for all dependency clauses authored by this file.
     pub dependency_selections: Vec<DependencySelection>,
     pub headers: Vec<Header>,
@@ -1551,8 +1653,6 @@ pub struct FileFrontendPrepareOutput {
     pub const_template_count: usize,
     /// Number of runtime fragments contributed by this file.
     pub runtime_fragment_count: usize,
-    /// Whether this file is the active root and contains non-trivial top-level root/start code.
-    pub has_non_trivial_root_body: bool,
     /// Names and authored spans of bindings introduced by this file's entry body.
     ///
     /// WHY: header parsing owns runtime-root symbol discovery. Later constant-context lookup
@@ -1671,6 +1771,24 @@ pub enum FileFrontendPrepareFailure {
 }
 
 impl FileFrontendPrepareFailure {
+    /// Convert one header-parser failure into the per-file preparation lane.
+    ///
+    /// WHAT: attaches the warnings already accumulated for this file to a header-stage source
+    ///       diagnostic and leaves infrastructure failures unchanged.
+    /// WHY: header parsing and Moth template preparation end at the same boundary and must not
+    ///      repeat the two-lane conversion.
+    pub(crate) fn from_header_parse(failure: HeaderParseFailure, warnings: DiagnosticBag) -> Self {
+        match failure {
+            HeaderParseFailure::Diagnostic(diagnostic) => {
+                Self::Diagnosed(FileFrontendPrepareError {
+                    warnings,
+                    diagnostic,
+                })
+            }
+            HeaderParseFailure::Infrastructure(error) => Self::Infrastructure(error),
+        }
+    }
+
     pub(crate) fn from_tokenization(failure: TokenizeFailure) -> Self {
         match failure {
             TokenizeFailure::Diagnosed(diagnostic) => Self::Diagnosed(FileFrontendPrepareError {
@@ -1751,6 +1869,10 @@ impl FileFrontendPrepareOutput {
             clause.remap_string_ids(remap);
         }
 
+        for occurrence in &mut self.qualified_references {
+            occurrence.remap_string_ids(remap);
+        }
+
         for selection in &mut self.dependency_selections {
             selection.source_name = remap.get(selection.source_name);
             if let Some(alias) = &mut selection.local_alias {
@@ -1798,6 +1920,9 @@ impl FileFrontendPrepareOutput {
         for clause in &mut self.file_dependency_clauses {
             clause.remap_path_ids(remap);
         }
+        for occurrence in &mut self.qualified_references {
+            occurrence.remap_path_ids(remap);
+        }
         for header in &mut self.headers {
             header.remap_path_ids(remap);
         }
@@ -1807,6 +1932,44 @@ impl FileFrontendPrepareOutput {
         self.path_syntax.table_mut()?.remap_path_ids(remap);
         Ok(())
     }
+
+    /// Every authored dependency path in this file, paired with its clause kind.
+    ///
+    /// WHAT: yields dependency clauses first, then expression-qualified occurrences. Both
+    ///       collections are stored in source order, so this is also the order Stage 0
+    ///       discovered their provider shells.
+    /// WHY: provider discovery and directory resolution consume the same sequence; one iterator
+    ///      keeps that order defined in the file that owns both retained collections.
+    pub(crate) fn authored_dependencies(
+        &self,
+    ) -> impl Iterator<Item = (&RetainedDependencyPath, DependencyClauseKind)> {
+        self.file_dependency_clauses
+            .iter()
+            .map(|clause| (&clause.dependency, clause.binding.clause_kind()))
+            .chain(self.qualified_references.iter().map(|occurrence| {
+                (
+                    &occurrence.dependency,
+                    DependencyClauseKind::DirectSelection,
+                )
+            }))
+    }
+
+    /// Mutable form of [`Self::authored_dependencies`] for resolution that rewrites retained
+    /// paths.
+    pub(crate) fn authored_dependencies_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (&mut RetainedDependencyPath, DependencyClauseKind)> {
+        self.file_dependency_clauses
+            .iter_mut()
+            .map(|clause| (&mut clause.dependency, clause.binding.clause_kind()))
+            .chain(self.qualified_references.iter_mut().map(|occurrence| {
+                (
+                    &mut occurrence.dependency,
+                    DependencyClauseKind::DirectSelection,
+                )
+            }))
+    }
+
     /// Rebind every retained source identity to its consuming file.
     ///
     /// WHAT: updates the canonical file identity, retained declaration syntax, fragment metadata
@@ -1841,7 +2004,10 @@ impl FileFrontendPrepareOutput {
         }
 
         for clause in &mut self.file_dependency_clauses {
-            clause.commit_source_rebinding(final_file_id, final_logical_path);
+            clause.commit_source_rebinding(final_file_id);
+        }
+        for occurrence in &mut self.qualified_references {
+            occurrence.commit_source_rebinding(final_file_id);
         }
         self.structural_file_references
             .rebind_source_identity(final_file_id, final_logical_path);
@@ -1965,6 +2131,8 @@ impl FileFrontendPrepareOutput {
         validate_dependency_clauses(
             &self.file_dependency_clauses,
             &self.dependency_selections,
+            &self.qualified_references,
+            path_syntax,
             self.file_id,
             string_table,
             path_fork,
@@ -1999,6 +2167,8 @@ impl FileFrontendPrepareOutput {
 fn validate_dependency_clauses(
     clauses: &[RetainedDependencyClause],
     selections: &[DependencySelection],
+    qualified_references: &[QualifiedReferenceOccurrence],
+    path_syntax: &PathSyntaxTable,
     file_id: SourceId,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
@@ -2069,6 +2239,58 @@ fn validate_dependency_clauses(
             CompilerStage::HeaderParsing,
             "file-owned dependency selection table contains unclaimed rows",
         ));
+    }
+
+    // Inline qualified occurrences allocate their shells after every authored clause in the same
+    // dense ordinal space, so one ordinal can never bind two providers.
+    let occurrence_base = u32::try_from(clauses.len()).map_err(|_| {
+        InfrastructureFailure::internal(
+            CompilerStage::HeaderParsing,
+            "prepared file contains more dependency shells than its ordinal identity can represent",
+        )
+    })?;
+    for (occurrence_index, occurrence) in qualified_references.iter().enumerate() {
+        let occurrence_index = u32::try_from(occurrence_index).map_err(|_| {
+            InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "prepared file contains more qualified references than its shell ordinal identity can represent",
+            )
+        })?;
+        let expected_ordinal = occurrence_base
+            .checked_add(occurrence_index)
+            .ok_or_else(|| {
+                InfrastructureFailure::internal(
+                    CompilerStage::HeaderParsing,
+                    "qualified-reference shell ordinal exceeded its file-local identity",
+                )
+            })?;
+        if occurrence.dependency.dependency_shell_id.source != file_id {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "qualified-reference shell does not use the prepared file's source identity",
+            ));
+        }
+        if occurrence.dependency.dependency_shell_id.ordinal != expected_ordinal {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::HeaderParsing,
+                "qualified-reference shell ordinal does not follow its dense file-local occurrence position",
+            ));
+        }
+        validate_dependency_path(&occurrence.dependency, file_id, string_table, path_fork)?;
+        validate_source_span(
+            Some(occurrence.dependency.span),
+            file_id,
+            "qualified-reference path",
+        )?;
+        validate_source_span(
+            Some(occurrence.selected_span),
+            file_id,
+            "qualified-reference selection",
+        )?;
+        path_syntax.try_path_for_token(
+            occurrence.dependency.path_syntax,
+            occurrence.dependency.span,
+        )?;
     }
     Ok(())
 }

@@ -34,7 +34,6 @@ use crate::compiler_frontend::compiler_errors::{
 };
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::InvalidConfigView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::freeze::InstallMode;
@@ -443,7 +442,7 @@ fn prepared_entry_file_path(
         .find_map(|(source_file, role)| {
             if matches!(
                 *role,
-                FileRole::ActiveModuleRoot | FileRole::ActiveApiOnlyModuleRoot
+                FileRole::ActiveApiOnlyModuleRoot(_) | FileRole::ActiveEntryRoot
             ) {
                 Some(prepared.path_fork.render_native(
                     *source_file,
@@ -461,7 +460,7 @@ fn prepared_entry_canonical_file_path(
     source_files: &SourceDatabase,
 ) -> Option<PathBuf> {
     prepared
-        .entry_file_path(source_files)
+        .preparation_anchor_path(source_files)
         .ok()
         .map(Path::to_path_buf)
 }
@@ -953,17 +952,24 @@ fn with_namespace_resolution(
         source_package_boundary_indexes,
         &external_packages,
     );
-    let provider_paths = ["child", "helper", "project"]
-        .into_iter()
-        .map(|segment| {
-            (
-                segment.to_owned(),
-                path_fork
-                    .try_intern_child(PathId::ROOT, string_table.intern(segment))
-                    .expect("test path fits"),
-            )
-        })
-        .collect::<Vec<_>>();
+    let provider_paths = [
+        "child",
+        "helper",
+        "project",
+        "paired",
+        "entry_child",
+        "entry_support",
+    ]
+    .into_iter()
+    .map(|segment| {
+        (
+            segment.to_owned(),
+            path_fork
+                .try_intern_child(PathId::ROOT, string_table.intern(segment))
+                .expect("test path fits"),
+        )
+    })
+    .collect::<Vec<_>>();
     body(
         &module_namespace_set,
         &source_tree_index,
@@ -1218,7 +1224,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
             input_files,
             &mut span_view,
             &entry_file_path,
-            None,
+            &ModuleRootTable::empty(),
             local_string_table,
             source_files.fork_path_interner(),
             source_byte_count,
@@ -1232,7 +1238,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
             input_files,
             &mut span_view,
             &entry_file_path,
-            None,
+            &ModuleRootTable::empty(),
             local_string_table,
             source_files.fork_path_interner(),
             source_byte_count,
@@ -1248,6 +1254,23 @@ fn discover_modules_and_graph_for_test(
     config: &Config,
     resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
+) -> (
+    ModuleCompilationSchedule,
+    super::project_module_graph::ProjectModuleGraph,
+    super::source_tree_index::SourceTreeIndex,
+    SourceDatabase,
+    StringTable,
+) {
+    discover_modules_and_graph_for_test_with_check_only(config, resolver, style_directives, false)
+}
+
+/// Discover modules and, when requested, prepare deferred check-only units from the final
+/// canonical provider state so focused tests can inspect their transient bindings.
+pub(super) fn discover_modules_and_graph_for_test_with_check_only(
+    config: &Config,
+    resolver: &ProjectPathResolver,
+    style_directives: &StyleDirectiveRegistry,
+    include_check_only: bool,
 ) -> (
     ModuleCompilationSchedule,
     super::project_module_graph::ProjectModuleGraph,
@@ -1309,7 +1332,7 @@ fn discover_modules_and_graph_for_test(
     let modules = {
         let path_interner = source_owner.sources_mut().fork_path_builder();
         let (source_files, mut source_spans) = source_owner.split();
-        discover_all_modules_in_project_with_check_only(
+        let mut schedule = discover_all_modules_in_project_with_check_only(
             config,
             resolver,
             source_files,
@@ -1324,15 +1347,35 @@ fn discover_modules_and_graph_for_test(
             ),
             &mut resource_inputs,
             true,
-            false,
+            include_check_only,
             &mut selected_source_texts,
             &mut string_table,
             &path_interner,
             #[cfg(feature = "timers")]
             crate::timing::NO_TIMING_BOUNDARY,
         )
-    }
-    .expect("module discovery should pass for focused graph-edge tests");
+        .expect("module discovery should pass for focused graph-edge tests");
+        if include_check_only {
+            schedule
+                .prepare_check_only_jobs(
+                    style_directives,
+                    &mut source_spans,
+                    resolver,
+                    &mut external_imports,
+                    DirectoryDependencyResolution::project(
+                        &module_namespace_set,
+                        &source_tree_index,
+                        &path_fork,
+                    ),
+                    &project_module_graph,
+                    &string_table,
+                    &path_interner,
+                    &mut selected_source_texts,
+                )
+                .expect("deferred check-only units should prepare for focused tests");
+        }
+        schedule
+    };
     let mut path_fork = source_owner.sources().fork_path_interner();
     let retain_result =
         selected_source_texts.retain_into(source_owner.sources_mut(), &mut path_fork);
@@ -1369,20 +1412,15 @@ pub(super) fn successful_compilation_value<T>(result: CompilationResult<T>) -> T
     match result {
         Ok(CompilationOutcome::Success { value, .. }) => value,
         Ok(CompilationOutcome::Diagnosed(reports)) => {
-            panic!("expected compilation success, got diagnostics: {reports:?}")
+            panic!(
+                "expected compilation success, got diagnostics:\n{}",
+                crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_reports(&reports).join("\n")
+            )
         }
         Err(errors) => {
             panic!("expected compilation success, got infrastructure errors: {errors:?}")
         }
     }
-}
-
-fn first_invalid_config<T>(result: &CompilationResult<T>) -> InvalidConfigView {
-    let diagnostic = first_error_diagnostic(result);
-    assert_eq!(diagnostic.descriptor().code, "MOTH-CONFIG-0001");
-    diagnostic
-        .family_view::<InvalidConfigView>()
-        .expect("expected typed invalid-config facts")
 }
 
 fn discover_modules_for_test_messages(
@@ -1643,8 +1681,8 @@ fn write_cross_module_project(
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(module_a.join("@pageA.moth"), "@module_b\n#[:pageA]\n").expect("should write pageA");
-    fs::write(module_b.join("@api.moth"), "export:\n    b #= 1\n;\n")
+    fs::write(module_a.join("@entry.moth"), "@module_b\n#[:pageA]\n").expect("should write pageA");
+    fs::write(module_b.join("@mod.moth"), "export:\n    b #= 1\n;\n")
         .expect("should write module_b root");
     fs::write(module_b.join("impl.moth"), "impl #= 1\n").expect("should write module_b impl");
 
@@ -1684,12 +1722,9 @@ pub(super) fn compiled_package(prefix: &str) -> CompiledSourcePackage {
         ModuleRootRole::Normal,
     );
     let root_path = PathBuf::from(format!("{prefix}/@mod.moth"));
-    let graph = ProjectModuleGraph::from_normal_roots(vec![(origin.clone(), root_path)]);
-    let root_module_id = graph
-        .entry_modules()
-        .first()
-        .copied()
-        .expect("one entry module");
+    let graph = ProjectModuleGraph::from_standalone_roots(vec![(origin.clone(), root_path)]);
+    // A source package root is an API facade, never a project entry.
+    let root_module_id = ModuleId::from_index(0);
 
     let mut modules = ModuleArtifactStore::new(1);
     modules
@@ -1697,7 +1732,7 @@ pub(super) fn compiled_package(prefix: &str) -> CompiledSourcePackage {
             root_module_id,
             CompiledModuleArtifact {
                 module: empty_module(),
-                interface: PublicSemanticInterface {
+                normal_interface: Some(PublicSemanticInterface {
                     module_origin: origin,
                     export_bindings: Vec::new(),
                     export_diagnostic_provenance: Vec::new(),
@@ -1705,7 +1740,7 @@ pub(super) fn compiled_package(prefix: &str) -> CompiledSourcePackage {
                     declarations: Vec::new(),
                     reusable_evidence: Vec::new(),
                     concrete_call_summaries: Vec::new(),
-                },
+                }),
                 support_interface: None,
             },
         )
@@ -1741,10 +1776,7 @@ fn empty_module() -> Module {
             functions: HirModuleLinkFacts::default(),
         },
         metadata: ModuleCompilerMetadata {
-            entry_point: PathBuf::new(),
-            const_top_level_fragments: Vec::new(),
-            root_activity:
-                crate::compiler_frontend::module_compilation::ModuleRootActivity::default(),
+            entry: None,
             doc_fragments: Vec::new(),
             materialisation_context: None,
         },
@@ -1769,7 +1801,7 @@ fn direct_selection_resolves_cross_module_child_facade() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@child greet\n#[:entry]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@child greet\n#[:entry]\n").expect("should write entry");
     fs::write(
         src.join("child/@mod.moth"),
         "export:\n    greet || -> String:\n        return \"hi\"\n    ;\n;\n",
@@ -1786,7 +1818,7 @@ fn direct_selection_resolves_cross_module_child_facade() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
     let declaring_source =
-        fs::canonicalize(src.join("@page.moth")).expect("declaring_source should canonicalize");
+        fs::canonicalize(src.join("@entry.moth")).expect("declaring_source should canonicalize");
 
     with_namespace_resolution(
         &config,
@@ -1820,6 +1852,163 @@ fn direct_selection_resolves_cross_module_child_facade() {
 }
 
 #[test]
+fn namespace_selects_present_child_surfaces_without_surface_fallback() {
+    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
+    let root = _tmp_root.path().to_path_buf();
+    let src = root.join("src");
+    fs::create_dir_all(src.join("child")).expect("should create support-only child");
+    fs::create_dir_all(src.join("paired")).expect("should create paired child");
+    fs::create_dir_all(src.join("entry_child")).expect("should create entry-only child");
+    fs::create_dir_all(src.join("entry_support"))
+        .expect("should create paired entry/support child");
+    fs::write(
+        root.join(settings::CONFIG_FILE_NAME),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(src.join("@mod.moth"), "").expect("should write normal parent root");
+    fs::write(
+        src.join("child/@package.moth"),
+        "export:\n    value #= 1\n;\n",
+    )
+    .expect("should write support-only child root");
+    fs::write(src.join("paired/@mod.moth"), "export:\n    value #= 1\n;\n")
+        .expect("should write paired normal root");
+    fs::write(
+        src.join("paired/@package.moth"),
+        "export:\n    value #= 1\n;\n",
+    )
+    .expect("should write paired support root");
+    fs::write(src.join("entry_child/@entry.moth"), "").expect("should write entry-only child root");
+    fs::write(src.join("entry_support/@entry.moth"), "")
+        .expect("should write paired entry/support entry root");
+    fs::write(
+        src.join("entry_support/@package.moth"),
+        "export:\n    value #= 1\n;\n",
+    )
+    .expect("should write paired entry/support support root");
+
+    let mut config = Config::new(root.clone());
+    let style_directives = test_style_directives();
+    parse_project_config_for_test(
+        &mut config,
+        &root.join(settings::CONFIG_FILE_NAME),
+        &style_directives,
+    )
+    .expect("config should parse");
+    let resolver = configured_resolver(&config);
+    let declaring_source =
+        fs::canonicalize(src.join("@mod.moth")).expect("declaring source should canonicalize");
+
+    with_namespace_resolution(
+        &config,
+        &resolver,
+        &crate::builder_surface::SourcePackageRegistry::default(),
+        None,
+        |namespace_set,
+         source_tree_index,
+         _package_prefix,
+         string_table,
+         provider_paths,
+         path_fork| {
+            let resolution =
+                DirectoryDependencyResolution::project(namespace_set, source_tree_index, path_fork);
+
+            let support_only = resolution
+                .resolve_dependency(
+                    &provider_root(&["child"], provider_paths),
+                    &declaring_source,
+                    string_table,
+                )
+                .expect("a support-only child must resolve through its support surface");
+            match support_only {
+                ResolvedDependency::CrossModule {
+                    provider_surface,
+                    root_file,
+                    ..
+                } => {
+                    assert_eq!(
+                        provider_surface,
+                        ModuleRootRole::Support,
+                        "a support-only child must never be selected as a normal child module"
+                    );
+                    assert!(
+                        root_file.ends_with("child/@package.moth"),
+                        "expected the support facade root file, got {root_file:?}"
+                    );
+                }
+                other => panic!("expected CrossModule, got {other:?}"),
+            }
+
+            let paired = resolution
+                .resolve_dependency(
+                    &provider_root(&["paired"], provider_paths),
+                    &declaring_source,
+                    string_table,
+                )
+                .expect("a paired child must resolve through its normal surface");
+            match paired {
+                ResolvedDependency::CrossModule {
+                    provider_surface,
+                    root_file,
+                    ..
+                } => {
+                    assert_eq!(
+                        provider_surface,
+                        ModuleRootRole::Normal,
+                        "a paired child must select its normal surface without a support fallback"
+                    );
+                    assert!(
+                        root_file.ends_with("paired/@mod.moth"),
+                        "expected the normal facade root file, got {root_file:?}"
+                    );
+                }
+                other => panic!("expected CrossModule, got {other:?}"),
+            }
+
+            let entry_only = resolution
+                .resolve_dependency(
+                    &provider_root(&["entry_child"], provider_paths),
+                    &declaring_source,
+                    string_table,
+                )
+                .expect_err("an entry-only child has no importable surface");
+            assert_eq!(
+                entry_only.code(),
+                "MOTH-IMPORT-0005",
+                "an entry-only child must report a missing dependency target"
+            );
+
+            let entry_support = resolution
+                .resolve_dependency(
+                    &provider_root(&["entry_support"], provider_paths),
+                    &declaring_source,
+                    string_table,
+                )
+                .expect("a paired entry/support child must resolve through its support surface");
+            match entry_support {
+                ResolvedDependency::CrossModule {
+                    provider_surface,
+                    root_file,
+                    ..
+                } => {
+                    assert_eq!(
+                        provider_surface,
+                        ModuleRootRole::Support,
+                        "a co-located entry must never be selected as the provider surface"
+                    );
+                    assert!(
+                        root_file.ends_with("entry_support/@package.moth"),
+                        "expected the support facade root file, got {root_file:?}"
+                    );
+                }
+                other => panic!("expected CrossModule, got {other:?}"),
+            }
+        },
+    );
+}
+
+#[test]
 fn direct_selection_resolves_source_package_facade() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
     let root = _tmp_root.path().to_path_buf();
@@ -1832,7 +2021,7 @@ fn direct_selection_resolves_source_package_facade() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@helper add\n#[:entry]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@helper add\n#[:entry]\n").expect("should write entry");
     fs::write(
         package_root.join("@mod.moth"),
         "export:\n    add |a I32, b I32| -> I32:\n        return a + b\n    ;\n;\n",
@@ -1854,7 +2043,7 @@ fn direct_selection_resolves_source_package_facade() {
     .expect("config should parse");
     let resolver = configured_resolver(&config);
     let declaring_source =
-        fs::canonicalize(src.join("@page.moth")).expect("declaring_source should canonicalize");
+        fs::canonicalize(src.join("@entry.moth")).expect("declaring_source should canonicalize");
 
     with_namespace_resolution(
         &config,
@@ -1900,7 +2089,7 @@ fn underscore_prefixed_source_package_prefix_precedes_hidden_directory_rejection
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@_vendor/toolkit add\n#[:entry]\n")
+    fs::write(src.join("@entry.moth"), "@_vendor/toolkit add\n#[:entry]\n")
         .expect("should write entry");
     fs::write(
         package_root.join("@mod.moth"),
@@ -1923,7 +2112,7 @@ fn underscore_prefixed_source_package_prefix_precedes_hidden_directory_rejection
     .expect("config should parse");
     let resolver = configured_resolver(&config);
     let declaring_source =
-        fs::canonicalize(src.join("@page.moth")).expect("declaring_source should canonicalize");
+        fs::canonicalize(src.join("@entry.moth")).expect("declaring_source should canonicalize");
 
     with_namespace_resolution(
         &config,

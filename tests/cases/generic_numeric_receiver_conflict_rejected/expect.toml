@@ -7,12 +7,12 @@ diagnostic_codes = ["MOTH-TYPE-0001"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 18
 column = 19
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 17
 column = 18

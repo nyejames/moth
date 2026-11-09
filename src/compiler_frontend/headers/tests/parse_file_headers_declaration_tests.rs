@@ -234,11 +234,10 @@ fn malformed_generic_bound_retains_exact_multibyte_extended_span() {
     let mut span_builder = ExtendedSpanBuilder::new();
     let options = HeaderParseOptions::default();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let file_path = Path::new("src/@page.moth");
+    let file_path = Path::new("src/@entry.moth");
     let source_id = SourceId::from_index(12);
     let context = HeaderTestPrepareContext {
         source_id,
-        entry_file_path: file_path,
         options: &options,
         style_directives: &style_directives,
     };
@@ -286,7 +285,7 @@ fn top_level_const_template_outside_entry_file_errors() {
     let result = parse_single_file_headers_with_entry(
         "#[html.head: [\"x\"]]\n",
         "src/lib.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
     );
 
     assert!(
@@ -332,9 +331,8 @@ fn top_level_const_template_tokens_keep_close_and_eof_for_ast_parser() {
 fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
     let long_fragment_name = "fragment_".to_owned() + &"x".repeat(1300);
     let source = format!("value #Config of I32 = 1\n#[{long_fragment_name}]\n");
-    let mut source_context = TestSourceContext::new("src/@page.moth");
+    let mut source_context = TestSourceContext::new("src/@entry.moth");
     let mut path_fork = PathInternerFork::empty();
-    let file_path = source_context.path().to_path_buf();
     let source_id = source_context.source_id();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let file_tokens = source_context
@@ -350,12 +348,13 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
     let tokenizer_span_count = {
         let (string_table, span_builder) = source_context.preparation_parts();
         let count = span_builder.len();
+        let options =
+            crate::compiler_frontend::tests::parse_support::synthetic_entry_options(source_id);
         let output = prepare_file_from_tokens(
             owner,
             interned_path,
             path_syntax,
-            &file_path,
-            &HeaderParseOptions::default(),
+            &options,
             string_table,
             0,
             0,
@@ -433,7 +432,7 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
 #[test]
 fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
     let source = "#[value]\n";
-    let mut source_context = TestSourceContext::new("src/@page.moth");
+    let mut source_context = TestSourceContext::new("src/@entry.moth");
     let mut path_fork = PathInternerFork::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let token_stream = source_context
@@ -474,7 +473,7 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
         dependency_selections: &[],
         string_table,
         path_fork: &mut path_fork,
-        file_role: FileRole::ActiveModuleRoot,
+        file_role: FileRole::ActiveEntryRoot,
     };
     let failure =
         create_top_level_const_template(scope, opening, 0, &mut cursor, &mut context, span_builder)
@@ -497,7 +496,7 @@ fn const_fragment_selection_failure_stays_in_the_infrastructure_lane() {
 fn top_level_const_template_uses_selected_dependency_alias_path() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let (output, _span_builder) = prepare_single_file_with_fork(
         "@widgets content as panel\n#[panel]\n",
         &file_path,
@@ -960,7 +959,8 @@ fn retained_header_substreams_do_not_count_copied_path_rows() {
 #[test]
 fn function_signature_rejects_void_return_syntax() {
     let source = format!("f|| {}{}:\n;\n", "-> ", "Void");
-    let result = parse_single_file_headers_with_entry(&source, "src/@page.moth", "src/@page.moth");
+    let result =
+        parse_single_file_headers_with_entry(&source, "src/@entry.moth", "src/@entry.moth");
     assert!(
         matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "void return syntax must be rejected"
@@ -979,7 +979,8 @@ fn function_signature_rejects_void_return_syntax() {
 #[test]
 fn function_signature_rejects_none_return_syntax() {
     let source = format!("f|| {}{}:\n;\n", "-> ", "None");
-    let result = parse_single_file_headers_with_entry(&source, "src/@page.moth", "src/@page.moth");
+    let result =
+        parse_single_file_headers_with_entry(&source, "src/@entry.moth", "src/@entry.moth");
     assert!(
         matches!(&result, HeaderTestOutcome::Diagnostics(_)),
         "none return syntax must be rejected"
@@ -1011,4 +1012,27 @@ fn function_signature_preserves_unknown_symbolic_return_for_ast_resolution() {
             ..
         }]
     ));
+}
+
+#[test]
+fn import_is_an_ordinary_identifier() {
+    let headers = parse_single_file_headers("import = 1\n");
+    assert!(
+        headers
+            .headers
+            .iter()
+            .any(|header| matches!(header.kind, HeaderKind::StartFunction)),
+        "import remains an ordinary runtime binding name"
+    );
+}
+
+#[test]
+fn import_is_a_valid_struct_identifier() {
+    let (headers, string_table) =
+        parse_single_file_headers_with_table("Import = | source String |\n");
+    let names = declared_header_names(&headers, &string_table);
+    assert!(
+        names.iter().any(|name| name == "Import"),
+        "Import remains available as an ordinary struct identifier"
+    );
 }

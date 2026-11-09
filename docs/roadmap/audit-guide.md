@@ -22,7 +22,7 @@ Follow [AGENTS.md](../../AGENTS.md) task routing first. Then read:
 1. The chosen checklist under [audit-kinds](./audit-kinds/).
 2. The [audit log](./audit-log.md) row for the area, if it has one.
 3. Open findings and any recent report for the same area.
-4. The canonical authorities the area's subject matter routes to, plus the [progress matrix](../docs/progress/@page.moth) when current support status matters.
+4. The canonical authorities the area's subject matter routes to, plus the [progress matrix](../docs/progress/@entry.moth) when current support status matters.
 
 Do not blanket-read every design document. Follow the routing.
 

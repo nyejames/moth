@@ -13,6 +13,6 @@ message_contains = ["__moth_collection_get"]
 
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0058"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 20
 column = 27

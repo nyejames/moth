@@ -6,6 +6,6 @@ message_contains = ["Type mismatch in catch recovery: expected I32, found String
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 6
 column = 10

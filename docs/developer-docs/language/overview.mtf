@@ -10,11 +10,12 @@ observable semantics for their topics.
   parser, semantic stages, diagnostics or lowering for that feature.
 - Paired `-basic.mtf` files teach a smaller truthful surface. They do not define
   edge cases or replace the unsuffixed reference.
-- `@page.moth` files own introductions, navigation and website composition.
+- `@mod.moth` and `@package.moth` own API facades, while `@entry.moth` owns
+  executable entry work, introductions, navigation and website composition.
 - `docs/developer-docs/memory-management/**` owns the formal memory model.
 - `docs/compiler-design-overview.md` owns compiler-stage contracts.
 - `docs/build-system-design.md` owns project and build orchestration.
-- `docs/docs/progress/@page.moth` owns current implementation and backend
+- `docs/docs/progress/@entry.moth` owns current implementation and backend
   support.
 
 ## Canonical focused references
@@ -118,10 +119,11 @@ observable semantics for their topics.
 Contributor routing for compiler and build handoffs lives in
 `docs/docs/directives/overview.mtf`. That file is not a public page import.
 Template-specific directive meanings stay in
-`docs/docs/templates/template-directives.mtf`. Exact `$project`, `$config` and
-`$html_builder` signatures stay in the project-structure references. A future
-`$entry` purpose and runtime title remain deferred; the earlier `$page` proposal
-is superseded.
+`docs/docs/templates/template-directives.mtf`. Exact named `project` and
+active-builder record fields plus the `$config` input contract stay in the
+project-structure references. Root file roles are fixed at `@mod.moth`,
+`@package.moth` and `@entry.moth`. A source annotation never selects an entry.
+Capability-checked runtime title mutation remains deferred.
 
 ### Constants and compile-time behaviour
 

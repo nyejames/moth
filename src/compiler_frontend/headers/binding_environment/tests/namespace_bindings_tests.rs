@@ -14,11 +14,13 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::{
     families::{
+        generics_traits_api::{InvalidReceiverDeclarationView, TraitNameUsedAsTypeView},
         imports::{
             DuplicateImportSurfaceMemberView, ExplicitMothExtensionView, ImportNameCollisionView,
             NotExportedByPublicSurfaceView,
         },
         names_declarations::ReservedNameCollisionView,
+        names_declarations::TypeUsedAsValueView,
     },
     foreign::SiteRef,
     labels::DurableLabelMessage,
@@ -44,7 +46,9 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::{
 use crate::compiler_frontend::headers::module_symbols::{
     ModuleRootBoundary, ModuleSymbols, PublicExportEntry, PublicExportTarget,
 };
+use crate::compiler_frontend::headers::parse_file_headers::FileRole;
 use crate::compiler_frontend::headers::parse_file_headers::HeaderPreparationFailure;
+use crate::compiler_frontend::headers::qualified_references::QualifiedReferenceOccurrence;
 use crate::compiler_frontend::headers::types::{
     DependencyBindingSyntax, DependencySelection, DependencySelectionRange, HeaderExportMode,
     RetainedDependencyClause,
@@ -53,15 +57,17 @@ use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
 use crate::compiler_frontend::public_interface::{
-    ConcreteCallSummaryRecord, ProviderDependencyKind, PublicBindingExport,
+    ConcreteCallSummaryRecord, ProviderDependencyKind, PublicAliasSemantics, PublicBindingExport,
     PublicCallableReturnContract, PublicConstantSemantics, PublicDeclarationRecord,
     PublicDeclarationSemantics, PublicEvidenceOwnership, PublicEvidenceRecord,
     PublicReceiverMethodCategory, PublicReceiverMethodSemantics, PublicSemanticInterface,
-    PublicStructSemantics, SourceProviderDependency, SourceProviderDependencySet,
+    PublicStructSemantics, PublicTraitSemantics, SourceProviderDependency,
+    SourceProviderDependencySet,
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginConstantId, OriginDeclarationId, OriginFunctionId,
-    OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
+    OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
+    StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
@@ -249,7 +255,7 @@ fn namespace_dependency_default_rejects_keyword_shadow_name_variants() {
 
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+        let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
         let dependency_path =
             intern_path(&["test", &provider_name], &mut string_table, &mut path_fork);
         let dependency = test_dependency(dependency_path);
@@ -289,7 +295,7 @@ fn namespace_dependency_alias_rejects_keyword_shadow_name_variants() {
 
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+        let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
         let dependency_path = intern_path(
             &["test", "namespace_alias"],
             &mut string_table,
@@ -335,7 +341,7 @@ fn namespace_dependency_alias_collision_retains_exact_alias_span() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let dependency_path = intern_path(
         &["test", "namespace_alias_collision"],
         &mut string_table,
@@ -413,7 +419,7 @@ fn namespace_dependency_alias_collision_retains_exact_alias_span() {
 fn explicit_moth_extension_diagnostic_retains_dependency_path_span() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let dependency_path = intern_path(&["helper.moth"], &mut string_table, &mut path_fork);
     let mut dependency = test_dependency(dependency_path);
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -467,7 +473,7 @@ fn selected_dependency_unaliased_name_rejects_keyword_shadow_variants() {
 
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+        let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
         let dependency_path = intern_path(
             &["test", &format!("selected_unaliased_{index}")],
             &mut string_table,
@@ -525,7 +531,7 @@ fn selected_dependency_alias_rejects_keyword_shadow_name_variants() {
 
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+        let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
         let dependency_path = intern_path(
             &["test", &format!("selected_alias_{index}")],
             &mut string_table,
@@ -588,7 +594,7 @@ fn source_selection_binding_rejects_keyword_shadow_names_before_source_validatio
     for (source_name, local_alias) in cases {
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+        let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
         let symbol_path = intern_path(&["helper", source_name], &mut string_table, &mut path_fork);
         let dependency_path = intern_path(&["helper"], &mut string_table, &mut path_fork);
         let mut dependency = test_dependency(dependency_path);
@@ -649,7 +655,7 @@ fn provider_declaration_selection_rejects_keyword_shadow_names_before_provider_r
     for (source_name, local_alias) in cases {
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
-        let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+        let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
         let mut dependency = test_dependency(intern_path(
             &["provider"],
             &mut string_table,
@@ -750,7 +756,7 @@ fn binding_counters_separate_namespace_clauses_from_selected_names() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let namespace_path = intern_path(&["test", "namespace"], &mut string_table, &mut path_fork);
     let selection_path = intern_path(&["test", "selections"], &mut string_table, &mut path_fork);
     let namespace_clause = test_dependency(namespace_path);
@@ -866,7 +872,7 @@ fn external_nested_namespace_tree_builds_correctly() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let dependency_path = intern_path(&["test", "path"], &mut string_table, &mut path_fork);
     let dependency = test_dependency(dependency_path);
 
@@ -946,7 +952,7 @@ fn external_nested_namespace_tree_builds_correctly() {
 fn duplicate_external_namespace_value_and_type_slot_is_rejected() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let span = location_for(&["src", "@page.moth"], &mut string_table);
+    let span = location_for(&["src", "@entry.moth"], &mut string_table);
     let surface_path = intern_path(&["test", "path"], &mut string_table, &mut path_fork);
     let test_package = string_table.intern("@test");
     let mut record = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(test_package));
@@ -982,7 +988,7 @@ fn duplicate_external_namespace_value_and_type_slot_is_rejected() {
 fn duplicate_external_namespace_and_value_slot_is_rejected() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let span = location_for(&["src", "@page.moth"], &mut string_table);
+    let span = location_for(&["src", "@entry.moth"], &mut string_table);
     let surface_path = intern_path(&["test", "path"], &mut string_table, &mut path_fork);
     let test_package = string_table.intern("@test");
     let mut record = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(test_package));
@@ -1018,7 +1024,7 @@ fn duplicate_external_namespace_and_value_slot_is_rejected() {
 fn duplicate_external_namespace_and_type_slot_is_rejected() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let span = location_for(&["src", "@page.moth"], &mut string_table);
+    let span = location_for(&["src", "@entry.moth"], &mut string_table);
     let surface_path = intern_path(&["test", "path"], &mut string_table, &mut path_fork);
     let test_package = string_table.intern("@test");
     let mut record = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(test_package));
@@ -1060,7 +1066,7 @@ fn source_receiver_methods_remain_absent_from_namespace_records() {
     let method_path = path_fork
         .try_intern_portable_path("src/helper/tick", &mut string_table)
         .expect("test path fits");
-    let span = location_for(&["src", "@page.moth"], &mut string_table);
+    let span = location_for(&["src", "@entry.moth"], &mut string_table);
     let method_name = path_fork
         .component(method_path)
         .expect("method path should have a leaf name");
@@ -1132,7 +1138,7 @@ fn unique_namespace_with_value_member_is_none_when_ambiguous() {
     let other_alias = string_table.intern("other");
     let package = string_table.intern("@core/math");
     let other_package = string_table.intern("@other/math");
-    let file_path = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let file_path = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
 
     let mut math = NamespaceRecord::empty(NamespaceRecordSource::ExternalPackage(package));
     math.value_members.insert(
@@ -1282,14 +1288,22 @@ fn missing_package_symbol_multi_component_path_has_no_candidates() {
 fn module_root_namespace_uses_prepared_root_file_identity() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
-    let root_file = intern_path(&["helper", "@home.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
+    let root_file = intern_path(
+        &["helper", "@entry.moth"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let dependency = test_dependency(intern_path(&["helper"], &mut string_table, &mut path_fork));
     let module_root = dependency.dependency.path;
 
     let mut module_symbols = ModuleSymbols::empty();
     module_symbols.module_file_paths.insert(source_file);
     module_symbols.module_file_paths.insert(root_file);
+    module_symbols.file_roles_by_source.insert(
+        source_file,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
+    );
     module_symbols.file_module_membership.insert(
         source_file,
         intern_path(&["entry-root"], &mut string_table, &mut path_fork),
@@ -1355,7 +1369,7 @@ fn prelude_symbol_visibility_has_no_authored_span() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let mut module_symbols = ModuleSymbols::empty();
     module_symbols.module_file_paths.insert(source_file);
 
@@ -1407,8 +1421,8 @@ fn explicit_external_symbol_binding_retains_authored_span() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
-    let dependency_span = location_for(&["src", "@page.moth"], &mut string_table);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
+    let dependency_span = location_for(&["src", "@entry.moth"], &mut string_table);
     let provider = RetainedDependencyPath {
         span: dependency_span,
         path: intern_path(
@@ -1499,7 +1513,7 @@ fn prelude_namespace_alias_injects_unshadowed_record() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
 
     let mut module_symbols = ModuleSymbols::empty();
     module_symbols.module_file_paths.insert(source_file);
@@ -1550,7 +1564,7 @@ fn prelude_namespace_alias_collides_with_same_file_declaration() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let declaration_path = intern_path(&["src", "prelude_ns"], &mut string_table, &mut path_fork);
 
     let mut declared_paths = FxHashSet::default();
@@ -1611,7 +1625,7 @@ fn prelude_namespace_alias_coexists_with_explicit_dependency_of_same_target() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let dependency_path = intern_path(&["test", "prelude_ns"], &mut string_table, &mut path_fork);
     let provider = RetainedDependencyPath {
         span: SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start()),
@@ -1677,6 +1691,10 @@ fn nested_module_root_depends_on_child_facade_resolves_child_root() {
     let mut module_symbols = ModuleSymbols::empty();
     module_symbols.module_file_paths.insert(helper_mod_file);
     module_symbols.module_file_paths.insert(grandchild_mod_file);
+    module_symbols.file_roles_by_source.insert(
+        helper_mod_file,
+        FileRole::ActiveApiOnlyModuleRoot(ModuleRootRole::Normal),
+    );
     module_symbols
         .file_module_membership
         .insert(helper_mod_file, helper_root);
@@ -1742,7 +1760,7 @@ fn provider_semantics_bind_once_across_many_shells() {
 
     // Ten authored shells reference the same provider, one direct constant selection each.
     let mut module_symbols = ModuleSymbols::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     module_symbols.module_file_paths.insert(source_file);
     let mut dependency_selections = Vec::new();
     let dependencies = names
@@ -2002,7 +2020,7 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
         });
 
     let mut module_symbols = ModuleSymbols::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     module_symbols.module_file_paths.insert(source_file);
     let mut dependency_selections = Vec::new();
     let mut alpha_dependency =
@@ -2114,6 +2132,68 @@ fn constant_provider(prefix: &str, names: &[&str]) -> PublicSemanticInterface {
             ownership: PublicEvidenceOwnership::SourceCanonical,
             requirement_mappings: Vec::new(),
         }],
+        concrete_call_summaries: Vec::new(),
+    }
+}
+
+fn alias_provider(prefix: &str, name: &str) -> PublicSemanticInterface {
+    let module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local(prefix),
+        format!("{prefix}/@mod.moth"),
+        ModuleRootRole::Normal,
+    );
+    let origin = OriginDeclarationId::Type(OriginTypeId::new(
+        module_origin.clone(),
+        name.to_owned(),
+        OriginTypeCategory::TransparentAlias,
+    ));
+    PublicSemanticInterface {
+        module_origin: module_origin.clone(),
+        export_bindings: vec![ExportBinding::new(
+            module_origin,
+            name.to_owned(),
+            origin.clone(),
+        )],
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: vec![PublicDeclarationRecord {
+            origin,
+            synthetic_interface_provenance: Default::default(),
+            semantics: PublicDeclarationSemantics::TransparentAlias(PublicAliasSemantics {
+                target_type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
+            }),
+        }],
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
+    }
+}
+
+fn trait_provider(prefix: &str, name: &str) -> PublicSemanticInterface {
+    let module_origin = StableModuleOriginIdentity::from_portable_path(
+        StablePackageIdentity::project_local(prefix),
+        format!("{prefix}/@mod.moth"),
+        ModuleRootRole::Normal,
+    );
+    let origin =
+        OriginDeclarationId::Trait(OriginTraitId::new(module_origin.clone(), name.to_owned()));
+    PublicSemanticInterface {
+        module_origin: module_origin.clone(),
+        export_bindings: vec![ExportBinding::new(
+            module_origin,
+            name.to_owned(),
+            origin.clone(),
+        )],
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: vec![PublicDeclarationRecord {
+            origin,
+            synthetic_interface_provenance: Default::default(),
+            semantics: PublicDeclarationSemantics::Trait(PublicTraitSemantics {
+                requirements: Vec::new(),
+                incompatibilities: Vec::new(),
+            }),
+        }],
+        reusable_evidence: Vec::new(),
         concrete_call_summaries: Vec::new(),
     }
 }
@@ -2254,7 +2334,7 @@ fn single_file_module_symbols(
     path_fork: &mut PathInternerFork,
 ) -> ModuleSymbols {
     let mut module_symbols = ModuleSymbols::empty();
-    let source_file = intern_path(&["src", "@page.moth"], string_table, path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], string_table, path_fork);
     module_symbols.module_file_paths.insert(source_file);
     module_symbols
         .file_dependency_clauses_by_source
@@ -2289,9 +2369,13 @@ fn bind_environment(
 fn provider_selection_public_namespace_member_joins_declaration_surface() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let root_file = intern_path(&["facade", "@page.moth"], &mut string_table, &mut path_fork);
+    let root_file = intern_path(
+        &["facade", "@entry.moth"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let diagnostic_path = intern_path(&["provider", "CONST_0"], &mut string_table, &mut path_fork);
-    let location = location_for(&["facade", "@page.moth"], &mut string_table);
+    let location = location_for(&["facade", "@entry.moth"], &mut string_table);
     let export_name = string_table.intern("PUBLIC_CONST");
     let source_name = string_table.intern("CONST_0");
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
@@ -2358,9 +2442,13 @@ fn provider_selection_public_namespace_member_joins_declaration_surface() {
 fn provider_selection_namespace_prefers_source_name_over_facade_alias() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let root_file = intern_path(&["facade", "@page.moth"], &mut string_table, &mut path_fork);
+    let root_file = intern_path(
+        &["facade", "@entry.moth"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let diagnostic_path = intern_path(&["provider", "SOURCE"], &mut string_table, &mut path_fork);
-    let location = location_for(&["facade", "@page.moth"], &mut string_table);
+    let location = location_for(&["facade", "@entry.moth"], &mut string_table);
     let export_name = string_table.intern("ALIAS");
     let source_name = string_table.intern("SOURCE");
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
@@ -2419,9 +2507,13 @@ fn provider_selection_namespace_prefers_source_name_over_facade_alias() {
 fn provider_selection_public_namespace_member_joins_binding_surface() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let root_file = intern_path(&["facade", "@page.moth"], &mut string_table, &mut path_fork);
+    let root_file = intern_path(
+        &["facade", "@entry.moth"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let diagnostic_path = intern_path(&["provider", "BOUND"], &mut string_table, &mut path_fork);
-    let location = location_for(&["facade", "@page.moth"], &mut string_table);
+    let location = location_for(&["facade", "@entry.moth"], &mut string_table);
     let export_name = string_table.intern("PUBLIC_BOUND");
     let source_name = string_table.intern("BOUND");
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
@@ -2476,9 +2568,13 @@ fn provider_selection_public_namespace_member_joins_binding_surface() {
 fn provider_selection_namespace_binding_prefers_source_name_over_facade_alias() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let root_file = intern_path(&["facade", "@page.moth"], &mut string_table, &mut path_fork);
+    let root_file = intern_path(
+        &["facade", "@entry.moth"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let diagnostic_path = intern_path(&["provider", "SOURCE"], &mut string_table, &mut path_fork);
-    let location = location_for(&["facade", "@page.moth"], &mut string_table);
+    let location = location_for(&["facade", "@entry.moth"], &mut string_table);
     let export_name = string_table.intern("ALIAS");
     let source_name = string_table.intern("SOURCE");
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
@@ -2534,9 +2630,13 @@ fn provider_selection_namespace_binding_prefers_source_name_over_facade_alias() 
 fn provider_selection_public_namespace_member_rejects_missing_shell() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let root_file = intern_path(&["facade", "@page.moth"], &mut string_table, &mut path_fork);
+    let root_file = intern_path(
+        &["facade", "@entry.moth"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let diagnostic_path = intern_path(&["provider", "CONST_0"], &mut string_table, &mut path_fork);
-    let location = location_for(&["facade", "@page.moth"], &mut string_table);
+    let location = location_for(&["facade", "@entry.moth"], &mut string_table);
     let export_name = string_table.intern("PUBLIC_CONST");
     let source_name = string_table.intern("CONST_0");
     let shell = DependencyShellId::new(SourceId::from_index(0), 7);
@@ -2587,9 +2687,13 @@ fn provider_selection_public_namespace_member_rejects_missing_shell() {
 fn provider_selection_public_namespace_member_rejects_missing_member() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let root_file = intern_path(&["facade", "@page.moth"], &mut string_table, &mut path_fork);
+    let root_file = intern_path(
+        &["facade", "@entry.moth"],
+        &mut string_table,
+        &mut path_fork,
+    );
     let diagnostic_path = intern_path(&["provider", "MISSING"], &mut string_table, &mut path_fork);
-    let location = location_for(&["facade", "@page.moth"], &mut string_table);
+    let location = location_for(&["facade", "@entry.moth"], &mut string_table);
     let export_name = string_table.intern("PUBLIC_CONST");
     let source_name = string_table.intern("MISSING");
     let shell = DependencyShellId::new(SourceId::from_index(0), 0);
@@ -2850,6 +2954,373 @@ fn missing_provider_record_fails_deterministically() {
     assert_eq!(primary_span(diagnostic), Some(expected_source_span));
 }
 
+fn qualified_occurrence(
+    clause_dependency: RetainedDependencyPath,
+    selected: &str,
+    string_table: &mut StringTable,
+) -> QualifiedReferenceOccurrence {
+    QualifiedReferenceOccurrence {
+        owning_header_index: 0,
+        dependency: clause_dependency,
+        selected: string_table.intern(selected),
+        selected_span: SourceSpan::new(SourceId::from_index(0), LocalSpan::source_start()),
+        const_required: true,
+    }
+}
+
+fn single_file_occurrences(
+    occurrences: Vec<QualifiedReferenceOccurrence>,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> (ModuleSymbols, PathId) {
+    let mut module_symbols = ModuleSymbols::empty();
+    let source_file = intern_path(&["src", "@entry.moth"], string_table, path_fork);
+    module_symbols.module_file_paths.insert(source_file);
+    module_symbols
+        .qualified_references_by_source
+        .insert(source_file, occurrences);
+    (module_symbols, source_file)
+}
+
+#[test]
+fn qualified_occurrence_binds_provider_target_without_publishing_a_name() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let provider = constant_provider("provider", &["CONST_0"]);
+    let provider_path = intern_path(&["provider"], &mut string_table, &mut path_fork);
+    let mut dependency = test_dependency(provider_path).dependency;
+    dependency.dependency_shell_id = DependencyShellId::new(SourceId::from_index(0), 0);
+    let occurrence = qualified_occurrence(dependency, "CONST_0", &mut string_table);
+    let selected_name = occurrence.selected;
+    let (mut module_symbols, source_file) =
+        single_file_occurrences(vec![occurrence], &mut string_table, &mut path_fork);
+    let expected_local_path = path_fork
+        .try_intern_child(provider_path, selected_name)
+        .expect("test path fits");
+    let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
+        kind: ProviderDependencyKind::Authored {
+            shell: DependencyShellId::new(SourceId::from_index(0), 0),
+        },
+        interface: &provider,
+    }])
+    .expect("one shell should register");
+
+    let environment = bind_environment(
+        &provider_dependencies,
+        &mut module_symbols,
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect("a provider occurrence must bind");
+
+    let resolved = environment
+        .qualified_reference_target(SourceId::from_index(0), occurrence_path_syntax())
+        .expect("the occurrence must be retained in the per-occurrence lookup");
+    assert_eq!(
+        resolved.target,
+        crate::compiler_frontend::headers::binding_environment::ResolvedQualifiedTarget::Imported {
+            origin: provider.declarations[0].origin.clone(),
+            local_path: expected_local_path,
+        },
+        "the occurrence retains the provider origin and imported declaration path"
+    );
+    assert!(
+        environment
+            .imported_declarations_by_local_path
+            .contains_key(&expected_local_path),
+        "AST projection needs the imported path provenance"
+    );
+
+    let visibility = environment
+        .visibility_for(&source_file)
+        .expect("the occurrence's file has visibility");
+    assert!(
+        !visibility.visible_source_names.contains_key(&selected_name),
+        "a qualified occurrence must not install a visible local name"
+    );
+    assert!(
+        visibility.visible_source_names.is_empty(),
+        "the occurrence file declares no other name"
+    );
+}
+
+#[test]
+fn missing_qualified_provider_member_reports_the_clause_diagnostic() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let provider = constant_provider("provider", &["CONST_0"]);
+    let provider_path = intern_path(&["provider"], &mut string_table, &mut path_fork);
+    let mut dependency = test_dependency(provider_path).dependency;
+    dependency.dependency_shell_id = DependencyShellId::new(SourceId::from_index(0), 0);
+    let occurrence = qualified_occurrence(dependency, "MISSING", &mut string_table);
+    let expected_selected_span = occurrence.selected_span;
+    let expected_requested_path = path_fork
+        .try_intern_child(provider_path, string_table.intern("MISSING"))
+        .expect("test path fits");
+    let (mut module_symbols, _source_file) =
+        single_file_occurrences(vec![occurrence], &mut string_table, &mut path_fork);
+    let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
+        kind: ProviderDependencyKind::Authored {
+            shell: DependencyShellId::new(SourceId::from_index(0), 0),
+        },
+        interface: &provider,
+    }])
+    .expect("one shell should register");
+
+    let failure = bind_environment(
+        &provider_dependencies,
+        &mut module_symbols,
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("a missing provider member must fail occurrence binding");
+    let diagnostics = failure_diagnostics(failure);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected one missing provider member diagnostic");
+    let facts = diagnostic
+        .family_view::<NotExportedByPublicSurfaceView>()
+        .expect("expected the clause-form public-surface diagnostic");
+    assert_eq!(
+        facts.requested_path, expected_requested_path,
+        "the occurrence uses the same selected path identity as the clause form"
+    );
+    assert_eq!(primary_span(diagnostic), Some(expected_selected_span));
+}
+
+fn occurrence_path_syntax() -> crate::compiler_frontend::paths::path_syntax::PathSyntaxId {
+    crate::compiler_frontend::paths::path_syntax::PathSyntaxId::NONE
+}
+
+#[derive(Clone, Copy)]
+enum LocalOccurrenceKind {
+    ReceiverMethod,
+    TypeAlias,
+    Trait,
+    Struct,
+    Choice,
+}
+
+fn bind_local_source_occurrence(
+    selected: &str,
+    kind: LocalOccurrenceKind,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> (
+    Result<
+        crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment,
+        HeaderPreparationFailure,
+    >,
+    SourceSpan,
+    PathId,
+) {
+    let helper = intern_path(&["src", "helper.moth"], string_table, path_fork);
+    let selected_name = string_table.intern(selected);
+    let selected_path = path_fork
+        .try_intern_child(helper, selected_name)
+        .expect("test path fits");
+    let occurrence =
+        qualified_occurrence(test_dependency(helper).dependency, selected, string_table);
+    let expected_span = occurrence.selected_span;
+    let (mut module_symbols, _source_file) =
+        single_file_occurrences(vec![occurrence], string_table, path_fork);
+    module_symbols
+        .dependency_bindable_source_symbol_paths
+        .insert(selected_path);
+    match kind {
+        LocalOccurrenceKind::ReceiverMethod => {
+            module_symbols.receiver_method_paths.insert(selected_path);
+        }
+        LocalOccurrenceKind::TypeAlias => {
+            module_symbols.type_alias_paths.insert(selected_path);
+        }
+        LocalOccurrenceKind::Trait => {
+            module_symbols.trait_paths.insert(selected_path);
+        }
+        LocalOccurrenceKind::Struct | LocalOccurrenceKind::Choice => {}
+    }
+
+    let provider_dependencies = SourceProviderDependencySet::default();
+    let result = bind_environment(
+        &provider_dependencies,
+        &mut module_symbols,
+        string_table,
+        path_fork,
+    );
+    (result, expected_span, selected_path)
+}
+
+#[test]
+fn qualified_occurrence_rejects_source_receiver_method_like_a_clause() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (result, expected_span, _) = bind_local_source_occurrence(
+        "tick",
+        LocalOccurrenceKind::ReceiverMethod,
+        &mut string_table,
+        &mut path_fork,
+    );
+    let failure = result.expect_err("a receiver method is not independently bindable");
+    let diagnostics = failure_diagnostics(failure);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected one receiver-method diagnostic");
+    assert!(
+        diagnostic
+            .family_view::<InvalidReceiverDeclarationView>()
+            .is_some(),
+        "expected the clause-form receiver-method diagnostic, got {}",
+        diagnostic.descriptor().code
+    );
+    assert_eq!(primary_span(diagnostic), Some(expected_span));
+}
+
+#[test]
+fn qualified_occurrence_rejects_source_type_alias_as_a_value() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (result, expected_span, _) = bind_local_source_occurrence(
+        "Names",
+        LocalOccurrenceKind::TypeAlias,
+        &mut string_table,
+        &mut path_fork,
+    );
+    let failure = result.expect_err("a type alias is not a value");
+    let diagnostics = failure_diagnostics(failure);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected one type-alias namespace diagnostic");
+    assert!(
+        diagnostic.family_view::<TypeUsedAsValueView>().is_some(),
+        "expected type-used-as-value, got {}",
+        diagnostic.descriptor().code
+    );
+    assert_eq!(primary_span(diagnostic), Some(expected_span));
+}
+
+#[test]
+fn qualified_occurrence_rejects_source_trait_as_a_value() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (result, expected_span, _) = bind_local_source_occurrence(
+        "Drawable",
+        LocalOccurrenceKind::Trait,
+        &mut string_table,
+        &mut path_fork,
+    );
+    let failure = result.expect_err("a trait is not a value");
+    let diagnostics = failure_diagnostics(failure);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected one trait-name diagnostic");
+    assert!(
+        diagnostic
+            .family_view::<TraitNameUsedAsTypeView>()
+            .is_some(),
+        "expected trait-name-used-as-type, got {}",
+        diagnostic.descriptor().code
+    );
+    assert_eq!(primary_span(diagnostic), Some(expected_span));
+}
+
+#[test]
+fn qualified_occurrence_keeps_nominal_constructor_targets() {
+    for kind in [LocalOccurrenceKind::Struct, LocalOccurrenceKind::Choice] {
+        let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
+        let (result, _, selected_path) =
+            bind_local_source_occurrence("Point", kind, &mut string_table, &mut path_fork);
+        let environment = result.expect("a nominal type constructor target must bind");
+        let resolved = environment
+            .qualified_reference_target(SourceId::from_index(0), occurrence_path_syntax())
+            .expect("the nominal occurrence must retain its target");
+        assert_eq!(
+            resolved.target,
+            crate::compiler_frontend::headers::binding_environment::ResolvedQualifiedTarget::Source {
+                declaration_path: selected_path,
+            },
+            "the constructor keeps the ordinary source declaration target"
+        );
+    }
+}
+
+fn bind_provider_occurrence(
+    provider: &PublicSemanticInterface,
+    selected: &str,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> (
+    Result<
+        crate::compiler_frontend::headers::binding_environment::HeaderBindingEnvironment,
+        HeaderPreparationFailure,
+    >,
+    SourceSpan,
+) {
+    let provider_path = intern_path(&["provider"], string_table, path_fork);
+    let mut dependency = test_dependency(provider_path).dependency;
+    dependency.dependency_shell_id = DependencyShellId::new(SourceId::from_index(0), 0);
+    let occurrence = qualified_occurrence(dependency, selected, string_table);
+    let expected_span = occurrence.selected_span;
+    let (mut module_symbols, _source_file) =
+        single_file_occurrences(vec![occurrence], string_table, path_fork);
+    let provider_dependencies = SourceProviderDependencySet::new(vec![SourceProviderDependency {
+        kind: ProviderDependencyKind::Authored {
+            shell: DependencyShellId::new(SourceId::from_index(0), 0),
+        },
+        interface: provider,
+    }])
+    .expect("one provider shell should register");
+    let result = bind_environment(
+        &provider_dependencies,
+        &mut module_symbols,
+        string_table,
+        path_fork,
+    );
+    (result, expected_span)
+}
+
+#[test]
+fn qualified_occurrence_rejects_provider_type_alias_as_a_value() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let provider = alias_provider("provider", "Names");
+    let (result, expected_span) =
+        bind_provider_occurrence(&provider, "Names", &mut string_table, &mut path_fork);
+    let failure = result.expect_err("a provider type alias is not a value");
+    let diagnostics = failure_diagnostics(failure);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected one type-alias namespace diagnostic");
+    assert!(
+        diagnostic.family_view::<TypeUsedAsValueView>().is_some(),
+        "expected type-used-as-value, got {}",
+        diagnostic.descriptor().code
+    );
+    assert_eq!(primary_span(diagnostic), Some(expected_span));
+}
+
+#[test]
+fn qualified_occurrence_rejects_provider_trait_as_a_value() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let provider = trait_provider("provider", "Drawable");
+    let (result, expected_span) =
+        bind_provider_occurrence(&provider, "Drawable", &mut string_table, &mut path_fork);
+    let failure = result.expect_err("a provider trait is not a value");
+    let diagnostics = failure_diagnostics(failure);
+    let diagnostic = diagnostics
+        .first()
+        .expect("expected one trait-name diagnostic");
+    assert!(
+        diagnostic
+            .family_view::<TraitNameUsedAsTypeView>()
+            .is_some(),
+        "expected trait-name-used-as-type, got {}",
+        diagnostic.descriptor().code
+    );
+    assert_eq!(primary_span(diagnostic), Some(expected_span));
+}
+
 #[test]
 fn receiver_methods_reuse_summary_by_origin_storage() {
     let mut string_table = StringTable::new();
@@ -3068,7 +3539,7 @@ fn occupied_agreement_insertion_borrows_without_cloning() {
 fn retained_local_source_edge_must_reference_prepared_compiler_slot() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let source_file = intern_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
+    let source_file = intern_path(&["src", "@entry.moth"], &mut string_table, &mut path_fork);
     let dependency_path = intern_path(&["helper"], &mut string_table, &mut path_fork);
     let mut dependency = test_dependency(dependency_path);
     dependency.dependency.local_source_id = Some(SourceId::from_index(1));
@@ -3100,7 +3571,7 @@ fn retained_local_source_edge_must_reference_prepared_compiler_slot() {
 
 #[test]
 fn retained_local_source_edge_rejects_wrong_valid_in_module_identity() {
-    let page_path = std::path::PathBuf::from("/project/src/@page.moth");
+    let page_path = std::path::PathBuf::from("/project/src/@entry.moth");
     let helper_path = std::path::PathBuf::from("/project/src/helper.moth");
     let other_path = std::path::PathBuf::from("/project/src/other.moth");
     let mut string_table = StringTable::new();

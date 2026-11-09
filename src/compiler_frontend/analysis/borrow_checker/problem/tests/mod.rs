@@ -1503,7 +1503,7 @@ fn borrow_problem_hir_extractor_uses_conservative_generated_fallback_without_sum
                 "main".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            "@page.moth".to_owned(),
+            "@entry.moth".to_owned(),
             ModulePrivateExecutableCategory::GenericFunction,
             "identity".to_owned(),
             None,

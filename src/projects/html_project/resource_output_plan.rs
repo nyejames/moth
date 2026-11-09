@@ -565,7 +565,10 @@ fn record_const_fragment_resource_spans(
     module: &Module,
     source_domain: Option<&StablePackageIdentity>,
 ) {
-    for fragment in &module.metadata.const_top_level_fragments {
+    let Some(entry) = &module.metadata.entry else {
+        return;
+    };
+    for fragment in &entry.const_top_level_fragments {
         let OwnedFoldedString::Pieces(pieces) = &fragment.value else {
             continue;
         };
@@ -700,6 +703,7 @@ fn module_root_role_tag(role: ModuleRootRole) -> &'static str {
     match role {
         ModuleRootRole::Normal => "normal",
         ModuleRootRole::Support => "support",
+        ModuleRootRole::Entry => "entry",
         ModuleRootRole::Shared => "shared",
         ModuleRootRole::SyntheticProjectContext => "synthetic_project_context",
     }

@@ -1,0 +1,3 @@
+@card Resource
+
+title #Resource = Resource()

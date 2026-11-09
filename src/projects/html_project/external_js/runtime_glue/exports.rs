@@ -184,7 +184,10 @@ fn selected_export_error(
             "HTML JS glue preparation: validated runtime metadata is inconsistent for entry module '{}': \
          Moth function '{function_name}' ({function_id:?}), JS export '{export_name}', \
          package '{package_path}' ({package_id:?}): {reason}.",
-            portable_path_text(&module.metadata.entry_point)
+            module.metadata.entry.as_ref().map_or_else(
+                || "<entryless>".to_owned(),
+                |entry| { portable_path_text(&entry.entry_point) }
+            )
         ),
     )
 }

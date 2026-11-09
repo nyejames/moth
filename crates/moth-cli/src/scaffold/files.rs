@@ -13,11 +13,11 @@ use crate::scaffold::{
 use moth::projects::settings::CONFIG_FILE_NAME;
 use tempfile::NamedTempFile;
 
-const PAGE_FILE: &str = "@page.moth";
+const ENTRY_FILE: &str = "@entry.moth";
 const GITIGNORE_FILE: &str = ".gitignore";
 
 /// Relative paths of all scaffold-owned files.
-const SCAFFOLD_OWNED_FILES: &[&str] = &[CONFIG_FILE_NAME, PAGE_FILE];
+const SCAFFOLD_OWNED_FILES: &[&str] = &[CONFIG_FILE_NAME, ENTRY_FILE];
 
 /// The filesystem shape of one entry observed without following its final symlink.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -409,7 +409,7 @@ pub(crate) fn write_scaffold(
     write_scaffold_file(CONFIG_FILE_NAME, &config_contents)?;
 
     // 3. Starter page.
-    write_scaffold_file(PAGE_FILE, start_page_scaffolding::page_template())?;
+    write_scaffold_file(ENTRY_FILE, start_page_scaffolding::page_template())?;
 
     // 4. .gitignore (handled separately; --force never replaces it).
     let gitignore = handle_gitignore(project_dir, prompt)?;

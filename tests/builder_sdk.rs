@@ -34,11 +34,7 @@ const HOST_U8_PAGE_SOURCE: &str = "@platform takes_byte\noctet U8 = 42\ntakes_by
 fn external_crate_defines_source_and_host_packages() {
     let ui_dir = tempfile::tempdir().expect("should create package directory");
     let definition = BuilderDefinition::new("game")
-        .source_package(
-            SourcePackage::new("@ui")
-                .from_dir(ui_dir.path())
-                .available_in_templates(),
-        )
+        .source_package(SourcePackage::new("@ui").from_dir(ui_dir.path()))
         .host_package(
             HostPackage::new("@platform").function(
                 HostFunction::new("has_prefix")
@@ -47,12 +43,31 @@ fn external_crate_defines_source_and_host_packages() {
                     .returns(HostType::Bool),
             ),
         )
-        .moth_templates()
         .markdown()
         .finish()
-        .expect("public definition should finish");
+        .expect("public definition should finish without the standard template prelude");
 
     assert_eq!(definition.identity(), "game");
+}
+
+#[test]
+fn external_crate_cannot_register_the_html_prelude_package() {
+    let html_dir = tempfile::tempdir().expect("should create HTML package directory");
+
+    for (case, path) in [("root", "@html"), ("nested", "@html/docs")] {
+        let error = BuilderDefinition::new("game")
+            .source_package(SourcePackage::new(path).from_dir(html_dir.path()))
+            .finish()
+            .expect_err("SDK builders cannot register the official HTML prelude package");
+        assert_eq!(error.kind(), ErrorKind::InvalidDefinition, "{case}");
+        assert!(error.to_string().contains("reserved"), "{case}: {error}");
+        assert!(
+            error
+                .to_string()
+                .contains("standard HTML builder package set"),
+            "{case}: {error}"
+        );
+    }
 }
 
 #[test]
@@ -87,17 +102,17 @@ impl ProjectBuilder for PackageFacadeBuilder {
 }
 
 /// Writes a one-page project whose page holds `page_source` and, when requested, its
-/// `+package.moth` facade beside `config.moth`.
+/// `@package.moth` facade beside `config.moth`.
 fn write_project(project_root: &Path, page_source: &str, with_facade: bool) {
     fs::write(
         project_root.join("config.moth"),
         "project #= (\n    name = \"docs\",\n)\n",
     )
     .expect("should write config");
-    fs::write(project_root.join("@page.moth"), page_source).expect("should write page");
+    fs::write(project_root.join("@entry.moth"), page_source).expect("should write page");
     if with_facade {
         fs::write(
-            project_root.join("+package.moth"),
+            project_root.join("@package.moth"),
             "export:\n    label #= \"facade\"\n;\n",
         )
         .expect("should write package facade");
@@ -266,7 +281,7 @@ fn write_ui_paired_package(package_root: &Path) {
     )
     .expect("should write normal package root");
     fs::write(
-        package_root.join("+package.moth"),
+        package_root.join("@package.moth"),
         "export:\n    @impl greeting\n;\n",
     )
     .expect("should write support package facade");
@@ -277,7 +292,7 @@ fn write_ui_paired_package(package_root: &Path) {
 /// Writes a support-only `@ui` package root that re-exports shared helper declarations.
 fn write_ui_support_package(package_root: &Path) {
     fs::write(
-        package_root.join("+package.moth"),
+        package_root.join("@package.moth"),
         "export:\n    @impl value, Message\n;\n",
     )
     .expect("should write support package facade");
@@ -314,7 +329,7 @@ fn invalid_source_returns_compilation_error_without_building() {
         "the builder must not run when compilation fails"
     );
     let rendered_lines = error.messages().join("\n");
-    assert!(rendered_lines.contains("@page.moth"), "{rendered_lines}");
+    assert!(rendered_lines.contains("@entry.moth"), "{rendered_lines}");
 }
 
 #[test]

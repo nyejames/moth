@@ -45,12 +45,12 @@ Exact view identity includes root, phase and value context. Structural walks fol
 
 Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
 
-[diagram:
+[@diagrams diagram:
     [$in label: TIR lives and dies inside AST]
     [$in caption: Template structure gets a real home for exactly as long as the checker needs it, then leaves nothing behind for later stages to misread.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Built]
             [$in title: Structure captured as TIR]
@@ -58,8 +58,8 @@ Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Classified]
             [$in title: prepare_tir_view classifies the value]
@@ -67,14 +67,14 @@ Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Two exits]
-                [fanout:
-                [detail:
+                [@diagrams fanout:
+                [@diagrams detail:
                     [$in href: ../html-assembly-and-output/]
                     Static pieces fold to strings with insertion indexes
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../hir/]
                     Dynamic pieces become neutral runtime handoff data
                 ]
@@ -83,8 +83,8 @@ Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../hir/]
             [$in eyebrow: Gone]
             [$in title: The TIR store drops]
@@ -101,7 +101,7 @@ Classification happens in one place. `prepare_tir_view` validates structurally r
 - runtime conditional and loop bodies stay available for lazy lowering
 - runtime slot plans prepare sources and sites
 - helper-only artefacts drop away
-- top-level page fragments emit **folded metadata** with insertion indexes and body or builder-slot destinations
+- top-level entry fragments emit **folded metadata** with insertion indexes and body or builder-slot destinations
 - runtime templates become **neutral owned handoff payloads**
 
 Compile-time fragments never live in HIR. HIR receives ordinary string and control-flow work for runtime pieces only. The TIR store drops before the completed AST leaves the stage. It is temporary scaffolding, not permanent structure. No TIR id tours a public interface or backend.
@@ -115,7 +115,15 @@ Moth template `.mtf` and Markdown `.md` files do not invent forever-parallel com
 - `.mtf` builds a private constant whose initializer is a structurally built `$md` template over the original body tokens
 - `.md` reaches the same shape after preparation renders the raw Markdown to HTML, and that rendered HTML becomes the synthetic string-literal initializer
 
-Later ordering and folding treat both as ordinary compile-time constants. Return to the greeting project after that side path: `@page.moth` remains the star, and document kinds prove the "one semantic pipeline" bet.
+Later ordering and folding treat both as ordinary compile-time constants. Return to the greeting project after that side path: `@entry.moth` remains the star, and document kinds prove the "one semantic pipeline" bet.
+
+An `.mtf` body can read application data with an explicit qualified reference:
+
+[codeblock, $code("md"):
+    # Welcome to [@settings site_name]
+]
+
+That is an ordinary dependency reference. It creates a provider edge and a local ordering edge but installs no name. `.mtf` has no implicit same-directory facade constants. The fixed `@html` helper prelude is the only bare-name scope, and root-local `@mod`, `@package` or `@entry` declarations stay invisible. Shared data belongs in an ordinary helper file. Both cycle directions are diagnosed by the normal Stage 0 and Stage 3 owners, never by a template-specific sorter.
 
 Tooling that wants folded `.mtf` content asks the compiler's **direct Moth template service**. That service is a shorter path over the same owners, stopping before HIR. It is not a second parser, and project tooling never prepares, binds, orders or folds the template itself.
 

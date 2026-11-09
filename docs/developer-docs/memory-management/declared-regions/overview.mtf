@@ -26,4 +26,4 @@ The compiler currently reserves valid `name:` headers with a deferred-feature di
 - `docs/developer-docs/memory-management/retained-edge-counting/overview.mtf`
 - `docs/roadmap/roadmap.md`
 - `docs/docs/memory/declared-regions.mtf`
-- `docs/docs/progress/@page.moth`
+- `docs/docs/progress/@entry.moth`

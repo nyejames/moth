@@ -2,7 +2,7 @@
 
 Every earlier stage produced records. The HTML builder's job is to turn the right records into one working document and a safe output set without rediscovering source structure or letting each backend spray files into the tree. This is harvest time, not another season of growth from seed.
 
-The Alpha builder currently receives grouped `html` settings and direct const root builder slot contributions. The resolved `$html_builder` settings described here are accepted queued handoff facts; output ownership, fragment order and resource rules remain shared. A general `$entry` root purpose is deferred, and the earlier `$page` proposal is superseded.
+The Alpha builder currently receives grouped `html` settings and direct const root builder slot contributions. The resolved `html` record settings described here are accepted handoff facts; output ownership, fragment order and resource rules remain shared. Entries come from `@entry.moth` presence, not authored activity or a source directive.
 
 This is the last primary stop on the chronological route. The fragment at the end is still:
 
@@ -14,7 +14,7 @@ This is the last primary stop on the chronological route. The fragment at the en
 
 The builder consumes explicit inputs such as:
 
-- entry assembly and activated root activity
+- entry assembly and activated entry-root work
 - folded compile-time fragments with body or builder-slot destinations and insertion indexes
 - runtime fragment slots and the entry invocation plan
 - selected functions and their target labels
@@ -26,21 +26,21 @@ The builder consumes explicit inputs such as:
 
 If a fact is missing, an upstream owner failed. The builder should not open `greeting.moth` to peek at source again.
 
-[diagram:
+[@diagrams diagram:
     [$in label: Everything converges, nothing is rediscovered]
     [$in caption: Harvest time. Every input arrived as a record from an owner upstream, which is why the builder never has to open a source file.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../linking-entries-and-reachability/]
             [$in eyebrow: From the compiler]
             [$in title: Semantic records]
-            Entry assembly, activated root activity, folded fragments with insertion indexes and reachable resource uses.
+            Entry assembly, activated entry-root work, folded fragments with insertion indexes and reachable resource uses.
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../backend-lowering/]
             [$in eyebrow: From the backends]
             [$in title: Emitted code]
@@ -48,8 +48,8 @@ If a fact is missing, an upstream owner failed. The builder should not open `gre
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Builder]
             [$in title: One document and one output plan]
@@ -57,22 +57,22 @@ If a fact is missing, an upstream owner failed. The builder should not open `gre
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Written under one owned root]
-                [fanout:
-                [detail:
+                [@diagrams fanout:
+                [@diagrams detail:
                     [$in href: ./]
                     HTML document
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     JavaScript and Wasm
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     Runtime assets
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ./]
                     Output manifest
                 ]
@@ -122,12 +122,12 @@ Manifests remember what this builder produced. Incremental builds compare record
 
 ## Writing and ownership
 
-[diagram:
+[@diagrams diagram:
     [$in label: Nobody writes a file until the whole set is agreed]
     [$in caption: Backends hand over records rather than writing directly, so conflicts surface before any byte lands and cleanup knows exactly what it owns.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ../backend-lowering/]
             [$in eyebrow: Backends]
             [$in title: Emit records]
@@ -135,8 +135,8 @@ Manifests remember what this builder produced. Incremental builds compare record
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Build system]
             [$in title: Validate the whole set]
@@ -144,8 +144,8 @@ Manifests remember what this builder produced. Incremental builds compare record
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Build system]
             [$in title: Write and record]
@@ -153,10 +153,10 @@ Manifests remember what this builder produced. Incremental builds compare record
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Cleanup, keyed by builder and profile]
-                [lane:
-                [detail:
+                [@diagrams lane:
+                [@diagrams detail:
                     [$in href: ./]
                     A debug build never tidies up after a release build
                 ]
@@ -232,7 +232,7 @@ Backend generation failures belong to the backend article. Assembly failures bel
 
 - **Accepted design:** build-system-owned output writing and manifests, and structural resource anchors the builder lowers once placement and a URL context exist.
 - **Current implementation:** HTML, resource and backend progress rows. Resource linking uses structural Resource/SiteRoot pieces, exact live-origin unions and builder-owned URL contexts.
-- **Queued work:** `html_project_backend_wasm_final_implementation_plan.md` for the mixed backend, and `html-page-directives-and-runtime-title-plan.md` for a general `$entry` root purpose and capability-checked runtime title. Builder slots own initial document metadata; the earlier `$page` proposal is superseded.
+- **Queued work:** `html_project_backend_wasm_final_implementation_plan.md` for the mixed backend, and capability-checked runtime title mutation. Builder slots own initial document metadata and entry selection uses `@entry.moth` presence.
 - **Deferred or outside scope:** backend-owned output directories, content-addressed output names and general resource transformation pipelines. Stale artefact cleanup itself is accepted and current, scoped to manifest paths the selected builder and profile own.
 
 ## Exit state

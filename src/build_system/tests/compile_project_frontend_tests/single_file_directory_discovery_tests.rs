@@ -1,5 +1,6 @@
 use super::super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
 use super::*;
+use crate::build_system::create_project_modules::ProjectFrontendCompilation;
 use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::compiler_messages::diagnostics::boundary_accumulator::BoundaryAccumulator;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -247,8 +248,8 @@ fn directory_project_discovers_multiple_entry_modules() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(dir.join("page/@page.moth"), "x ~= 10\n").expect("should write page");
-    fs::write(dir.join("layout/@layout.moth"), "y ~= 20\n").expect("should write layout");
+    fs::write(dir.join("page/@entry.moth"), "x ~= 10\n").expect("should write page");
+    fs::write(dir.join("layout/@entry.moth"), "y ~= 20\n").expect("should write layout");
 
     let mut config = Config::new(dir.clone());
     let style_directives = StyleDirectiveRegistry::built_ins();
@@ -292,12 +293,12 @@ fn directory_project_remaps_delta_collisions_across_modules() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("first/@a.moth"),
+        dir.join("first/@entry.moth"),
         "Item = |\n    shared I32,\n    first_only String,\n|\nitem = Item(1, \"first\")\n",
     )
     .expect("should write first entry");
     fs::write(
-        dir.join("second/@b.moth"),
+        dir.join("second/@entry.moth"),
         "Item = |\n    shared I32,\n    second_only String,\n|\nitem = Item(1, \"second\")\n",
     )
     .expect("should write second entry");
@@ -321,12 +322,11 @@ fn directory_project_remaps_delta_collisions_across_modules() {
         .find(|module| {
             module
                 .metadata
-                .entry_point
-                .file_name()
-                .and_then(|name| name.to_str())
-                == Some("@b.moth")
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with("second/@entry.moth"))
         })
-        .expect("expected @b.moth module");
+        .expect("expected @entry.moth module");
     let item_path = (0..second_module.executable.path_table.len())
         .filter_map(PathId::try_from_index)
         .find(|path| {
@@ -334,7 +334,7 @@ fn directory_project_remaps_delta_collisions_across_modules() {
                 *path,
                 warning_owner.string_table(),
                 &mut Vec::new(),
-            ) == "second/@b.moth/Item"
+            ) == "second/@entry.moth/Item"
         })
         .expect("Item path should exist in the published path table");
     let nominal_id = second_module
@@ -495,4 +495,152 @@ fn single_file_project_cutoff_after_package_work_refuses_module_admission() {
             .contains(DiagnosticDiscoveryStops::PROJECT_SCHEDULING_CUTOFF),
         "refusing the unvisited module is a recorded project cutoff"
     );
+}
+
+#[test]
+fn check_project_with_root_entry_only_publishes_no_interface() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(dir.join("@entry.moth"), "value ~= 1\n").expect("should write the entry root");
+
+    let mut config = Config::new(dir);
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let mut project_source_files = None;
+    let mut project_source_builder = Some(
+        crate::compiler_frontend::source::SourceDatabaseBuilder::new(
+            crate::compiler_frontend::source::SourceDatabase::empty(),
+        ),
+    );
+
+    let result = compile_project_frontend_with_inputs(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut warning_owner,
+        &mut project_source_files,
+        &mut project_source_builder,
+        &crate::compiler_frontend::build_config::BuildConfigInputSet::new(),
+        FrontendCompilationMode::Check,
+    );
+
+    let modules = successful_compilation_value(result);
+    let views = modules.successful_module_views().collect::<Vec<_>>();
+    assert_eq!(
+        views.len(),
+        1,
+        "an entry-only root directory is one structural module"
+    );
+    let artifacts = modules
+        .project
+        .successful_artefacts_in_module_id_order()
+        .collect::<Vec<_>>();
+    assert_eq!(artifacts.len(), 1);
+    assert!(
+        artifacts[0].normal_interface.is_none(),
+        "an entry-only module must not publish a normal interface"
+    );
+    assert!(
+        artifacts[0].support_interface.is_none(),
+        "an entry-only module must not publish a support interface"
+    );
+}
+
+/// Compile one explicitly selected file through the real synthetic single-file path.
+///
+/// WHY: selection by `Config::entry_dir` is part of the contract under test, so these cases must
+///      not reuse the directory-lane helpers or build a Config from a directory.
+fn compile_selected_file(
+    entry: PathBuf,
+    mode: FrontendCompilationMode,
+) -> CompilationResult<ProjectFrontendCompilation> {
+    let mut config = Config::new(entry);
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
+    let mut project_source_files = None;
+    let mut project_source_builder = None;
+    compile_project_frontend_with_inputs(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut warning_owner,
+        &mut project_source_files,
+        &mut project_source_builder,
+        &BuildConfigInputSet::new(),
+        mode,
+    )
+}
+
+#[test]
+fn check_single_file_selected_root_keeps_its_authored_role_in_a_triple_root_directory() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+    fs::write(
+        dir.join("@mod.moth"),
+        "export:\n    normal_label #= \"normal\"\n;\n",
+    )
+    .expect("should write normal facade");
+    fs::write(
+        dir.join("@package.moth"),
+        "export:\n    support_label #= \"support\"\n;\n",
+    )
+    .expect("should write support facade");
+    fs::write(dir.join("@entry.moth"), "#[:triple]\n").expect("should write entry root");
+    fs::write(dir.join("helper.moth"), "helper #= 1\n").expect("should write shared helper");
+
+    // Selecting one root in a triple-root directory compiles exactly that authored role as the
+    // synthetic unit. Sibling roots stay bounded Stage 0 facts and must not leak a second surface
+    // or replace the selected root's role.
+    for (selected, normal, support, entry) in [
+        ("@mod.moth", true, false, false),
+        ("@package.moth", false, true, false),
+        ("@entry.moth", false, false, true),
+    ] {
+        let result = compile_selected_file(dir.join(selected), FrontendCompilationMode::Check);
+        let compilation = successful_compilation_value(result);
+        let artifacts = compilation
+            .project
+            .successful_artefacts_in_module_id_order()
+            .collect::<Vec<_>>();
+        assert_eq!(artifacts.len(), 1, "{selected}: one synthetic module");
+        let artifact = artifacts[0];
+        assert_eq!(
+            artifact.normal_interface.is_some(),
+            normal,
+            "{selected}: normal facade ownership"
+        );
+        assert_eq!(
+            artifact.support_interface.is_some(),
+            support,
+            "{selected}: support facade ownership"
+        );
+        assert_eq!(
+            artifact.module.metadata.entry.is_some(),
+            entry,
+            "{selected}: only the entry root owns executable entry metadata"
+        );
+        if entry {
+            let metadata = artifact
+                .module
+                .metadata
+                .entry
+                .as_ref()
+                .expect("the selected entry root carries entry metadata");
+            assert!(
+                metadata.entry_point.ends_with("@entry.moth"),
+                "{selected}: the selected entry root is the entry point"
+            );
+        }
+    }
 }

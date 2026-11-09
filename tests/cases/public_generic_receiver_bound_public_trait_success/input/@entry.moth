@@ -1,0 +1,5 @@
+@provider combine
+@impl Label, Box
+
+result = combine(Box(Label("payload")))
+[:result=[result]]

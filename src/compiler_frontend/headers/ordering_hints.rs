@@ -13,17 +13,21 @@ use crate::compiler_frontend::builtins::error_type::{
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{CapacityResource, CompilerStage};
-use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     ParsedNamedTypeReference, collect_capacity_references_in_parsed_ref,
     for_each_named_type_in_parsed_ref,
 };
+use crate::compiler_frontend::headers::binding_environment::{
+    HeaderBindingEnvironment, ResolvedQualifiedTarget,
+};
+use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
 use crate::compiler_frontend::headers::parse_file_headers::RetainedDependencyClause;
+use crate::compiler_frontend::headers::qualified_references::push_const_required_expression_ranges;
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
 use crate::compiler_frontend::headers::types::{
-    DependencySelection, Header, HeaderBuildContext, HeaderKind, HeaderParseFailure,
-    LocalDeclarationOrderingHint, SyntheticContentPayload,
+    DependencySelection, Header, HeaderBuildContext, HeaderParseFailure,
+    LocalDeclarationOrderingHint,
 };
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, PreparedFileReferenceTable,
@@ -198,17 +202,87 @@ pub(super) fn dependency_path_for_local_name(
 }
 
 // ------------------------
+//  Qualified-reference ordering
+// ------------------------
+
+/// Record declaration-ordering hints for const-required expression-qualified occurrences.
+///
+/// WHAT: reads the prepared occurrences owned by each header and records their already-resolved
+/// targets as local ordering hints when the occurrence's producing range folds before the
+/// declaration is prepared.
+/// WHY: a qualified reference in a compile-time shell is a real declaration dependency even
+///      though it installed no local name. Imported targets keep the provider-interface path so
+///      Stage 3 classifies them through the existing provider edge arm instead of fabricating a
+///      local header. A runtime function or start body never contributes, even when the same
+///      header shell also owns a const-required default.
+pub(super) fn collect_qualified_reference_ordering_hints(
+    headers: &mut [Header],
+    module_symbols: &ModuleSymbols,
+    binding_environment: &HeaderBindingEnvironment,
+) -> Result<(), InfrastructureFailure> {
+    if binding_environment.qualified_reference_targets.is_empty() {
+        return Ok(());
+    }
+
+    for (header_index, header) in headers.iter_mut().enumerate() {
+        let source = header.tokens.source();
+        let Some(occurrences) = module_symbols
+            .source_paths_by_source_id
+            .get(&source)
+            .and_then(|source_path| {
+                module_symbols
+                    .qualified_references_by_source
+                    .get(source_path)
+            })
+        else {
+            continue;
+        };
+
+        for occurrence in occurrences.iter().filter(|occurrence| {
+            occurrence.owning_header_index == header_index && occurrence.const_required
+        }) {
+            let Some(resolved) = binding_environment
+                .qualified_reference_target(source, occurrence.dependency.path_syntax)
+            else {
+                continue;
+            };
+            let target_path = match &resolved.target {
+                ResolvedQualifiedTarget::Source { declaration_path }
+                    if module_symbols.constant_paths.contains(declaration_path) =>
+                {
+                    Some(*declaration_path)
+                }
+                ResolvedQualifiedTarget::Imported { local_path, .. } => Some(*local_path),
+                ResolvedQualifiedTarget::Source { .. }
+                | ResolvedQualifiedTarget::External { .. } => None,
+            };
+            if let Some(target_path) = target_path {
+                header.local_ordering_hints.insert(
+                    LocalDeclarationOrderingHint::qualified_reference(target_path)
+                        .with_occurrence_span(resolved.selected_span),
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+// ------------------------
 //  Content-source shell ordering
 // ------------------------
 
-/// Record content-source ordering hints for every pre-body declaration shell in one file.
+/// Record content-source ordering hints for every const-required value range in one file.
 ///
-/// WHAT: scans each declaration shell's value-token range for path tokens whose prepared row
-/// classified as a content source, and records one hint per occurrence targeting that source's
-/// synthetic `content` constant. Runtime function and start bodies are never scanned.
+/// WHAT: takes the shared const-required expression classification and scans each range for path
+/// tokens whose prepared row classified as a content source, recording one hint per occurrence
+/// targeting that source's synthetic `content` constant.
 /// WHY: a direct `.mtf` or `.md` value path reuses the synthetic content constant, so every shell
-/// that folds before ordinary body emission depends on it. The scan stays token-level: it reads
-/// path handles and their prepared classification without parsing any expression.
+/// that folds before ordinary body emission depends on it. Runtime function and start bodies are
+/// never scanned. Sharing `push_const_required_expression_ranges` keeps this ordering pass and
+/// qualified-reference ordering on one definition of which defaults are compile-time content. The
+/// scan stays token-level: it reads path handles and their prepared classification without
+/// parsing any expression.
 pub(super) fn collect_content_source_ordering_hints(
     headers: &mut [Header],
     source_tokens: &SourceTokens,
@@ -220,105 +294,17 @@ pub(super) fn collect_content_source_ordering_hints(
     let content_targets =
         content_source_targets(file_references, path_syntax, string_table, path_fork)?;
 
-    for header in headers {
-        let Header {
-            kind,
-            tokens: token_range,
-            local_ordering_hints,
-            synthetic_content_payload,
-            ..
-        } = header;
-
-        match kind {
-            HeaderKind::Constant { declaration } => {
-                if declaration.config_qualifier.is_none() {
-                    if let Some(range) = declaration.initializer_range {
-                        scan_token_range_for_content_sources(
-                            range,
-                            source_tokens,
-                            &content_targets,
-                            local_ordering_hints,
-                        )?;
-                    }
-
-                    // Moth-template synthetic content keeps its body in `Header::tokens` while
-                    // leaving the declaration initializer range empty. Preserve that single body
-                    // range as the ordering-hint source.
-                    if declaration.initializer_range.is_none()
-                        && matches!(
-                            *synthetic_content_payload,
-                            Some(SyntheticContentPayload::MothTemplate { .. })
-                        )
-                        && !token_range.is_empty()
-                    {
-                        scan_token_range_for_content_sources(
-                            *token_range,
-                            source_tokens,
-                            &content_targets,
-                            local_ordering_hints,
-                        )?;
-                    }
-                }
-            }
-
-            // Const-template tokens cover both the template head and body, including the
-            // top-level compile-time fragments folded before body emission.
-            HeaderKind::ConstTemplate { .. } => {
-                scan_token_range_for_content_sources(
-                    *token_range,
-                    source_tokens,
-                    &content_targets,
-                    local_ordering_hints,
-                )?;
-            }
-
-            HeaderKind::Function { signature, .. } => {
-                for parameter in &signature.parameters {
-                    if let Some(range) = parameter.default_range {
-                        scan_token_range_for_content_sources(
-                            range,
-                            source_tokens,
-                            &content_targets,
-                            local_ordering_hints,
-                        )?;
-                    }
-                }
-            }
-
-            HeaderKind::Struct { fields, .. } => {
-                for field in fields {
-                    if let Some(range) = field.default_range {
-                        scan_token_range_for_content_sources(
-                            range,
-                            source_tokens,
-                            &content_targets,
-                            local_ordering_hints,
-                        )?;
-                    }
-                }
-            }
-
-            HeaderKind::Choice { variants, .. } => {
-                for variant in variants {
-                    let ChoiceVariantPayloadSyntax::Record { fields } = &variant.payload else {
-                        continue;
-                    };
-                    for field in fields {
-                        if let Some(range) = field.default_range {
-                            scan_token_range_for_content_sources(
-                                range,
-                                source_tokens,
-                                &content_targets,
-                                local_ordering_hints,
-                            )?;
-                        }
-                    }
-                }
-            }
-
-            // Runtime bodies fold after the synthetic content constants are complete, and the
-            // remaining shells hold no pre-body value expressions.
-            _ => {}
+    let mut const_required_ranges = Vec::new();
+    for (header_index, header) in headers.iter_mut().enumerate() {
+        const_required_ranges.clear();
+        push_const_required_expression_ranges(header, header_index, &mut const_required_ranges);
+        for expression_range in &const_required_ranges {
+            scan_token_range_for_content_sources(
+                expression_range.range,
+                source_tokens,
+                &content_targets,
+                &mut header.local_ordering_hints,
+            )?;
         }
     }
     Ok(())

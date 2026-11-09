@@ -20,11 +20,14 @@ use crate::compiler_frontend::headers::module_symbols::{GenericDeclarationKind, 
 use crate::compiler_frontend::headers::parse_file_headers::{
     Header, HeaderKind, HeaderPreparationFailure,
 };
-use crate::compiler_frontend::headers::types::LocalDeclarationOrderingHint;
+use crate::compiler_frontend::headers::types::{
+    LocalDeclarationOrderingHint, LocalDeclarationOrderingHintOrigin, SyntheticContentPayload,
+};
 use crate::compiler_frontend::public_interface::{
     PublicDeclarationRecord, PublicDeclarationSemantics,
 };
 use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::utilities::token_scan::InitializerReference;
@@ -65,6 +68,153 @@ pub(crate) enum ConstantReferenceResolution {
     ExternalNonConstant { _symbol_id: ExternalSymbolId },
     ConstructorLikeSource { _path: PathId },
     NotVisible { name: StringId },
+}
+
+/// Borrowed facts one header's qualified-reference diagnostic pass needs.
+///
+/// WHY: the pass must be callable with synthetic hints in a focused test without building a full
+///      `Header`; grouping the read-only facts keeps the function's argument list small.
+struct QualifiedReferenceDiagnosticContext<'a> {
+    declaration_path: PathId,
+    name_span: Option<SourceSpan>,
+    header_index: usize,
+    current_source_file: PathId,
+    is_moth_template_content: bool,
+    constant_positions: &'a FxHashMap<PathId, ConstantPosition>,
+    path_fork: &'a PathInternerFork,
+}
+
+/// Push the same-file qualified-reference diagnostics for one header in authored source order.
+///
+/// WHAT: reports self-references and same-file forward references among the header's retained
+///       qualified-reference hints. The MOTH template content self-cycle skip is preserved.
+/// WHY: hint storage is a hash set used to deduplicate graph edges, so this pass orders the
+///      qualifying hints by authored span before pushing. Diagnostics preserve insertion order
+///      and bounded error reporting keeps the first retained errors.
+fn push_qualified_reference_diagnostics<'a>(
+    context: QualifiedReferenceDiagnosticContext<'_>,
+    hints: impl IntoIterator<Item = &'a LocalDeclarationOrderingHint>,
+    diagnostic_bag: &mut DiagnosticBag,
+    byte_range: impl FnMut(SourceSpan) -> Option<(u32, u32)>,
+) {
+    let QualifiedReferenceDiagnosticContext {
+        declaration_path,
+        name_span,
+        header_index,
+        current_source_file,
+        is_moth_template_content,
+        constant_positions,
+        path_fork,
+    } = context;
+
+    for hint in qualified_reference_hints_in_diagnostic_order(hints, name_span, byte_range) {
+        let Some(position) = constant_positions.get(&hint.path()) else {
+            continue;
+        };
+        if position.source_file != current_source_file {
+            continue;
+        }
+        let span = hint.occurrence_span().or(name_span);
+
+        if hint.path() == declaration_path {
+            if is_moth_template_content {
+                // Stage 3's existing cycle diagnostic owns the explicit self-qualified
+                // template content reference; the unqualified self filter does not apply.
+                continue;
+            }
+            diagnostic_bag.push(self_reference_error_for(
+                path_fork.component(declaration_path),
+                span,
+            ));
+            continue;
+        }
+
+        if position.header_index > header_index {
+            diagnostic_bag.push(same_file_forward_reference_error_for(
+                declaration_path,
+                hint.path(),
+                span,
+                path_fork,
+            ));
+        }
+    }
+}
+
+/// Inline byte range for diagnostic ordering, without resolving an extended span.
+///
+/// WHY: header binding runs before the source database installs extended-span tables, so
+/// `SourceSpan::byte_range` can panic on a span that does not fit inline. An extended span
+/// stays in the spanned group. Its allocation index is not a byte offset, so two extended
+/// spans in one shell are deterministic by path, not necessarily in authored order. Restoring
+/// that order needs the preparation-time occurrence list, which this pass does not own.
+fn hint_span_order_range(span: SourceSpan) -> (u32, u32) {
+    if let Some(range) = span.local().inline_range() {
+        return (range.start(), range.end());
+    }
+    (u32::MAX - 1, u32::MAX - 1)
+}
+/// Authored order for one qualified-reference diagnostic.
+///
+/// Spanned hints sort first. Hints with only a header name span follow. Hints with no
+/// resolvable span sort last. The path breaks ties so equal spans stay deterministic.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct QualifiedDiagnosticOrder {
+    category: u8,
+    start: u32,
+    end: u32,
+    path: PathId,
+}
+
+/// Order the qualified-reference hints a diagnostic pass examines by authored source position.
+///
+/// WHAT: returns hints with a resolvable occurrence span first, ordered by span start then end,
+///       then hints without one in their header name-span order. The referenced path is the final
+///       tie-breaker for equal spans.
+/// WHY: `Header::local_ordering_hints` is a `HashSet` retained to deduplicate graph edges, so its
+///      iteration order carries randomized hash state. `DiagnosticBag` preserves insertion order
+///      and bounded error reporting keeps the first retained errors, so diagnostics must be pushed
+///      in authored source order instead of hash order.
+fn qualified_reference_hints_in_diagnostic_order<'a>(
+    hints: impl IntoIterator<Item = &'a LocalDeclarationOrderingHint>,
+    name_span: Option<SourceSpan>,
+    mut byte_range: impl FnMut(SourceSpan) -> Option<(u32, u32)>,
+) -> Vec<&'a LocalDeclarationOrderingHint> {
+    let mut name_range: Option<Option<(u32, u32)>> = None;
+    let mut keyed: Vec<(QualifiedDiagnosticOrder, &LocalDeclarationOrderingHint)> = hints
+        .into_iter()
+        .filter(|hint| hint.origin() == LocalDeclarationOrderingHintOrigin::QualifiedReference)
+        .map(|hint| {
+            let key = match hint.occurrence_span().and_then(&mut byte_range) {
+                Some((start, end)) => QualifiedDiagnosticOrder {
+                    category: 0,
+                    start,
+                    end,
+                    path: hint.path(),
+                },
+                None => {
+                    let name_range =
+                        *name_range.get_or_insert_with(|| name_span.and_then(&mut byte_range));
+                    match name_range {
+                        Some((start, end)) => QualifiedDiagnosticOrder {
+                            category: 1,
+                            start,
+                            end,
+                            path: hint.path(),
+                        },
+                        None => QualifiedDiagnosticOrder {
+                            category: 2,
+                            start: u32::MAX,
+                            end: u32::MAX,
+                            path: hint.path(),
+                        },
+                    }
+                }
+            };
+            (key, hint)
+        })
+        .collect();
+    keyed.sort_unstable_by_key(|(key, _)| *key);
+    keyed.into_iter().map(|(_, hint)| hint).collect()
 }
 
 pub(crate) fn add_constant_initializer_dependencies(
@@ -147,6 +297,9 @@ pub(crate) fn add_constant_initializer_dependencies(
             Ok(v) => v,
             Err(error) => return Err(HeaderPreparationFailure::Infrastructure(error.into())),
         };
+        let current_source_file = module_symbols
+            .source_path_for_header(header)
+            .expect("header body range has no prepared source-path identity");
 
         let current_path = header.declaration_path;
 
@@ -178,9 +331,6 @@ pub(crate) fn add_constant_initializer_dependencies(
                             missing_constant_position_error(&path, path_fork, string_table).into(),
                         ));
                     };
-                    let current_source_file = module_symbols
-                        .source_path_for_header(header)
-                        .expect("header body range has no prepared source-path identity");
                     if position.source_file == current_source_file {
                         if position.header_index > reference_header_index {
                             diagnostic_bag.push(same_file_forward_reference_error(
@@ -219,15 +369,83 @@ pub(crate) fn add_constant_initializer_dependencies(
                 ConstantReferenceResolution::ExternalNonConstant { .. } => {}
 
                 // A constant with this name exists in the module but is not visible to this file.
+                // When the invisible declaration is authored directly in an active root file,
+                // name the root-local isolation rule with both sites instead of the generic
+                // constant-visibility error.
                 ConstantReferenceResolution::NotVisible { name } => {
-                    if constants_by_name.contains_key(&name) {
-                        diagnostic_bag.push(not_visible_constant_error(reference));
+                    let Some(candidates) = constants_by_name.get(&name) else {
+                        // No constant with this name exists anywhere. AST produces a more precise
+                        // diagnostic during expression parsing.
+                        continue;
+                    };
+                    // A Moth template body is an ordinary reader here. Qualified selection of a
+                    // root facade is rejected earlier in binding with MOTH-IMPORT-0005, while
+                    // naming a root-local declaration reaches this rule and reports
+                    // MOTH-IMPORT-0030 like any other reader.
+                    let root_local = candidates.iter().copied().find_map(|path| {
+                        let position = constant_positions.get(&path)?;
+                        (!module_symbols.authored_declarations_visible_from(
+                            &current_source_file,
+                            &position.source_file,
+                        ))
+                        .then_some((path, position.source_file))
+                    });
+                    match root_local {
+                        Some((path, target_source_file)) => {
+                            let diagnostic = crate::compiler_frontend::headers::binding_environment::cross_file_root_local_declaration(
+                                module_symbols,
+                                &current_source_file,
+                                &target_source_file,
+                                &path,
+                                reference.span,
+                            )
+                            .expect(
+                                "an invisible constant authored in an active root file is not visible from this consumer",
+                            );
+                            diagnostic_bag.push(diagnostic);
+                        }
+                        None => diagnostic_bag.push(not_visible_constant_error(reference)),
                     }
-                    // If no constant with this name exists anywhere, treat as Unknown so AST
-                    // can produce a more precise diagnostic during expression parsing.
                 }
             }
         }
+    }
+
+    // Same-file forward and self-reference diagnostics apply to constant shells only.
+    // A parameter or field default may name a later constant in the same file; the ordering
+    // edge sorts that constant first, matching the unqualified default. Diagnosing it here
+    // would reject a program the unqualified form accepts.
+    for (header_index, header) in headers.iter().enumerate() {
+        let constant_shell = match &header.kind {
+            HeaderKind::Constant { declaration } if declaration.config_qualifier.is_none() => true,
+            HeaderKind::ConstTemplate { .. } => true,
+            _ => false,
+        };
+        if !constant_shell {
+            continue;
+        }
+        let Some(current_source_file) = module_symbols.source_path_for_header(header) else {
+            continue;
+        };
+        let is_moth_template_content = matches!(
+            header.synthetic_content_payload,
+            Some(SyntheticContentPayload::MothTemplate { .. })
+        );
+
+        push_qualified_reference_diagnostics(
+            QualifiedReferenceDiagnosticContext {
+                declaration_path: header.declaration_path,
+                name_span: header.name_span,
+                header_index,
+                current_source_file,
+                is_moth_template_content,
+                constant_positions: &constant_positions,
+                path_fork,
+            },
+            &header.local_ordering_hints,
+            &mut diagnostic_bag,
+            |span| Some(hint_span_order_range(span)),
+        );
     }
 
     for (header_index, hint) in edges_to_add {
@@ -453,10 +671,14 @@ fn is_nominal_constructor(
 // ---------------------------------------------------------------------------
 
 fn self_reference_error(reference: &InitializerReference) -> DiagnosticDraft {
+    self_reference_error_for(Some(reference.name), reference.span)
+}
+
+fn self_reference_error_for(name: Option<StringId>, span: Option<SourceSpan>) -> DiagnosticDraft {
     choices_control_flow::compile_time_evaluation_error(
         CompileTimeEvaluationErrorReason::ConstantSelfReference,
-        Some(reference.name),
-        reference.span,
+        name,
+        span,
     )
 }
 
@@ -482,13 +704,22 @@ fn same_file_forward_reference_error(
     reference: &InitializerReference,
     path_fork: &PathInternerFork,
 ) -> DiagnosticDraft {
+    same_file_forward_reference_error_for(*constant_path, *target_path, reference.span, path_fork)
+}
+
+fn same_file_forward_reference_error_for(
+    constant_path: PathId,
+    target_path: PathId,
+    span: Option<SourceSpan>,
+    path_fork: &PathInternerFork,
+) -> DiagnosticDraft {
     let target_name = path_fork
-        .component(*target_path)
-        .or_else(|| path_fork.component(*constant_path));
+        .component(target_path)
+        .or_else(|| path_fork.component(constant_path));
     choices_control_flow::compile_time_evaluation_error(
         CompileTimeEvaluationErrorReason::SameFileForwardConstantReference,
         target_name,
-        reference.span,
+        span,
     )
 }
 

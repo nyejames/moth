@@ -10,8 +10,6 @@ use super::{
     BindingEnvironmentBuilder, BindingEnvironmentError, FileVisibility, SourceDeclarationTarget,
     SourceDependencyAccess, VisibleNameBinding, VisibleNameRegistry,
 };
-use crate::compiler_frontend::compiler_messages::InvalidReceiverDeclarationReason;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::headers::binding_environment::diagnostics;
 use crate::compiler_frontend::headers::dependency_clause_syntax::DependencyAlias;
 use crate::compiler_frontend::source::SourceSpan;
@@ -160,23 +158,10 @@ impl<'a> BindingEnvironmentBuilder<'a> {
 
         let is_type_alias = self.module_symbols.type_alias_paths.contains(symbol_path);
         let is_trait = self.module_symbols.trait_paths.contains(symbol_path);
-        let is_receiver_method = self
-            .module_symbols
-            .receiver_method_paths
-            .contains(symbol_path);
 
-        if is_receiver_method {
-            // Source-authored receiver methods are not independently bindable or aliasable.
-            // They travel with their receiver type's visibility.
-            return Err(generics_traits_api::invalid_receiver_declaration(
-                InvalidReceiverDeclarationReason::ReceiverMethodImportOrExportNotAllowed,
-                source_span,
-            )
-            .into());
-        }
-
-        // Check export requirement after the source receiver-method guard so explicit method
-        // dependencies report the receiver policy instead of an incidental export failure.
+        // Check export requirement after the shared selected-target resolution has already
+        // rejected a source receiver method, so explicit method dependencies report the
+        // receiver policy instead of an incidental export failure.
         if matches!(&access, SourceDependencyAccess::DirectSourceExport) {
             let is_dependency_bindable = self
                 .module_symbols

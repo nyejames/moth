@@ -1,13 +1,29 @@
-A `.mtf` file sees a small compile-time scope. The implicit template body can access constants from its module root and builder-provided helpers.
+A `.mtf` file has a small compile-time scope. It sees the fixed HTML prelude and can select declarations from same-module helper files with qualified references. It has no implicit access to module root declarations.
 
-### Same-directory module root constants
+### Same-module helpers
 
-Exported compile-time constants and const records from the same-directory module root are visible inside a `.mtf` file. This is the primary way to parameterise moth template content.
-
-Only an unpaired module root contributes this implicit scope. A `.mtf` file in a directory with both `@` and `+` roots is a shared helper and sees neither root's declarations. Parameterise it through builder-provided helpers or an explicit module that imports the intended surface.
+An ordinary `.moth` helper declaration is reachable from a `.mtf` file in the same module through a qualified reference:
 
 [codeblock, $code("moth"):
-    -- docs/@docs.moth
+    -- docs/settings.moth
+    site_name #= "Moth"
+]
+
+[codeblock, $code("md"):
+    -- docs/intro.mtf
+    # Welcome to [@settings site_name]
+]
+
+The provider path names the helper file, the selected symbol names one compile-time declaration and the two tokens stay on the same line. The template folds the selected value during compilation. The directory needs no `@mod.moth` file for this to work.
+
+A qualified reference introduces no local binding. It therefore never shadows a prelude name or another declaration. Selecting `@home_constants p` produces that helper's `p`, even though the prelude also exposes `p`.
+
+### Root-local declarations stay hidden
+
+Declarations authored directly in `@mod.moth`, `@package.moth` or `@entry.moth` belong to that root file only. A `.mtf` file cannot read them, even when the facade exports the declaration:
+
+[codeblock, $code("moth"):
+    -- docs/@mod.moth
     export:
         site_name #= "Moth"
     ;
@@ -18,9 +34,13 @@ Only an unpaired module root contributes this implicit scope. A `.mtf` file in a
     # Welcome to [site_name]
 ]
 
-### Builder-provided compile-time helpers
+The unqualified name fails with a root-local visibility diagnostic instead of resolving through the facade. Naming the root file directly also fails, because root files are not qualified-reference providers.
 
-Exported compile-time constants and const records from `@html` are visible flat inside a `.mtf` file. This includes helpers such as `p`, `codeblock` and other HTML builder constants.
+Move the shared value into an ordinary helper file when a template needs it. A helper declaration is shared by every root and selectable from the template.
+
+### The fixed HTML prelude
+
+Exported compile-time constants from `@html` are visible flat inside every `.mtf` body. This includes helpers such as `p`, `codeblock` and other HTML constants.
 
 [codeblock, $code("text"):
     -- docs/intro.mtf
@@ -29,33 +49,27 @@ Exported compile-time constants and const records from `@html` are visible flat 
     [codeblock, $code("moth"): value = 42]
 ]
 
+The prelude is fixed compiler policy. It always resolves to the official `packages/html/@mod.moth` source package with its Builder origin and MothSource backing intact. A builder that enables `.mtf` sources must register that official package set. `@html` is reserved for it. Source packages that contain `.mtf` files order after `@html`.
+
+The prelude supplies compile-time constants only. It is not a general template-wide import mechanism and it never includes arbitrary builder-registered constants.
+
 ### Collision semantics
 
-`@html` constants and same-directory module root constants don't shadow each
-other. If both surfaces expose the same visible name, compilation fails with a
-visible-name collision diagnostic. The collision identifies both sources where
-location data is available.
+A real local binding that matches a prelude name fails with an ordinary visible-name collision. The diagnostic identifies both sources where location data is available.
 
-Authors resolve collisions by renaming the module-root export.
+A qualified selection creates no local binding, so it cannot collide merely because the selected name matches a prelude constant:
 
 [codeblock, $code("moth"):
-    -- docs/@docs.moth
-    export:
-        -- INVALID when this root is paired with a .mtf file because @html also exposes p.
-        p #= [: Custom paragraph]
-    ;
+    -- docs/home_constants.moth
+    p #= "local p"
 ]
 
-[codeblock, $code("moth"):
-    -- docs/@docs.moth
-    export:
-        my_p #= [: Custom paragraph]
-    ;
+[codeblock, $code("text"):
+    -- docs/intro.mtf
+    [p][@home_constants p]
 ]
 
-The collision occurs when the same-directory root and implicit `@html` surface are combined for a `.mtf` body.
-
-This follows the same no-shadowing model as ordinary source visibility.
+The first `p` comes from the prelude and the second from the helper. Both render.
 
 ### Nested templates
 
@@ -67,7 +81,7 @@ Nested templates inside a `.mtf` body are valid. A nested template with no expli
 
 ### Constants versus runtime values
 
-Only compile-time constants are visible inside a `.mtf` file. Runtime bindings, runtime functions, types, traits, methods, external runtime APIs and the generated self `content` constant are not visible.
+Qualified references inside a `.mtf` file must resolve to compile-time constants. Runtime bindings, runtime functions, types, traits, methods, external runtime APIs and the generated self `content` constant are not valid template values.
 
 A reference to a runtime value is rejected with `MOTH-RULE-0034` or `MOTH-RULE-0053`.
 
@@ -77,12 +91,9 @@ Moth template bodies are const-required. There is no runtime capture. The entire
 
 ### Allowed template directives
 
-Formatting and child-selection directives available in the compile-time
-template environment are valid inside `.mtf`. This includes `$md`, `$raw`,
-`$fresh`, `$html`, `$code`, `$css` and `$escape_html`.
+Formatting and child-selection directives available in the compile-time template environment are valid inside `.mtf`. This includes `$md`, `$raw`, `$fresh`, `$html`, `$code`, `$css` and `$escape_html`.
 
-A `.mtf` file produces one fixed `content` constant. It cannot expose its own
-slot receiver or contribute a builder root slot.
+A `.mtf` file produces one fixed `content` constant. It cannot expose its own slot receiver or contribute a builder root slot.
 
 ### Child-template formatting boundary
 
@@ -100,10 +111,11 @@ To output literal template delimiters, use string insertion:
 
 ### Content helpers
 
-Content helpers such as `codeblock` work only where the builder environment provides them. Do not assume arbitrary normal source dependencies are available inside `.mtf`.
+Content helpers such as `codeblock` come from the fixed `@html` prelude above, not from the active builder. A `.mtf` file can also name an ordinary helper with an explicit qualified reference. It does not gain that helper's declarations automatically.
 
 ### Concepts related to template scope
 
 - For the full template directive list see @../templates/#template-directives (Template directives).
 - For `$md` formatting see @../templates/#markdown-formatting (Markdown formatting).
+- For the `.mtf` content constant see @#content-dependencies (Content dependencies).
 - For limitations see @#moth-template-files-limits (Moth template limits).

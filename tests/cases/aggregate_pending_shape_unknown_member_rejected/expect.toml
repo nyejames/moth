@@ -10,6 +10,6 @@ diagnostic_codes = ["MOTH-RULE-0048"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0048"
 reason = "invalid_field_access.unknown_member"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 9
 column = 9

@@ -44,61 +44,65 @@ pub(crate) enum ProviderSlot {
 }
 
 /// Describe the first mismatch between a successful artifact's published surfaces and the
-/// structural graph's declared pair.
+/// structural graph node's facade roots.
 ///
-/// WHAT: enforces the exact normal/support shape before a success can enter any retained lane.
+/// WHAT: enforces the exact optional normal/support shape before a success can enter any retained
+///       lane. A published surface must exist exactly when the node owns that facade root, and its
+///       origin must be the node's origin for that role.
 /// WHY: publication and boundary validation must not trust compile-time construction to decide
-///      whether a paired module has a support interface or a single-root module lacks one.
-///      Returned prose is allocated only on failure.
+///      whether an entry-only module published nothing, a single facade published one surface or a
+///      paired module published both. Returned prose is allocated only on failure.
 pub(crate) fn publication_surface_mismatch(
     artifact: &CompiledModuleArtifact,
-    expected_primary: &StableModuleOriginIdentity,
+    expected_normal: Option<&StableModuleOriginIdentity>,
     expected_support: Option<&StableModuleOriginIdentity>,
 ) -> Option<String> {
-    if artifact.interface.module_origin != *expected_primary {
-        return Some(format!(
-            "artefact primary interface origin {:?} disagrees with graph node origin {:?}",
-            artifact.interface.module_origin, expected_primary
-        ));
-    }
+    optional_surface_mismatch(
+        "normal",
+        ModuleRootRole::Normal,
+        artifact.normal_interface.as_ref(),
+        expected_normal,
+    )
+    .or_else(|| {
+        optional_surface_mismatch(
+            "support",
+            ModuleRootRole::Support,
+            artifact.support_interface.as_ref(),
+            expected_support,
+        )
+    })
+}
 
-    let Some(expected_support) = expected_support else {
-        if let Some(support_interface) = &artifact.support_interface {
-            return Some(format!(
-                "artefact publishes unexpected secondary support interface {:?} for a graph node without paired roots",
-                support_interface.module_origin
-            ));
+/// Validate one optional facade surface against the graph node's matching root origin.
+fn optional_surface_mismatch(
+    label: &str,
+    role: ModuleRootRole,
+    published: Option<&PublicSemanticInterface>,
+    expected: Option<&StableModuleOriginIdentity>,
+) -> Option<String> {
+    match (published, expected) {
+        (None, None) => None,
+        (Some(_), None) => Some(format!(
+            "artefact publishes an unexpected {label} interface for a graph node without a {label} facade root"
+        )),
+        (None, Some(expected_origin)) => Some(format!(
+            "artefact is missing the {label} interface declared by graph origin {expected_origin:?}"
+        )),
+        (Some(interface), Some(expected_origin)) => {
+            if expected_origin.role() != role {
+                return Some(format!(
+                    "graph node declares a {label} facade root whose origin {expected_origin:?} is not a {role:?} surface"
+                ));
+            }
+            if interface.module_origin != *expected_origin {
+                return Some(format!(
+                    "artefact {label} interface origin {:?} disagrees with graph node {label} origin {expected_origin:?}",
+                    interface.module_origin
+                ));
+            }
+            None
         }
-        return None;
-    };
-
-    if expected_primary.role() != ModuleRootRole::Normal {
-        return Some(format!(
-            "graph node declares paired roots but its primary origin {:?} is not a normal surface",
-            expected_primary
-        ));
     }
-    if expected_support.role() != ModuleRootRole::Support
-        || !expected_support.is_same_structural_directory(expected_primary)
-    {
-        return Some(format!(
-            "graph node declares paired roots but its secondary origin {:?} is not a support surface in the primary structural directory",
-            expected_support
-        ));
-    }
-    let Some(support_interface) = &artifact.support_interface else {
-        return Some(format!(
-            "artefact is missing the secondary support interface declared by graph origin {:?}",
-            expected_support
-        ));
-    };
-    if support_interface.module_origin != *expected_support {
-        return Some(format!(
-            "artefact support interface origin {:?} disagrees with graph node support origin {:?}",
-            support_interface.module_origin, expected_support
-        ));
-    }
-    None
 }
 
 /// Exact location of one published materialisation template inside this store.
@@ -147,7 +151,7 @@ impl ModuleArtifactStore {
         &self,
         module_id: ModuleId,
         artifact: &CompiledModuleArtifact,
-        expected_origin: &StableModuleOriginIdentity,
+        expected_normal_origin: Option<&StableModuleOriginIdentity>,
         expected_support_origin: Option<&StableModuleOriginIdentity>,
     ) -> Result<ModuleSuccessPublication, InfrastructureFailure> {
         if self.slot(module_id)? != ProviderSlot::Unavailable {
@@ -158,7 +162,7 @@ impl ModuleArtifactStore {
             );
         }
         if let Some(mismatch) =
-            publication_surface_mismatch(artifact, expected_origin, expected_support_origin)
+            publication_surface_mismatch(artifact, expected_normal_origin, expected_support_origin)
         {
             crate::compiler_bug!(
                 crate::compiler_frontend::compiler_messages::CompilerStage::ProjectBuildAssembly,
@@ -288,20 +292,21 @@ impl ModuleArtifactStore {
     }
 
     #[cfg(test)]
-    pub(crate) fn interface(
+    pub(crate) fn normal_interface(
         &self,
         module_id: ModuleId,
     ) -> Result<Option<&PublicSemanticInterface>, InfrastructureFailure> {
         Ok(self
             .artifact(module_id)?
-            .map(|artifact| &artifact.interface))
+            .and_then(|artifact| artifact.normal_interface.as_ref()))
     }
 
     /// Resolve the published interface for one explicit module surface.
     ///
-    /// A paired module publishes its normal interface in the primary lane and its support
-    /// interface beside it. A support-only module publishes its support interface as the primary
-    /// lane. Callers must select the surface their dependency edge names; there is no fallback.
+    /// Each facade surface has its own named lane, so this returns exactly the field for the
+    /// requested role. A module without that facade root, and every non-facade role, reports a
+    /// typed absence. Callers must select the surface their dependency edge names; there is no
+    /// normal-then-support or primary fallback.
     pub(crate) fn interface_for_surface(
         &self,
         module_id: ModuleId,
@@ -311,17 +316,11 @@ impl ModuleArtifactStore {
             return Ok(None);
         };
         match surface {
-            ModuleRootRole::Normal => Ok((artifact.interface.module_origin.role()
-                == ModuleRootRole::Normal)
-                .then_some(&artifact.interface)),
-            ModuleRootRole::Support => Ok(artifact.support_interface.as_ref().or_else(|| {
-                matches!(
-                    artifact.interface.module_origin.role(),
-                    ModuleRootRole::Support | ModuleRootRole::SyntheticProjectContext
-                )
-                .then_some(&artifact.interface)
-            })),
-            ModuleRootRole::Shared | ModuleRootRole::SyntheticProjectContext => Ok(None),
+            ModuleRootRole::Normal => Ok(artifact.normal_interface.as_ref()),
+            ModuleRootRole::Support => Ok(artifact.support_interface.as_ref()),
+            ModuleRootRole::Entry
+            | ModuleRootRole::Shared
+            | ModuleRootRole::SyntheticProjectContext => Ok(None),
         }
     }
     /// Install one boundary-owned path table into every successful base artefact.
@@ -476,7 +475,10 @@ impl ModuleArtifactStore {
         module_id: ModuleId,
         artifact: CompiledModuleArtifact,
     ) -> Result<(), InfrastructureFailure> {
-        let expected_origin = artifact.interface.module_origin.clone();
+        let expected_normal_origin = artifact
+            .normal_interface
+            .as_ref()
+            .map(|interface| &interface.module_origin);
         let expected_support_origin = artifact
             .support_interface
             .as_ref()
@@ -484,7 +486,7 @@ impl ModuleArtifactStore {
         let publication = self.preflight_success(
             module_id,
             &artifact,
-            &expected_origin,
+            expected_normal_origin,
             expected_support_origin,
         )?;
         self.reserve_success_commit(&publication);

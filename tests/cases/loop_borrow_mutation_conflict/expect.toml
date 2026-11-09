@@ -6,5 +6,5 @@ diagnostic_codes = ["MOTH-BORROW-0003", "MOTH-BORROW-0003"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-BORROW-0003"
 occurrence = 2
-path = "input/stepped/@mod.moth"
+path = "input/stepped/@entry.moth"
 line = 4

@@ -1,7 +1,7 @@
 //! Header-prep classification of graph-active file-value paths.
 
 use crate::compiler_frontend::headers::parse_file_headers::prepare_file_from_tokens;
-use crate::compiler_frontend::headers::types::{HeaderParseOptions, SourceTokenOwner};
+use crate::compiler_frontend::headers::types::SourceTokenOwner;
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -21,7 +21,7 @@ fn prepare_source(
 ) {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let file_path = Path::new("@page.moth");
+    let file_path = Path::new("@entry.moth");
     let interned_path = path_fork
         .try_intern_filesystem_path(file_path, &mut string_table)
         .expect("test path should be UTF-8");
@@ -38,12 +38,14 @@ fn prepare_source(
     )
     .expect("tokenization should succeed");
     let owner = SourceTokenOwner::new(lexed.tokens);
+    let options = crate::compiler_frontend::tests::parse_support::synthetic_entry_options(
+        SourceId::COMPILATION_ROOT,
+    );
     let output = prepare_file_from_tokens(
         owner,
         interned_path,
         lexed.path_syntax,
-        file_path,
-        &HeaderParseOptions::default(),
+        &options,
         &mut string_table,
         0,
         0,
@@ -126,11 +128,26 @@ fn moth_value_paths_are_classified_without_becoming_dependency_clauses() {
 
 #[test]
 fn a_path_inside_a_broken_expression_is_still_graph_active() {
-    let (output, _, _path_fork, _span_builder) = prepare_source("broken #= @assets/logo.svg foo\n");
+    // The path has no same-line selected symbol, so it keeps its file-value role even though the
+    // surrounding expression is incomplete.
+    let (output, _, _path_fork, _span_builder) = prepare_source("broken #= @assets/logo.svg 2\n");
     let references = output.structural_file_references.references();
     assert_eq!(references.len(), 1);
     assert_eq!(
         references[0].class,
         PreparedFileReferenceClass::ResourceFile
+    );
+}
+
+#[test]
+fn an_explicit_extension_path_with_a_selected_symbol_is_an_occurrence_not_a_file_value() {
+    // Plan 2.1: a selected symbol after an explicit-extension path is a malformed qualified
+    // reference, not a reinterpretation of the resource as a namespace. Phase 1 retains the
+    // authored shape and lets provider validation diagnose it.
+    let (output, _, _path_fork, _span_builder) = prepare_source("broken #= @assets/logo.svg foo\n");
+    assert_eq!(output.qualified_references.len(), 1);
+    assert!(
+        output.structural_file_references.references().is_empty(),
+        "the occurrence owns its path row instead of filing it as a resource value"
     );
 }

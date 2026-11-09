@@ -290,16 +290,16 @@ fn resolution_table_collects_different_packages_from_different_source_files() {
     let mut table = ExternalImportResolutionTable::new();
 
     // Same module-relative prefix in different owning modules may resolve to distinct packages.
-    table.insert("src/@page.moth", "lib.js", resolution_table_import(1));
+    table.insert("src/@entry.moth", "lib.js", resolution_table_import(1));
     table.insert(
-        "src/feature/@page.moth",
+        "src/feature/@entry.moth",
         "lib.js",
         resolution_table_import(2),
     );
 
     let source_files = [
-        "src/@page.moth".to_owned(),
-        "src/feature/@page.moth".to_owned(),
+        "src/@entry.moth".to_owned(),
+        "src/feature/@entry.moth".to_owned(),
     ];
     let result = table
         .resolved_imports_for_source_files(&source_files)

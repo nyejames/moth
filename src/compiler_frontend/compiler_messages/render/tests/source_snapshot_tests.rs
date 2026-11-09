@@ -174,7 +174,7 @@ fn materialised_diagnostic_renders_owned_requester_and_donor_snapshots_after_ser
     let donor_directory = tempfile::tempdir().expect("the donor directory should exist");
     let source_root = project_directory.path().join("src");
     fs::create_dir_all(&source_root).expect("the requester source root should exist");
-    let requester_path = source_root.join("@page.moth");
+    let requester_path = source_root.join("@entry.moth");
     let donor_path = donor_directory.path().join("@mod.moth");
     const REQUESTER: &str = "@pkg outer\nvalue I32 = outer(1)\n";
     const DONOR: &str = "inner type U |text String, result U| -> U:\n    return result\n;\n\

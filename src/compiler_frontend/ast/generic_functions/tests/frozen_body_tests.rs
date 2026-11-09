@@ -15,7 +15,7 @@ use super::super::{
 use super::ModuleMaterialisationInput;
 use super::artefact_emit::{ModuleMaterialisationContext, check_materialisation_row_identity};
 use super::frozen_file_references::StableResolvedFileReferenceOutcome;
-use super::frozen_syntax::{SharedDonorIdentity, StableBodySyntax};
+use super::frozen_syntax::{SharedDonorIdentity, StableBodyCaptureFacts, StableBodySyntax};
 use super::preparation_freeze::{ModuleMaterialisationCapture, ModuleMaterialisationPreparation};
 use super::stable_types::GeneratedFoldedValueMaterialiser;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
@@ -52,7 +52,8 @@ use crate::compiler_frontend::folded_value::{
 };
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    HeaderParseOptions, bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
+    FileRole, HeaderParseOptions, bind_module_headers, prepare_file_from_tokens,
+    prepare_header_syntax,
 };
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
@@ -244,8 +245,11 @@ fn capture_test_body(
         *source_file,
         path_fork,
         Some(&donor_identity),
-        Some(&facts),
-        FrozenIdentityHandle::new(),
+        StableBodyCaptureFacts {
+            qualified_references: &[],
+            stage0_resolution_facts: Some(&facts),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+        },
         &no_content_value,
     )
     .expect("test body path rows should be resolved before capture")
@@ -370,8 +374,11 @@ fn frozen_content_value_captures_and_reinterns_resource_pieces() {
         source_file,
         &path_fork,
         Some(&donor_identity),
-        Some(&facts),
-        FrozenIdentityHandle::new(),
+        StableBodyCaptureFacts {
+            qualified_references: &[],
+            stage0_resolution_facts: Some(&facts),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+        },
         &|_| {
             Ok(PublicFoldedValue::String(OwnedFoldedString::Pieces(vec![
                 OwnedFoldedStringPiece::Text("private content: ".to_owned()),
@@ -460,8 +467,11 @@ fn missing_content_fold_fails_loudly_during_capture() {
         source_file,
         &path_fork,
         Some(&donor_identity),
-        Some(&facts),
-        FrozenIdentityHandle::new(),
+        StableBodyCaptureFacts {
+            qualified_references: &[],
+            stage0_resolution_facts: Some(&facts),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+        },
         &|_| {
             Err(InfrastructureFailure::internal(
                 CompilerStage::GenericMaterialisation,
@@ -490,8 +500,11 @@ fn non_string_content_fold_fails_loudly_during_capture() {
         source_file,
         &path_fork,
         Some(&donor_identity),
-        Some(&facts),
-        FrozenIdentityHandle::new(),
+        StableBodyCaptureFacts {
+            qualified_references: &[],
+            stage0_resolution_facts: Some(&facts),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+        },
         &|_| {
             Ok(PublicFoldedValue::FixedScalar(
                 FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32"),
@@ -729,8 +742,11 @@ fn frozen_body_preserves_multiple_referenced_canonical_path_expressions() {
         source_file,
         &path_fork,
         Some(&donor_identity),
-        Some(&facts),
-        FrozenIdentityHandle::new(),
+        StableBodyCaptureFacts {
+            qualified_references: &[],
+            stage0_resolution_facts: Some(&facts),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+        },
         &|_| {
             Err::<PublicFoldedValue, InfrastructureFailure>(InfrastructureFailure::internal(
                 CompilerStage::GenericMaterialisation,
@@ -898,8 +914,11 @@ fn source_body_captures_share_donor_strings_after_construction_owners_drop() {
             source_file,
             &path_fork,
             Some(&donor_identity),
-            Some(&facts),
-            FrozenIdentityHandle::new(),
+            StableBodyCaptureFacts {
+                qualified_references: &[],
+                stage0_resolution_facts: Some(&facts),
+                frozen_identity_handle: FrozenIdentityHandle::new(),
+            },
             &content_value,
         )
         .expect("source body should capture with one declaring donor")
@@ -1054,8 +1073,11 @@ fn canonical_string_only_donors_borrow_identity_without_retaining_file_tokens() 
         source_file,
         &path_fork,
         Some(&donor_identity),
-        body.resolution_facts().map(Arc::as_ref),
-        FrozenIdentityHandle::new(),
+        StableBodyCaptureFacts {
+            qualified_references: &[],
+            stage0_resolution_facts: body.resolution_facts().map(Arc::as_ref),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+        },
         &|_| {
             Err(InfrastructureFailure::internal(
                 CompilerStage::GenericMaterialisation,
@@ -1226,8 +1248,11 @@ fn donor_numeric_literal_text_renders_through_borrowed_origin() {
         source_file,
         &path_fork,
         Some(&donor_identity),
-        body.resolution_facts().map(Arc::as_ref),
-        FrozenIdentityHandle::new(),
+        StableBodyCaptureFacts {
+            qualified_references: &[],
+            stage0_resolution_facts: body.resolution_facts().map(Arc::as_ref),
+            frozen_identity_handle: FrozenIdentityHandle::new(),
+        },
         &|_| {
             Err(InfrastructureFailure::internal(
                 CompilerStage::GenericMaterialisation,
@@ -1572,7 +1597,7 @@ fn generated_identity(name: &str) -> GeneratedFunctionIdentity {
     GeneratedFunctionIdentity::new(
         GeneratedDeclarationIdentity::ModulePrivate(ModulePrivateExecutableIdentity::new(
             origin,
-            "@main.moth".to_owned(),
+            "main.moth".to_owned(),
             ModulePrivateExecutableCategory::GenericFunction,
             name.to_owned(),
             None,
@@ -2031,7 +2056,7 @@ fn resource_default_materialisation_fixture(
     let declaration_identity =
         GeneratedDeclarationIdentity::ModulePrivate(ModulePrivateExecutableIdentity::new(
             module_origin.clone(),
-            "@page.moth".to_owned(),
+            "@entry.moth".to_owned(),
             ModulePrivateExecutableCategory::GenericFunction,
             "draw".to_owned(),
             None,
@@ -2171,7 +2196,7 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
     let declaration_identity =
         GeneratedDeclarationIdentity::ModulePrivate(ModulePrivateExecutableIdentity::new(
             module_origin.clone(),
-            "@page.moth".to_owned(),
+            "@entry.moth".to_owned(),
             ModulePrivateExecutableCategory::GenericFunction,
             "draw".to_owned(),
             None,
@@ -2695,7 +2720,7 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
         let mut source_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
         let source_file = path_fork
-            .try_intern_portable_path("@body.moth", &mut source_table)
+            .try_intern_portable_path("body.moth", &mut source_table)
             .expect("test path fits");
         let path_span = token_span();
         let mut path_syntax = PathSyntaxTable::with_source(SourceId::COMPILATION_ROOT);
@@ -2742,8 +2767,11 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
             source_file,
             &path_fork,
             Some(&donor_identity),
-            Some(&facts),
-            FrozenIdentityHandle::new(),
+            StableBodyCaptureFacts {
+                qualified_references: &[],
+                stage0_resolution_facts: Some(&facts),
+                frozen_identity_handle: FrozenIdentityHandle::new(),
+            },
             &|_| {
                 Err::<PublicFoldedValue, InfrastructureFailure>(InfrastructureFailure::internal(
                     CompilerStage::GenericMaterialisation,
@@ -2779,7 +2807,7 @@ fn materialised_generic_bodies_keep_colliding_path_facts_separate() {
         let (mut path_fork, mut generated_table) =
             generated_materialisation_domain(&owner_path_fork, &owner_string_table);
         let generated_source_file = path_fork
-            .try_intern_portable_path("@body.moth", &mut generated_table)
+            .try_intern_portable_path("body.moth", &mut generated_table)
             .expect("test path fits");
         let materialised = frozen
             .materialise(
@@ -4010,10 +4038,10 @@ fn parse_closure_files(files: &[(&str, &str)]) -> (AstBuildResult, PathInternerF
         &sources,
     );
     let options = HeaderParseOptions {
-        entry_file_id: sources.get_by_canonical_path(entry).map(|source| source.id),
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role: ModuleRootRole::Normal,
+        selected_file: sources
+            .get_by_canonical_path(entry)
+            .map(|source| (source.id, FileRole::ActiveEntryRoot)),
+        ..Default::default()
     };
     let mut outputs = Vec::new();
     let mut const_offset = 0;
@@ -4036,7 +4064,6 @@ fn parse_closure_files(files: &[(&str, &str)]) -> (AstBuildResult, PathInternerF
             owner,
             logical_path,
             syntax,
-            path,
             &options,
             &mut frontend.string_table,
             const_offset,
@@ -4078,8 +4105,8 @@ fn parse_closure_files(files: &[(&str, &str)]) -> (AstBuildResult, PathInternerF
         .headers_to_ast(
             AstBuildRequest {
                 sorted,
-                entry_file_path: entry,
-                root_role: ModuleRootRole::Normal,
+                module_anchor_path: entry,
+                synthesizes_entry_start: true,
                 build_profile: FrontendBuildProfile::Dev,
                 capacity_estimate: Default::default(),
                 resolved_file_references: ResolvedFileReferenceTable::default(),
@@ -4098,7 +4125,7 @@ fn parse_closure_files(files: &[(&str, &str)]) -> (AstBuildResult, PathInternerF
 #[test]
 fn nested_template_retains_distinct_source_dependency_visibility() {
     let (build_result, paths, strings) = parse_closure_files(&[
-        ("@page.moth", "@outer outer\n"),
+        ("@entry.moth", "@outer outer\n"),
         (
             "outer.moth",
             "@inner inner\nouter type T |value T| -> String:\n    return inner(value)\n;\n",
@@ -4181,7 +4208,7 @@ fn callable_only_choice_signature_retains_private_hir_shell() {
 fn repeated_bounded_forwarding_preserves_bodyless_receiver_parameter_owner() {
     let (mut build_result, mut path_fork, mut strings) = parse_closure_files(&[
         (
-            "@page.moth",
+            "@entry.moth",
             concat!(
                 "@label DISPLAY_TEXT, Label\n@box Box\n",
                 "LabelBox as Box of Label\n",

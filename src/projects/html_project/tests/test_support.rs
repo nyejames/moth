@@ -28,7 +28,7 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::module_compilation::artefact::{
-    ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
+    EntryRootMetadata, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
 };
 use crate::compiler_frontend::module_compilation::{
     Module, ModuleExternalImport, ModuleRootActivity,
@@ -113,14 +113,15 @@ pub(crate) fn create_test_module(entry_point: PathBuf, string_table: &mut String
             functions: function_link_facts,
         },
         metadata: ModuleCompilerMetadata {
-            entry_point,
-            const_top_level_fragments: vec![],
-            // Most builder fixtures represent active page roots. API-only modules opt into the
-            // explicit default when a test needs to verify artifact filtering.
-            root_activity: ModuleRootActivity {
-                has_non_trivial_root_body: true,
-                ..ModuleRootActivity::default()
-            },
+            // Most builder fixtures represent active entry roots. API-only modules clear this
+            // typed presence when a test needs to verify artifact filtering.
+            entry: Some(EntryRootMetadata {
+                entry_point,
+                const_top_level_fragments: vec![],
+                root_activity: ModuleRootActivity {
+                    runtime_fragment_count: 1,
+                },
+            }),
             doc_fragments: vec![],
             materialisation_context: None,
         },

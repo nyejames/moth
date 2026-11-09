@@ -4,7 +4,7 @@ This directory owns the public Rust project-builder tutorial and its SDK
 contracts. Read `creating-a-builder.mtf` for the complete path from a definition
 to output, then the focused references below.
 
-`@page.moth` owns website composition. It doesn't import this routing reference.
+`@entry.moth` owns website composition. It doesn't import this routing reference.
 The examples use the `moth::builder` and `moth::host` public facades. Physical
 crate placement doesn't change compiler, builder or runtime ownership.
 
@@ -21,7 +21,7 @@ crate placement doesn't change compiler, builder or runtime ownership.
 ## Shared authorities
 
 `docs/compiler-design-overview.md` owns semantic compilation, identities,
-result slots, validated compiler handoffs and the normal-root entry contract.
+result slots, validated compiler handoffs and the entry-root start contract.
 `docs/build-system-design.md` owns graph orchestration, package topology,
 configuration, assembly, lifecycle inputs and output ownership.
 
@@ -48,7 +48,7 @@ manual binding path. Registration is explicit. Rust signatures use the closed
 host profile, not guessed layouts or source generation. A host binding isn't a
 network route or a portable browser implementation.
 
-Normal-root startup preserves its success fragment slots and built-in Error!
+Entry-root startup preserves its success fragment slots and built-in Error!
 channel. Publication waits for success and never implies rollback of prior IO.
 Templates remain strings. Resource strings retain their structural origins
 until a valid output context supplies their characters.

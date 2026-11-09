@@ -62,8 +62,7 @@ use crate::compiler_frontend::public_interface::{
 #[cfg(test)]
 use crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity;
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModuleRootRole,
-    StableModuleOriginIdentity,
+    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, StableModuleOriginIdentity,
 };
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::{
@@ -360,6 +359,7 @@ impl GenericTemplateArtefact {
             Rc::clone(&module_resources),
             context.module_origin.clone(),
             Arc::clone(&materialised_body.resolution_facts),
+            Arc::clone(&materialised_body.qualified_reference_targets),
         );
         let build_context = AstBuildContext {
             external_package_registry: Arc::clone(external_package_registry),
@@ -367,7 +367,7 @@ impl GenericTemplateArtefact {
             string_table,
             path_fork,
             entry_dir,
-            root_role: ModuleRootRole::Support,
+            synthesizes_entry_start: false,
             build_profile,
             file_value_resolution: Some(file_value_resolution),
             config_resolution: None,
@@ -390,6 +390,7 @@ impl GenericTemplateArtefact {
         let binding_environment = self
             .materialise_binding_environment(
                 context,
+                &materialised_body,
                 &source_file,
                 external_package_registry,
                 path_fork_ref,
@@ -464,6 +465,7 @@ impl GenericTemplateArtefact {
     fn materialise_binding_environment(
         &self,
         context: &ModuleMaterialisationContext,
+        materialised_body: &super::frozen_syntax::MaterialisedBody,
         source_file: &PathId,
         external_package_registry: &ExternalPackageRegistry,
         path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
@@ -478,6 +480,11 @@ impl GenericTemplateArtefact {
                 string_table,
             )?),
         );
+        // Qualified-reference targets are semantic facts, not donor syntax. Share the exact map
+        // the materialised body and its value services use, so generated AST lowering consumes
+        // the declaration the authored path selected without copying it or re-resolving a name.
+        environment.qualified_reference_targets =
+            Arc::clone(&materialised_body.qualified_reference_targets);
         for binding in &self.declarations {
             let local_path = binding.local_path;
             environment

@@ -562,8 +562,11 @@ fn build_html_project_local_js_import_emits_generated_glue() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "@drawing.js draw\nvalue = draw()\n")
-        .expect("should write page");
+    fs::write(
+        src.join("@entry.moth"),
+        "@drawing.js draw\nvalue = draw()\n",
+    )
+    .expect("should write page");
     fs::write(
         src.join("drawing.js"),
         "/**\n * @moth.sig draw || -> I32\n */\nexport function draw() { return 7; }\n",
@@ -882,7 +885,7 @@ fn build_html_registered_source_package_preserves_provider_identity_and_order() 
                     "project #= (\n    name = \"package_campaign\",\n)\nhtml #= ()\n",
                 ),
                 (
-                    project_root.join("@page.moth"),
+                    project_root.join("@entry.moth"),
                     "@binding.js provider_value as project_value\n@campaign package_value\n@x/y\n[:project=[project_value()]|package=[package_value()]|[y.marker]]\n",
                 ),
                 (
@@ -1063,7 +1066,7 @@ fn build_html_normal_sibling_name_is_not_visible_from_child_module() {
                 "config.moth",
                 "project #= (\n    name = \"sibling_boundary\",\n)\nhtml #= ()\n",
             ),
-            ("src/@page.moth", "@consumer value\n[:[value]]\n"),
+            ("src/@entry.moth", "@consumer value\n[:[value]]\n"),
             (
                 "src/consumer/@mod.moth",
                 "export:\n    @provider value\n;\n",
@@ -1120,17 +1123,17 @@ fn build_html_project_shared_support_provider_keeps_page_wrappers_isolated() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@shared root_value\n[:[root_value()]]\n",
     )
     .expect("should write homepage");
     fs::write(
-        about.join("@page.moth"),
+        about.join("@entry.moth"),
         "@shared about_value\n[:[about_value()]]\n",
     )
     .expect("should write about page");
     fs::write(
-        shared.join("+package.moth"),
+        shared.join("@package.moth"),
         "export:\n    @binding.js root_value, about_value, unused_value\n;\n",
     )
     .expect("should write shared support facade");
@@ -1285,7 +1288,7 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@drawing get_number\nvalue = get_number() catch:\n    then 0\n;\n",
     )
     .expect("should write page");
@@ -1367,7 +1370,7 @@ fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module()
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@drawing.js get_number\nvalue = get_number()\nio.line([: [value]])\n",
     )
     .expect("should write page");
@@ -1411,7 +1414,7 @@ fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_m
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@drawing.js get_number\nvalue = get_number() catch:\n    then 0\n;\n",
     )
     .expect("should write page");
@@ -1453,7 +1456,7 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@drawing.js get_number\nunused || -> I32, Error!:\n    return get_number()!\n;\nvalue = 1\n",
     )
     .expect("should write page");
@@ -1512,7 +1515,7 @@ fn build_html_project_unreachable_html_canvas_helper_dependency_does_not_emit_ru
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         r#"@html canvas, get_canvas_context
 #[canvas:
   [$in id:unused_canvas]
@@ -1580,7 +1583,7 @@ fn build_html_project_web_canvas_emits_builtin_js_asset_and_glue() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@web/canvas\nrun |id String| -> String, Error!:\n    canvas_ref = canvas.get_canvas(id)!\n    ctx ~= canvas.context_2d(canvas_ref)!\n    canvas.set_line_width(~ctx, 2.0)\n    gradient ~= canvas.create_linear_gradient(ctx, 0.0, 0.0, 10.0, 0.0)!\n    canvas.add_color_stop(~gradient, 0.0, \"red\")!\n    canvas.set_fill_gradient(~ctx, gradient)\n    canvas.fill_rect(~ctx, 0.0, 0.0, 10.0, 10.0)\n    return \"ok\"\n;\nresult = run(\"game\") catch:\n    then \"error\"\n;\nio.line([: [result]])\n",
     )
     .expect("should write page");
@@ -1659,7 +1662,7 @@ fn build_html_project_html_canvas_helper_emits_builtin_js_asset_and_glue() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@html get_canvas_context\ndraw || -> String, Error!:\n    context = get_canvas_context(\"game_canvas\")!\n    return \"ok\"\n;\nresult = draw() catch:\n    then \"error\"\n;\nio.line([: [result]])\n",
     )
     .expect("should write page");
@@ -1721,8 +1724,8 @@ fn build_project_discards_backend_warnings_when_multimodule_diagnostics_fail() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src_dir.join("@page.moth"), "value = 1\n").expect("should write homepage");
-    fs::write(docs_dir.join("@page.moth"), "value = 2\n").expect("should write docs page");
+    fs::write(src_dir.join("@entry.moth"), "value = 1\n").expect("should write homepage");
+    fs::write(docs_dir.join("@entry.moth"), "value = 2\n").expect("should write docs page");
 
     let builder = MultiModuleDiagnosticBuilder;
     let result = build_project(
@@ -1762,7 +1765,7 @@ fn build_html_project_literal_const_change_reaches_next_build_without_asset() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@helper as helper_ns\n#[:constant=[helper_ns.triangles_ns is 4]]\n",
     )
     .expect("should write page");
@@ -1849,7 +1852,7 @@ fn build_html_project_mixed_const_and_function_emits_single_glue_module() {
     )
     .expect("should write config");
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "@gl_mixed.js primitive_triangles, u32_max, double_u32\n\ndoubled U32 = double_u32(primitive_triangles)\ndoubled_again U32 = double_u32(doubled)\n[:mixed doubled=[doubled]/[doubled_again] const=[primitive_triangles is 4]]\n",
     )
     .expect("should write page");
@@ -1921,7 +1924,7 @@ fn write_shared_glue_project(root: &Path, page_dirs: &[&str], page_export: &str)
     )
     .expect("should write config");
     fs::write(
-        shared.join("+package.moth"),
+        shared.join("@package.moth"),
         "export:\n    @provider.js get_number, get_other\n;\n",
     )
     .expect("should write provider facade");
@@ -1934,7 +1937,7 @@ fn write_shared_glue_project(root: &Path, page_dirs: &[&str], page_export: &str)
         let page_root = root.join(page_dir);
         fs::create_dir_all(&page_root).expect("should create page directory");
         fs::write(
-            page_root.join("@page.moth"),
+            page_root.join("@entry.moth"),
             format!("@shared {page_export}\nvalue = {page_export}() catch:\n    then 0\n;\n"),
         )
         .expect("should write page");

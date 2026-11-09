@@ -7,7 +7,7 @@ message_contains = ["Collection loop source must be a collection, found 'I32'. U
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0029"
 reason = "invalid_loop_header.collection_source_not_collection"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 3
 column = 10
 count = 1

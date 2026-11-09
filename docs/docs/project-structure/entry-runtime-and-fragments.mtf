@@ -1,102 +1,58 @@
-**Current support.** An HTML entry is selected from implemented activity on a normal module root: a non-trivial root body, a direct const top-level fragment or a runtime fragment. A general `$entry` root purpose is deferred; the earlier `$page` proposal is superseded and is not implemented. Dependency roots remain non-activating.
+`@entry.moth` is the executable entry root. Its presence makes the directory entry-eligible. Top-level runtime work in that file becomes a dormant compiler-owned entry, which entry assembly activates exactly once for a selected page. `@mod.moth` and `@package.moth` are API-only facades with no start function and no fragments, and a dependency never activates its entry.
 
-Every selected normal module is compiled into an immutable module artefact. Its top-level runtime work becomes a dormant compiler-owned entry. Entry assembly activates that module-owned entry exactly once for a selected page. A dependency exposes declarations without activating its root.
+### Entry ownership
 
-### Current entry activity and future root purpose
+Every selected module compiles into an immutable module artefact. Only a module with `@entry.moth` owns dormant root runtime, direct page fragments and an implicit `start`. An API facade may declare functions and constants but rejects top-level runtime statements, direct fragments and builder slots.
 
-The Alpha HTML builder selects a page from authored root activity. Any of these
-makes a normal root an entry candidate:
+The entry still has its built-in `Error!` contract. Checked numeric failure propagates to that contract, and compatible top-level postfix `!` is legal. Custom typed errors still need explicit recovery. A generated terminal handler closes the entry boundary, so an unhandled built-in failure does not become an implicit panic. See @../progress (Progress) for compiler support.
 
-- a non-trivial top-level runtime body
-- a direct const top-level fragment
-- a runtime top-level fragment
+### Entry eligibility and activation
 
-A direct named builder contribution such as a const root `$in title` is a const
-fragment, so a root with only metadata still counts as output-producing
-activity and emits a complete document.
+Eligibility follows file presence. An empty `@entry.moth`, a static-only entry and a metadata-only entry all count. No activity heuristic selects a page.
 
-The accepted future direction is a general `$entry` root purpose. It is deferred
-and must not be used in source today. The earlier `$page` proposal is
-superseded: `$page` is not an accepted directive and offers no metadata
-arguments. `$entry` will make entry selection explicit while preserving
-directory-derived routes, one page per normal root and dependency
-non-activation. Future `$test` remains a separate non-page purpose. Neither
-future purpose is a metadata path; initial document metadata belongs to builder
-slots.
+Entry assembly activates the selected module-owned entry exactly once. Loading a module, binding its API or importing a package exposes declarations without activating root work. A project-local `@entry.moth` is the only project entry source. Dependency entries and separately compiled source-package entries never activate.
 
-Only a direct top-level const `$in` on the active entry root reaches the
-builder. A nested or aliased insert remains ordinary template composition, and
-runtime top-level templates still contribute only to the default body lane.
-Runtime named builder slots are unsettled final design and are not supported.
+Only a direct top-level const `$in` on the entry reaches the builder. A nested or aliased insert remains ordinary template composition, and runtime top-level templates still contribute only to the default body lane. Runtime named builder slots are not supported.
 
-### Comment and documentation exemptions
+### Comment and documentation templates
 
-Semantically classified `$doc`, `$note` and `$todo` templates are
-documentation/comment processing. They do not create an HTML entry by
-themselves. This exemption follows the template's semantic category, not
-whether its rendered output happens to be empty.
+Semantically classified `$doc`, `$note` and `$todo` templates are documentation or comment processing. They produce no page fragment. This follows the template's semantic category, not whether its rendered output happens to be empty. The entry remains eligible because the file exists.
 
-Assigned or returned template values are ordinary values, not direct output.
-Their containing runtime code follows the normal root placement rules.
+Assigned or returned template values are ordinary values, not direct output. Their containing runtime code follows the normal entry placement rules.
 
 ### Entry-activated root runtime
 
-The selected module root's top-level runtime code becomes a dormant
-compiler-owned entry. Entry assembly activates it exactly
-once. This includes top-level bindings, function calls and other runtime
-statements. Helper files define reusable declarations. They do not own an
-export block or an entry.
-
-The entry has a built-in `Error!` contract. Checked numeric failure propagates to
-that contract, and compatible top-level postfix `!` is legal. Custom typed
-errors still need explicit recovery. A generated terminal handler closes the
-entry boundary; an unhandled built-in failure does not become an implicit panic.
-See @../progress (Progress) for compiler support.
+The entry file's top-level runtime code becomes a dormant compiler-owned entry. Entry assembly activates it exactly once. This includes top-level bindings, function calls and other runtime statements. Helper files define reusable declarations and never own an entry or an export block.
 
 ### Page fragments
 
-Two forms of direct top-level template in a module root become page fragments:
+Two forms of direct top-level template in `@entry.moth` become page fragments:
 
 - A const fragment uses the `#` prefix before the opening bracket. It folds at compile time and is emitted as static HTML.
-- A runtime fragment uses the plain bracket form without `#`. The module's entry evaluates it when entry assembly activates the module, but publication waits until that invocation succeeds.
+- A runtime fragment uses the plain bracket form without `#`. The entry evaluates it when assembly activates the module, and publication waits until that invocation succeeds.
 
-The builder preserves source order between static and runtime fragments. Static
-fragments remain in the document even when startup fails. Runtime fragments use
-generated slots, and the entry boundary fills those slots only after successful
-startup. Failure publishes none of that invocation's runtime fragments. This is
-not rewind: other side effects do not roll back.
+The builder preserves source order between static and runtime fragments. Static fragments remain in the document even when startup fails. Runtime fragments use generated slots, and the entry boundary fills those slots only after successful startup. Failure publishes none of that invocation's runtime fragments. This is not rewind: other side effects do not roll back.
 
-The generated terminal handler presents a generic safe release notice, not the
-application's `Error` message as HTML. Development presentation, including the
-three startup categories and invocation-local reporting, is owned by
-`docs/build-system-design.md` > `Development entry-error reports` and summarised at
-@../../developer-docs/compiler-design/html-assembly-and-output/#document-shell-and-fragments (HTML assembly).
+The generated terminal handler presents a generic safe release notice, not the application's `Error` message as HTML. Development presentation, including the three startup categories and invocation-local reporting, is owned by `docs/build-system-design.md` > `Development entry-error reports` and summarised at @../../developer-docs/compiler-design/html-assembly-and-output/#document-shell-and-fragments (HTML assembly).
 
-### Metadata-only pages
+### Metadata-only and empty pages
 
-A root with only direct const builder slot contributions still emits a complete
-document. A page containing only resource-bearing metadata also emits the
-resources it uses without non-empty executable HIR, an artificial fragment or
-generated runtime code.
+An entry with only direct const builder slot contributions still produces a complete document. A page containing only resource-bearing metadata also emits the resources it uses without non-empty executable HIR, an artificial fragment or generated runtime code.
 
-### Dependency roots
+An empty `@entry.moth` produces the builder's ordinary default document for its route. The route exists because the entry file exists.
 
-Dependency module roots never activate their root runtime. When a module is
-bound for its public API, its top-level runtime code, entry body and page
-fragments remain dormant. Only exported declarations remain available.
+### Dependency entries
 
-A consumer cannot make a dependency's root work or fragments part of its own
-entry, and imported module roots do not contribute named builder slots to the
-consumer. Valid dependency access and `check` remain non-activating.
+An imported module never activates its entry. When a module is bound for its public API, its entry runtime, entry body and page fragments remain dormant. Only exported declarations remain available.
+
+A consumer cannot make a dependency's root work or fragments part of its own entry, and imported entries do not contribute named builder slots to the consumer. An entry-only child publishes no normal API, so a dependency that requests one receives a missing-surface diagnostic. Valid dependency access and `check` remain non-activating.
 
 ### Do not put page fragments in helper files
 
-Helper files should define reusable declarations. The module root should bind
-and use them. Page-producing top-level templates belong in the selected module
-root only. An ordinary file cannot become a page by containing a fragment.
+Helper files define reusable declarations. The entry file binds and uses them. Top-level page templates and builder slots belong in `@entry.moth` only. An ordinary file cannot become a page or contribute a fragment by containing a template.
 
-### Concepts related to runtime fragments
+### Concepts related to entry runtime
 
-- For module identity and root filenames see @#module-roots (Module roots).
+- For module roles and root filenames see @#module-roots (Module roots).
 - For builder slots and command policy see @#entry-config (Entry metadata and builder slots).
-- For routes and synthetic single-file pages see @#html-routing-and-artifacts (HTML routing and artefacts).
+- For routes and single-file pages see @#html-routing-and-artifacts (HTML routing and artefacts).

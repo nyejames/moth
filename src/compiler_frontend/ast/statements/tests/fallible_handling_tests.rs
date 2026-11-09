@@ -483,7 +483,7 @@ fn catch_body_warnings_require_a_warning_sink() {
 fn catch_handler_warning_codes() -> Vec<&'static str> {
     let source = "|BadName|:\n    if 1 is:\n        1 => return 0\n        else => return 0\n        2 => return 0\n    ;\n;";
     let mut path_fork = PathInternerFork::empty();
-    let mut source_context = TestSourceContext::new("@page.moth");
+    let mut source_context = TestSourceContext::new("@entry.moth");
     let style_directives = StyleDirectiveRegistry::built_ins();
     let lexed = source_context
         .tokenize(

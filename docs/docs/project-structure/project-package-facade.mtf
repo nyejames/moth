@@ -1,46 +1,30 @@
-**Current support versus accepted design.** Paired normal/support roots and
-source-package publication are implemented. The deferred `$project` directive
-form remains queued. The project package surface is API-only: no generic
-directive can turn it into an application entry.
-
-The project package facade exposes a project's public API to external
-consumers. A project-root `+*.moth` is an ordinary support root of that
-structural module, not a separate facade node.
+The project package facade exposes a project's public API to external consumers. It is the `@package.moth` file at the selected project root. That file is an ordinary support root of the project's structural module, not a separate facade node.
 
 ### The package surface
 
-One optional `+*.moth` root at the selected project directory is the external
-project package surface. The suffix after `+` is cosmetic. Package assembly
-selects that support interface; it never falls back to the normal root.
+One optional `@package.moth` at the selected project directory is the external project package surface. Package assembly selects that support interface. It never falls back to the normal `@mod.moth` facade.
 
-The support root may define and export its own legal API-only declarations:
-functions, structs, choices, type aliases, traits and compile-time constants.
-Helpers are shared with the normal root, but the two roots cannot import each
-other.
+The directory may also contain `@mod.moth`, `@entry.moth` and `config.moth`. The project can be an application and a package at the same time.
+
+The support root defines and exports its own API-only declarations: functions, structs, choices, type aliases, traits and compile-time constants. Helpers are shared with the other roots, but no root can import another root's local declarations.
 
 ### Facade restrictions
 
 The facade:
 
 - never bypasses an `export:` boundary
-- isn't visible to internal project modules
+- is invisible to internal project modules
 - cannot depend on `@project`
 - cannot expose a semantic fact that depends on project-private context
-- rejects top-level runtime work and page fragments
-- cannot declare an application root purpose, including a future `$entry`
-- has no implicit entry
-- emits no route or HTML artefact
+- rejects top-level runtime work, direct fragments and builder-slot contributions
+- has no implicit start and no route
+- never becomes an application entry
 
-Support roots and the project package facade reject top-level runtime work and
-page fragments, including direct builder slot contributions. They don't merely
-stay inactive. Generic directives also cannot promote a facade or support root
-into an application entry. A future directive cannot weaken this API-only
-boundary without an explicit contract owned by the facade/package design.
+Support roots and the project package facade reject root runtime and page fragments rather than merely staying inactive. The facade has no entry lifecycle to activate.
 
 ### Project package assembly
 
-The compiler produces one immutable module artefact with normal and support
-interfaces. `ProjectPackageAssembly` is a separate link plan over:
+The compiler produces one immutable module artefact with optional normal and support interfaces. `ProjectPackageAssembly` is a separate link plan over:
 
 - the selected support interface
 - selected descendant public interfaces
@@ -49,38 +33,33 @@ interfaces. `ProjectPackageAssembly` is a separate link plan over:
 
 Assembly never recompiles or mutates the facade.
 
-A project may be both an application and a package. Without the facade it has
-no externally consumable Moth package surface.
+Without a project-root `@package.moth`, the project has no externally consumable Moth package surface, even when it has `@mod.moth`.
 
-The facade package identity comes from `project.name`.
+The facade package identity comes from the `project` record's `name` field.
 
 ### External package eligibility
 
-The build system rejects any declaration whose public semantic facts or
-reachable executable implementation directly or transitively depend on private
-`@project`. This includes an exported function that calls a private
-project-dependent helper.
+The build system rejects any declaration whose public semantic facts or reachable executable implementation directly or transitively depend on private `@project`. This includes an exported function that calls a private project-dependent helper.
 
-The validator doesn't treat implementation-only dependence as a reusable
-package specialisation mechanism.
+The validator does not treat implementation-only dependence as a reusable package specialisation mechanism.
+
+### Registered package surfaces
+
+Only the external project package needs a project-root `@package.moth`. Registered Core and Builder source-backed packages keep their existing normal-or-support public-root contract. For example, `packages/html/@mod.moth` and `packages/web/site/@mod.moth` publish normal surfaces without a `@package` root.
+
+Importing a package never activates its entry. A builder that registers a source package publishes that package's declared API surface, not a project facade.
 
 ### Dependency package facades
 
-A dependency package exposes its facade and immutable artefacts to consumers.
-Consumers never see the dependency's private `@project`.
+A dependency package exposes its facade and immutable artefacts to consumers. Consumers never see the dependency's private `@project`.
 
-No declaration exposed through a dependency package facade may directly or
-transitively depend on that dependency's private `@project`. Private
-declarations may use the dependency's own `@project` only when no external
-package export can reach or expose them.
+No declaration exposed through a dependency package facade may directly or transitively depend on that dependency's private `@project`. Private declarations may use the dependency's own `@project` only when no external package export can reach or expose them.
 
-Configuration namespaces are scoped to one project or package compilation
-boundary. A consuming command's unqualified CLI or programmatic inputs don't
-implicitly satisfy a dependency's `$config` contracts.
+Configuration namespaces are scoped to one project or package compilation boundary. A consuming command's unqualified CLI or programmatic inputs do not implicitly satisfy a dependency's `$config` contracts.
 
 ### Concepts related to the project package facade
 
 - For module root rules see @#module-roots (Module roots).
-- For entry activity and non-activation see @#entry-runtime-and-fragments (Active-root runtime and fragments).
+- For entry runtime and non-activation see @#entry-runtime-and-fragments (Entry runtime and fragments).
 - For package origins and backing see @../packages/#package-origins-and-backing (Package origins and backing).
 - For the full facade contract see @https://github.com/nyejames/moth/blob/main/docs/build-system-design.md (Build system design).

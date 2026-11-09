@@ -12,6 +12,9 @@ executable runtime below describe accepted target design, not available APIs.
 
 `SourcePackage::new` assigns the public package root. `from_dir` supplies its
 installed files as an absolute path, and `finish` rejects a relative one.
+The installed directory needs at least one API facade root, `@mod.moth` or
+`@package.moth`. A collocated `@entry.moth` is allowed but never activates, and
+an entry-only directory is not an importable source package.
 Registration through `BuilderDefinition::source_package` records Builder
 provenance without asking the caller to construct an internal registry entry.
 A package root may have several components, such as `@game/ui`. `finish`
@@ -22,15 +25,15 @@ such as `@game/ui` and `@game/audio` don't overlap.
 [codeblock, $code("rust"):
     let install_root = std::path::PathBuf::from("/srv/game/installed-packages");
     let package = SourcePackage::new("@ui")
-        .from_dir(install_root.join("ui"))
-        .available_in_templates();
+        .from_dir(install_root.join("ui"));
 ]
 
-`available_in_templates` makes the package's exported constants eligible for
-implicit template scope. It doesn't inject arbitrary Rust functions, expose
-private constants or change Moth's no-shadowing rules. Ambiguous visible names
-are errors. `finish` rejects the package unless the same definition also calls
-`moth_templates`.
+Template scope is not a package registration option. The only implicit `.mtf`
+helper scope is the compiler-standard `@html` prelude, owned by the official
+HTML builder package set. A builder cannot substitute a source package under
+`@html` or opt arbitrary exported constants into template scope. Application
+data reaches a template through an explicit qualified reference such as
+`@provider symbol`. Ambiguous visible names are still errors.
 
 Packages compile in their own semantic boundaries with the same exact numeric
 identities and language-owned defaults. Builder source packages don't inherit

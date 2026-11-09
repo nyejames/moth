@@ -5,7 +5,7 @@ diagnostic_codes = ["MOTH-SYNTAX-0007"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0007"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1
 column = 13
 count = 1

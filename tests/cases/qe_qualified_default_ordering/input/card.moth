@@ -1,0 +1,10 @@
+-- The consumer file sorts before both providers, so the parameter defaults must create their own
+-- ordering edges. `@settings title` is an expression-qualified constant and `@intro.mtf` is the
+-- equivalent content-source file value.
+render |title String = @settings title| -> String:
+    return title
+;
+
+content |body String = @intro.mtf| -> String:
+    return body
+;

@@ -37,8 +37,8 @@ use crate::compiler_frontend::instrumentation::{
     FrontendCounter, add_frontend_counter, increment_frontend_counter,
 };
 use crate::compiler_frontend::module_compilation::artefact::{
-    Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts, ModuleRootActivity,
-    ResolvedConstFragment,
+    EntryRootMetadata, Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
+    ModuleRootActivity, ResolvedConstFragment,
 };
 use crate::compiler_frontend::module_compilation::context::ModuleCompilationContext;
 use crate::compiler_frontend::module_compilation::external_imports::collect_external_import_candidates;
@@ -90,17 +90,20 @@ use std::sync::Arc;
 pub(crate) struct BoracleModuleInput {
     pub(crate) hir: HirModule,
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
-    pub(crate) entry_point: PathBuf,
+    /// The preparation anchor that located this module's source. Boracle analyses any module,
+    /// including entryless API-only roots, so this is a source identity rather than an entry.
+    pub(crate) source_path: PathBuf,
 }
 
 /// Compile one ready module through the canonical local semantic sequence.
 ///
 /// WHAT: binds retained header syntax against completed provider interfaces, orders local
-///       declarations, runs AST semantics, projects the public interface, lowers and validates HIR,
-///       collects link facts, borrow-validates, completes generated semantic work and closes the
-///       public interface. It receives no source text or tokens and cannot rerun file preparation.
-///       The active module origin and entry file are resolved from the retained active root
-///       `SourceId`, never reconstructed from source paths.
+///       declarations, runs AST semantics, projects one interface per present facade root, lowers
+///       and validates HIR, collects link facts, borrow-validates, completes generated semantic
+///       work and closes each public interface. It receives no source text or tokens and cannot
+///       rerun file preparation. The module origin is resolved from the retained preparation
+///       anchor `SourceId`, and the executable entry file from the entry root `SourceId`, never
+///       reconstructed from source paths.
 /// WHY: this is the one production owner of the binding -> ordering -> AST -> HIR -> borrow
 ///      sequence. Everything the sequence needs arrives as immutable input, and everything it
 ///      produces leaves as one typed outcome, so the build system can schedule it without knowing
@@ -112,16 +115,18 @@ pub(crate) fn compile_module(
     known_generated: KnownGeneratedFunctions<'_>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
 ) -> Result<ModuleCompilationOutcome, Box<InfrastructureErrors>> {
-    // The entry file is a retained preparation identity, so it is resolved from the payload
-    // rather than repeated as an argument the caller must keep in sync.
-    let entry_file_path = prepared
-        .entry_file_path(context.source_files)?
+    // The preparation anchor and executable entry root are retained identities, so both are
+    // resolved from the payload rather than repeated as arguments the caller must keep in sync.
+    let module_anchor_path = prepared
+        .preparation_anchor_path(context.source_files)?
         .to_path_buf();
-    let entry_file_path = entry_file_path.as_path();
+    let module_anchor_path = module_anchor_path.as_path();
+    let entry_point_path = prepared.entry_point_path(context.source_files)?;
+    let synthesizes_entry_start = prepared.synthesizes_entry_start();
+    let preparation_anchor = prepared.preparation_anchor()?;
+    let facade_surface_roots = prepared.facade_surface_roots();
 
     let PreparedModuleInput {
-        active_root_file_id,
-        support_root_file_id,
         candidate_source_ids,
         source_module_origins,
         prepared_header_syntax,
@@ -130,20 +135,21 @@ pub(crate) fn compile_module(
         path_fork,
         source_file_count,
         source_byte_count,
+        ..
     } = prepared;
     resolved_file_references.validate()?;
-    // The active module origin is resolved from the shared boundary source-origin table using the
-    // retained active-root `SourceId`, not from a loose origin argument. Preparation already
-    // validated the active root's table origin against the expected active origin, so the semantic
-    // projection re-derives the same origin from the table and validates every directly-defined
-    // public header against it.
-    let active_module_origin = source_module_origins
-        .origin_for(active_root_file_id)?
+    // The module origin is resolved from the shared boundary source-origin table using the
+    // retained preparation-anchor `SourceId`, not from a loose origin argument. It anchors
+    // resource and generated-identity provenance for the one structural module; it grants no
+    // surface or entry authority. Preparation already validated the anchor's table origin, so
+    // the semantic projection re-derives the same origin from the table.
+    let module_origin = source_module_origins
+        .origin_for(preparation_anchor)?
         .unwrap_or_else(|| {
             crate::compiler_bug!(
                 CompilerStage::ProjectBuildAssembly,
-                "semantic module compilation: active root file id {} has no module origin",
-                active_root_file_id.index()
+                "semantic module compilation: preparation anchor file id {} has no module origin",
+                preparation_anchor.index()
             )
         })
         .clone();
@@ -163,13 +169,15 @@ pub(crate) fn compile_module(
         known_generated,
         preparation_warnings,
         SemanticStageInputs {
-            support_root_file_id,
+            facade_surface_roots,
             candidate_source_ids,
             prepared_header_syntax,
             source_module_origins,
-            active_root_file_id,
-            active_module_origin,
-            entry_file_path,
+            preparation_anchor,
+            module_origin,
+            module_anchor_path,
+            entry_point_path,
+            synthesizes_entry_start,
             source_file_count,
             source_byte_count,
             resolved_file_references,
@@ -187,8 +195,8 @@ pub(crate) fn compile_module(
             let CompleteSemanticStage {
                 module,
                 warnings,
-                public_interface,
-                support_public_interface,
+                normal_interface,
+                support_interface,
                 generated_delta,
                 resource_source_associations,
             } = *output;
@@ -201,8 +209,8 @@ pub(crate) fn compile_module(
                     resource_source_associations,
                     string_table,
                     path_fork,
-                    public_interface,
-                    support_public_interface,
+                    normal_interface,
+                    support_interface,
                 }),
                 warnings,
                 sidecar_warnings,
@@ -237,13 +245,15 @@ pub(crate) fn compile_module_for_boracle(
     // Both typed lanes stay intact until the final build boundary performs the one vessel
     // conversion. Infrastructure errors propagate without building a second vessel or cloning
     // the local table.
-    let entry_file_path = prepared
-        .entry_file_path(context.source_files)?
+    let module_anchor_path = prepared
+        .preparation_anchor_path(context.source_files)?
         .to_path_buf();
-    let entry_file_path = entry_file_path.as_path();
+    let module_anchor_path = module_anchor_path.as_path();
+    let entry_point_path = prepared.entry_point_path(context.source_files)?;
+    let synthesizes_entry_start = prepared.synthesizes_entry_start();
+    let preparation_anchor = prepared.preparation_anchor()?;
+    let facade_surface_roots = prepared.facade_surface_roots();
     let PreparedModuleInput {
-        active_root_file_id,
-        support_root_file_id,
         candidate_source_ids,
         source_module_origins,
         prepared_header_syntax,
@@ -252,15 +262,16 @@ pub(crate) fn compile_module_for_boracle(
         path_fork,
         source_file_count,
         source_byte_count,
+        ..
     } = prepared;
     resolved_file_references.validate()?;
-    let active_module_origin = source_module_origins
-        .origin_for(active_root_file_id)?
+    let module_origin = source_module_origins
+        .origin_for(preparation_anchor)?
         .unwrap_or_else(|| {
             crate::compiler_bug!(
                 CompilerStage::ProjectBuildAssembly,
-                "semantic Boracle compilation: active root file id {} has no module origin",
-                active_root_file_id.index()
+                "semantic Boracle compilation: preparation anchor file id {} has no module origin",
+                preparation_anchor.index()
             )
         })
         .clone();
@@ -280,12 +291,14 @@ pub(crate) fn compile_module_for_boracle(
         preparation_warnings,
         SemanticStageInputs {
             prepared_header_syntax,
-            support_root_file_id,
+            facade_surface_roots,
             candidate_source_ids,
             source_module_origins,
-            active_root_file_id,
-            active_module_origin,
-            entry_file_path,
+            preparation_anchor,
+            module_origin,
+            module_anchor_path,
+            entry_point_path,
+            synthesizes_entry_start,
             source_file_count,
             source_byte_count,
             resolved_file_references,
@@ -315,12 +328,23 @@ pub(crate) fn compile_module_for_boracle(
 ///      classification, instead of a parameter list that hides which value came from where.
 struct SemanticStageInputs<'a> {
     prepared_header_syntax: PreparedHeaderSyntax,
-    support_root_file_id: Option<crate::compiler_frontend::source::SourceId>,
+    /// The present API facade roots in the fixed normal, then support slots. Each present slot
+    /// projects one interface; two empty slots mean the module publishes none.
+    facade_surface_roots: [Option<(SourceId, ModuleRootRole)>; 2],
     candidate_source_ids: Vec<SourceId>,
     source_module_origins: Arc<SourceModuleOriginTable>,
-    active_root_file_id: SourceId,
-    active_module_origin: StableModuleOriginIdentity,
-    entry_file_path: &'a Path,
+    /// The one root selected to anchor preparation. It identifies which projection input came from
+    /// the AST anchor, not which surfaces the module publishes.
+    preparation_anchor: SourceId,
+    /// The stable origin of the preparation anchor. It anchors the AST module identity for
+    /// resource and generated-identity provenance.
+    module_origin: StableModuleOriginIdentity,
+    /// The preparation-anchor path, used only to locate the module's AST entry directory.
+    module_anchor_path: &'a Path,
+    /// The executable entry-root path, or a typed absence for an entryless module.
+    entry_point_path: Option<&'a Path>,
+    /// Whether preparation synthesized the compiler-owned `start` body.
+    synthesizes_entry_start: bool,
     source_file_count: usize,
     source_byte_count: usize,
     /// Stage 0's settled file-reference targets, consumed by dependency sorting for content edges.
@@ -344,8 +368,8 @@ enum SemanticStageRequest {
 struct CompleteSemanticStage {
     module: Module,
     warnings: DiagnosticBag,
-    public_interface: PublicSemanticInterface,
-    support_public_interface: Option<PublicSemanticInterface>,
+    normal_interface: Option<PublicSemanticInterface>,
+    support_interface: Option<PublicSemanticInterface>,
     generated_delta: GeneratedFunctionDelta,
     resource_source_associations: Vec<ResourceSourceAssociation>,
 }
@@ -371,12 +395,14 @@ fn run_semantic_stages(
     let _ = request;
     let SemanticStageInputs {
         prepared_header_syntax,
-        support_root_file_id,
+        facade_surface_roots,
         candidate_source_ids,
         source_module_origins,
-        active_root_file_id,
-        active_module_origin,
-        entry_file_path,
+        preparation_anchor,
+        module_origin,
+        module_anchor_path,
+        entry_point_path,
+        synthesizes_entry_start,
         source_file_count,
         source_byte_count,
         resolved_file_references,
@@ -415,9 +441,6 @@ fn run_semantic_stages(
     };
 
     let mut generated_transaction = GeneratedFunctionTransaction::new(known_generated);
-    let active_root_role = context
-        .root_role_override
-        .unwrap_or_else(|| active_module_origin.role());
     let external_dependency_resolution_table = context.external_dependency_resolution_table;
 
     // 1. Bind retained header syntax against provider interfaces.
@@ -445,8 +468,6 @@ fn run_semantic_stages(
     )?;
 
     let root_activity = ModuleRootActivity {
-        has_non_trivial_root_body: sorted.has_non_trivial_root_body,
-        const_fragment_count: sorted.const_fragment_count,
         runtime_fragment_count: sorted.entry_runtime_fragment_count,
     };
 
@@ -461,44 +482,33 @@ fn run_semantic_stages(
     // callable identity, so best-effort header receiver names never mask valid generic
     // receiver methods or preempt AST receiver diagnostics. The draft is retained only
     // on overall semantic success, so a diagnosed module exposes no component.
-    let export_seed = build_direct_export_seed(
-        &source_module_origins,
-        active_root_file_id,
-        &sorted.headers,
-        &sorted.module_symbols,
-        context.source_provider_dependencies,
-        compiler.external_package_registry.as_ref(),
-        &compiler.string_table,
-        &compiler.path_fork,
-    )?;
-    let support_surface_seed = match support_root_file_id {
-        Some(support_root_file_id) => {
-            let support_origin = source_module_origins
-                .origin_for(support_root_file_id)?
-                .cloned()
-                .ok_or_else(|| {
-                    InfrastructureFailure::internal(
-                        CompilerStage::ProjectBuildAssembly,
-                        format!(
-                            "semantic module compilation: paired support root file id {} has no module origin",
-                            support_root_file_id.index()
-                        ),
-                    )
-                })?;
-            let seed = build_direct_export_seed(
-                &source_module_origins,
-                support_root_file_id,
-                &sorted.headers,
-                &sorted.module_symbols,
-                context.source_provider_dependencies,
-                compiler.external_package_registry.as_ref(),
-                &compiler.string_table,
-                &compiler.path_fork,
-            )?;
-            Some((support_origin, seed))
+    // One seed per present facade root. An entry-only module has no facade root, so it projects
+    // no export surface and no draft at all rather than fabricating an empty interface.
+    let mut facade_seeds = Vec::with_capacity(2);
+    for (surface_root_file_id, role) in facade_surface_roots.into_iter().flatten() {
+        let seed = build_direct_export_seed(
+            &source_module_origins,
+            surface_root_file_id,
+            &sorted.headers,
+            &sorted.module_symbols,
+            context.source_provider_dependencies,
+            compiler.external_package_registry.as_ref(),
+            &compiler.string_table,
+            &compiler.path_fork,
+        )?;
+        let seed_role = seed.module_origin().role();
+        if seed_role != role {
+            return Err(InfrastructureFailure::internal(
+                CompilerStage::ProjectBuildAssembly,
+                format!(
+                    "semantic module compilation: facade root file id {} projects a {seed_role:?} origin instead of its inventory role {role:?}",
+                    surface_root_file_id.index()
+                ),
+            )
+            .into());
         }
-        None => None,
-    };
+        facade_seeds.push((role, surface_root_file_id, seed));
+    }
 
     // Build the transient expanded public source-nominal origin index before `sorted`
     // moves into AST construction. Each origin is derived from the header's retained
@@ -545,12 +555,12 @@ fn run_semantic_stages(
         context,
         compiler,
         sorted,
-        entry_file_path,
-        active_root_role,
+        module_anchor_path,
+        synthesizes_entry_start,
         capacity_estimate,
         &mut warnings,
         resolved_file_references,
-        Some(active_module_origin.clone()),
+        Some(module_origin.clone()),
         std::sync::Arc::clone(&public_source_trait_origins),
         #[cfg(feature = "timers")]
         timing_context,
@@ -561,7 +571,7 @@ fn run_semantic_stages(
     let AstBuildResult {
         ast: mut module_ast,
         public_interface_projection_input,
-        support_public_interface_projection_input,
+        mut support_public_interface_projection_input,
         module_resources,
         materialisation_context: materialisation_context_builder,
         deferred_generic_requests,
@@ -599,23 +609,32 @@ fn run_semantic_stages(
     // after borrow validation, and provider closure assembles the completed public surface.
     // Export-diagnostic and synthetic-interface provenance are already retained in the draft.
     let module_resource_table = module_resources.borrow();
-    let support_surface_role = support_surface_seed
-        .as_ref()
-        .map(|(support_origin, _)| support_origin.role());
-    let mut surface_specs = vec![(
-        active_module_origin.role(),
-        export_seed,
-        public_interface_projection_input,
-    )];
-    if let Some((support_origin, support_seed)) = support_surface_seed {
-        let support_projection =
-            support_public_interface_projection_input.ok_or_else(|| {
+    // The AST built its main projection input from the preparation anchor. Every other present
+    // facade root has its own support projection input. A support facade alone is the anchor, so
+    // it consumes the main input rather than duplicating the same projection.
+    let mut public_interface_projection_input = Some(public_interface_projection_input);
+    let mut surface_specs = Vec::with_capacity(facade_seeds.len());
+    for (role, surface_root_file_id, seed) in facade_seeds {
+        let projection_input = if surface_root_file_id == preparation_anchor {
+            public_interface_projection_input.take().ok_or_else(|| {
                 InfrastructureFailure::internal(
                     CompilerStage::ProjectBuildAssembly,
-                    "semantic module compilation: paired support root has no support public-interface projection input",
+                    "semantic module compilation: the anchor facade root has no public-interface projection input",
                 )
-            })?;
-        surface_specs.push((support_origin.role(), support_seed, support_projection));
+            })?
+        } else {
+            support_public_interface_projection_input
+                .take()
+                .ok_or_else(|| {
+                    InfrastructureFailure::internal(
+                        CompilerStage::ProjectBuildAssembly,
+                        format!(
+                            "semantic module compilation: the {role:?} facade root is not the preparation anchor and has no public-interface projection input"
+                        ),
+                    )
+                })?
+        };
+        surface_specs.push((role, seed, projection_input));
     }
 
     let mut surface_builds = Vec::with_capacity(surface_specs.len());
@@ -689,7 +708,7 @@ fn run_semantic_stages(
     let private_function_origin_seeds = materialisation_context_builder
         .install_concrete_executable_contracts(
             &module_ast.const_values,
-            &active_module_origin,
+            &module_origin,
             &public_origins_by_path,
             &public_source_nominal_type_origins,
             &module_resources.borrow(),
@@ -834,6 +853,26 @@ fn run_semantic_stages(
             })
             .collect::<Result<Vec<_>, InfrastructureFailure>>()?
     };
+    // Entry metadata exists exactly when the module has a start-bearing root. An entryless
+    // module must not carry a dormant start, an entry fragment schedule or root activity facts.
+    let entry_metadata = match entry_point_path {
+        Some(entry_point_path) => Some(EntryRootMetadata {
+            entry_point: entry_point_path.to_path_buf(),
+            const_top_level_fragments,
+            root_activity,
+        }),
+        None => {
+            if !const_top_level_fragments.is_empty() {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    "semantic module compilation: an entryless module retained const top-level fragments",
+                )
+                .into());
+            }
+            debug_assert_eq!(root_activity, ModuleRootActivity::default());
+            None
+        }
+    };
 
     let mut warning_bag = DiagnosticBag::from_diagnostics(std::mem::take(&mut warnings));
     // 6. Lower AST to Higher-level Intermediate Representation (HIR).
@@ -869,7 +908,7 @@ fn run_semantic_stages(
         return Ok(SemanticStageOutput::Boracle(Box::new(BoracleModuleInput {
             hir: hir_module,
             external_package_registry: Arc::clone(compiler.external_package_registry),
-            entry_point: entry_file_path.to_path_buf(),
+            source_path: module_anchor_path.to_path_buf(),
         })));
     }
 
@@ -900,7 +939,6 @@ fn run_semantic_stages(
             materialisation_context_builder.context(),
             &mut generated_never_proofs,
             compiler,
-            entry_file_path,
             #[cfg(feature = "timers")]
             timing_context,
         )
@@ -986,13 +1024,36 @@ fn run_semantic_stages(
         )?;
         public_interfaces.push((role, interface));
     }
-    let public_interface_refs = public_interfaces
-        .iter()
-        .map(|(_, interface)| interface)
-        .collect::<Vec<_>>();
-    let materialisation_context = materialisation_context_builder
-        .freeze(&public_interface_refs)?
-        .map(Arc::new);
+    let materialisation_context = {
+        let public_interface_refs = public_interfaces
+            .iter()
+            .map(|(_, interface)| interface)
+            .collect::<Vec<_>>();
+        materialisation_context_builder
+            .freeze(&public_interface_refs)?
+            .map(Arc::new)
+    };
+    // Each present facade root contributes exactly one closed surface. An entry-only module
+    // contributes none, so both options stay absent rather than borrowing another root's surface.
+    let mut normal_interface = None;
+    let mut support_interface = None;
+    for (role, interface) in public_interfaces {
+        match role {
+            ModuleRootRole::Normal => normal_interface = Some(interface),
+            ModuleRootRole::Support => support_interface = Some(interface),
+            ModuleRootRole::Entry
+            | ModuleRootRole::Shared
+            | ModuleRootRole::SyntheticProjectContext => {
+                return Err(InfrastructureFailure::internal(
+                    CompilerStage::ProjectBuildAssembly,
+                    format!(
+                        "semantic module compilation: a facade draft carries the non-facade role {role:?}"
+                    ),
+                )
+                .into());
+            }
+        }
+    }
     let resource_table = Rc::try_unwrap(module_resources)
         .map(|cell| cell.into_inner())
         .unwrap_or_else(|_| {
@@ -1053,30 +1114,14 @@ fn run_semantic_stages(
                     functions: function_link_facts,
                 },
                 metadata: ModuleCompilerMetadata::from_hir_lowering(
-                    entry_file_path.to_path_buf(),
+                    entry_metadata,
                     lowering_metadata,
-                    const_top_level_fragments,
-                    root_activity,
                     materialisation_context,
                 ),
             },
             warnings: warning_bag,
-            public_interface: public_interfaces
-                .iter()
-                .find(|(role, _)| *role == active_module_origin.role())
-                .map(|(_, interface)| interface.clone())
-                .or_else(|| {
-                    public_interfaces
-                        .first()
-                        .map(|(_, interface)| interface.clone())
-                })
-                .expect("a module surface interface must exist"),
-            support_public_interface: support_surface_role.and_then(|support_role| {
-                public_interfaces
-                    .iter()
-                    .find(|(role, _)| *role == support_role)
-                    .map(|(_, interface)| interface.clone())
-            }),
+            normal_interface,
+            support_interface,
             generated_delta,
             resource_source_associations,
         }),
@@ -1140,14 +1185,14 @@ fn sort_headers(
 // no-timer builds; bundling it would add a context struct for one field.
 #[allow(
     clippy::too_many_arguments,
-    reason = "AST construction keeps module context, mutable frontend and warnings, owned sorted headers and resolved references, entry path, root role, arena estimate, module origin and the timers-only context separate"
+    reason = "AST construction keeps module context, mutable frontend and warnings, owned sorted headers and resolved references, module anchor, entry-start fact, arena estimate, module origin and the timers-only context separate"
 )]
 fn build_ast_with_registered_types(
     context: &ModuleCompilationContext<'_>,
     compiler: &mut CompilerFrontend<'_>,
     sorted: SortedHeaders,
-    entry_file_path: &Path,
-    root_role: ModuleRootRole,
+    module_anchor_path: &Path,
+    synthesizes_entry_start: bool,
     capacity_estimate: FrontendArenaCapacityEstimate,
     warnings: &mut Vec<DiagnosticDraft>,
     resolved_file_references: ResolvedFileReferenceTable,
@@ -1163,8 +1208,8 @@ fn build_ast_with_registered_types(
     match compiler.headers_to_ast(
         AstBuildRequest {
             sorted,
-            entry_file_path,
-            root_role,
+            module_anchor_path,
+            synthesizes_entry_start,
             build_profile: context.build_profile,
             capacity_estimate,
             resolved_file_references,

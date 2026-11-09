@@ -1,15 +1,15 @@
-Scoped support packages are `+*.moth` roots in the project source tree. The containing directory supplies the package name.
+Scoped support packages are `@package.moth` roots in the project source tree. The containing directory supplies the package name.
 
 ### A simple support package
 
 [codeblock, $code("text"):
-    @site.moth
+    @entry.moth
     blog/
-    ├── +package.moth
+    ├── @package.moth
     └── helpers/dates.moth
 ]
 
-`+package.moth` makes `@blog` a scoped support package visible to `@site` and its sibling modules.
+`@package.moth` makes `@blog` a scoped support package visible to the entry root and its normal sibling modules.
 
 ### Binding from a package
 
@@ -19,5 +19,12 @@ Scoped support packages are `+*.moth` roots in the project source tree. The cont
 
 `@blog` resolves to the `blog` directory's support root. The package's public surface comes from its `export:` block.
 
-Support packages can hold reusable ordinary `#` constants; no custom `$project`
-metadata is required.
+Support packages can hold reusable ordinary `#` constants. They do not need project metadata.
+
+### The project package
+
+`@package.moth` at the project root is the project's external package surface. Internal project modules cannot import it.
+
+### No pages from support roots
+
+A support root publishes an API and never a page. Only `@entry.moth` creates a page, and importing a support package never runs an entry.

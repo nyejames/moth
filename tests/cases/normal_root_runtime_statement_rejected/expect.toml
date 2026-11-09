@@ -1,0 +1,25 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0023"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0023"
+path = "input/@mod.moth"
+line = 4
+column = 1
+count = 1
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0023"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0023"
+path = "input/@mod.moth"
+line = 4
+column = 1
+count = 1

@@ -17,9 +17,7 @@ A nested template inserts a value from the surrounding scope.
 Templates can build plain text, Markdown, HTML, CSS or another string-based
 format. They may be finished during compilation or built at runtime.
 
-HTML entries currently come from top-level runtime work and direct const
-fragments. Builder metadata uses direct const root `$in` inserts. A
-general `$entry` purpose is deferred, and the former `$page` metadata design is
-superseded. See @../progress (Progress) for current support and
+HTML pages come from `@entry.moth`. A direct top-level template in that file
+becomes page output. Builder metadata uses direct const root `$in` inserts. See @../progress (Progress) for current support and
 @../project-structure/#entry-config (Entry metadata and builder slots) for page
 metadata. Assigned or returned templates remain ordinary `String` values.

@@ -38,7 +38,7 @@ architectural reviews or changes that cross ownership boundaries.
   `docs/developer-docs/wasm-optimisation/wasm-optimisation.mtf`.
 - **Moth source and language semantics:** use
   `docs/docs/cheatsheet/moth-language-cheatsheet.mtf` for orientation and
-  `docs/docs/progress/@page.moth` for implemented support. Read the relevant
+  `docs/docs/progress/@entry.moth` for implemented support. Read the relevant
   canonical language references when correctness depends on exact semantics.
   The cheatsheet is not mandatory for Rust-only runtime or manager tasks.
 - **Tests and validation:** read the relevant sections of

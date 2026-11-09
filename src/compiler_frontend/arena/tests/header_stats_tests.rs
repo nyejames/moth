@@ -55,7 +55,7 @@ DISPLAYABLE must:
 #[test]
 fn multi_file_declarations_are_aggregated() {
     let mut string_table = StringTable::new();
-    let entry_path = PathBuf::from("src/@page.moth");
+    let entry_path = PathBuf::from("src/@entry.moth");
     let helper_path = PathBuf::from("src/helper.moth");
 
     let source_files = SourceDatabase::build(
@@ -92,12 +92,16 @@ fn multi_file_declarations_are_aggregated() {
         )
         .expect("source should tokenize");
         let owner = SourceTokenOwner::new(lexed.tokens);
+        let options = if source_id == entry_id {
+            crate::compiler_frontend::tests::parse_support::synthetic_entry_options(source_id)
+        } else {
+            HeaderParseOptions::default()
+        };
         prepare_file_from_tokens(
             owner,
             lexed.logical_path,
             lexed.path_syntax,
-            &entry_path,
-            &HeaderParseOptions::default(),
+            &options,
             &mut string_table,
             0,
             0,

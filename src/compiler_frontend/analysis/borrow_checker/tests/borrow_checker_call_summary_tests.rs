@@ -460,7 +460,7 @@ mutator(shared, ~mutable)
 ;"#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(
@@ -514,7 +514,7 @@ fn local_call_mutation_summary_in_order(
     };
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
     let entry_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(
@@ -598,7 +598,7 @@ fn public_call_summary_map_set_only_writes_receiver_parameter() {
 ;"#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(
@@ -1565,7 +1565,7 @@ return input + 1
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(
@@ -1608,7 +1608,7 @@ return ~scores.remove("key")!
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test entry path fits");
     let external_package_registry = default_external_package_registry(&mut string_table);
     let hir = lower_hir(
@@ -3575,7 +3575,7 @@ fn catch_private_call_return_alias_unions_success_and_parameter_derived_handler(
                   ;\n;\n";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = path_fork
-        .try_intern_portable_path("@page.moth", &mut string_table)
+        .try_intern_portable_path("@entry.moth", &mut string_table)
         .expect("test entry path fits");
     let registry = default_external_package_registry(&mut string_table);
     let (mut hir, mut type_environment) =

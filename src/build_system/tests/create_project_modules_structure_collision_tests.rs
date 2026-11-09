@@ -71,7 +71,7 @@ fn assert_reserved_project_dependency_failure(failure: PreparedFailure) {
 fn assert_claims_reserved_project_name(claim: impl FnOnce(&Path), reason: &str) {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
-    fs::write(root.join("@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(
         root.join("config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
@@ -125,31 +125,6 @@ fn rejects_reserved_project_globals_source_file_at_entry_root() {
 }
 
 #[test]
-fn rejects_reserved_project_globals_module_root_file() {
-    for file in ["@project.moth", "@Project.moth", "+Project.moth"] {
-        assert_claims_reserved_project_name(
-            |root| {
-                fs::write(root.join(file), "x ~= 1\n").expect("should write reserved module root");
-            },
-            "project module root must not create a real project module",
-        );
-    }
-}
-
-#[test]
-fn rejects_reserved_project_globals_facade_root_file() {
-    for file in ["+project.moth", "+Project.moth"] {
-        assert_claims_reserved_project_name(
-            |root| {
-                fs::write(root.join(file), "export:\n;\n")
-                    .expect("should write reserved facade root");
-            },
-            "project facade root must not claim the reserved project root",
-        );
-    }
-}
-
-#[test]
 fn rejects_nested_reserved_project_globals_dependency() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
@@ -184,7 +159,7 @@ fn rejects_nested_reserved_project_globals_dependency() {
             DependencyClauseKind::NamespaceAlias,
         ),
     ] {
-        fs::write(root.join("src/@page.moth"), source).expect("should write entry");
+        fs::write(root.join("src/@entry.moth"), source).expect("should write entry");
         let failure = discover_modules_for_test(&config, &resolver, &style_directives);
         let diagnostic = first_error_diagnostic(&failure);
         let facts = diagnostic
@@ -212,8 +187,8 @@ fn source_package_rejects_exact_reserved_project_globals_dependency() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("@page.moth"), "#[:entry]\n").expect("should write project entry");
-    fs::write(package_root.join("@mod.moth"), "value ~= 1\n")
+    fs::write(src.join("@entry.moth"), "#[:entry]\n").expect("should write project entry");
+    fs::write(package_root.join("@mod.moth"), "value #= 1\n")
         .expect("should write helper package root");
 
     let mut source_packages = crate::builder_surface::SourcePackageRegistry::default();
@@ -300,7 +275,7 @@ fn rejects_moth_file_and_folder_collision_in_same_directory() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/UI")).expect("should create src/UI");
-    fs::write(root.join("src/UI/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("src/UI/@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("src/ui.moth"), "y ~= 2\n").expect("should write colliding file");
     fs::write(
         root.join("config.moth"),
@@ -338,7 +313,7 @@ fn rejects_template_file_and_folder_collision_in_same_directory() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/ui")).expect("should create src/ui");
-    fs::write(root.join("src/ui/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("src/ui/@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("src/ui.mtf"), "template\n").expect("should write colliding file");
     fs::write(
         root.join("config.moth"),
@@ -375,7 +350,7 @@ fn allows_same_stem_in_different_directories() {
     fs::create_dir_all(root.join("src/pages")).expect("should create src/pages");
     fs::write(root.join("src/components/card.moth"), "x ~= 1\n").expect("should write card");
     fs::write(root.join("src/pages/card.moth"), "y ~= 2\n").expect("should write another card");
-    fs::write(root.join("src/@page.moth"), "z ~= 3\n").expect("should write entry");
+    fs::write(root.join("src/@entry.moth"), "z ~= 3\n").expect("should write entry");
     fs::write(
         root.join("config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
@@ -407,7 +382,7 @@ fn rejects_collision_with_empty_folder() {
     let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/helper")).expect("should create src/helper");
     fs::write(root.join("src/helper.moth"), "x ~= 1\n").expect("should write colliding file");
-    fs::write(root.join("src/@page.moth"), "y ~= 2\n").expect("should write entry");
+    fs::write(root.join("src/@entry.moth"), "y ~= 2\n").expect("should write entry");
     fs::write(
         root.join("config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
@@ -445,7 +420,7 @@ fn js_file_with_same_stem_as_folder_does_not_trigger_collision() {
     let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("src/helper")).expect("should create src/helper");
     fs::write(root.join("src/helper.js"), "// js\n").expect("should write js file");
-    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("src/@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(
         root.join("config.moth"),
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
@@ -486,7 +461,7 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
 
     // Entry file imports a .js file explicitly.
     fs::write(
-        src.join("@page.moth"),
+        src.join("@entry.moth"),
         "-- é🦋\n@drawing.js as drawing\n#[:ok]\n",
     )
     .expect("should write entry");
@@ -530,7 +505,7 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
         "js",
         "unexpected extension in diagnostic"
     );
-    assert_primary_span_text(&failure, &src.join("@page.moth"), "@drawing.js");
+    assert_primary_span_text(&failure, &src.join("@entry.moth"), "@drawing.js");
 
     let mut source_string_table = StringTable::new();
     let project_root = fs::canonicalize(&config.entry_dir).expect("project root should resolve");
@@ -552,7 +527,7 @@ fn unsupported_js_import_without_provider_reports_moth_import_0021() {
     let mut source_files =
         source_database_for_test(&source_tree_index, &resolver, &mut source_string_table);
     let entry_path =
-        fs::canonicalize(src.join("@page.moth")).expect("entry source path should canonicalize");
+        fs::canonicalize(src.join("@entry.moth")).expect("entry source path should canonicalize");
     let mut selected_source_texts = super::source_loading::SelectedSourceTextMap::default();
     selected_source_texts
         .load(&entry_path)
@@ -604,7 +579,7 @@ fn explicit_moth_extension_still_reports_moth_import_0020() {
     )
     .expect("should write config");
 
-    fs::write(src.join("@page.moth"), "@helper.moth\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@helper.moth\n#[:ok]\n").expect("should write entry");
 
     fs::write(
         src.join("helper.moth"),
@@ -649,7 +624,7 @@ fn unsupported_moth_template_dependency_without_builder_support_reports_moth_imp
     )
     .expect("should write config");
 
-    fs::write(src.join("@page.moth"), "@intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@intro\n#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.mtf"), "hello\n").expect("should write moth template file");
 
     let mut config = Config::new(root.clone());
@@ -689,7 +664,7 @@ fn direct_moth_template_extension_dependency_reports_moth_import_0024() {
     )
     .expect("should write config");
 
-    fs::write(src.join("@page.moth"), "@intro.mtf\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@intro.mtf\n#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.mtf"), "hello\n").expect("should write moth template file");
 
     let mut config = Config::new(root.clone());
@@ -732,7 +707,7 @@ fn moth_template_files_are_reachable_without_dependency_scanning() {
     )
     .expect("should write config");
 
-    fs::write(src.join("@page.moth"), "@intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@intro\n#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.mtf"), "@missing\n").expect("should write moth template file");
 
     let mut config = Config::new(root.clone());
@@ -758,84 +733,9 @@ fn moth_template_files_are_reachable_without_dependency_scanning() {
     let input_paths: HashSet<_> = module_prepared_source_names(modules[0])
         .into_iter()
         .collect();
-    assert!(input_paths.contains("@page.moth"));
+    assert!(input_paths.contains("@entry.moth"));
     assert!(input_paths.contains("intro.mtf"));
     assert!(modules[0].prepared.contains_moth_template);
-}
-
-#[test]
-fn reachable_moth_template_queues_same_directory_root_file() {
-    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-    let root = _tmp_root.path().to_path_buf();
-    let src = root.join("src");
-    let docs = src.join("docs");
-    fs::create_dir_all(&docs).expect("should create docs dir");
-
-    fs::write(
-        root.join(settings::CONFIG_FILE_NAME),
-        "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
-    )
-    .expect("should write config");
-
-    fs::write(src.join("@page.moth"), "@docs\n#[:ok]\n").expect("should write entry");
-    fs::write(docs.join("intro.mtf"), "hello\n").expect("should write moth template file");
-    fs::write(docs.join("@docs.moth"), "@intro\ntitle #= \"Docs\"\n").expect("should write root");
-
-    let mut config = Config::new(root.clone());
-    let style_directives = test_style_directives();
-    parse_project_config_for_test(
-        &mut config,
-        &root.join(settings::CONFIG_FILE_NAME),
-        &style_directives,
-    )
-    .expect("config should parse");
-
-    let mut source_file_kinds = crate::builder_surface::SourceFileKindRegistry::new();
-    source_file_kinds.register("mtf", crate::builder_surface::SourceFileKind::MothTemplate);
-    let resolver = configured_resolver_with_source_file_kinds(&config, &source_file_kinds);
-
-    let modules = successful_compilation_value(discover_modules_for_test(
-        &config,
-        &resolver,
-        &style_directives,
-    ));
-    let modules: Vec<_> = modules.waves().iter().flatten().collect();
-
-    // The entry module depends on a Moth template file from the `docs` module root, so `docs` is its
-    // provider and precedes it in the returned inventory order. Find the entry module by its
-    // root file rather than assuming index 0.
-    let entry_module = modules
-        .iter()
-        .find(|module| {
-            prepared_entry_file_path(&module.prepared.semantic)
-                .expect("prepared module retains its entry file identity")
-                .file_name()
-                .is_some_and(|name| name == "@page.moth")
-        })
-        .expect("entry module should be discovered");
-    let input_paths: HashSet<_> = module_prepared_source_names(entry_module)
-        .into_iter()
-        .collect();
-    assert!(input_paths.contains("@page.moth"));
-    assert!(!input_paths.contains("intro.mtf"));
-    assert!(!input_paths.contains("@docs.moth"));
-
-    let docs_module = modules
-        .iter()
-        .find(|module| {
-            prepared_entry_file_path(&module.prepared.semantic)
-                .expect("prepared module retains its entry file identity")
-                .file_name()
-                .is_some_and(|name| name == "@docs.moth")
-        })
-        .expect("docs provider module should be discovered");
-
-    let docs_input_names: HashSet<_> = module_prepared_source_names(docs_module)
-        .into_iter()
-        .collect();
-    assert!(docs_input_names.contains("intro.mtf"));
-    assert!(docs_input_names.contains("@docs.moth"));
-    assert!(docs_module.prepared.contains_moth_template);
 }
 
 #[test]
@@ -851,7 +751,7 @@ fn unreferenced_moth_template_file_under_entry_root_is_ignored() {
     )
     .expect("should write config");
 
-    fs::write(src.join("@page.moth"), "#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.mtf"), "hello\n").expect("should write moth template file");
 
     let mut config = Config::new(root.clone());
@@ -874,7 +774,10 @@ fn unreferenced_moth_template_file_under_entry_root_is_ignored() {
     ));
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
-    assert_eq!(module_prepared_source_names(modules[0]), vec!["@page.moth"]);
+    assert_eq!(
+        module_prepared_source_names(modules[0]),
+        vec!["@entry.moth"]
+    );
     assert!(!modules[0].prepared.contains_moth_template);
 }
 
@@ -893,7 +796,7 @@ fn extensionless_moth_dependency_and_virtual_package_dependency_still_work() {
 
     // Normal extensionless dependencies still resolve as Moth source files, while virtual package
     // dependencies continue to stay out of Stage 0 filesystem traversal.
-    fs::write(src.join("@page.moth"), "@helper\n@core/io line\n#[:ok]\n")
+    fs::write(src.join("@entry.moth"), "@helper\n@core/io line\n#[:ok]\n")
         .expect("should write entry");
 
     fs::write(
@@ -924,7 +827,7 @@ fn extensionless_moth_dependency_and_virtual_package_dependency_still_work() {
         .into_iter()
         .collect();
 
-    assert!(discovered.contains("@page.moth"));
+    assert!(discovered.contains("@entry.moth"));
     assert!(discovered.contains("helper.moth"));
 }
 
@@ -941,7 +844,7 @@ fn indexed_module_inventory_includes_referenced_markdown_without_scanning_its_bo
     )
     .expect("should write config");
 
-    fs::write(src.join("@page.moth"), "@intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@intro\n#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.md"), "@missing\n").expect("should write markdown file");
 
     let mut config = Config::new(root.clone());
@@ -968,7 +871,7 @@ fn indexed_module_inventory_includes_referenced_markdown_without_scanning_its_bo
     let input_paths: HashSet<_> = module_prepared_source_names(modules[0])
         .into_iter()
         .collect();
-    assert!(input_paths.contains("@page.moth"));
+    assert!(input_paths.contains("@entry.moth"));
     assert!(input_paths.contains("intro.md"));
 
     assert!(!modules[0].prepared.contains_moth_template);
@@ -987,9 +890,9 @@ fn indexed_module_inventory_excludes_unrelated_module_root_from_markdown_owner()
     )
     .expect("should write config");
 
-    fs::write(src.join("@page.moth"), "@intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@intro\n#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
-    fs::write(src.join("other/@other.moth"), "export:\n    x #= 1\n;\n")
+    fs::write(src.join("other/@mod.moth"), "export:\n    x #= 1\n;\n")
         .expect("should write other module root");
 
     let mut config = Config::new(root.clone());
@@ -1016,9 +919,9 @@ fn indexed_module_inventory_excludes_unrelated_module_root_from_markdown_owner()
     let input_paths: HashSet<_> = module_prepared_source_names(modules[0])
         .into_iter()
         .collect();
-    assert!(input_paths.contains("@page.moth"));
+    assert!(input_paths.contains("@entry.moth"));
     assert!(input_paths.contains("intro.md"));
-    assert!(!input_paths.contains("@other.moth"));
+    assert!(!input_paths.contains("other/@mod.moth"));
 
     assert!(!modules[0].prepared.contains_moth_template);
 }
@@ -1036,7 +939,7 @@ fn indexed_module_inventory_ignores_unreferenced_markdown_file() {
     )
     .expect("should write config");
 
-    fs::write(src.join("@page.moth"), "#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
 
     let mut config = Config::new(root.clone());
@@ -1060,7 +963,10 @@ fn indexed_module_inventory_ignores_unreferenced_markdown_file() {
     ));
     let modules: Vec<_> = modules.waves().iter().flatten().collect();
 
-    assert_eq!(module_prepared_source_names(modules[0]), vec!["@page.moth"]);
+    assert_eq!(
+        module_prepared_source_names(modules[0]),
+        vec!["@entry.moth"]
+    );
     assert!(!modules[0].prepared.contains_moth_template);
 }
 
@@ -1077,7 +983,7 @@ fn indexed_module_inventory_rejects_direct_markdown_extension_dependency() {
     )
     .expect("should write config");
 
-    fs::write(src.join("@page.moth"), "@intro.md\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@intro.md\n#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
 
     let mut config = Config::new(root.clone());
@@ -1135,7 +1041,7 @@ fn indexed_module_inventory_rejects_unsupported_markdown_dependency() {
     )
     .expect("should write config");
 
-    fs::write(src.join("@page.moth"), "@intro\n#[:ok]\n").expect("should write entry");
+    fs::write(src.join("@entry.moth"), "@intro\n#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
 
     let mut config = Config::new(root.clone());
@@ -1175,5 +1081,5 @@ fn indexed_module_inventory_rejects_unsupported_markdown_dependency() {
         "md",
         "unexpected extension in unsupported source file kind diagnostic"
     );
-    assert_primary_span_text(&failure, &src.join("@page.moth"), "@intro");
+    assert_primary_span_text(&failure, &src.join("@entry.moth"), "@intro");
 }

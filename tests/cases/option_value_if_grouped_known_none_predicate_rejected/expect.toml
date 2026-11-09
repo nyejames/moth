@@ -10,6 +10,6 @@ message_contains = ["Optional `none` checks are statement-only here."]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0042"
 reason = "invalid_control_flow_statement.value_if_option_none_predicate"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 2
 count = 1

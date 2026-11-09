@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-IMPORT-0015"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-IMPORT-0015"
+path = "input/app/@package.moth"
+line = 1
+column = 1
+count = 1

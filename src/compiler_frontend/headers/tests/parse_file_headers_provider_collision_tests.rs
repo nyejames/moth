@@ -6,7 +6,7 @@ use super::*;
 #[test]
 fn prelude_symbol_declaration_prepared_without_registry_then_collides_at_binding() {
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let mut path_fork = PathInternerFork::empty();
     // Preparation takes no registry input, so a declaration that reuses a prelude symbol name
     // still parses into a retained declaration shell during provider-independent preparation.
@@ -57,7 +57,7 @@ fn prelude_symbol_declaration_prepared_without_registry_then_collides_at_binding
 #[test]
 fn prelude_type_generic_parameter_prepared_without_registry_then_collides_at_binding() {
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let mut path_fork = PathInternerFork::empty();
     // A generic parameter reusing a prelude type name parses during provider-independent
     // preparation; the collision is provider-dependent and is validated during binding.
@@ -107,7 +107,7 @@ fn prelude_type_generic_parameter_prepared_without_registry_then_collides_at_bin
 #[test]
 fn direct_selection_does_not_reserve_provider_basename_for_generic_parameter() {
     let mut string_table = StringTable::new();
-    let file_path = PathBuf::from("src/@page.moth");
+    let file_path = PathBuf::from("src/@entry.moth");
     let mut path_fork = PathInternerFork::empty();
     let (output, _span_builder) = prepare_single_file_with_fork(
         "@core/Math add\nidentity type Math |value Math| -> Math:\n    return value\n;\n",

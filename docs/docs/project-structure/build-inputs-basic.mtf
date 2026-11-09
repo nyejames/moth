@@ -15,7 +15,7 @@ CLI numeric spelling stays raw until the exact contract selects its type. Declar
 
 The name is the input name, the type is the contract and `=` is the fallback. A required non-optional input may omit the initializer. Ordinary constants still need one.
 
-Only `$config` declarations create explicit-only contracts. A `$project` field named `version` does not supply a source input named `version`.
+Only `$config` declarations create explicit-only contracts. A `project` record field named `version` does not supply a source input named `version`.
 
 ### Current `#Config`
 

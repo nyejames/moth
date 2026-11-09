@@ -872,7 +872,7 @@ fn dev_cycle_warning_context_is_released_with_its_cycle_report() {
     )
     .expect("should write config");
     fs::write(
-        source_root.join("@page.moth"),
+        source_root.join("@entry.moth"),
         "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n",
     )
     .expect("should write page source with a frontend warning");
@@ -898,7 +898,7 @@ fn dev_cycle_warning_context_is_released_with_its_cycle_report() {
         let position = DiagnosticRenderContext::for_report(warning_report)
             .site_position(warning.primary_site())
             .expect("the warning should resolve through its report context");
-        assert!(position.path.ends_with("@page.moth"));
+        assert!(position.path.ends_with("@entry.moth"));
         assert!(position.line.contains("\"one\" => ~result = \"one\""));
         Arc::downgrade(&warning_report.shared_context())
     };
@@ -1096,7 +1096,7 @@ fn project_build_executor_writes_the_validated_directory_plan() {
     )
     .expect("should write project config");
     fs::write(
-        source_root.join("@page.moth"),
+        source_root.join("@entry.moth"),
         "@project version\n#[:<h1>[version]</h1>]\n",
     )
     .expect("should write page source");
@@ -1182,7 +1182,7 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(source_root.join("@page.moth"), "#[:<h1>Dev Cycle</h1>]\n")
+    fs::write(source_root.join("@entry.moth"), "#[:<h1>Dev Cycle</h1>]\n")
         .expect("should write page source");
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
@@ -1958,7 +1958,7 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
     )
     .expect("write config");
     fs::write(
-        source.join("@page.moth"),
+        source.join("@entry.moth"),
         "@support product\n\
          asset #= @site.css\n\
          #[:<main>static-survives</main><link rel=\"stylesheet\" href=\"[asset]\">]\n\
@@ -1969,7 +1969,7 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
     .expect("write homepage");
     fs::write(source.join("site.css"), "body { color: green; }").expect("write supporting asset");
     fs::write(
-        source.join("other/@page.moth"),
+        source.join("other/@entry.moth"),
         "#[:<main>other-page</main>]\n",
     )
     .expect("write independent page");
@@ -1982,7 +1982,7 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
             return plain(value)\n\
         ;\n\
     ;\n";
-    let helper_path = source.join("support/+package.moth");
+    let helper_path = source.join("support/@package.moth");
     let successful = format!(
         "multiply |value I32| -> I32:\n    return value\n;\n\
          plain |value I32| -> I32:\n    return value\n;\n{PUBLIC_API}"
@@ -2153,7 +2153,7 @@ fn real_module_allowance_stop_reaches_browser_error_page_and_clears_after_repair
     let source = root.to_path_buf();
     fs::create_dir_all(&source).expect("create source directory");
     fs::write(root.join("config.moth"), MODULE_LIMIT_CONFIG_SOURCE).expect("write config");
-    fs::write(source.join("@page.moth"), TWO_FAILING_BODIES_SOURCE).expect("write failing page");
+    fs::write(source.join("@entry.moth"), TWO_FAILING_BODIES_SOURCE).expect("write failing page");
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
     let executor = ProjectBuildExecutor::new(
@@ -2203,7 +2203,7 @@ fn real_module_allowance_stop_reaches_browser_error_page_and_clears_after_repair
         "the stored browser error page must explain the stop exactly once"
     );
 
-    fs::write(source.join("@page.moth"), REPAIRED_BODIES_SOURCE).expect("write repaired page");
+    fs::write(source.join("@entry.moth"), REPAIRED_BODIES_SOURCE).expect("write repaired page");
     let repaired = run_single_build_cycle(&state, &executor, root, &[]);
     assert!(repaired.build_ok, "the repaired page must build");
     let build = state.build_state.lock().expect("build state");

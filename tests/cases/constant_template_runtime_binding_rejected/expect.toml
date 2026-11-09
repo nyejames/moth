@@ -7,10 +7,10 @@ message_contains = ["resolves to a non-constant value."]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0053"
 reason = "compile_time_evaluation_error.non_constant_reference_in_constant"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 3
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1

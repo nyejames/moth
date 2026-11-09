@@ -4,4 +4,4 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-SYNTAX-0040"]
-message_contains = ["Source '@page.moth' is not valid UTF-8"]
+message_contains = ["Source '@entry.moth' is not valid UTF-8"]

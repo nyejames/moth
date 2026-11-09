@@ -284,16 +284,16 @@ pub(crate) fn run_hir_module(
             ),
         ));
     }
-    let entry_point = input.entry_point.to_string_lossy();
+    let source_path = input.source_path.to_string_lossy();
     if options.dump == BoracleDump::Differential {
         let problems =
             build_hir_module_problems(&input.hir, &input.external_package_registry, &selection)?;
-        return render_differential_module_report(problems, entry_point.as_ref(), &selection);
+        return render_differential_module_report(problems, source_path.as_ref(), &selection);
     }
     let report = solve_hir_module_parts(&input.hir, &input.external_package_registry, &selection)?;
     Ok(render_module_report(
         &report,
-        entry_point.as_ref(),
+        source_path.as_ref(),
         options.dump,
     ))
 }

@@ -7,6 +7,6 @@ message_contains = ["Unknown variant 'Reply::Sucess'. Did you mean 'Reply::Succe
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0049"
 reason = "invalid_match_pattern.unknown_variant"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 6
 count = 1

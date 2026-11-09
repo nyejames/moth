@@ -14,6 +14,7 @@ use crate::compiler_frontend::module_compilation::ModuleCompilationContext;
 use crate::compiler_frontend::module_compilation::compile_module_for_boracle;
 
 use crate::builder_surface::BuilderSurface;
+use crate::builder_surface::definition::TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{
@@ -26,7 +27,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{imports, token_lexical};
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticBag, PreparedFailure, SourceSpanCapacityResource,
+    DiagnosticBag, InvalidConfigReason, PreparedFailure, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
@@ -37,7 +38,10 @@ use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::SourceDatabase;
-use crate::compiler_frontend::source_packages::root_file::file_name_is_normal_module_root_file;
+use crate::compiler_frontend::source_packages::root_file::{
+    file_name_is_invalid_module_root_marker, file_name_is_module_root_file,
+    module_root_role_for_file_name,
+};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathInternError, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -59,6 +63,7 @@ use super::super::file_reference_resolution::{
 };
 use super::super::generated_store::BoundaryGeneratedFunctionStore;
 use super::super::module_artifact_store::ModuleArtifactStore;
+use super::super::module_identity::ModuleId;
 use super::super::module_inventory::ModuleCompilationJob;
 use super::super::module_namespace::ModuleNamespaceSet;
 use super::super::module_preparation::{
@@ -66,7 +71,10 @@ use super::super::module_preparation::{
 };
 use super::super::prepared_module::PreparedModule;
 use super::super::project_module_graph::ProjectModuleGraph;
-use super::super::project_structure_diagnostics::non_utf8_filesystem_name_error;
+use super::super::project_structure_diagnostics::{
+    invalid_module_root_file_name_error, non_utf8_filesystem_name_error, path_id,
+    project_structure_diagnostic,
+};
 use super::super::resource_inputs::ResourceInputRegistry;
 use super::super::source_discovery;
 use super::super::source_package_discovery::build_source_package_boundary_indexes;
@@ -344,7 +352,18 @@ fn compile_single_file_frontend_with_target(
         }
     };
 
-    let module_roots = if file_name_is_normal_module_root_file(entry_file_name) {
+    // The selected file shares the closed root vocabulary with directory discovery. An invalid
+    // `@*.moth`, `+*.moth` or `#*.moth` spelling is rejected here rather than routed to a page
+    // output or treated as an ordinary source file.
+    if file_name_is_invalid_module_root_marker(entry_file_name) {
+        let directory = entry_path.parent().unwrap_or_else(|| Path::new("."));
+        return Err(BoundaryPremergeFailure::from(
+            invalid_module_root_file_name_error(directory, entry_file_name, string_table),
+        ));
+    }
+
+    // Only the three fixed root spellings own a bounded Stage 0 inventory.
+    let module_roots = if file_name_is_module_root_file(entry_file_name) {
         SourceTreeIndex::bounded_module_roots_for_single_file(
             &entry_path,
             config,
@@ -356,6 +375,9 @@ fn compile_single_file_frontend_with_target(
     } else {
         ModuleRootTable::empty()
     };
+    // Preparation needs the same bounded root inventory to classify every module root this
+    // synthetic unit reaches. The resolver owns that table, so borrow it back instead of
+    // keeping a second snapshot.
     let project_path_resolver = ProjectPathResolver::new_with_module_roots(
         source_root.clone(),
         source_root.clone(),
@@ -428,12 +450,13 @@ fn compile_single_file_frontend_with_target(
     let result = (|| -> Result<SingleFileFrontendResult, BoundaryPremergeFailure> {
         // Stage 0 indexed package roots above for namespace and collision checks. The shared
         // inventory path materialises every registered source package when entered, so skip it
-        // only when the consumer retained no source-package edges and no selected Moth template
-        // can receive an implicit package from this builder.
+        // only when the consumer retained no source-package edges and no Moth template needs the
+        // compiler-standard `@html` prelude provider.
         let requires_source_package_inventories = !source_package_dependencies.is_empty()
-            || (!builder_surface
-                .implicit_template_scope_source_packages
-                .is_empty()
+            || (builder_surface
+                .source_packages
+                .get_root(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX)
+                .is_some()
                 && input_files
                     .iter()
                     .any(|input| source_is_moth_template(source_files, input.source_id())));
@@ -521,26 +544,50 @@ fn compile_single_file_frontend_with_target(
         let timing_module_context =
             Some(crate::timing::TimingContext::for_module(timing_module_key));
 
-        // Single-file compilation is a separate synthetic-module mode: it builds one deterministic
-        // normal-module origin from the configured project identity, the empty logical module path
-        // and `ModuleRootRole::Normal`. The empty path is the entry-root spelling and is always valid,
-        // so construction failure is a proven internal invariant surfaced as a typed
-        // `InfrastructureFailure` rather than a panic. The origin travels through
-        // preparation into semantic compilation so the single-file module receives the same canonical
-        // identity contract as a directory-discovered module.
+        // Single-file compilation is a separate synthetic-module mode. An ordinary selected file
+        // is explicitly selected as that unit's executable output, so it takes the `Entry` role.
+        // A selected canonical root keeps its authored API-facade role instead: exports remain
+        // legal, root runtime is rejected, and a build command with no entry reports its normal
+        // no-entry outcome. The empty logical path is the selected-root spelling and is always
+        // valid, so construction failure is a proven internal invariant surfaced as a typed
+        // `InfrastructureFailure` rather than a panic.
+        let origin_role =
+            module_root_role_for_file_name(entry_file_name).unwrap_or(ModuleRootRole::Entry);
         let stable_origin = StableModuleOriginIdentity::from_relative_logical_path(
             StablePackageIdentity::project_local(&config.project_name),
             Path::new(""),
-            ModuleRootRole::Normal,
+            origin_role,
         )?;
-        // The synthetic module is the graph's only consumer. Declare its slot before preparation
-        // so a command whose project threshold was already met by source-package work refuses its
+        // The synthetic unit always has exactly one module slot. Declare it before preparation so
+        // a command whose project threshold was already met by source-package work refuses its
         // admission at boundary entry instead of preparing a module it could never compile.
-        let graph = ProjectModuleGraph::from_normal_roots(vec![(
+        let graph = ProjectModuleGraph::from_standalone_roots(vec![(
             stable_origin.clone(),
             entry_path.clone(),
         )]);
-        let module_id = graph.entry_modules()[0];
+        let module_id = ModuleId::from_index(0);
+        // Build and dev need an executable entry anywhere in the selected unit. A selected API
+        // facade compiles declaration-only under `check`, but a runtime command reports the same
+        // no-entry outcome directory discovery uses. Boracle analysis remains declaration-only.
+        if target == SingleFileFrontendTarget::Normal
+            && mode.requires_entry()
+            && graph.entry_modules().is_empty()
+        {
+            let mut diagnostic_strings = DiagnosticStringBuilder::new(string_table);
+            let diagnostic =
+                project_structure_diagnostic(InvalidConfigReason::NoRootModuleEntries {
+                    entry_root: path_id(&source_root, &mut diagnostic_strings),
+                });
+            let table = string_table.take_for_handoff();
+            return Err(BoundaryPremergeFailure::from(PreparedFailure::Diagnosed(
+                PreparedDiagnosticBatch::capture_from_bag(
+                    DiagnosticBag::from(diagnostic),
+                    table,
+                    None,
+                    None,
+                ),
+            )));
+        }
         if project_budget.is_exhausted() {
             // The package diagnostics upstream stay retained. The unvisited slot is proven by the
             // cutoff record and the command's stop flag; it never reports success or diagnosis.
@@ -580,7 +627,7 @@ fn compile_single_file_frontend_with_target(
             input_files,
             &mut source_spans,
             &entry_path,
-            None,
+            project_path_resolver.prepared_module_roots(),
             local_table,
             path_fork,
             source_byte_count,
@@ -592,7 +639,7 @@ fn compile_single_file_frontend_with_target(
             input_files,
             &mut source_spans,
             &entry_path,
-            None,
+            project_path_resolver.prepared_module_roots(),
             local_table,
             path_fork,
             source_byte_count,
@@ -668,7 +715,6 @@ fn compile_single_file_frontend_with_target(
             let compile_context = ModuleCompilationContext {
                 options: config.frontend_options(),
                 build_profile,
-                root_role_override: None,
                 project_path_resolver: Some(&project_path_resolver),
                 source_files,
                 style_directives,

@@ -1,0 +1,5 @@
+@impl compare
+
+export:
+    @impl compare
+;

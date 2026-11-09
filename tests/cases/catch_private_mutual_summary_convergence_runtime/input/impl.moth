@@ -1,0 +1,33 @@
+recover |text String| -> String:
+    code ~U32 = 0
+    value = first(text, true) catch |parse_error|:
+        ~code = parse_error.code
+        then -7
+    ;
+    return [:[value]/[code]]
+;
+
+first |text String, again Bool| -> I32:
+    if again:
+        return second(text, false)
+    ;
+    return cast text
+;
+
+second |text String, again Bool| -> I32:
+    return first(text, again)
+;
+
+DomainError :: Invalid;
+
+builtin_forward |text String| -> I32, Error!:
+    return first(text, true)
+;
+
+custom_map |text String| -> I32, DomainError!:
+    value = first(text, true) catch |mapped_error|:
+        assert(mapped_error.code is 200)
+        return! DomainError::Invalid
+    ;
+    return value
+;

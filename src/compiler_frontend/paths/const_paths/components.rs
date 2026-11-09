@@ -147,21 +147,6 @@ fn is_component_terminator(character: char) -> bool {
     )
 }
 
-/// Returns whether a canonical component can be emitted without quotes and parsed back unchanged.
-///
-/// Migration diagnostics use this predicate because canonical path rows retain component values,
-/// not whether the author quoted them. Components that need quotes must not receive a lossy fix-it.
-pub(super) fn can_serialize_bare_component(component: &str) -> bool {
-    !component.is_empty()
-        && !component.starts_with('@')
-        && component
-            .chars()
-            .all(|character| !is_component_terminator(character))
-        && component
-            .chars()
-            .all(|character| is_valid_component_char(character, false))
-}
-
 /// WHAT: Validates and interns one parsed component.
 /// WHY: keeps all paths aligned on one validation boundary.
 pub(super) fn push_validated_component(
@@ -208,7 +193,7 @@ fn validate_path_component(
     // Reject a path component that starts with `@` after the path introducer was consumed.
     // WHAT: the leading `@` in `@path` is the path introducer consumed by the lexer. A second
     //      `@` starting any component (such as `@@pages` or `@helper/@home`) is not a valid
-    //      module name. Normal module-root filenames are cosmetic filesystem markers.
+    //      module name. Root filenames are fixed structural markers, not dependency names.
     if !was_quoted && component.starts_with('@') {
         return Err(token_lexical::invalid_path(
             PathKind::LeadingAtInPathComponent,

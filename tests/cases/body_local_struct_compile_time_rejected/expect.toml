@@ -6,6 +6,6 @@ message_contains = ["Constant 'Local' is not compile-time resolvable."]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0053"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 2
 column = 11

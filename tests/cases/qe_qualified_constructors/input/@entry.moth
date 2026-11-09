@@ -1,0 +1,9 @@
+color = @types Color()
+outcome = @types Outcome::Err("bad")
+
+if outcome is:
+    Ok => io.line("unexpected ok")
+    Err(message as error_message) => io.line([: qe-constructors choice=[error_message] ])
+;
+
+[: qe-constructors struct=[color.label] ]

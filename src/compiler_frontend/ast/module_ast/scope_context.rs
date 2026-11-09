@@ -377,6 +377,14 @@ fn validate_frozen_reference(
 pub(crate) struct FileValueResolutionServices {
     pub(crate) stage0_resolution_facts: Option<Arc<Stage0ResolutionFacts>>,
     pub(crate) module_resources: Rc<RefCell<ModuleResourceTable>>,
+    /// Expression-qualified targets reachable from constant-header and materialised scopes.
+    ///
+    /// WHAT: the same shared `(owning source, authored path row)` map the completed module
+    ///       environment carries, not a copy of it.
+    /// WHY: constant headers and generated bodies parse before or outside the completed
+    ///      `AstModuleLookups` package, but they still consume the binding proved at Stage 3.
+    pub(crate) qualified_reference_targets:
+        Arc<crate::compiler_frontend::headers::binding_environment::QualifiedReferenceTargets>,
     pub(crate) module_origin: Option<StableModuleOriginIdentity>,
     /// Public trait declarations that own a stable source-derived origin in this module.
     ///
@@ -405,6 +413,7 @@ impl FileValueResolutionServices {
         Rc::new(Self {
             stage0_resolution_facts: Some(stage0_resolution_facts),
             module_resources: Rc::clone(&self.module_resources),
+            qualified_reference_targets: Arc::clone(&self.qualified_reference_targets),
             module_origin: self.module_origin.clone(),
             public_source_trait_origins: std::sync::Arc::clone(&self.public_source_trait_origins),
             frozen_identity_handle: self.frozen_identity_handle.clone(),

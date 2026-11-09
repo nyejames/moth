@@ -60,7 +60,7 @@ Neutral template handoff from AST becomes ordinary string and control-flow opera
 - template control flow as ordinary CFG
 - slot accumulators and appends where needed
 
-Compile-time page fragments and TIR itself do **not** enter HIR. Folded fragment metadata lives in module metadata lanes. HIR validation checks executable fragment operations only.
+Compile-time entry fragments and TIR itself do **not** enter HIR. Folded fragment metadata lives in module metadata lanes. HIR validation checks executable fragment operations only.
 
 The greeting's runtime pieces, if any remain dynamic, look like ordinary operations over strings and calls. Static compile-time fragment text stays metadata until the HTML builder inserts it.
 
@@ -78,12 +78,12 @@ HIR stores no dependency aliases as semantic authority and no backend runtime na
 
 Those facts are the linking authority later stages consume.
 
-[diagram:
+[@diagrams diagram:
     [$in label: Link facts sit beside HIR, never inside it]
     [$in caption: Later stages read the facts on the right without touching the control flow on the left. Analysis writes side tables; it never rewrites the IR to taste.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Validated]
             [$in title: HIR control flow]
@@ -91,18 +91,18 @@ Those facts are the linking authority later stages consume.
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Recorded alongside, per function]
-                [lane:
-                [detail:
+                [@diagrams lane:
+                [@diagrams detail:
                     [$in href: ../linking-entries-and-reachability/]
                     Call edges to explicit identities
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../target-planning-and-validation/]
                     Helper and capability needs
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../html-assembly-and-output/]
                     Resource uses
                 ]

@@ -7,5 +7,5 @@ message_contains = ["Type mismatch in return value: expected Summary, found Stri
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 7

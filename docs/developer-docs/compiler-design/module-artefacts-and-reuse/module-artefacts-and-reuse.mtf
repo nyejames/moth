@@ -14,7 +14,7 @@ Think of four layers plus records of what changed:
 
 **Link facts.** Backend-neutral per-function edges, binding-backed call ids, helpers, capabilities, numeric and cast operations, resource uses, provenance and generated-function requests. Resource *uses* are the compiler's business. Physical paths, URLs and asset placement stay with the builder.
 
-**Compiler and builder metadata.** Dormant root activity, folded fragment values with body or builder-slot destinations and insertion indexes, documentation fragments, resource origins, non-executable fragment uses, materialisation context and structured warnings. Direct named builder contributions are folded metadata, not a runtime side channel.
+**Compiler and builder metadata.** Dormant entry-root activity, folded fragment values with body or builder-slot destinations and insertion indexes, documentation fragments, resource origins, non-executable fragment uses, materialisation context and structured warnings. Direct named builder contributions are folded metadata, not a runtime side channel.
 
 **Fingerprints** are an accepted design layer over those lanes, meant to let reuse say what changed. They are not a lane the current artefact retains. The compiler computes fingerprint facts during a build and today's builds do not keep them for later comparison.
 
@@ -24,12 +24,12 @@ Backend planning facts do not live in the public interface. Private bodies do no
 
 For `greeting.moth`, the constant and function land in the interface when exported, in executable state as HIR and types and in link facts as call and capability edges as needed.
 
-[diagram:
+[@diagrams diagram:
     [$in label: One sealed artefact, four lanes]
     [$in caption: Each fact has exactly one lane. Knowing which lane a fact belongs to answers most questions about who is allowed to read it.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Sealed]
             [$in title: CompiledModuleArtifact]
@@ -37,22 +37,22 @@ For `greeting.moth`, the constant and function land in the interface when export
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Who reads which lane]
-                [lane:
-                [detail:
+                [@diagrams lane:
+                [@diagrams detail:
                     [$in href: ../declarations-dependencies-and-ordering/]
                     Interface, read by consumers
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../backend-lowering/]
                     Executable state, read by backends
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../linking-entries-and-reachability/]
                     Link facts, read by link planning
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../html-assembly-and-output/]
                     Metadata, read by the builder
                 ]
@@ -70,15 +70,16 @@ Accepted design records separate fingerprints, including:
 
 - **public-interface** fingerprint
 - **implementation** fingerprint
-- **dormant root-activity** fingerprint
+- **dormant entry-activity** fingerprint
 - **runtime-dependency** fingerprint
 - **documentation** fingerprint
 
 Invalidation meaning follows the split:
 
 - a private body change need not recompile semantic consumers unless a public fact changes
+- an entry implementation change leaves a facade's public-interface fingerprint unchanged when its public facts stay equal
 - an implementation change may force relinking or codegen without semantic consumer recompilation
-- a root-activity change relinks entries that activate the module
+- an entry-activity change relinks entries that activate the module
 - a runtime-dependency change updates capability, glue and asset planning
 - a documentation-only change regenerates docs without invalidating executable instances
 

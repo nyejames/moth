@@ -1,0 +1,20 @@
+@overview content as reference_content
+@styles navbar, section, theme_css, theme_head, sidebar, init_docs_sidebar
+@diagrams css as diagrams_css
+
+#[$in title:["Compiler design: source to page"]]
+#[$in description:["A chronological educational tour of Moth's compiler and build pipeline."]]
+#[$in head:<style>[theme_css] [diagrams_css]</style>]
+
+#[navbar]
+#[sidebar]
+init_docs_sidebar()!
+
+#[section, $md:
+    This section explains compiler concepts in general alongside the Moth-specific ones.
+
+    It breaks down what Moth does differently, why it does it and how the pieces fit the bigger design picture.
+]
+
+#[section, reference_content]
+

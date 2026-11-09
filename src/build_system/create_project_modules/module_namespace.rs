@@ -37,6 +37,7 @@ use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDepende
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source_packages::root_file::dependency_component_is_config_file;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
@@ -782,8 +783,9 @@ fn build_package_namespaces(
 /// Add same-module source entries for one module from its owned source rows.
 ///
 /// Each owned source's extensionless module-relative logical path becomes a namespace key.
-/// Root files (names starting with `@` or `+`) are excluded because direct root dependencies are
-/// rejected.
+/// Special root files are excluded because direct root dependencies are rejected: every root
+/// file's owning origin carries a Normal, Support, Entry or SyntheticProjectContext role (for
+/// example `@mod.moth`, `@package.moth` or `@entry.moth`).
 fn populate_same_module_entries(
     namespace: &mut ModuleNamespace,
     index: &SourceTreeIndex,
@@ -804,6 +806,7 @@ fn populate_same_module_entries(
                     origin.role(),
                     ModuleRootRole::Normal
                         | ModuleRootRole::Support
+                        | ModuleRootRole::Entry
                         | ModuleRootRole::SyntheticProjectContext
                 )
             });
@@ -1007,7 +1010,7 @@ fn resolve_entry(
             let root_file = index
                 .module_identities()
                 .record(*target_module_id)
-                .root_file_for_surface(*surface)
+                .root_file(*surface)
                 .unwrap_or_else(|| {
                     panic!(
                         "cross-module namespace selected missing {surface:?} surface for ModuleId {}",
@@ -1030,7 +1033,7 @@ fn resolve_entry(
     }
 }
 
-/// Reject direct support-root and config paths before namespace absence can change the diagnostic.
+/// Reject direct config paths before namespace absence can change the diagnostic.
 fn reject_direct_special_file_dependency(
     provider: &RetainedDependencyPath,
     string_table: &StringTable,
@@ -1039,14 +1042,7 @@ fn reject_direct_special_file_dependency(
     let source_component = path_fork
         .component(provider.path)
         .map(|component| string_table.resolve(component));
-    if source_component.is_some_and(|component| {
-        component == "config.moth"
-            || component == "config"
-            || (component.starts_with('+') && !component.contains('.') && component.len() > 1)
-            || (component.starts_with('+')
-                && component.ends_with(".moth")
-                && component.len() > "+.moth".len())
-    }) {
+    if source_component.is_some_and(dependency_component_is_config_file) {
         return Err(imports::direct_special_file_import(
             provider.path,
             Some(provider.span),

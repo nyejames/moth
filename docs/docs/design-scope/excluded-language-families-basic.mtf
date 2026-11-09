@@ -43,7 +43,7 @@ before unknown syntax can be skipped.
 
 Future `$layout` preserves nominal identity, `$export` replaces rather than
 duplicates export syntax, and `$test` remains a deferred root purpose. Custom
-metadata is open design, so `$project` stays strict.
+metadata remains open design. Project configuration stays a closed named record.
 
 ### No explicit lifetime and ownership type system
 

@@ -1,4 +1,4 @@
-**Current support and accepted design.** Template directives work today. General source modifiers are accepted design queued for the general-directives plan. Entry selection uses the planned `@entry.moth` file role, not a directive. See @../progress (Progress) for current support.
+**Current support and accepted design.** Template directives work today. General source modifiers are accepted design queued for the general-directives plan. Entry selection uses the fixed `@entry.moth` file role, not a directive. See @../progress (Progress) for current support.
 
 A directive modifies an existing construct. Template-head directives modify their template and source directives modify the following eligible construct.
 
@@ -21,6 +21,6 @@ Each directive can have at most one optional compile-time operand: `$name`, `$na
     api_url #String = "https://example.com"
 ]
 
-The current config source retains named `project` and selected-builder records, using `#Config of T` inputs until the `$config` migration. There are no `$project` or `$builder` directives. HTML metadata uses direct const `$in` slots in the selected entry; the planned `@entry.moth` role makes entry eligibility explicit.
+The current config source retains named `project` and selected-builder records, using `#Config of T` inputs until the `$config` migration. There are no `$project` or `$builder` directives. HTML metadata uses direct const `$in` slots in `@entry.moth`, whose presence makes entry eligibility explicit.
 
 See @../directives/#directives (Directives), @../project-structure/#project-config (Project config) and @../project-structure/#entry-config (Entry metadata and builder slots).

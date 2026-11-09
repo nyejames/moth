@@ -416,9 +416,9 @@ fn synthetic_rejects_support_and_missing_symlink_boundaries_without_watches() {
         fs::canonicalize(outside_temp.path()).expect("outside root should canonicalize");
     fs::create_dir_all(&support_root).expect("support root should be created");
     fs::create_dir_all(&child_root).expect("child root should be created");
-    fs::write(support_root.join("+support.moth"), "support root")
+    fs::write(support_root.join("@package.moth"), "support root")
         .expect("support root file should be created");
-    fs::write(child_root.join("@child.moth"), "child root")
+    fs::write(child_root.join("@mod.moth"), "child root")
         .expect("child root file should be created");
     fs::write(support_root.join("existing.mtf"), "template")
         .expect("support content should be created");

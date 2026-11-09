@@ -14,7 +14,7 @@ use crate::compiler_frontend::datatypes::{CallableReturnShape, FunctionReturnCon
 use crate::compiler_frontend::module_compilation::artefact::{
     ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
 };
-use crate::compiler_frontend::module_compilation::{FrontendOptions, Module, ModuleRootActivity};
+use crate::compiler_frontend::module_compilation::{FrontendOptions, Module};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase, SourceSpan};
@@ -262,9 +262,7 @@ fn successful_borrow_report_can_be_stored_on_module() {
             functions: function_link_facts,
         },
         metadata: ModuleCompilerMetadata {
-            entry_point: std::path::PathBuf::from("main.moth"),
-            const_top_level_fragments: Vec::new(),
-            root_activity: ModuleRootActivity::default(),
+            entry: None,
             doc_fragments: Vec::new(),
             materialisation_context: None,
         },

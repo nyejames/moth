@@ -9,13 +9,13 @@ message_contains = ["`$md` and `$raw` cannot be combined because both control te
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0022"
 reason = "invalid_template_structure.incompatible_head_item"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1
 column = 7
 
 [[backends.html.diagnostic_assertions.secondary_labels]]
 occurrence = 1
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1
 column = 2
 

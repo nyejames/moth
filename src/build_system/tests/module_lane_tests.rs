@@ -57,7 +57,7 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::module_compilation::artefact::{
-    ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
+    EntryRootMetadata, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
 };
 use crate::compiler_frontend::module_compilation::{
     CompiledModuleArtifact, CompletedGeneratedFunction, GeneratedFunctionSidecar, Module,
@@ -243,7 +243,7 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
         functions: function_link_facts,
     };
 
-    let entry_point = PathBuf::from("src/@page.moth");
+    let entry_point = PathBuf::from("src/@entry.moth");
     hir_module.expressions.freeze();
     let mut module = Module {
         executable: ModuleExecutable {
@@ -256,9 +256,11 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
         },
         link_facts,
         metadata: ModuleCompilerMetadata {
-            entry_point: entry_point.clone(),
-            const_top_level_fragments: vec![],
-            root_activity: ModuleRootActivity::default(),
+            entry: Some(EntryRootMetadata {
+                entry_point: entry_point.clone(),
+                const_top_level_fragments: vec![],
+                root_activity: ModuleRootActivity::default(),
+            }),
             doc_fragments: vec![],
             materialisation_context: None,
         },
@@ -328,7 +330,15 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
     );
 
     // The metadata entry path is a PathBuf, not interned, so it is preserved.
-    assert_eq!(module.metadata.entry_point, entry_point);
+    assert_eq!(
+        module
+            .metadata
+            .entry
+            .as_ref()
+            .expect("remap fixture represents an active entry root")
+            .entry_point,
+        entry_point
+    );
 }
 
 #[test]
@@ -360,12 +370,13 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
             functions: function_link_facts,
         },
         metadata: ModuleCompilerMetadata {
-            entry_point: PathBuf::from("@page.moth"),
-            const_top_level_fragments: vec![],
-            root_activity: ModuleRootActivity {
-                has_non_trivial_root_body: true,
-                ..ModuleRootActivity::default()
-            },
+            entry: Some(EntryRootMetadata {
+                entry_point: PathBuf::from("@entry.moth"),
+                const_top_level_fragments: vec![],
+                root_activity: ModuleRootActivity {
+                    runtime_fragment_count: 1,
+                },
+            }),
             doc_fragments: vec![],
             materialisation_context: None,
         },
@@ -389,46 +400,71 @@ fn frontend_compilation_retains_project_artefact_interfaces() {
     //       handoff instead of being flattened into a bare `Module`.
     // WHY: completed artefacts are retained so interface closure, fingerprints and link owners
     //      can consume them after `compile_project_frontend` returns.
-    let module = minimal_lane_module(PathBuf::from("@page.moth"), true);
-    let frontend = test_frontend_from_project_modules(vec![module]);
+    let entry = minimal_lane_module(PathBuf::from("@entry.moth"), true);
+    let facade = minimal_lane_module(PathBuf::from("@mod.moth"), false);
+    let frontend = test_frontend_from_project_modules(vec![entry, facade]);
     let artifact = frontend
         .project
         .modules
         .artifact(ModuleId::from_index(0))
         .expect("valid module id")
-        .expect("project module should be successful");
+        .expect("project entry module should be successful");
     assert!(
         artifact
             .module
             .metadata
+            .entry
+            .as_ref()
+            .expect("project artefact retains entry metadata")
             .root_activity
-            .has_html_artifact_activity(),
+            .runtime_fragment_count
+            > 0,
         "project artefact root activity is retained"
     );
+    assert!(
+        artifact.normal_interface.is_none(),
+        "an entry-only artefact publishes no facade"
+    );
+    let facade_artifact = frontend
+        .project
+        .modules
+        .artifact(ModuleId::from_index(1))
+        .expect("valid facade module id")
+        .expect("project facade module should be successful");
     assert_eq!(
-        artifact.interface.module_origin.role(),
+        facade_artifact
+            .normal_interface
+            .as_ref()
+            .expect("the published facade artefact carries its normal interface")
+            .module_origin
+            .role(),
         ModuleRootRole::Normal,
         "artefact interface survives the handoff"
     );
 
     let compilation = ProjectCompilation::from_frontend(frontend)
-        .expect("one active project module assembles one entry");
-    assert_eq!(compilation.module_count(), 1, "one base module");
+        .expect("one entry plus one facade assembles one entry");
+    assert_eq!(compilation.module_count(), 2, "both base modules");
     let retained = compilation
         .project
         .modules
-        .artifact(ModuleId::from_index(0))
-        .expect("valid module id")
+        .artifact(ModuleId::from_index(1))
+        .expect("valid facade module id")
         .expect("success-only compilation retains the artefact");
     assert_eq!(
-        retained.interface.module_origin.role(),
+        retained
+            .normal_interface
+            .as_ref()
+            .expect("the retained artefact carries its normal facade")
+            .module_origin
+            .role(),
         ModuleRootRole::Normal,
         "completed public interface remains accessible after success-only conversion"
     );
     assert_eq!(
         compilation.entries().len(),
         1,
-        "normal root creates one entry"
+        "the entry root creates one entry"
     );
 }
 
@@ -439,8 +475,8 @@ fn source_package_artefacts_are_retained_but_never_project_entries() {
     //       entry identities through the retained mapping rather than mutating package metadata.
     // WHY: package `root_activity` is never cleared to suppress entries; the separate graph
     //      boundaries keep package modules out of project entry selection.
-    let active_project = minimal_lane_module(PathBuf::from("src/@page.moth"), true);
-    let package_root = minimal_lane_module(PathBuf::from("packages/html/@mod.moth"), true);
+    let active_project = minimal_lane_module(PathBuf::from("src/@entry.moth"), true);
+    let package_root = minimal_lane_module(PathBuf::from("packages/html/@mod.moth"), false);
 
     let frontend = test_frontend_with_source_package(active_project, package_root);
     assert_eq!(frontend.source_packages.len(), 1);
@@ -456,9 +492,9 @@ fn source_package_artefacts_are_retained_but_never_project_entries() {
             .expect("package root should be successful")
             .module
             .metadata
-            .root_activity
-            .has_html_artifact_activity(),
-        "source-package root activity is retained, not cleared"
+            .entry
+            .is_none(),
+        "a source-package facade root carries no entry metadata"
     );
 
     let compilation = ProjectCompilation::from_frontend(frontend)
@@ -475,11 +511,8 @@ fn source_package_artefacts_are_retained_but_never_project_entries() {
         .nth(1)
         .expect("package module retained");
     assert!(
-        package_module
-            .metadata
-            .root_activity
-            .has_html_artifact_activity(),
-        "package module metadata is unchanged by project assembly"
+        package_module.metadata.entry.is_none(),
+        "a source-package facade root carries no entry metadata"
     );
 }
 
@@ -531,6 +564,18 @@ fn test_graph_boundary(
     module_path: &str,
 ) -> CompiledGraphBoundary {
     let module_count = modules.len();
+    // A module with entry metadata models an executable entry; modules without it model API-only
+    // facades, so each graph node keeps exactly the roots its published interface describes.
+    let roles = modules
+        .iter()
+        .map(|module| {
+            if module.metadata.entry.is_some() {
+                ModuleRootRole::Entry
+            } else {
+                ModuleRootRole::Normal
+            }
+        })
+        .collect::<Vec<_>>();
     let origins = (0..module_count)
         .map(|index| {
             StableModuleOriginIdentity::from_portable_path(
@@ -540,11 +585,11 @@ fn test_graph_boundary(
                 } else {
                     module_path.to_owned()
                 },
-                ModuleRootRole::Normal,
+                roles[index],
             )
         })
         .collect::<Vec<_>>();
-    let graph = ProjectModuleGraph::from_normal_roots(
+    let graph = ProjectModuleGraph::from_standalone_roots(
         origins
             .iter()
             .cloned()
@@ -558,7 +603,8 @@ fn test_graph_boundary(
                 ModuleId::from_index(index),
                 CompiledModuleArtifact {
                     module,
-                    interface: empty_test_interface_for_origin(origins[index].clone()),
+                    normal_interface: (roles[index] == ModuleRootRole::Normal)
+                        .then(|| empty_test_interface_for_origin(origins[index].clone())),
                     support_interface: None,
                 },
             )
@@ -604,7 +650,7 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
             ModuleId::from_index(2),
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("high/@mod.moth"), true),
-                interface: empty_test_interface("high".to_owned()),
+                normal_interface: Some(empty_test_interface("high".to_owned())),
                 support_interface: None,
             },
         )
@@ -614,7 +660,7 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
             ModuleId::from_index(1),
             CompiledModuleArtifact {
                 module: minimal_lane_module(PathBuf::from("low/@mod.moth"), true),
-                interface: empty_test_interface("low".to_owned()),
+                normal_interface: Some(empty_test_interface("low".to_owned())),
                 support_interface: None,
             },
         )
@@ -627,12 +673,28 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
         .artifact(ModuleId::from_index(2))
         .expect("valid high module id")
         .expect("high module should be successful");
-    assert!(high.module.metadata.entry_point.ends_with("high/@mod.moth"));
+    assert!(
+        high.module
+            .metadata
+            .entry
+            .as_ref()
+            .expect("high module represents an active root")
+            .entry_point
+            .ends_with("high/@mod.moth")
+    );
     let low = store
         .artifact(ModuleId::from_index(1))
         .expect("valid low module id")
         .expect("low module should be successful");
-    assert!(low.module.metadata.entry_point.ends_with("low/@mod.moth"));
+    assert!(
+        low.module
+            .metadata
+            .entry
+            .as_ref()
+            .expect("low module represents an active root")
+            .entry_point
+            .ends_with("low/@mod.moth")
+    );
     assert!(
         store
             .artifact(ModuleId::from_index(0))
@@ -643,7 +705,16 @@ fn dense_lookup_resolves_wave_publication_out_of_module_id_order() {
 
     let order = store
         .successful_artefacts_in_module_id_order()
-        .map(|artifact| artifact.module.metadata.entry_point.clone())
+        .map(|artifact| {
+            artifact
+                .module
+                .metadata
+                .entry
+                .as_ref()
+                .expect("ordered artefacts represent active roots")
+                .entry_point
+                .clone()
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         order,
@@ -663,7 +734,7 @@ fn duplicate_declaration_inside_one_materialisation_context_raises_compiler_bug(
         identity
     );
     let mut store = ModuleArtifactStore::new(1);
-    let mut module = minimal_lane_module(PathBuf::from("@dup.moth"), true);
+    let mut module = minimal_lane_module(PathBuf::from("dup.moth"), true);
     module.metadata.materialisation_context = Some(Arc::new(
         ModuleMaterialisationContext::from_identities_for_test(vec![identity.clone(), identity]),
     ));
@@ -673,7 +744,7 @@ fn duplicate_declaration_inside_one_materialisation_context_raises_compiler_bug(
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module,
-                interface: empty_test_interface("dup".to_owned()),
+                normal_interface: Some(empty_test_interface("dup".to_owned())),
                 support_interface: None,
             },
         )
@@ -702,9 +773,10 @@ fn materialisation_lookup_resolves_the_exact_template_row() {
         "rows".to_owned(),
         ModuleRootRole::Normal,
     );
-    let graph = ProjectModuleGraph::from_normal_roots(vec![(origin, PathBuf::from("@rows.moth"))]);
+    let graph =
+        ProjectModuleGraph::from_standalone_roots(vec![(origin, PathBuf::from("rows.moth"))]);
     let mut store = ModuleArtifactStore::new(1);
-    let mut module = minimal_lane_module(PathBuf::from("@rows.moth"), true);
+    let mut module = minimal_lane_module(PathBuf::from("rows.moth"), true);
     module.metadata.materialisation_context = Some(Arc::new(
         ModuleMaterialisationContext::from_identities_for_test(vec![
             first_identity,
@@ -716,7 +788,7 @@ fn materialisation_lookup_resolves_the_exact_template_row() {
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module,
-                interface: empty_test_interface("rows".to_owned()),
+                normal_interface: Some(empty_test_interface("rows".to_owned())),
                 support_interface: None,
             },
         )
@@ -741,13 +813,13 @@ fn same_generated_declaration_across_project_and_package_boundaries_fails() {
         "Generated declaration identity {:?} is published by both project module 0 and source package @html",
         identity
     );
-    let mut project_module = minimal_lane_module(PathBuf::from("@page.moth"), true);
+    let mut project_module = minimal_lane_module(PathBuf::from("@entry.moth"), true);
     project_module.metadata.materialisation_context = Some(Arc::new(
         ModuleMaterialisationContext::from_identities_for_test(vec![identity.clone()]),
     ));
     let project = test_graph_boundary(vec![project_module], "test", "page");
 
-    let mut package_module = minimal_lane_module(PathBuf::from("@mod.moth"), true);
+    let mut package_module = minimal_lane_module(PathBuf::from("@mod.moth"), false);
     package_module.metadata.materialisation_context = Some(Arc::new(
         ModuleMaterialisationContext::from_identities_for_test(vec![identity]),
     ));
@@ -780,7 +852,7 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
     let package_a = test_graph_boundary(
         vec![minimal_lane_module(
             PathBuf::from("packages/a/@mod.moth"),
-            true,
+            false,
         )],
         "a",
         "",
@@ -788,13 +860,13 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
     let package_b = test_graph_boundary(
         vec![minimal_lane_module(
             PathBuf::from("packages/b/@mod.moth"),
-            true,
+            false,
         )],
         "b",
         "",
     );
     let project = test_graph_boundary(
-        vec![minimal_lane_module(PathBuf::from("@page.moth"), true)],
+        vec![minimal_lane_module(PathBuf::from("@entry.moth"), true)],
         "test",
         "page",
     );
@@ -834,11 +906,8 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
         .expect("valid package a id")
         .expect("package a root should be successful");
     assert!(
-        package_a_module
-            .module
-            .metadata
-            .entry_point
-            .ends_with("packages/a/@mod.moth")
+        package_a_module.module.metadata.entry.is_none(),
+        "package a root is an API facade, never an entry"
     );
     let package_b_module = frontend
         .source_packages
@@ -851,27 +920,24 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
         .expect("valid package b id")
         .expect("package b root should be successful");
     assert!(
-        package_b_module
-            .module
-            .metadata
-            .entry_point
-            .ends_with("packages/b/@mod.moth")
+        package_b_module.module.metadata.entry.is_none(),
+        "package b root is an API facade, never an entry"
     );
 
     let compilation = ProjectCompilation::from_frontend(frontend)
         .expect("overlapping package module ids should assemble");
     assert_eq!(compilation.module_count(), 3);
-    let module_paths = compilation
+    let entry_paths = compilation
         .modules()
-        .map(|module| module.metadata.entry_point.clone())
+        .filter_map(|module| module.metadata.entry.as_ref())
+        .map(|entry| entry.entry_point.clone())
         .collect::<Vec<_>>();
-    assert!(module_paths[1].ends_with("packages/a/@mod.moth"));
-    assert!(module_paths[2].ends_with("packages/b/@mod.moth"));
     assert_eq!(
-        compilation.entries().len(),
+        entry_paths.len(),
         1,
-        "only the project root is an entry"
+        "package roots are API facades; only the project root is an entry"
     );
+    assert!(entry_paths[0].ends_with("@entry.moth"));
 }
 
 #[test]
@@ -879,7 +945,7 @@ fn boundary_outcome_sorting_is_independent_of_wave_order() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut boundary = CompiledGraphBoundary {
-        structure: ProjectModuleGraph::from_normal_roots(Vec::new()),
+        structure: ProjectModuleGraph::from_standalone_roots(Vec::new()),
         modules: ModuleArtifactStore::new(0),
         generated: BoundaryGeneratedFunctionStore::default(),
         diagnosed: vec![
@@ -1113,7 +1179,7 @@ fn project_and_package_boundaries_may_contain_equal_generated_identities() {
     let package_facade = OriginFunctionId::new_free(package_origin, "facade".to_owned());
 
     let project_module = lane_module_with_generated_and_cross_module_calls(
-        PathBuf::from("@page.moth"),
+        PathBuf::from("@entry.moth"),
         true,
         Some(shared_identity.clone()),
         std::slice::from_ref(&package_facade),
@@ -1138,7 +1204,7 @@ fn project_and_package_boundaries_may_contain_equal_generated_identities() {
             summary: generated_test_summary(),
             sidecar: lane_sidecar(
                 shared_identity.clone(),
-                PathBuf::from("@project_shared_generated.moth"),
+                PathBuf::from("project_shared_generated.moth"),
             ),
         });
         store
@@ -1151,7 +1217,7 @@ fn project_and_package_boundaries_may_contain_equal_generated_identities() {
             summary: generated_test_summary(),
             sidecar: lane_sidecar(
                 shared_identity.clone(),
-                PathBuf::from("packages/sharedpkg/@package_shared_generated.moth"),
+                PathBuf::from("packages/sharedpkg/package_shared_generated.moth"),
             ),
         });
         store
@@ -1185,24 +1251,12 @@ fn project_and_package_boundaries_may_contain_equal_generated_identities() {
     let project_sidecar = entry
         .linked_modules
         .iter()
-        .find(|linked| {
-            linked
-                .module
-                .metadata
-                .entry_point
-                .ends_with("@project_shared_generated.moth")
-        })
+        .find(|linked| linked.source_domain.is_none())
         .expect("project-boundary sidecar should be linked");
     let package_sidecar = entry
         .linked_modules
         .iter()
-        .find(|linked| {
-            linked
-                .module
-                .metadata
-                .entry_point
-                .ends_with("@package_shared_generated.moth")
-        })
+        .find(|linked| linked.source_domain.is_some())
         .expect("package-boundary sidecar should be linked");
     let project_name = project_sidecar
         .generated_function_names
@@ -1230,7 +1284,7 @@ fn package_cannot_resolve_an_unrelated_package_sidecar() {
     let package_facade = OriginFunctionId::new_free(package_origin, "facade".to_owned());
 
     let project_module = lane_module_with_generated_and_cross_module_calls(
-        PathBuf::from("@page.moth"),
+        PathBuf::from("@entry.moth"),
         true,
         None,
         std::slice::from_ref(&package_facade),
@@ -1262,7 +1316,7 @@ fn package_cannot_resolve_an_unrelated_package_sidecar() {
             summary: generated_test_summary(),
             sidecar: lane_sidecar(
                 shared_identity.clone(),
-                PathBuf::from("packages/b/@generated.moth"),
+                PathBuf::from("packages/b/generated.moth"),
             ),
         });
         store
@@ -1336,7 +1390,7 @@ fn independent_packages_publish_equal_generated_identities_in_any_order() {
     let frontend_for = |order: [&str; 2]| -> ProjectFrontendCompilation {
         let (first_prefix, second_prefix) = (order[0], order[1]);
         let project_module = lane_module_with_generated_and_cross_module_calls(
-            PathBuf::from("@page.moth"),
+            PathBuf::from("@entry.moth"),
             true,
             None,
             &[
@@ -1365,7 +1419,7 @@ fn independent_packages_publish_equal_generated_identities_in_any_order() {
                         summary: generated_test_summary(),
                         sidecar: lane_sidecar(
                             shared_identity.clone(),
-                            PathBuf::from(format!("packages/{prefix}/@generated.moth")),
+                            PathBuf::from(format!("packages/{prefix}/generated.moth")),
                         ),
                     });
                     store
@@ -1405,16 +1459,10 @@ fn independent_packages_publish_equal_generated_identities_in_any_order() {
         let mut symbols = rustc_hash::FxHashMap::default();
         for linked_module in &entries[0].linked_modules {
             if let Some(name) = linked_module.generated_function_names.get(&shared_identity) {
-                let prefix = if linked_module
-                    .module
-                    .metadata
-                    .entry_point
-                    .starts_with("packages/a/")
-                {
-                    "a"
-                } else {
-                    "b"
-                };
+                let prefix = linked_module
+                    .source_domain
+                    .expect("package sidecar carries its package domain")
+                    .name();
                 symbols.insert(prefix.to_owned(), name.clone());
             }
         }
@@ -1441,7 +1489,7 @@ fn independent_packages_publish_equal_generated_identities_in_any_order() {
             facade_b.clone()
         };
         let project_module = lane_module_with_generated_and_cross_module_calls(
-            PathBuf::from("@page.moth"),
+            PathBuf::from("@entry.moth"),
             true,
             None,
             &[facade],
@@ -1461,7 +1509,7 @@ fn independent_packages_publish_equal_generated_identities_in_any_order() {
                 summary: generated_test_summary(),
                 sidecar: lane_sidecar(
                     shared_identity.clone(),
-                    PathBuf::from(format!("packages/{prefix}/@generated.moth")),
+                    PathBuf::from(format!("packages/{prefix}/generated.moth")),
                 ),
             });
             store
@@ -1540,16 +1588,13 @@ fn lane_module_with_generated_and_cross_module_calls(
             functions: function_link_facts,
         },
         metadata: ModuleCompilerMetadata {
-            entry_point,
-            const_top_level_fragments: vec![],
-            root_activity: if active_root {
-                ModuleRootActivity {
-                    has_non_trivial_root_body: true,
-                    ..ModuleRootActivity::default()
-                }
-            } else {
-                ModuleRootActivity::default()
-            },
+            entry: active_root.then(|| EntryRootMetadata {
+                entry_point,
+                const_top_level_fragments: vec![],
+                root_activity: ModuleRootActivity {
+                    runtime_fragment_count: 1,
+                },
+            }),
             doc_fragments: vec![],
             materialisation_context: None,
         },
@@ -1571,9 +1616,9 @@ fn lane_sidecar(
 
 #[test]
 fn frontend_boundary_rejects_unfinished_module_slots() {
-    let first_root = PathBuf::from("@first.moth");
-    let second_root = PathBuf::from("@second.moth");
-    let graph = ProjectModuleGraph::from_normal_roots(vec![
+    let first_root = PathBuf::from("first.moth");
+    let second_root = PathBuf::from("second.moth");
+    let graph = ProjectModuleGraph::from_standalone_roots(vec![
         (
             StableModuleOriginIdentity::from_portable_path(
                 StablePackageIdentity::project_local("test"),
@@ -1596,8 +1641,8 @@ fn frontend_boundary_rejects_unfinished_module_slots() {
         .publish_success(
             ModuleId::from_index(0),
             CompiledModuleArtifact {
-                module: minimal_lane_module(PathBuf::from("@first.moth"), true),
-                interface: empty_test_interface("first".to_owned()),
+                module: minimal_lane_module(PathBuf::from("first.moth"), true),
+                normal_interface: Some(empty_test_interface("first".to_owned())),
                 support_interface: None,
             },
         )
@@ -1627,14 +1672,14 @@ fn frontend_boundary_rejects_unfinished_module_slots() {
 
 #[test]
 fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
-    let graph = ProjectModuleGraph::from_normal_roots(vec![
+    let graph = ProjectModuleGraph::from_standalone_roots(vec![
         (
             StableModuleOriginIdentity::from_portable_path(
                 StablePackageIdentity::project_local("test"),
                 "success".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            PathBuf::from("@success.moth"),
+            PathBuf::from("success.moth"),
         ),
         (
             StableModuleOriginIdentity::from_portable_path(
@@ -1642,7 +1687,7 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
                 "diagnosed".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            PathBuf::from("@diagnosed.moth"),
+            PathBuf::from("diagnosed.moth"),
         ),
         (
             StableModuleOriginIdentity::from_portable_path(
@@ -1650,7 +1695,7 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
                 "blocked".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            PathBuf::from("@blocked.moth"),
+            PathBuf::from("blocked.moth"),
         ),
     ]);
     let mut store = ModuleArtifactStore::new(3);
@@ -1658,8 +1703,8 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
         .publish_success(
             ModuleId::from_index(0),
             CompiledModuleArtifact {
-                module: minimal_lane_module(PathBuf::from("@success.moth"), true),
-                interface: empty_test_interface("success".to_owned()),
+                module: minimal_lane_module(PathBuf::from("success.moth"), true),
+                normal_interface: Some(empty_test_interface("success".to_owned())),
                 support_interface: None,
             },
         )
@@ -1748,7 +1793,7 @@ fn generated_test_identity(name: &str) -> GeneratedFunctionIdentity {
                 "main".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            "@page.moth".to_owned(),
+            "@entry.moth".to_owned(),
             ModulePrivateExecutableCategory::GenericFunction,
             name.to_owned(),
             None,
@@ -1787,16 +1832,13 @@ fn minimal_lane_module(entry_point: PathBuf, active_root: bool) -> Module {
             functions: function_link_facts,
         },
         metadata: ModuleCompilerMetadata {
-            entry_point,
-            const_top_level_fragments: vec![],
-            root_activity: if active_root {
-                ModuleRootActivity {
-                    has_non_trivial_root_body: true,
-                    ..ModuleRootActivity::default()
-                }
-            } else {
-                ModuleRootActivity::default()
-            },
+            entry: active_root.then(|| EntryRootMetadata {
+                entry_point,
+                const_top_level_fragments: vec![],
+                root_activity: ModuleRootActivity {
+                    runtime_fragment_count: 1,
+                },
+            }),
             doc_fragments: vec![],
             materialisation_context: None,
         },
@@ -1804,13 +1846,13 @@ fn minimal_lane_module(entry_point: PathBuf, active_root: bool) -> Module {
 }
 
 fn single_node_graph() -> ProjectModuleGraph {
-    ProjectModuleGraph::from_normal_roots(vec![(
+    ProjectModuleGraph::from_standalone_roots(vec![(
         StableModuleOriginIdentity::from_portable_path(
             StablePackageIdentity::project_local("test"),
             "single".to_owned(),
             ModuleRootRole::Normal,
         ),
-        PathBuf::from("@single.moth"),
+        PathBuf::from("single.moth"),
     )])
 }
 
@@ -1820,7 +1862,7 @@ fn boundary_validation_rejects_diagnosed_lane_mismatch_in_both_directions() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut boundary = test_graph_boundary(
-        vec![minimal_lane_module(PathBuf::from("@single.moth"), false)],
+        vec![minimal_lane_module(PathBuf::from("single.moth"), false)],
         "test",
         "single",
     );
@@ -1863,8 +1905,8 @@ fn boundary_validation_rejects_blocked_lane_mismatch_in_both_directions() {
         .publish_success(
             ModuleId::from_index(0),
             CompiledModuleArtifact {
-                module: minimal_lane_module(PathBuf::from("@single.moth"), false),
-                interface: empty_test_interface("single".to_owned()),
+                module: minimal_lane_module(PathBuf::from("single.moth"), false),
+                normal_interface: Some(empty_test_interface("single".to_owned())),
                 support_interface: None,
             },
         )
@@ -1918,14 +1960,14 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
     store
         .mark_diagnosed(ModuleId::from_index(1))
         .expect("slot 1 should transition");
-    let graph = ProjectModuleGraph::from_normal_roots(vec![
+    let graph = ProjectModuleGraph::from_standalone_roots(vec![
         (
             StableModuleOriginIdentity::from_portable_path(
                 StablePackageIdentity::project_local("test"),
                 "a".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            PathBuf::from("@a.moth"),
+            PathBuf::from("a.moth"),
         ),
         (
             StableModuleOriginIdentity::from_portable_path(
@@ -1933,7 +1975,7 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
                 "b".to_owned(),
                 ModuleRootRole::Normal,
             ),
-            PathBuf::from("@b.moth"),
+            PathBuf::from("b.moth"),
         ),
     ]);
     let boundary = CompiledGraphBoundary {
@@ -1970,14 +2012,14 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
         .mark_blocked(ModuleId::from_index(1))
         .expect("slot 1 should transition");
     let boundary = CompiledGraphBoundary {
-        structure: ProjectModuleGraph::from_normal_roots(vec![
+        structure: ProjectModuleGraph::from_standalone_roots(vec![
             (
                 StableModuleOriginIdentity::from_portable_path(
                     StablePackageIdentity::project_local("test"),
                     "a".to_owned(),
                     ModuleRootRole::Normal,
                 ),
-                PathBuf::from("@a.moth"),
+                PathBuf::from("a.moth"),
             ),
             (
                 StableModuleOriginIdentity::from_portable_path(
@@ -1985,7 +2027,7 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
                     "b".to_owned(),
                     ModuleRootRole::Normal,
                 ),
-                PathBuf::from("@b.moth"),
+                PathBuf::from("b.moth"),
             ),
         ]),
         modules: store,
@@ -2039,7 +2081,7 @@ fn boundary_validation_rejects_duplicate_and_overlapping_outcome_lanes() {
 #[test]
 fn source_package_publication_rejects_unavailable_root_slot() {
     let package_boundary = CompiledGraphBoundary {
-        structure: ProjectModuleGraph::from_normal_roots(vec![(
+        structure: ProjectModuleGraph::from_standalone_roots(vec![(
             StableModuleOriginIdentity::from_portable_path(
                 StablePackageIdentity::source_package(PackageOrigin::ProjectLocal, "pkg"),
                 "pkg/@mod.moth".to_owned(),
@@ -2096,7 +2138,7 @@ fn materialisation_rows_iterate_in_deterministic_publication_order() {
             ModuleId::from_index(1),
             CompiledModuleArtifact {
                 module: second_module,
-                interface: empty_test_interface("second".to_owned()),
+                normal_interface: Some(empty_test_interface("second".to_owned())),
                 support_interface: None,
             },
         )
@@ -2113,7 +2155,7 @@ fn materialisation_rows_iterate_in_deterministic_publication_order() {
             ModuleId::from_index(0),
             CompiledModuleArtifact {
                 module: first_module,
-                interface: empty_test_interface("first".to_owned()),
+                normal_interface: Some(empty_test_interface("first".to_owned())),
                 support_interface: None,
             },
         )
@@ -2259,7 +2301,7 @@ fn generated_names_stay_stable_under_sidecar_publication_reordering() {
     let frontend_for_order = |first: GeneratedFunctionIdentity,
                               second: GeneratedFunctionIdentity| {
         let mut project = test_graph_boundary(
-            vec![minimal_lane_module(PathBuf::from("@page.moth"), true)],
+            vec![minimal_lane_module(PathBuf::from("@entry.moth"), true)],
             "test",
             "page",
         );
@@ -2267,12 +2309,12 @@ fn generated_names_stay_stable_under_sidecar_publication_reordering() {
         store.push_completed_for_test(CompletedGeneratedFunction {
             identity: first.clone(),
             summary: generated_test_summary(),
-            sidecar: lane_sidecar(first, PathBuf::from("@generated_first.moth")),
+            sidecar: lane_sidecar(first, PathBuf::from("generated_first.moth")),
         });
         store.push_completed_for_test(CompletedGeneratedFunction {
             identity: second.clone(),
             summary: generated_test_summary(),
-            sidecar: lane_sidecar(second, PathBuf::from("@generated_second.moth")),
+            sidecar: lane_sidecar(second, PathBuf::from("generated_second.moth")),
         });
         project.generated = store;
         ProjectCompilation::from_frontend(
@@ -2309,7 +2351,7 @@ fn boundary_with_unvisited_slot(
     cutoff: Option<SchedulingCutoff>,
     string_table: &mut StringTable,
 ) -> CompiledGraphBoundary {
-    let graph = ProjectModuleGraph::from_normal_roots(
+    let graph = ProjectModuleGraph::from_standalone_roots(
         ["success", "diagnosed", "skipped"]
             .into_iter()
             .map(|path| {
@@ -2330,8 +2372,8 @@ fn boundary_with_unvisited_slot(
         .publish_success(
             ModuleId::from_index(0),
             CompiledModuleArtifact {
-                module: minimal_lane_module(PathBuf::from("@success.moth"), true),
-                interface: empty_test_interface("success".to_owned()),
+                module: minimal_lane_module(PathBuf::from("success.moth"), true),
+                normal_interface: Some(empty_test_interface("success".to_owned())),
                 support_interface: None,
             },
         )
@@ -2375,7 +2417,7 @@ fn diagnostic_recovery_incomplete_graph_is_not_success() {
         frontend
             .project
             .modules
-            .interface(ModuleId::from_index(2))
+            .normal_interface(ModuleId::from_index(2))
             .expect("slot lookup should resolve")
             .is_none()
     );
@@ -2384,7 +2426,9 @@ fn diagnostic_recovery_incomplete_graph_is_not_success() {
         .successful_artefacts_in_module_id_order()
         .map(|artifact| {
             artifact
-                .interface
+                .normal_interface
+                .as_ref()
+                .expect("the successful artefact carries its normal facade")
                 .module_origin
                 .logical_module_path()
                 .to_owned()
@@ -2410,7 +2454,7 @@ fn cutoff_boundary_without_unvisited_slots_is_valid_but_never_success() {
     // A command can also stop after skipping check-only units, which own no graph slot. The
     // canonical graph is complete then, but the request is still not linkable success.
     let boundary = test_graph_boundary(
-        vec![minimal_lane_module(PathBuf::from("@single.moth"), true)],
+        vec![minimal_lane_module(PathBuf::from("single.moth"), true)],
         "test",
         "single",
     );

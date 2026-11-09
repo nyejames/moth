@@ -1,0 +1,5 @@
+export:
+    show type T |value T| -> String:
+        return [: [@settings site_name] ]
+    ;
+;

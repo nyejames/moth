@@ -10,12 +10,15 @@ use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker_in_cursor;
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
+use crate::compiler_frontend::headers::qualified_references::{
+    HeaderExpressionRange, collect_qualified_references,
+};
 use crate::compiler_frontend::headers::synthetic_content_header::{
     SyntheticContentHeaderInput, synthetic_content_header,
 };
 use crate::compiler_frontend::headers::types::{
-    FileFrontendPrepareOutput, FileRole, PreparedFilePathSyntax, SourceTokenOwner,
-    SyntheticContentPayload,
+    FileFrontendPrepareFailure, FileFrontendPrepareOutput, FileRole, PreparedFilePathSyntax,
+    SourceTokenOwner, SyntheticContentPayload,
 };
 use crate::compiler_frontend::paths::file_references::classify_prepared_file_references;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
@@ -35,6 +38,11 @@ const MOTH_TEMPLATE_MARKDOWN_DIRECTIVE: &str = "md";
 /// The canonical source owner must be paired with its preparing path table. Preparation retains
 /// only a checked body range and compact directive payload; the AST fold boundary supplies the
 /// structural `MothContentTemplateEntry` directly.
+///
+/// WHAT: returns the ordinary per-file preparation failure lane, not a bare infrastructure result.
+/// WHY: template-head qualified references validate their authored path and alias shape exactly
+///      like ordinary `.moth` expression positions, so their typed diagnostics must reach the same
+///      user-facing boundary instead of being downgraded to infrastructure failures.
 pub(crate) fn prepare_moth_template_file(
     owner: SourceTokenOwner,
     source_file: PathId,
@@ -42,7 +50,7 @@ pub(crate) fn prepare_moth_template_file(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     span_builder: &mut ExtendedSpanBuilder,
-) -> Result<FileFrontendPrepareOutput, InfrastructureFailure> {
+) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
     let file_id = owner.source_id();
     #[cfg(feature = "data_layout_memory_probe")]
     crate::compiler_frontend::instrumentation::record_source_tokens_path_table(
@@ -54,13 +62,14 @@ pub(crate) fn prepare_moth_template_file(
         return Err(InfrastructureFailure::internal(
             CompilerStage::HeaderParsing,
             "Moth template source token owner does not match its file identity",
-        ));
+        )
+        .into());
     }
     let token_count = owner.len();
     let token_stats = owner.token_stats();
     let body_range = MothTemplatePrepareContext::body_range(canonical)?;
     let context = MothTemplatePrepareContext::new(source_file, file_id, body_range, string_table);
-    let (content_header, config_owned_path_syntax_ids) = {
+    let (content_header, consumed_path_syntax_ids, qualified_references) = {
         let body_facts =
             TokenFactView::from_source_range(canonical, context.body_range).map_err(|error| {
                 InfrastructureFailure::internal(
@@ -70,24 +79,42 @@ pub(crate) fn prepare_moth_template_file(
             })?;
         let body_cursor = owner.cursor(context.body_range)?;
         let content_header = context.content_header(body_facts, string_table, path_fork)?;
-        let config_owned_path_syntax_ids =
-            if find_config_qualifier_marker_in_cursor(body_cursor, string_table, span_builder)
-                .is_some()
-            {
-                (0..body_facts.len())
-                    .filter_map(|index| {
-                        body_facts.get(index).and_then(|token| token.path_syntax_id)
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            };
-        (content_header, config_owned_path_syntax_ids)
+        if find_config_qualifier_marker_in_cursor(body_cursor, string_table, span_builder).is_some()
+        {
+            // A config-qualified body is not expression syntax; every path row stays owned by the
+            // config contract and no qualified occurrence is recognized.
+            let config_owned_path_syntax_ids: Vec<_> = (0..body_facts.len())
+                .filter_map(|index| body_facts.get(index).and_then(|token| token.path_syntax_id))
+                .collect();
+            (content_header, config_owned_path_syntax_ids, Vec::new())
+        } else {
+            // Every `.mtf` qualified occurrence lives inside a template head (including nested
+            // heads), so one bounded scan of the retained body is the complete occurrence set.
+            // The synthetic content body is compile-time content, so every occurrence is
+            // const-required.
+            let occurrences = collect_qualified_references(
+                canonical,
+                [HeaderExpressionRange::const_required(0, context.body_range)],
+                context.file_id,
+                0,
+                path_syntax.as_ref(),
+                string_table,
+                path_fork,
+            )
+            .map_err(|failure| {
+                FileFrontendPrepareFailure::from_header_parse(failure, DiagnosticBag::new())
+            })?;
+            let consumed_path_syntax_ids = occurrences
+                .iter()
+                .map(|occurrence| occurrence.dependency.path_syntax)
+                .collect();
+            (content_header, consumed_path_syntax_ids, occurrences)
+        }
     };
     let mut headers = vec![content_header];
     let structural_file_references = classify_prepared_file_references(
         path_syntax.as_ref(),
-        config_owned_path_syntax_ids,
+        consumed_path_syntax_ids,
         context.file_id,
         path_fork,
         string_table,
@@ -113,13 +140,13 @@ pub(crate) fn prepare_moth_template_file(
         file_role: FileRole::Normal,
         file_dependency_clauses: Vec::new(),
         structural_file_references,
+        qualified_references,
         dependency_selections: Vec::new(),
         headers,
         top_level_const_fragments: Vec::new(),
         source_token_stream: Some(source_token_stream),
         const_template_count: 0,
         runtime_fragment_count: 0,
-        has_non_trivial_root_body: false,
         start_body_binding_spans: rustc_hash::FxHashMap::default(),
         warnings: DiagnosticBag::new(),
     })

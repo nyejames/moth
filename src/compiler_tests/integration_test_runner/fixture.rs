@@ -575,20 +575,20 @@ fn resolve_case_entry_path(
         return canonicalize_contained_entry(fixture_root, input_root, entry);
     }
 
-    // A directory fixture with a config is a directory compilation even when its root normal
-    // module is `@page.moth`; choosing the file first would silently switch it to synthetic
-    // single-file mode.
+    // A directory fixture with a config is a directory compilation even when its root entry is
+    // `@entry.moth`; choosing the file first would silently switch it to synthetic single-file
+    // mode.
     if input_root.join("config.moth").is_file() {
         return Ok(input_root.to_path_buf());
     }
 
-    let default_entry = input_root.join("@page.moth");
+    let default_entry = input_root.join("@entry.moth");
     if default_entry.is_file() {
-        return canonicalize_contained_entry(fixture_root, input_root, "@page.moth");
+        return canonicalize_contained_entry(fixture_root, input_root, "@entry.moth");
     }
 
     Err(FixtureLoadError::path_boundary(format!(
-        "Could not determine canonical test entry for '{}'. Add 'entry = ...' to '{}' or provide @page.moth.",
+        "Could not determine canonical test entry for '{}'. Add 'entry = ...' to '{}' or provide @entry.moth.",
         input_root.display(),
         EXPECT_FILE_NAME
     )))

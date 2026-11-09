@@ -414,8 +414,11 @@ fn provider_created_package_registry_survives_into_module() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(dir.join("@page.moth"), "@drawing.js draw\nvalue = draw()\n")
-        .expect("should write page");
+    fs::write(
+        dir.join("@entry.moth"),
+        "@drawing.js draw\nvalue = draw()\n",
+    )
+    .expect("should write page");
     fs::write(dir.join("drawing.js"), "export function draw() {}\n").expect("should write js");
 
     let mut config = Config::new(dir.clone());
@@ -474,12 +477,12 @@ fn reexported_js_final_calls_retain_provider_runtime_candidate() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         "@components animate_canvas, observed\nanimate_canvas(\"canvas\")\n[:[observed()]]\n",
     )
     .expect("should write page");
     fs::write(
-        dir.join("components/@components.moth"),
+        dir.join("components/@mod.moth"),
         "export:\n    @background-animation.js animate_canvas, observed\n;\n",
     )
     .expect("should write facade");
@@ -506,11 +509,12 @@ fn reexported_js_final_calls_retain_provider_runtime_candidate() {
         .successful_module_views()
         .find(|module| {
             module
-                .metadata
-                .entry_point
-                .ends_with("components/@components.moth")
+                .link_facts
+                .external_import_candidates
+                .iter()
+                .any(|candidate| candidate.runtime_asset.is_some())
         })
-        .expect("export-only components artifact should exist");
+        .expect("export-only components artifact should retain its provider candidate");
     let provider_candidate = components
         .link_facts
         .external_import_candidates
@@ -531,7 +535,13 @@ fn reexported_js_final_calls_retain_provider_runtime_candidate() {
 
     let page = modules
         .successful_module_views()
-        .find(|module| module.metadata.entry_point.ends_with("@page.moth"))
+        .find(|module| {
+            module
+                .metadata
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with("@entry.moth"))
+        })
         .expect("calling page artifact should exist");
     let start = page
         .executable
@@ -597,7 +607,7 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         "@drawing.js draw\n@other run\nvalue = draw()\nother_value = run()\n",
     )
     .expect("should write entry");
@@ -658,7 +668,7 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(dir.join("@page.moth"), "@other run\nvalue = 1\n").expect("should write entry");
+    fs::write(dir.join("@entry.moth"), "@other run\nvalue = 1\n").expect("should write entry");
     fs::write(
         dir.join("other.moth"),
         "@drawing.js get_number\nrun || -> I32, Error!:\n    return get_number()!\n;\n",
@@ -745,7 +755,7 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         "@html canvas\npage_canvas_id #= canvas\nvalue = 1\n",
     )
     .expect("should write page");
@@ -818,8 +828,11 @@ fn provider_backed_import_with_js_lowering_passes_html_build() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(dir.join("@page.moth"), "@drawing.js draw\nvalue = draw()\n")
-        .expect("should write page");
+    fs::write(
+        dir.join("@entry.moth"),
+        "@drawing.js draw\nvalue = draw()\n",
+    )
+    .expect("should write page");
     fs::write(dir.join("drawing.js"), "export function draw() {}\n").expect("should write js");
 
     let mut config = Config::new(dir.clone());
@@ -872,7 +885,7 @@ fn linked_module_js_lowering_is_observed_separately() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         "@phase6helper helper\nvalue = helper()\n",
     )
     .expect("should write page");
@@ -943,7 +956,7 @@ fn provider_backed_direct_selection_compiles_and_reuses_cache() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         "@drawing.js draw as render\n@other run\nvalue = render()\nother_value = run()\n",
     )
     .expect("should write page");
@@ -994,7 +1007,7 @@ fn provider_backed_namespace_binding_exposes_function_and_type_members() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         "@drawing.js as drawing\nwidget drawing.Widget = drawing.make_widget()\nvalue = drawing.draw()\n",
     )
     .expect("should write page");
@@ -1041,7 +1054,7 @@ fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packa
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         "@a/use run_a\n@b/use run_b\nvalue_a = run_a()\nvalue_b = run_b()\n",
     )
     .expect("should write page");
@@ -1098,7 +1111,7 @@ fn provider_backed_opaque_type_passes_to_same_package_function() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         "@drawing.js make_widget, use_widget\nwidget = make_widget()\nvalue = use_widget(widget)\n",
     )
     .expect("should write page");
@@ -1140,7 +1153,7 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         "@a/drawing.js make_widget\n@b/drawing.js use_widget\nwidget = make_widget()\nvalue = use_widget(widget)\n",
     )
     .expect("should write page");
@@ -1242,7 +1255,7 @@ fn html_js_provider_namespace_binding_resolves() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         "@drawing.js as drawing\nvalue = drawing.draw()\n",
     )
     .expect("should write page");
@@ -1289,12 +1302,12 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources() {
     )
     .expect("should write config");
     fs::write(
-        src.join("first/@first.moth"),
+        src.join("first/@entry.moth"),
         "@drawing.js draw\nvalue = draw()\n",
     )
     .expect("should write first module");
     fs::write(
-        src.join("second/@second.moth"),
+        src.join("second/@entry.moth"),
         "@drawing.js draw\nvalue = draw()\n",
     )
     .expect("should write second module");
@@ -1339,8 +1352,9 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources() {
             artefact
                 .module
                 .metadata
-                .entry_point
-                .ends_with(Path::new("first/@first.moth"))
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with(Path::new("first/@entry.moth")))
         })
         .expect("expected first sibling module artefact");
     let second = artefacts
@@ -1349,8 +1363,9 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources() {
             artefact
                 .module
                 .metadata
-                .entry_point
-                .ends_with(Path::new("second/@second.moth"))
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with(Path::new("second/@entry.moth")))
         })
         .expect("expected second sibling module artefact");
 
@@ -1412,10 +1427,13 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources_when_
         "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(src.join("a/@a.moth"), "@drawing.js draw\nvalue = draw()\n")
-        .expect("should write a module");
     fs::write(
-        src.join("a-b/@b.moth"),
+        src.join("a/@entry.moth"),
+        "@drawing.js draw\nvalue = draw()\n",
+    )
+    .expect("should write a module");
+    fs::write(
+        src.join("a-b/@entry.moth"),
         "@drawing.js draw\nvalue = draw()\n",
     )
     .expect("should write a-b module");
@@ -1460,8 +1478,9 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources_when_
             artefact
                 .module
                 .metadata
-                .entry_point
-                .ends_with(Path::new("a/@a.moth"))
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with(Path::new("a/@entry.moth")))
         })
         .expect("expected a sibling module artefact");
     let module_a_b = artefacts
@@ -1470,8 +1489,9 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources_when_
             artefact
                 .module
                 .metadata
-                .entry_point
-                .ends_with(Path::new("a-b/@b.moth"))
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with(Path::new("a-b/@entry.moth")))
         })
         .expect("expected a-b sibling module artefact");
 
@@ -1530,7 +1550,7 @@ fn html_js_provider_direct_selection_resolves() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         "@drawing.js draw as render\nvalue = render()\n",
     )
     .expect("should write page");
@@ -1574,7 +1594,7 @@ fn html_js_provider_direct_alias_for_function_and_opaque_type_resolves() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         "@drawing.js Widget as Canvas, draw as render\nvalue = render()\n",
     )
     .expect("should write page");
@@ -1618,7 +1638,7 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         "@drawing.js make_canvas, fill_rect\ncanvas ~= make_canvas()\n~canvas.fill_rect(0.0, 0.0, 1.0, 1.0)\n",
     )
     .expect("should write page");
@@ -1671,7 +1691,7 @@ fn html_js_provider_missing_export_keyword_points_into_the_js_source() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         "@drawing.js add\nvalue = add(1, 2)\n",
     )
     .expect("should write page");
@@ -1744,7 +1764,7 @@ fn html_js_provider_missing_export_keyword_points_into_the_js_source() {
         .site_position(labels[1].site)
         .expect("the import-site label should carry the importing Moth position");
     assert!(
-        import_site.path.ends_with("@page.moth"),
+        import_site.path.ends_with("@entry.moth"),
         "import-site label should be the importing Moth source, got: {:?}",
         import_site.path
     );
@@ -1771,7 +1791,7 @@ fn html_js_provider_repeated_imports_reuse_cache() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         "@drawing.js draw\n@other run\nvalue = draw()\nother_value = run()\n",
     )
     .expect("should write entry");
@@ -1824,7 +1844,7 @@ fn html_js_provider_fallible_function_with_error_return_compiles() {
     )
     .expect("should write config");
     fs::write(
-        dir.join("@page.moth"),
+        dir.join("@entry.moth"),
         "@drawing.js Canvas, get_canvas\nrun || -> Canvas, Error!:\n    return get_canvas(\"game\")!\n;\n",
     )
     .expect("should write page");

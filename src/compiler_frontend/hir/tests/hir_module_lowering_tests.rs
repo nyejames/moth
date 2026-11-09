@@ -346,6 +346,65 @@ fn authored_fn_declaration_and_call_lower_normally() {
 }
 
 #[test]
+fn empty_entry_body_lowers_to_an_empty_compiler_owned_start() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let mut ast = build_ast_with_registered_types(
+        vec![super::entry_start_node(
+            FunctionSignature {
+                parameters: vec![],
+                return_contract: FunctionReturnContract::Returns(CallableReturnShape::from_slots(
+                    [],
+                    None,
+                )),
+            },
+            vec![],
+        )],
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    ast.synthesizes_entry_start = true;
+
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("an empty entry body should lower");
+
+    let start = module
+        .start_function
+        .expect("an entry root always owns a compiler-owned start");
+    assert_eq!(
+        module.function_origins.get(&start),
+        Some(&HirFunctionOrigin::EntryStart),
+        "the empty entry start keeps its dedicated origin"
+    );
+    assert_eq!(
+        module.functions.len(),
+        1,
+        "an empty entry body adds only the compiler-owned start"
+    );
+    assert_eq!(
+        module.functions[0].id, start,
+        "the sole function is the compiler-owned start"
+    );
+    assert!(
+        module
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .all(|statement| !matches!(
+                statement.kind,
+                HirStatementKind::PushRuntimeFragment { .. } | HirStatementKind::Call { .. }
+            )),
+        "an empty entry body emits no runtime work"
+    );
+}
+
+#[test]
 fn rejects_an_entry_in_an_api_only_root() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
@@ -364,7 +423,7 @@ fn rejects_an_entry_in_an_api_only_root() {
         ConstValueStore::default(),
         TypeEnvironment::new(),
     );
-    ast.root_role = ModuleRootRole::Support;
+    ast.synthesizes_entry_start = false;
 
     let error = lower_ast(
         ast,
@@ -380,7 +439,7 @@ fn rejects_an_entry_in_an_api_only_root() {
         errors
             .primary
             .message
-            .contains("without an implicit entry reached HIR lowering with an entry body")
+            .contains("an API-only module reached HIR lowering with an entry body")
     );
 }
 
@@ -525,7 +584,7 @@ fn rejects_a_normal_root_without_its_compiler_owned_entry() {
 #[test]
 fn api_only_root_roles_lower_without_implicit_start() {
     let mut path_fork = super::PathInternerFork::empty();
-    for root_role in [
+    for _ in [
         ModuleRootRole::Support,
         ModuleRootRole::SyntheticProjectContext,
     ] {
@@ -549,7 +608,7 @@ fn api_only_root_roles_lower_without_implicit_start() {
             ConstValueStore::default(),
             TypeEnvironment::new(),
         );
-        ast.root_role = root_role;
+        ast.synthesizes_entry_start = false;
 
         let (module, _type_environment) = lower_ast(
             ast,

@@ -15,7 +15,7 @@ fn expects_colon(diagnostic: DiagnosticView<'_>) -> bool {
 #[test]
 fn export_alone_is_rejected() {
     let result =
-        parse_single_file_headers_with_entry("export\n", "src/@mod.moth", "src/@page.moth");
+        parse_single_file_headers_with_entry("export\n", "src/@mod.moth", "src/@entry.moth");
     let errors = expect_header_error(result, "export without a block colon should be rejected");
 
     assert!(errors.diagnostics.views().any(expects_colon));
@@ -26,7 +26,7 @@ fn legacy_inline_export_declaration_is_rejected() {
     let result = parse_single_file_headers_with_entry(
         "export Button = | label String |\n",
         "src/@mod.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
     );
     let errors = expect_header_error(result, "legacy inline export should be rejected");
 
@@ -37,13 +37,16 @@ fn legacy_inline_export_declaration_is_rejected() {
 fn export_dependency_path_parsed_as_public_surface_dependency() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (output, _span_builder) = prepare_single_file_with_fork(
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let output = prepare_active_root_with_role(
         "export:\n    @button Button\n;\n",
         &PathBuf::from("src/@mod.moth"),
-        &PathBuf::from("src/@page.moth"),
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("an API-only normal root should accept its export block");
 
     assert_eq!(output.file_dependency_clauses.len(), 1);
     assert_eq!(
@@ -67,7 +70,7 @@ fn export_block_accepts_an_item_without_a_following_newline() {
         parse_single_file_headers_with_entry(
             "export: Button = | label String |\n;\n",
             "src/@mod.moth",
-            "src/@page.moth",
+            "src/@entry.moth",
         ),
         "export block should accept its first item after the colon",
     );
@@ -83,7 +86,7 @@ fn legacy_export_path_syntax_is_rejected() {
     let result = parse_single_file_headers_with_entry(
         "export @card Card, render as render_card\n",
         "src/@mod.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
     );
     let errors = expect_header_error(result, "legacy export path syntax should be rejected");
 
@@ -92,8 +95,11 @@ fn legacy_export_path_syntax_is_rejected() {
 
 #[test]
 fn export_bare_path_rejected_as_deferred_namespace_export() {
-    let result =
-        parse_single_file_headers_with_entry("export @layout\n", "src/@mod.moth", "src/@page.moth");
+    let result = parse_single_file_headers_with_entry(
+        "export @layout\n",
+        "src/@mod.moth",
+        "src/@entry.moth",
+    );
     let errors = expect_header_error(
         result,
         "bare namespace export should be rejected as deferred",
@@ -106,7 +112,7 @@ fn export_bare_path_rejected_as_deferred_namespace_export() {
 fn export_before_authored_declaration_marks_header_public() {
     let source = "export:\n    Button = | label String |\n    render |button Button| -> String:\n        return button.label\n    ;\n;\n";
     let headers = expect_header_success(
-        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@page.moth"),
+        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
         "headers should parse",
     );
 
@@ -127,7 +133,7 @@ fn export_before_authored_declaration_marks_header_public() {
 fn unmarked_authored_declarations_in_module_root_remain_private() {
     let source = "Button = | label String |\nrender |button Button| -> String:\n    return button.label\n;\n";
     let headers = expect_header_success(
-        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@page.moth"),
+        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
         "headers should parse",
     );
 
@@ -150,7 +156,7 @@ fn duplicate_declaration_detection_works_with_exported_declarations() {
     let result = parse_single_file_headers_with_entry(
         "export:\n    Button = | label String |\n;\nButton = | title String |\n",
         "src/@mod.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
     );
     let errors = expect_header_error(
         result,
@@ -168,7 +174,7 @@ fn duplicate_declaration_detection_works_with_exported_declarations() {
 fn export_before_constant_marks_header_public() {
     let source = "export:\n    theme #= \"dark\"\n    threshold #I32 = 42\n;\n";
     let headers = expect_header_success(
-        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@page.moth"),
+        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
         "headers should parse",
     );
 
@@ -192,7 +198,7 @@ fn export_before_constant_marks_header_public() {
 fn export_before_type_alias_marks_header_public() {
     let source = "export:\n    UserId as I32\n;\n";
     let headers = expect_header_success(
-        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@page.moth"),
+        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
         "headers should parse",
     );
 
@@ -209,7 +215,7 @@ fn export_before_type_alias_marks_header_public() {
 fn export_before_choice_marks_header_public() {
     let source = "export:\n    Status :: Ready, Failed | message String |;\n;\n";
     let headers = expect_header_success(
-        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@page.moth"),
+        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
         "headers should parse",
     );
 
@@ -226,7 +232,7 @@ fn export_before_choice_marks_header_public() {
 fn export_before_trait_declaration_marks_header_public() {
     let source = "export:\n    DISPLAY_TEXT must:\n        display |This| -> String\n    ;\n;\n";
     let headers = expect_header_success(
-        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@page.moth"),
+        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
         "headers should parse",
     );
 
@@ -244,7 +250,7 @@ fn export_before_runtime_template_is_rejected() {
     let result = parse_single_file_headers_with_entry(
         "export:\n    [: hello ]\n;\n",
         "src/@mod.moth",
-        "src/@page.moth",
+        "src/@entry.moth",
     );
     let errors = expect_header_error(result, "export before runtime template should be rejected");
 
@@ -256,13 +262,16 @@ fn export_before_runtime_template_is_rejected() {
 fn public_dependency_and_private_dependency_keep_distinct_retained_shells() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (output, _span_builder) = prepare_single_file_with_fork(
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let output = prepare_active_root_with_role(
         "@button Button\nexport:\n    @button Button\n;\n",
         &PathBuf::from("src/@mod.moth"),
-        &PathBuf::from("src/@page.moth"),
+        ModuleRootRole::Normal,
         &mut string_table,
+        &mut span_builder,
         &mut path_fork,
-    );
+    )
+    .expect("an API-only normal root should accept its export block");
 
     assert_eq!(
         output.file_dependency_clauses.len(),

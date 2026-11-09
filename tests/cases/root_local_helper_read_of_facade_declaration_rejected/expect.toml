@@ -1,0 +1,18 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-IMPORT-0030"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-IMPORT-0030"
+path = "input/helper.moth"
+line = 1
+column = 16
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@mod.moth"
+line = 2
+column = 5

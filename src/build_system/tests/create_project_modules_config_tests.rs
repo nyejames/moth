@@ -1,10 +1,11 @@
 use super::create_project_modules_tests::{diagnosed_reports, successful_compilation_value};
 use super::*;
 use crate::compiler_frontend::compiler_messages::DiagnosticSeverity;
+use crate::compiler_frontend::compiler_messages::InvalidConfigReason;
 use crate::compiler_frontend::compiler_messages::ValueReceiverContext;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidValueReceiverView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
-    InvalidConfigCode, InvalidConfigView,
+    InvalidConfigCode, InvalidConfigView, decode_invalid_config,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidPathView;
 use crate::compiler_frontend::compiler_messages::render::DiagnosticRenderContext;
@@ -295,13 +296,13 @@ fn loads_canonical_config_file_from_project_root() {
     fs::create_dir_all(root.join("alpha")).expect("should create first module directory");
     fs::create_dir_all(root.join("beta")).expect("should create second module directory");
     fs::write(
-        root.join("alpha/@alpha.moth"),
+        root.join("alpha/@entry.moth"),
         "@drawing.js as drawing\nvalue = 1\n",
     )
     .expect("should write first module root");
     fs::write(root.join("alpha/drawing.js"), "export function draw() {}\n")
         .expect("should write first module provider");
-    fs::write(root.join("beta/@beta.moth"), "").expect("should write second module root");
+    fs::write(root.join("beta/@entry.moth"), "").expect("should write second module root");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();
@@ -364,8 +365,9 @@ fn loads_canonical_config_file_from_project_root() {
             artefact
                 .module
                 .metadata
-                .entry_point
-                .ends_with(Path::new("alpha/@alpha.moth"))
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.entry_point.ends_with(Path::new("alpha/@entry.moth")))
         })
         .expect("expected alpha module artefact");
     let alpha_provider_package_paths = alpha
@@ -395,9 +397,9 @@ fn loads_canonical_config_file_from_project_root() {
     let canonical_config = fs::canonicalize(root.join(settings::CONFIG_FILE_NAME))
         .expect("config should canonicalize");
     let canonical_alpha =
-        fs::canonicalize(root.join("alpha/@alpha.moth")).expect("alpha should canonicalize");
+        fs::canonicalize(root.join("alpha/@entry.moth")).expect("alpha should canonicalize");
     let canonical_beta =
-        fs::canonicalize(root.join("beta/@beta.moth")).expect("beta should canonicalize");
+        fs::canonicalize(root.join("beta/@entry.moth")).expect("beta should canonicalize");
     let canonical_alpha_provider =
         fs::canonicalize(root.join("alpha/drawing.js")).expect("provider should canonicalize");
     assert_eq!(
@@ -864,10 +866,10 @@ fn rejects_builder_config_dependency_without_discovering_the_package_root() {
     let root = _tmp_root.path().to_path_buf();
     let package_root = root.join("builder/defaults");
     fs::create_dir_all(&package_root).expect("should create Builder package folder");
-    fs::write(package_root.join("@first.moth"), "value #= 1\n")
-        .expect("should write first invalid package root");
-    fs::write(package_root.join("@second.moth"), "value #= 2\n")
-        .expect("should write second invalid package root");
+    fs::write(package_root.join("@mod.moth"), "value #= 1\n")
+        .expect("should write first package facade root");
+    fs::write(package_root.join("@package.moth"), "value #= 2\n")
+        .expect("should write second package facade root");
 
     let config_path = root.join(settings::CONFIG_FILE_NAME);
     fs::write(&config_path, "@defaults value\n").expect("should write config dependency");
@@ -899,7 +901,7 @@ fn project_local_package_folder_does_not_register_source_metadata() {
     let root = _temp.path().to_path_buf();
     let package_root = root.join("packages/widgets");
     fs::create_dir_all(&package_root).expect("should create project-local package");
-    fs::write(root.join("@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("@entry.moth"), "x ~= 1\n").expect("should write entry");
 
     let config = Config::new(root.clone());
 
@@ -925,7 +927,7 @@ fn ordinary_package_folder_does_not_collide_with_source_packages() {
     let root = _temp.path().to_path_buf();
     fs::create_dir_all(root.join("helper")).expect("should create helper");
     fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
-    fs::write(root.join("@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("lib/helper/@mod.moth"), "foo #= 1\n").expect("should write root");
     fs::write(
         root.join("config.moth"),
@@ -989,7 +991,7 @@ fn malformed_dependency_path_keeps_precise_location_during_module_discovery() {
         "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    fs::write(root.join("@page.moth"), "@core//math sin\n#[:ok]\n")
+    fs::write(root.join("@entry.moth"), "@core//math sin\n#[:ok]\n")
         .expect("should write malformed entry");
 
     let mut config = Config::new(root.clone());
@@ -1418,7 +1420,7 @@ fn project_local_lib_directory_is_ignored_as_source_package_root() {
 
     fs::create_dir_all(root.join("lib/helper")).expect("should create lib/helper");
     fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("src/@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("lib/helper/@mod.moth"), "foo #= 1\n").expect("should write root");
     fs::write(root.join("lib/helper/utils.moth"), "bar #= 2\n").expect("should write lib file");
     fs::write(
@@ -1448,7 +1450,7 @@ fn project_local_lib_directory_is_ignored_as_source_package_root() {
         .try_intern_portable_path("helper/utils", &mut string_table)
         .expect("test path fits");
 
-    let declaring_source = root.join("src/@page.moth");
+    let declaring_source = root.join("src/@entry.moth");
     assert!(
         resolver
             .resolve_dependency_to_source_file(
@@ -1470,7 +1472,7 @@ fn builder_package_prefix_is_independent_of_ordinary_lib_directory() {
     fs::create_dir_all(root.join("lib/html")).expect("should create lib/html");
     fs::create_dir_all(root.join("builder/html")).expect("should create builder/html");
     fs::create_dir_all(root.join("src")).expect("should create src");
-    fs::write(root.join("src/@page.moth"), "x ~= 1\n").expect("should write entry");
+    fs::write(root.join("src/@entry.moth"), "x ~= 1\n").expect("should write entry");
     fs::write(root.join("lib/html/@mod.moth"), "foo #= 1\n").expect("should write root");
     fs::write(root.join("builder/html/@mod.moth"), "foo #= 1\n")
         .expect("should write builder package root");
@@ -1525,11 +1527,23 @@ fn selected_root_requires_at_least_one_root_entry_file() {
 
     let resolver = configured_resolver(&config);
     let result = discover_modules_for_test(&config, &resolver, &style_directives);
-
-    assert_eq!(
-        first_invalid_config(&result).reason,
-        InvalidConfigCode::NoRootModuleEntries
+    let (_, diagnostic) = diagnosed_reports(&result)
+        .iter_severity(DiagnosticSeverity::Error)
+        .next()
+        .expect("a project with no entry should diagnose");
+    let view = diagnostic
+        .family_view::<InvalidConfigView>()
+        .expect("expected typed invalid-config facts");
+    let (key, reason) = decode_invalid_config(&view, diagnostic.string_ids())
+        .expect("no-entry facts should decode");
+    assert!(
+        key.is_none(),
+        "a missing entry is a project-structure fact, not an authored config key"
     );
+    assert!(matches!(
+        reason,
+        InvalidConfigReason::NoRootModuleEntries { .. }
+    ));
 }
 
 #[cfg(unix)]

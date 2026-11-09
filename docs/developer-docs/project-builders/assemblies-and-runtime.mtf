@@ -9,13 +9,15 @@ against another compilation's similarly numbered objects.
 
 Use `entries` to inspect selected executable entries and `require_package` when
 the builder requires a project facade. Builder-defined callable roots are
-selected through their explicit purpose or binding contract. The build driver
+selected through their explicit builder or tooling contract. The build driver
 computes their reachable functions, generated instances, resource uses and
 runtime requirements from compiler-owned facts.
 
-The builder doesn't guess entry status from a filename, nonempty HIR or the
-presence of a template. An API-only support module remains API-only. Importing
-a module exposes its legal declarations without activating dormant root work.
+The builder consumes the build system's `@entry.moth` presence selection rather
+than guessing entry status from nonempty HIR, a template or rendered output. An
+API-only support module remains API-only. Importing a module exposes its legal
+declarations without activating dormant entry work.
+
 A Moth package export isn't automatically a native host export, foreign
 component interface or network endpoint.
 

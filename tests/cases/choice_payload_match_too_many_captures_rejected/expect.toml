@@ -7,7 +7,7 @@ message_contains = ["Variant 'Err' has 1 payload field, 'message', but this patt
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0049"
 reason = "invalid_match_pattern.too_many_capture_bindings"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 11
 column = 18
 count = 1

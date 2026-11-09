@@ -45,6 +45,7 @@ pub(crate) enum LabelDraftMessage {
     TemplateStartsHere,
     MissingExportDeclaration,
     ExternalImportSite,
+    RootLocalDeclarationSite,
     GenericInstantiationBodySite,
     GenericInstantiationDeclarationSite,
     GenericInstantiationSubstitutions {
@@ -92,6 +93,7 @@ impl LabelMessageCode {
     pub(super) const CONFLICTS_WITH_EARLIER_HEAD_ITEM: Self = Self(19);
     pub(super) const MISSING_EXPORT_DECLARATION: Self = Self(20);
     pub(super) const EXTERNAL_IMPORT_SITE: Self = Self(21);
+    pub(super) const ROOT_LOCAL_DECLARATION_SITE: Self = Self(22);
 
     /// Whether the label keeps a row in `label_data`. Config origin, substitutions, typed failure producers
     /// and write-back origins carry data; the rest never read the row.
@@ -139,6 +141,7 @@ impl LabelMessageCode {
             Self::CONFLICTS_WITH_EARLIER_HEAD_ITEM => "CONFLICTS_WITH_EARLIER_HEAD_ITEM",
             Self::MISSING_EXPORT_DECLARATION => "MISSING_EXPORT_DECLARATION",
             Self::EXTERNAL_IMPORT_SITE => "EXTERNAL_IMPORT_SITE",
+            Self::ROOT_LOCAL_DECLARATION_SITE => "ROOT_LOCAL_DECLARATION_SITE",
             _ => crate::compiler_bug!(
                 CompilerStage::DiagnosticReporting,
                 "label codes are the constants above"
@@ -227,6 +230,9 @@ pub(super) fn encode_label(
             plain(LabelMessageCode::MISSING_EXPORT_DECLARATION)
         }
         LabelDraftMessage::ExternalImportSite => plain(LabelMessageCode::EXTERNAL_IMPORT_SITE),
+        LabelDraftMessage::RootLocalDeclarationSite => {
+            plain(LabelMessageCode::ROOT_LOCAL_DECLARATION_SITE)
+        }
         LabelDraftMessage::GenericInstantiationBodySite => {
             plain(LabelMessageCode::GENERIC_INSTANTIATION_BODY_SITE)
         }
@@ -417,6 +423,9 @@ impl LabelWord {
                 DurableLabelMessage::MissingExportDeclaration
             }
             LabelMessageCode::EXTERNAL_IMPORT_SITE => DurableLabelMessage::ExternalImportSite,
+            LabelMessageCode::ROOT_LOCAL_DECLARATION_SITE => {
+                DurableLabelMessage::RootLocalDeclarationSite
+            }
             _ => crate::compiler_bug!(
                 CompilerStage::DiagnosticReporting,
                 "label codes are the constants in LabelMessageCode"
@@ -476,6 +485,7 @@ pub(crate) enum DurableLabelMessage<'a> {
     TemplateStartsHere,
     MissingExportDeclaration,
     ExternalImportSite,
+    RootLocalDeclarationSite,
     GenericInstantiationBodySite,
     GenericInstantiationDeclarationSite,
     GenericInstantiationSubstitutions(GenericSubstitutions<'a>),

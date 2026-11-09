@@ -7,6 +7,6 @@ message_contains = ["has no `&` borrow prefix", "`&` after `to` marks an inclusi
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-SYNTAX-0031"
 reason = "common_syntax_mistake.rust_borrow_prefix"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 2
 count = 1

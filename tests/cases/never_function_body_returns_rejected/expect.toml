@@ -6,6 +6,6 @@ diagnostic_codes = ["MOTH-RULE-0055"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0055"
 reason = "invalid_return_shape.never_body_returns_to_caller"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1
 column = 1

@@ -1,0 +1,3 @@
+wide_add |left I8, right U8| -> I16:
+    return left + right
+;

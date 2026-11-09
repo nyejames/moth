@@ -11,7 +11,7 @@ use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
-    FileFrontendPrepareFailure, HeaderParseOptions, SourcePreparationDelta,
+    FileFrontendPrepareFailure, FileRole, HeaderParseOptions, SourcePreparationDelta,
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
@@ -113,6 +113,7 @@ pub(super) fn prepare_discovery_source(
             runtime_fragment_offset: 0,
         },
         style_directives,
+        project_path_resolver.as_ref(),
         entry_file_path,
         source_files,
         path_fork,
@@ -155,6 +156,7 @@ pub(super) fn prepare_discovery_template_source(
             runtime_fragment_offset: 0,
         },
         style_directives,
+        project_path_resolver.as_ref(),
         entry_file_path,
         source_files,
         path_fork,
@@ -170,11 +172,13 @@ pub(super) fn prepare_discovery_template_source(
 fn prepare_discovery_output(
     input: FrontendFilePrepareInput<'_>,
     style_directives: &StyleDirectiveRegistry,
+    project_path_resolver: Option<&ProjectPathResolver>,
     entry_file_path: &Path,
     source_files: &mut SourceDatabase,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> SourcePreparationDelta {
+    let source_id = input.source_id;
     // Keep path nodes in the same local identity domain as the forked strings. The destination
     // module fork already contains tokenizer/source-prefix paths, so this delta can merge after
     // the string remap without exposing local component IDs to the caller.
@@ -184,19 +188,44 @@ fn prepare_discovery_output(
     let fork_source = string_table.fork_source();
     let base_len = fork_source.base_len();
     let (mut local_table, _) = fork_source.fork_for_module().into_parts();
-    let entry_file_id = source_files
+    let selected_file = source_files
         .get_by_canonical_path(entry_file_path)
-        .map(|identity| identity.id);
+        .map(|identity| {
+            // An ordinary selected file is the synthetic unit's entry root. A selected canonical
+            // root keeps its authored facade role, exactly as final module preparation classifies it.
+            let role = project_path_resolver
+                .and_then(|resolver| resolver.module_root_role_for_file(entry_file_path))
+                .unwrap_or(ModuleRootRole::Entry);
+            let file_role = FileRole::for_standalone_root(role)
+                .expect("bounded module roots never carry a shared helper role");
+            (identity.id, file_role)
+        });
+    // Synthetic discovery prepares a reached Moth file before final module preparation exists.
+    // Stage 0's bounded root inventory therefore supplies this file's foreign-root facade role
+    // here as a one-entry lookup; the selected entry keeps its explicit standalone role.
+    let reached_role = if selected_file.is_some_and(|(selected_id, _)| selected_id == source_id) {
+        None
+    } else {
+        source_files
+            .get(source_id)
+            .and_then(|record| record.canonical_os_path.as_deref())
+            .and_then(|path| {
+                let resolver = project_path_resolver?;
+                let role = resolver.module_root_role_for_file(path)?;
+                super::module_preparation::reached_root_file_role(role)
+            })
+    };
+    let reached_root_roles = reached_role.map(|role| [(source_id, role)]);
     let options = HeaderParseOptions {
-        entry_file_id,
-        support_root_file_id: None,
-        entry_file_role: None,
-        active_root_role: ModuleRootRole::Normal,
+        root_file_ids: Default::default(),
+        selected_file,
+        reached_root_roles: reached_root_roles
+            .as_ref()
+            .map_or(&[][..], |roles| roles.as_slice()),
     };
     let prepare_context = FrontendFilePrepareContext {
         source_files,
         style_directives,
-        entry_file_path,
         options: &options,
     };
 

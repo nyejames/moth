@@ -19,8 +19,8 @@ accept public API or semantics.
 STATUS: activated; scope and prelude review accepted; Phase 1 snapshot input hardening complete
 CURRENT_SLICE: Phase 2 - portable snapshot additions (candidate selection not started)
 BLOCKERS: Phase 2 needs its candidates chosen with the user; the ordered event queue needs a final
-Moth event value that crosses the binding boundary; io.set_title needs the config and HTML entry
-cutover; scheduling, timers and callbacks need structured async and a host-ingress contract
+Moth event value that crosses the binding boundary; scheduling, timers and callbacks need
+structured async and a host-ingress contract
 NEXT_ACTION: choose the Phase 2 snapshot additions with the user, then publish and implement them
 ```
 
@@ -181,9 +181,8 @@ Candidates only. Nothing here is accepted API.
 2. **Ordered pull queue.** Only after the value crosses cleanly: a host queue drained by an explicit
    poll into ordinary Moth values, with its own representation, ordering and overflow contract. The
    snapshot's coalesced transitions are not a queue and impose no size limit to inherit.
-3. **Queued `io.set_title`.** Its implementation is owned by the HTML page directives and runtime
-   title work and needs the config and HTML entry cutover first. Its meaning is host-neutral and
-   HTML-JS realises it as the live document title.
+3. **Queued `io.set_title`.** Its implementation is owned by the runtime title plan. Its meaning
+   is host-neutral and HTML-JS realises it as the live document title.
 4. **Small synchronous host conveniences.** Review each individually rather than adding a broad
    speculative IO surface.
 

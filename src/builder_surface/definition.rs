@@ -8,6 +8,7 @@
 use crate::build_system::output::{
     DEV_OUTPUT_FIELD, RELEASE_OUTPUT_FIELD, ensure_single_output_root_owner,
 };
+use crate::builder_surface::SourceFileKind;
 use crate::builder_surface::SourcePackageRegistry;
 use crate::builder_surface::config_schema::{
     ConfigFieldShape, ConfigSchema, ConfigSchemaField, ConfigSchemas, UnknownFieldPolicy,
@@ -18,6 +19,7 @@ use crate::builder_surface::external_import_providers::registry::ExternalImportP
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::builder_surface::package_metadata::package_paths_overlap;
 use crate::builder_surface::source_file_kind_registry::SourceFileKindRegistry;
+use crate::builder_surface::source_package_registry::ProvidedSourceRoot;
 use crate::compiler_frontend::build_config::{
     BuildInputName, BuilderConfigGlobalError, BuilderConfigGlobalSet, PrimitiveBuildValue,
 };
@@ -47,13 +49,6 @@ pub struct BuilderSurface {
     pub external_dependency_resolution_table: ExternalImportResolutionTable,
     pub builder_runtime_packages: Vec<BuilderRuntimePackageMetadata>,
     pub source_file_kinds: SourceFileKindRegistry,
-    /// Source-backed package prefixes whose constants are implicitly visible in `.mtf` files.
-    ///
-    /// WHAT: records a builder capability rather than making generic build orchestration infer
-    ///       implicit template providers from package names.
-    /// WHY: only the active builder owns the contract that connects a source package to the
-    ///      synthetic `.mtf` constant scope.
-    pub implicit_template_scope_source_packages: BTreeSet<String>,
     /// Statically known named destinations for direct top-level const contributions.
     ///
     /// WHAT: read-only builder input to frontend root-fragment routing.
@@ -69,6 +64,18 @@ pub(crate) enum BuilderSurfaceValidationError {
 }
 
 const BUILTIN_SOURCE_PACKAGES_DIR: &str = "packages";
+
+/// Source package that supplies the compiler-standard flat `.mtf` helper prelude.
+///
+/// WHAT: one fixed source-package prefix whose public compile-time constants are visible by bare
+///       name inside every `.mtf` body.
+/// WHY: the HTML helper prelude is part of the language surface, not a builder-configurable
+///      capability. The prefix is a compiler constant, and the standard HTML builder package set
+///      registers it from the official `packages/html` directory. An SDK builder cannot substitute
+///      another directory: surface validation requires the registered `html` root to equal
+///      [`BuilderSurface::builtin_source_package_root`], and SDK builders enabling `.mtf` without
+///      that package receive a typed capability error instead of a silently reduced scope.
+pub const TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX: &str = "html";
 
 impl BuilderSurface {
     /// Builds a builder surface with mandatory compiler core packages and no source-backed packages.
@@ -88,7 +95,6 @@ impl BuilderSurface {
             external_dependency_resolution_table: ExternalImportResolutionTable::new(),
             builder_runtime_packages: Vec::new(),
             source_file_kinds: SourceFileKindRegistry::new(),
-            implicit_template_scope_source_packages: BTreeSet::new(),
             builder_root_slots: BuilderRootSlotSchema::default(),
         }
     }
@@ -147,6 +153,49 @@ impl BuilderSurface {
                 }
             }
         }
+        // The template prelude belongs to the standard HTML builder package set. A builder may
+        // register `@html`, but only at the official package directory; an SDK builder cannot
+        // substitute an arbitrary directory of constants under that fixed name.
+        if let Some(html_root) = self
+            .source_packages
+            .get_root(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX)
+        {
+            let ProvidedSourceRoot::Filesystem(html_path) = &html_root.root;
+            let standard_root =
+                BuilderSurface::builtin_source_package_root(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX);
+            if html_path != &standard_root {
+                return Err(BuilderSurfaceValidationError::InvalidDefinition(format!(
+                    "Source package '@{}' is reserved for the standard HTML builder package set; \
+                     the template prelude can only come from the official package at '{}', not \
+                     '{}'. A builder enabling '{}' must use the standard HTML builder package set.",
+                    TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
+                    standard_root.display(),
+                    html_path.display(),
+                    SourceFileKind::MothTemplate.extension()
+                )));
+            }
+        }
+        // A builder that accepts `.mtf` sources must provide the compiler-standard template
+        // prelude. The prelude is not configurable, so a missing standard package is a builder
+        // capability error rather than a silently reduced template scope.
+        if self
+            .source_file_kinds
+            .kind_for_extension(SourceFileKind::MothTemplate.extension())
+            == Some(SourceFileKind::MothTemplate)
+            && self
+                .source_packages
+                .get_root(TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX)
+                .is_none()
+        {
+            return Err(BuilderSurfaceValidationError::InvalidDefinition(format!(
+                "Source file kind '{}' requires the standard HTML builder package set, which \
+                 registers the official '@{}' source package for the template prelude. A custom \
+                 '@{}' source package cannot supply it.",
+                SourceFileKind::MothTemplate.extension(),
+                TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX,
+                TEMPLATE_PRELUDE_SOURCE_PACKAGE_PREFIX
+            )));
+        }
         let binding_paths = self
             .binding_packages
             .package_paths()
@@ -163,15 +212,6 @@ impl BuilderSurface {
             }
         }
         Ok(())
-    }
-
-    /// Declare a source-backed package whose exported constants enter `.mtf` implicit scope.
-    pub fn register_implicit_template_scope_source_package(
-        &mut self,
-        package_prefix: impl Into<String>,
-    ) {
-        self.implicit_template_scope_source_packages
-            .insert(package_prefix.into());
     }
 
     /// Register one statically known named destination for direct top-level const contributions.

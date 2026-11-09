@@ -7,6 +7,6 @@ message_contains = ["explicit optional type context", "`value String? = none`"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0053"
 reason = "compile_time_evaluation_error.none_literal_requires_optional_type_context"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 5
 column = 15

@@ -148,14 +148,13 @@ pub(crate) fn finish_successful_project_warnings<T>(
 /// Success-only frontend payload consumed by project builders.
 ///
 /// WHAT: owns the retained project and source-package graph boundaries, the explicit entry
-///       assemblies selected from dormant root activity, and the generated sidecar lane inside
-///       each boundary. It retains immutable compiler module artefacts and their dense
+///       assemblies selected from project-local `@entry.moth` roots, and the generated sidecar
+///       lane inside each boundary. It retains immutable compiler module artefacts and their dense
 ///       `ModuleId` mapping so the published public semantic interface and boundary identity
 ///       survive into builders and link owners.
 /// WHY: project builders need a coherent project boundary with build-owned entry selection. A
 ///      diagnosed frontend never constructs this value, and backends never infer entries by
-///      filtering a flat module vector. Entry selection resolves the project graph's normal entry
-///      roots.
+///      filtering a flat module vector. Entry selection resolves the project graph's entry roots.
 ///
 /// Frontend configuration values and the synthetic `@project` interface are boundary-local
 /// compilation inputs, not retained state on this aggregate. Their semantic fingerprints and
@@ -381,9 +380,9 @@ impl ProjectCompilation {
 
         let mut entries = Vec::new();
 
-        // Entry selection resolves the project graph's normal-entry identities through the
-        // retained dense mapping. Source-package graphs are never queried as entry sources, and
-        // their root activity stays immutable.
+        // Entry selection resolves the project graph's project-local `@entry.moth` identities
+        // through the retained dense mapping. Source-package graphs are never queried as entry
+        // sources, so a separately compiled dependency entry never activates here.
         for module_id in project.structure.entry_modules() {
             let module = &project
                 .modules
@@ -392,15 +391,13 @@ impl ProjectCompilation {
                     InfrastructureFailure::internal(
                         CompilerStage::ProjectBuildAssembly,
                         format!(
-                            "Project graph normal entry ModuleId {} has no successful artefact",
+                            "Project graph entry ModuleId {} has no successful artefact",
                             module_id.index()
                         ),
                     )
                 })?
                 .module;
-            if !module.metadata.root_activity.has_html_artifact_activity() {
-                continue;
-            }
+            module.metadata.require_entry("project entry assembly")?;
 
             let start_function = module
                 .executable
@@ -879,7 +876,7 @@ fn boundary_interface_at<'a>(
                 InfrastructureFailure::internal(
                     CompilerStage::ProjectBuildAssembly,
                     format!(
-                        "Project module ref {} has no published interface",
+                        "Project module ref {} has no published {surface:?} interface",
                         module_id.index()
                     ),
                 )
@@ -896,7 +893,7 @@ fn boundary_interface_at<'a>(
                 InfrastructureFailure::internal(
                     CompilerStage::ProjectBuildAssembly,
                     format!(
-                        "Source-package module ref {} has no published interface",
+                        "Source-package module ref {} has no published {surface:?} interface",
                         module_id.index()
                     ),
                 )

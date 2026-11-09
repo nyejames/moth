@@ -1,0 +1,5 @@
+@impl wide_add
+
+result = wide_add(127, 255)
+
+[: discharged u8 add sum=[result]]

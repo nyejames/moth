@@ -30,7 +30,6 @@ use crate::compiler_frontend::build_config::{
 };
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -156,8 +155,8 @@ pub(in crate::compiler_frontend) struct AstBuildContext<'a> {
 
     /// Canonical path of the module entry directory.
     pub entry_dir: PathId,
-    /// Graph-owned semantic role of the active module root.
-    pub root_role: ModuleRootRole,
+    /// Whether preparation synthesized the compiler-owned entry `start` body.
+    pub synthesizes_entry_start: bool,
 
     /// Current build profile (dev/release) affecting optimization and diagnostic levels.
     pub build_profile: FrontendBuildProfile,
@@ -219,7 +218,7 @@ pub(crate) struct AstPhaseContext<'a> {
         Option<&'a crate::compiler_frontend::builder_root_slots::BuilderRootSlotSchema>,
     /// Names of source `#Config` contracts declared by this module.
     pub(crate) source_build_config_contract_names: Arc<FxHashSet<BuildInputName>>,
-    pub(crate) root_role: ModuleRootRole,
+    pub(crate) synthesizes_entry_start: bool,
     pub(crate) build_profile: FrontendBuildProfile,
     pub(crate) template_const_loop_iteration_limit: usize,
     pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
@@ -259,7 +258,7 @@ impl<'a> AstPhaseContext<'a> {
             string_table,
             path_fork,
             entry_dir,
-            root_role,
+            synthesizes_entry_start,
             file_value_resolution,
             config_resolution,
             build_config_values,
@@ -281,7 +280,7 @@ impl<'a> AstPhaseContext<'a> {
                 external_package_registry,
                 style_directives,
                 entry_dir,
-                root_role,
+                synthesizes_entry_start,
                 build_profile,
                 file_value_resolution,
                 config_resolution,

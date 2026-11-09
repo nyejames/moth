@@ -848,17 +848,6 @@ fn invalid_trait_conformance_shapes_capture_only_their_type_words() {
     );
     let cases: Vec<Case> = vec![
         (
-            Shape::ImportedModuleRoot,
-            Shape::ImportedModuleRoot,
-            vec![target_name],
-            InvalidTraitConformanceNames {
-                target_name,
-                reason_name: None,
-                trait_name: None,
-            },
-            0,
-        ),
-        (
             Shape::AliasTarget,
             Shape::AliasTarget,
             vec![target_name, trait_name],

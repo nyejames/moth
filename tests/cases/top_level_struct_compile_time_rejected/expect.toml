@@ -6,6 +6,6 @@ message_contains = ["Constant 'local_shape' is not compile-time resolvable."]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0053"
-path = "input/@page.moth"
+path = "input/@entry.moth"
 line = 1
 column = 13

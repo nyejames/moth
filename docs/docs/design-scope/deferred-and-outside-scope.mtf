@@ -147,8 +147,8 @@ C order alone is not a complete ABI contract, and SoA is not automatically a
 scalar layout option. `$export` will replace rather than permanently duplicate
 export syntax, while block support remains undecided. `$test` is a deferred
 root-purpose direction with runner, command and lifecycle details undefined.
-A separate custom-metadata directive remains open design, so `$project` stays
-strict.
+A separate custom-metadata directive remains open design. The named `project`
+record stays closed.
 
 ### Outside scope
 

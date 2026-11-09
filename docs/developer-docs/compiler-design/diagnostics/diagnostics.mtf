@@ -70,12 +70,12 @@ A missing provider and a missing symbol look alike in a terminal and belong to d
 
 A single global "parser error" funnel would throw away context. The type checker already knows the expected type. The borrow checker already knows the place. Let the owner who holds the fact build its typed diagnostic draft.
 
-[diagram:
+[@diagrams diagram:
     [$in label: Three failure lanes that never merge]
     [$in caption: The split is about who should act. One lane asks the author to change their code. One reports that the build could not run. One says the compiler broke and later results cannot be trusted.]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Lane one]
             [$in title: DiagnosticDraft]
@@ -83,14 +83,14 @@ A single global "parser error" funnel would throw away context. The type checker
         ]
 
         [$in details:
-            [branch:
+            [@diagrams branch:
                 [$in label: Rendered later, from the same event]
-                [lane:
-                [detail:
+                [@diagrams lane:
+                [@diagrams detail:
                     [$in href: ../starting-a-build/]
                     CLI output
                 ]
-                [detail:
+                [@diagrams detail:
                     [$in href: ../starting-a-build/]
                     Dev server and tooling views
                 ]
@@ -99,8 +99,8 @@ A single global "parser error" funnel would throw away context. The type checker
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Lane two]
             [$in title: InfrastructureFailure]
@@ -108,8 +108,8 @@ A single global "parser error" funnel would throw away context. The type checker
         ]
     ]
 
-    [stage:
-        [node:
+    [@diagrams stage:
+        [@diagrams node:
             [$in href: ./]
             [$in eyebrow: Lane three]
             [$in title: compiler_bug!]
