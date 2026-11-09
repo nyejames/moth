@@ -298,7 +298,6 @@ define_stable_reason_keys! {
     &InvalidDependencyClauseReason::ExpectedAliasName => "invalid_dependency_clause.expected_alias_name",
     &InvalidDependencyClauseReason::DuplicateSelectionName => "invalid_dependency_clause.duplicate_selection_name",
     &InvalidDependencyClauseReason::DuplicateSelectionLocalName => "invalid_dependency_clause.duplicate_selection_local_name",
-    &InvalidDependencyClauseReason::LegacyBraceSelections => "invalid_dependency_clause.legacy_brace_selections",
     &InvalidDependencyClauseReason::MissingSelectionAfterComma => "invalid_dependency_clause.missing_selection_after_comma",
     &InvalidDependencyClauseReason::MissingCommaBetweenSelections => "invalid_dependency_clause.missing_comma_between_selections",
     &InvalidDependencyClauseReason::NamespaceAliasWithSelections => "invalid_dependency_clause.namespace_alias_with_selections",
@@ -309,10 +308,6 @@ define_stable_reason_keys! {
     &InvalidDependencyClauseReason::ProjectGlobalsReexportNotAllowed => "invalid_dependency_clause.project_globals_reexport_not_allowed",
     &InvalidDependencyClauseReason::ProviderRequiresBinding => "invalid_dependency_clause.provider_requires_binding",
     &InvalidDependencyClauseReason::ContinuationEnteredStatement => "invalid_dependency_clause.continuation_entered_statement",
-    },
-
-    LegacyDependencyClauseReason => {
-    &LegacyDependencyClauseReason::ImportKeyword => "legacy_dependency_clause.import_keyword",
     },
 
     InvalidImportPathReason => {

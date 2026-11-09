@@ -20,11 +20,6 @@ use crate::compiler_frontend::tokenizer::tokens::{TokenStream, TokenTag};
 mod components;
 type PathComponents = Vec<StringId>;
 
-/// Returns whether a canonical path component has a lossless bare source spelling.
-pub(crate) fn can_serialize_path_component_bare(component: &str) -> bool {
-    components::can_serialize_bare_component(component)
-}
-
 #[derive(Debug)]
 struct ParsedPathPrefix {
     components: PathComponents,

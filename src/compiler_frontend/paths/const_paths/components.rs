@@ -147,21 +147,6 @@ fn is_component_terminator(character: char) -> bool {
     )
 }
 
-/// Returns whether a canonical component can be emitted without quotes and parsed back unchanged.
-///
-/// Migration diagnostics use this predicate because canonical path rows retain component values,
-/// not whether the author quoted them. Components that need quotes must not receive a lossy fix-it.
-pub(super) fn can_serialize_bare_component(component: &str) -> bool {
-    !component.is_empty()
-        && !component.starts_with('@')
-        && component
-            .chars()
-            .all(|character| !is_component_terminator(character))
-        && component
-            .chars()
-            .all(|character| is_valid_component_char(character, false))
-}
-
 /// WHAT: Validates and interns one parsed component.
 /// WHY: keeps all paths aligned on one validation boundary.
 pub(super) fn push_validated_component(

@@ -28,7 +28,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::choices_
     self, CompileTimeEvaluationErrorView, non_exhaustive_match,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
-    self, InvalidReceiverDeclarationView, InvalidTraitConformanceShape,
+    self, InvalidReceiverDeclarationView, InvalidThisUsageView, InvalidTraitConformanceShape,
     InvalidTraitConformanceView, invalid_generic_instantiation, invalid_trait_conformance,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
@@ -37,9 +37,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::imports:
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::{
     self, DuplicateDeclarationView, duplicate_declaration,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::{
-    self, LegacyDependencyClauseView, circular_dependency,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::circular_dependency;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     self, CompilerCapacityExceededView, ExpectedTokenView, invalid_multi_bind_syntax,
     missing_closing_delimiter, unexpected_token_from_tag,
@@ -72,8 +70,8 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticCapacityResource, DiagnosticCategory, DiagnosticDescriptor, DiagnosticPlace,
     DiagnosticSeverity, DiagnosticToken, GenericInferenceSubject, ImportPublicSurfaceType,
     InvalidCallShapeReason, InvalidGenericInstantiationReason, InvalidMultiBindReason,
-    InvalidReceiverCallReason, InvalidReceiverDeclarationReason, InvalidTraitConformanceReason,
-    NonExhaustiveMatchReason, ReceiverCallKind, TokenTag,
+    InvalidReceiverCallReason, InvalidReceiverDeclarationReason, InvalidThisUsageReason,
+    InvalidTraitConformanceReason, NonExhaustiveMatchReason, ReceiverCallKind, TokenTag,
 };
 use crate::compiler_frontend::datatypes::display::TypeDisplayShape;
 use crate::compiler_frontend::datatypes::display::TypeDisplayView;
@@ -1041,10 +1039,13 @@ fn prepared_rebase_updates_payloads_labels_and_tokens() {
 }
 
 #[test]
-fn prepared_rebase_updates_legacy_dependency_replacement() {
+fn prepared_rebase_updates_optional_function_name() {
     let mut local_table = StringTable::new();
-    let replacement = local_table.intern("@vendor/drawing.js as drawing");
-    let draft = project_config::legacy_dependency_clause(Some(replacement), None);
+    let function_name = local_table.intern("draw");
+    let draft = generics_traits_api::invalid_this_usage(
+        InvalidThisUsageReason::DuplicateThis { function_name },
+        None,
+    );
     let mut merged_table = StringTable::new();
     merged_table.intern("another module's string");
     let prepared = capture_rebased_batch(vec![draft], local_table, &mut merged_table, None, None);
@@ -1053,14 +1054,11 @@ fn prepared_rebase_updates_legacy_dependency_replacement() {
         .iter()
         .next()
         .expect("one prepared diagnostic freezes");
-    let dependency = view
-        .family_view::<LegacyDependencyClauseView>()
-        .expect("dependency replacement facts");
-    let replacement = dependency.replacement.expect("replacement text");
-    assert_eq!(
-        report.context().strings().resolve(replacement),
-        "@vendor/drawing.js as drawing"
-    );
+    let this_usage = view
+        .family_view::<InvalidThisUsageView>()
+        .expect("function name facts");
+    let function_name = this_usage.function_name.expect("function name text");
+    assert_eq!(report.context().strings().resolve(function_name), "draw");
 }
 
 #[test]

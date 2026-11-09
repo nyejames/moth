@@ -738,7 +738,6 @@ pub enum InvalidDependencyClauseReason {
     ExpectedAliasName,
     DuplicateSelectionName,
     DuplicateSelectionLocalName,
-    LegacyBraceSelections,
     MissingSelectionAfterComma,
     MissingCommaBetweenSelections,
     NamespaceAliasWithSelections,
@@ -757,11 +756,6 @@ pub enum InvalidDependencyClauseReason {
     ///       name was parsed as another selection. The diagnostic points at that name with a
     ///       secondary label on the continuation comma.
     ContinuationEnteredStatement,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum LegacyDependencyClauseReason {
-    ImportKeyword,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

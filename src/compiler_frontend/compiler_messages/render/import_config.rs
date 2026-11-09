@@ -1136,9 +1136,6 @@ pub(crate) fn invalid_dependency_clause_message(
         InvalidDependencyClauseReason::DuplicateSelectionLocalName => {
             "A dependency clause cannot bind two selections to the same local name. Rename or alias one selection."
         }
-        InvalidDependencyClauseReason::LegacyBraceSelections => {
-            "Dependency selections no longer use braces. Write selected names directly after the path, separated by commas."
-        }
         InvalidDependencyClauseReason::MissingSelectionAfterComma => {
             "A dependency-clause comma must be followed by another selected name. Remove the comma to end the clause, or add the promised selection. Trailing commas are not allowed."
         }

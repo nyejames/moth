@@ -18,15 +18,14 @@ use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
 use crate::compiler_frontend::compiler_messages::render::{
     render_circular_dependency, render_dependency_namespace_used_as_value,
     render_invalid_compile_time_path, render_invalid_config, render_invalid_dependency_clause,
-    render_invalid_html_slot_contribution, render_legacy_dependency_clause,
-    render_namespace_type_value_misuse, render_nested_dependency_traversal,
-    render_project_context_escape, render_project_entry_extension_required,
-    render_unsupported_builder_package,
+    render_invalid_html_slot_contribution, render_namespace_type_value_misuse,
+    render_nested_dependency_traversal, render_project_context_escape,
+    render_project_entry_extension_required, render_unsupported_builder_package,
 };
 use crate::compiler_frontend::compiler_messages::{
     DependencyClauseKind, DiagnosticSeverity, InvalidCompileTimePathReason, InvalidConfigReason,
     InvalidDependencyClauseReason, InvalidHtmlSlotContributionReason, InvalidOutputFolderReason,
-    LegacyDependencyClauseReason, NamespaceTypeValueMisuseKind, ProjectContextEscapeReason,
+    NamespaceTypeValueMisuseKind, ProjectContextEscapeReason,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -118,7 +117,6 @@ unit_code! {
         ExpectedAliasName = 5,
         DuplicateSelectionName = 6,
         DuplicateSelectionLocalName = 7,
-        LegacyBraceSelections = 8,
         MissingSelectionAfterComma = 9,
         MissingCommaBetweenSelections = 10,
         NamespaceAliasWithSelections = 11,
@@ -132,11 +130,6 @@ unit_code! {
     }
 }
 
-unit_code! {
-    impl LegacyDependencyClauseReason {
-        ImportKeyword = 1,
-    }
-}
 unit_code! {
     impl InvalidHtmlSlotContributionReason {
         MissingResource = 1,
@@ -191,39 +184,6 @@ pub(crate) fn invalid_dependency_clause(
     DiagnosticDraft::with_facts(&INVALID_DEPENDENCY_CLAUSE, span, |cursor| {
         cursor.push::<UnitFact<DependencyClauseKind>>(&clause_kind)?;
         cursor.push::<UnitFact<InvalidDependencyClauseReason>>(&reason)?;
-        Ok(())
-    })
-}
-
-diagnostic_family! {
-    LEGACY_DEPENDENCY_CLAUSE {
-        internal: 1035,
-        stable: "MOTH-SYNTAX-0035",
-        category: DiagnosticCategory::Syntax,
-        severity: DiagnosticSeverity::Error,
-        title: "Legacy dependency clause syntax",
-        facts: [
-            reason: UnitFact<LegacyDependencyClauseReason>,
-            replacement: OptStringFact,
-        ],
-        labels: [],
-        extra: None,
-        ctor: manual,
-        reason_key: reason,
-        view: LegacyDependencyClauseView,
-        render: render_legacy_dependency_clause,
-    }
-}
-
-/// Builds the legacy clause diagnostic with its fixed reason and optional replacement.
-pub(crate) fn legacy_dependency_clause(
-    replacement: Option<StringId>,
-    span: Option<SourceSpan>,
-) -> DiagnosticDraft {
-    let reason = LegacyDependencyClauseReason::ImportKeyword;
-    DiagnosticDraft::with_facts(&LEGACY_DEPENDENCY_CLAUSE, span, |cursor| {
-        cursor.push::<UnitFact<LegacyDependencyClauseReason>>(&reason)?;
-        cursor.push::<OptStringFact>(&replacement)?;
         Ok(())
     })
 }
@@ -1342,7 +1302,6 @@ diagnostic_family! {
 
 pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     INVALID_DEPENDENCY_CLAUSE,
-    LEGACY_DEPENDENCY_CLAUSE,
     CIRCULAR_DEPENDENCY,
     UNSUPPORTED_BUILDER_PACKAGE,
     INVALID_HTML_SLOT_CONTRIBUTION,

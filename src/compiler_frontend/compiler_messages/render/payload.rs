@@ -22,7 +22,6 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::imports:
     NotExportedBySourceFileView, RootLocalDeclarationNotVisibleView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::CircularDependencyView;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::LegacyDependencyClauseView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config::ProjectContextEscapeView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::UnescapedImplicitTemplateCloseView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::CompilerCapacityExceededView;
@@ -306,33 +305,6 @@ pub(crate) fn render_non_utf8_source(
         guidance: Vec::new(),
     }
 }
-fn legacy_dependency_clause_message(
-    replacement: Option<StringId>,
-    string_table: &dyn StringTableResolver,
-) -> String {
-    match replacement {
-        Some(replacement) => format!(
-            "Source dependency clauses no longer use `import`. Write `{}`.",
-            string_table.resolve(replacement)
-        ),
-        None => "Source dependency clauses no longer use `import`, and this clause has no automatic delimiter-free replacement. Choose either a namespace alias or direct flat selections beginning with `@`.".to_owned(),
-    }
-}
-
-/// WHAT: renders a legacy dependency clause from its compact replacement fact.
-/// WHY: the legacy reason is fixed to the import keyword, and its replacement is the only message fact.
-pub(crate) fn render_legacy_dependency_clause(
-    _diagnostic: &DiagnosticView<'_>,
-    facts: &LegacyDependencyClauseView,
-    context: DiagnosticRenderContext<'_>,
-) -> RenderedPayload {
-    let _ = facts.reason;
-    RenderedPayload {
-        message: legacy_dependency_clause_message(facts.replacement, context.string_table),
-        guidance: Vec::new(),
-    }
-}
-
 fn source_span_capacity_message(
     start: u32,
     length: u32,

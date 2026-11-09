@@ -305,7 +305,7 @@ pub(crate) fn parse_dependency_clause_scanned(
         ));
     }
 
-    reject_legacy_or_delimited_selection_scanned(tokens.get(index), source_id)?;
+    reject_delimited_selection_scanned(tokens.get(index), source_id)?;
 
     let mut selections = Vec::new();
     let mut selected_source_names = FxHashSet::default();
@@ -419,7 +419,7 @@ pub(crate) fn parse_dependency_clause_scanned(
                         Some(comma_span),
                     ));
                 }
-                reject_legacy_or_delimited_selection_scanned(tokens.get(index), source_id)?;
+                reject_delimited_selection_scanned(tokens.get(index), source_id)?;
             }
             Some(TokenTag::NEWLINE) | Some(TokenTag::END) | Some(TokenTag::EOF) | None => break,
             _ => {
@@ -457,7 +457,7 @@ fn clause_ended_scanned(token: Option<ScannedToken>) -> bool {
     token.is_none_or(|token| matches!(token.tag, TokenTag::NEWLINE | TokenTag::END | TokenTag::EOF))
 }
 
-fn reject_legacy_or_delimited_selection_scanned(
+fn reject_delimited_selection_scanned(
     token: Option<ScannedToken>,
     source_id: SourceId,
 ) -> DependencyClauseResult<()> {
@@ -465,10 +465,10 @@ fn reject_legacy_or_delimited_selection_scanned(
         return Ok(());
     };
     let reason = match token.tag {
-        TokenTag::OPEN_CURLY => InvalidDependencyClauseReason::LegacyBraceSelections,
-        TokenTag::OPEN_PARENTHESIS | TokenTag::TYPE_PARAMETER_BRACKET | TokenTag::COLON => {
-            InvalidDependencyClauseReason::InvalidSelectionDelimiter
-        }
+        TokenTag::OPEN_CURLY
+        | TokenTag::OPEN_PARENTHESIS
+        | TokenTag::TYPE_PARAMETER_BRACKET
+        | TokenTag::COLON => InvalidDependencyClauseReason::InvalidSelectionDelimiter,
         _ => return Ok(()),
     };
     Err(dependency_clause_error(

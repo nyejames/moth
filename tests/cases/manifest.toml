@@ -9964,23 +9964,17 @@ role = "boundary"
 [[case]]
 id = "dependency_selection_braces_rejected"
 path = "dependency_selection_braces_rejected"
-tags = ["integration", "diagnostics", "dependencies", "migration"]
+tags = ["integration", "diagnostics", "dependencies", "selections"]
 contract = "language.dependencies.selection_braces_rejected"
 role = "primary"
 
 [[case]]
-id = "legacy_import_keyword_migration_rejected"
-path = "legacy_import_keyword_migration_rejected"
-tags = ["integration", "diagnostics", "dependencies", "migration"]
-contract = "language.dependencies.legacy_import_keyword_migration"
+id = "obsolete_import_clause_rejected"
+path = "obsolete_import_clause_rejected"
+tags = ["integration", "diagnostics", "dependencies", "selections"]
+contract = "language.dependencies.obsolete_import_clause_is_ordinary_syntax"
 role = "primary"
 
-[[case]]
-id = "legacy_import_multiline_migration_rejected"
-path = "legacy_import_multiline_migration_rejected"
-tags = ["integration", "diagnostics", "dependencies", "migration"]
-contract = "language.dependencies.legacy_import_multiline_migration"
-role = "primary"
 
 [[case]]
 id = "dependency_continuation_into_binding_rejected"

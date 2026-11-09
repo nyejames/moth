@@ -1013,3 +1013,26 @@ fn function_signature_preserves_unknown_symbolic_return_for_ast_resolution() {
         }]
     ));
 }
+
+#[test]
+fn import_is_an_ordinary_identifier() {
+    let headers = parse_single_file_headers("import = 1\n");
+    assert!(
+        headers
+            .headers
+            .iter()
+            .any(|header| matches!(header.kind, HeaderKind::StartFunction)),
+        "import remains an ordinary runtime binding name"
+    );
+}
+
+#[test]
+fn import_is_a_valid_struct_identifier() {
+    let (headers, string_table) =
+        parse_single_file_headers_with_table("Import = | source String |\n");
+    let names = declared_header_names(&headers, &string_table);
+    assert!(
+        names.iter().any(|name| name == "Import"),
+        "Import remains available as an ordinary struct identifier"
+    );
+}

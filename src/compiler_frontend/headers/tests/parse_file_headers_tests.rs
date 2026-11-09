@@ -83,8 +83,6 @@ mod parse_file_headers_dependency_tests;
 mod parse_file_headers_entry_runtime_tests;
 #[path = "parse_file_headers_export_tests.rs"]
 mod parse_file_headers_export_tests;
-#[path = "parse_file_headers_legacy_import_tests.rs"]
-mod parse_file_headers_legacy_import_tests;
 #[path = "parse_file_headers_module_role_tests.rs"]
 mod parse_file_headers_module_role_tests;
 #[path = "parse_file_headers_multifile_tests.rs"]
@@ -108,7 +106,6 @@ mod parse_file_headers_type_span_tests;
 
 struct HeaderTestDiagnostics {
     diagnostics: CompactDiagnosticBagForTest,
-    string_table: StringTable,
 }
 
 impl std::fmt::Debug for HeaderTestDiagnostics {
@@ -690,7 +687,6 @@ fn parse_single_file_headers_with_options(
         })) => {
             return HeaderTestOutcome::Diagnostics(HeaderTestDiagnostics {
                 diagnostics: diagnostic_view_for_test(diagnostic),
-                string_table,
             });
         }
         Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
@@ -710,7 +706,6 @@ fn parse_single_file_headers_with_options(
         Ok(headers) => HeaderTestOutcome::Headers(headers),
         Err(diagnostics) => HeaderTestOutcome::Diagnostics(HeaderTestDiagnostics {
             diagnostics: compact_bag_for_test(diagnostics, None),
-            string_table,
         }),
     }
 }
