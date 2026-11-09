@@ -6,7 +6,7 @@ The Alpha builder currently receives grouped `html` settings and direct const ro
 
 This is the last primary stop on the chronological route. The fragment at the end is still:
 
-[codeblock, $code("html"):
+[codeblock, $code "html":
 <p>Hello, Priya!</p>
 ]
 
@@ -184,7 +184,7 @@ Backends emit data into central records. They do not each open a private output 
 
 A conceptual output tree for the walkthrough might contain:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
 output/
 ├── index.html          -- or route-shaped HTML
 ├── *.js                -- page scripts and helpers
@@ -195,7 +195,7 @@ output/
 
 Open the HTML. Find the fragment:
 
-[codeblock, $code("html"):
+[codeblock, $code "html":
 <p>Hello, Priya!</p>
 ]
 

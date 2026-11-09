@@ -1,6 +1,6 @@
 A source function forms a named top-level declaration.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     greet |name String|:
         io.line([: Hello, [name]])
     ;
@@ -12,7 +12,7 @@ A source function forms a named top-level declaration.
 
 ### Declaration shape
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     name |parameters|:
         body
     ;
@@ -59,7 +59,7 @@ in @../generics (Generics).
 A callable that never returns control normally declares one whole return
 contract:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     fatal |message String| -> !:
         assert(false, message)
     ;
@@ -74,7 +74,7 @@ contract:
 The bare `!` sits immediately after `->`. It is not a type, a suffix on a type
 or a reserved keyword. It cannot mix with ordinary return slots:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Invalid: Never mixed with a success slot
     bad || -> String, !:
     ;
@@ -135,7 +135,7 @@ proof coverage.
 
 Declaration-site generic parameters appear after the function name.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     identity type A |value A| -> A:
         return value
     ;

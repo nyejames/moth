@@ -1,7 +1,7 @@
 The compiler owns a fixed set of traits for user-defined cast sources.
 Conformance proves that a type can reach a target through plain `cast`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Label = |
         text String,
     |

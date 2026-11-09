@@ -1,13 +1,13 @@
 Put spaces around symbolic operators:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     total = left + right
     ~count += 1
 ]
 
 Use words for equality and logic:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     same = left is right
     ready = loaded and valid
     retry = timed_out or disconnected
@@ -17,7 +17,7 @@ Use words for equality and logic:
 `/` performs real division and produces `F64` for fixed integer operands.
 `//` performs integer division in the selected common integer type:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     real_result = 5 / 2
     whole_result = 5 // 2
 ]

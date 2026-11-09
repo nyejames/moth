@@ -1,4 +1,4 @@
-list = [$before = [:<li>], $after = [:</li>]:
+list = [$before [:<li>], $after [:</li>]:
     <ul>
         [$slot]
     </ul>

@@ -6,7 +6,7 @@ This page explains what they are so you know the concept exists.
 `request:` declares a region and opens its body. A declaration becomes owned by
 that region only when it uses `into request`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     request:
         parsed ParsedPost into request = parse_post(post)
         html String into request = render_post(parsed)

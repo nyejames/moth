@@ -27,8 +27,6 @@ pub(crate) mod output_plan;
 pub(crate) mod path_policy;
 pub(crate) mod resource_output_plan;
 pub(crate) mod structural_url_renderer;
-pub(crate) mod style_directives;
-pub(crate) mod styles;
 pub(crate) mod wasm;
 
 #[cfg(test)]

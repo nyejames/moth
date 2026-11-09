@@ -1,6 +1,6 @@
 Write a file path where you would write any other value, and you get a `String` back.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     logo    #= @assets/logo.svg
     intro   #= @docs/intro.mtf
 ]
@@ -9,7 +9,7 @@ Write a file path where you would write any other value, and you get a `String` 
 
 ### Putting a file in a template
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     image #= [$html:
         <img src="[@assets/logo.svg]" alt="Moth">
     ]
@@ -27,7 +27,7 @@ The same logo becomes `./assets/logo.svg` on the home page and `../../assets/log
 
 A `.mtf` or `.md` path gives you what the file says, not where it lives.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     license #= @legal/license.md
 
     footer #= [$html:
@@ -37,7 +37,7 @@ A `.mtf` or `.md` path gives you what the file says, not where it lives.
 
 A `.moth` path gives you nothing: source files hold declarations, and declarations are brought in with a dependency clause.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @helpers build_value
 ]
 

@@ -2,7 +2,7 @@ HTML pages come from folders that contain `@entry.moth`. Routes come from the fo
 
 ### Directory routes
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     @entry.moth          -> index.html
     about/@entry.moth    -> about/index.html
 ]
@@ -13,7 +13,7 @@ The root filename is fixed. Ordinary filenames such as `index.moth` have no page
 
 A folder becomes a page when it contains `@entry.moth`. An empty file or a metadata-only file still counts:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     #[$in title:Welcome]
 ]
 
@@ -25,7 +25,7 @@ Imported modules never run their entries.
 
 When you select one file directly, an ordinary `.moth` file or `@entry.moth` becomes a page:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     moth build page.moth     -> page.html
     moth build @entry.moth   -> index.html
     moth build index.moth    -> index.html

@@ -3,13 +3,13 @@ not fit its target and a rounded binary-float result may not stay finite.
 
 Use `catch` when this expression needs a local fallback:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count I32 = cast text catch then 0
 ]
 
 The handler protects the conversion and evaluation of its operand:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     narrow |left U32, right U32| -> U8:
         value U8 = cast left + right catch then 0
         return value

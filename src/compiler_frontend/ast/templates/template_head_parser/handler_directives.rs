@@ -9,7 +9,7 @@
 //! - Project-owned directives and frontend handler directives share one execution
 //!   contract, so this logic should be centralized and isolated from core directives.
 
-use super::directive_args::parse_optional_parenthesized_expression;
+use super::directive_args::{parse_optional_directive_operand, reject_directive_operand};
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
@@ -58,7 +58,7 @@ pub(super) fn apply_handler_style_directive(
     handler_spec: &StyleDirectiveHandlerSpec,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> HandlerDirectiveResult<()> {
+) -> HandlerDirectiveResult<bool> {
     let parsed_argument = parse_optional_handler_style_argument(
         token_stream,
         context,
@@ -87,7 +87,8 @@ pub(super) fn apply_handler_style_directive(
         build_state.style.formatter = Some(formatter.clone());
     }
 
-    Ok(())
+    // The head parser must not skip a separator when the directive already consumed its operand.
+    Ok(parsed_argument.value.is_some())
 }
 
 fn apply_style_directive_effects(
@@ -132,7 +133,17 @@ fn parse_optional_handler_style_argument(
     let default_span = Some(token_stream.current_span());
     let directive_name_id = string_table.intern(directive_name);
 
-    let Some(expression) = parse_optional_parenthesized_expression(
+    // A directive with no operand contract must reject the operand before parsing it, so the
+    // diagnostic names the directive shape instead of an unrelated unknown-name failure.
+    let Some(argument_type) = argument_type else {
+        reject_directive_operand(directive_name_id, token_stream)?;
+        return Ok(ParsedHandlerDirectiveArgument {
+            value: None,
+            error_span: default_span,
+        });
+    };
+
+    let Some(expression) = parse_optional_directive_operand(
         directive_name_id,
         token_stream,
         context,
@@ -147,18 +158,6 @@ fn parse_optional_handler_style_argument(
             value: None,
             error_span: default_span,
         });
-    };
-
-    let Some(argument_type) = argument_type else {
-        return Err(with_argument_span(
-            templates::invalid_template_directive(
-                Some(string_table.intern(directive_name)),
-                InvalidTemplateDirectiveReason::DirectiveNotAllowedHere,
-                default_span,
-            ),
-            default_span,
-        )
-        .into());
     };
 
     let expression = expression_builder.view(expression)?;

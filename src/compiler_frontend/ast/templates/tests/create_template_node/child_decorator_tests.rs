@@ -164,7 +164,7 @@ fn before_and_after_compose_one_direct_child_wrapper() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, context) = parse_decorator_template(
-        "[$before = [:prefix], $after = [:suffix]: [: child]]",
+        "[$before [:prefix], $after [:suffix]: [: child]]",
         &mut expression_builder,
         &mut const_values,
         &mut string_table,
@@ -250,7 +250,7 @@ fn before_directive_accepts_const_string_reference() {
     )];
 
     let file_tokens = template_tokens_from_source(
-        "[$before = prefix:[:child]]",
+        "[$before prefix:[:child]]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -415,7 +415,7 @@ fn before_directive_resolves_stored_constant_wrapper_in_runtime_template() {
     );
 
     let file_tokens = template_tokens_from_source(
-        "[$before = prefix: [: child]]",
+        "[$before prefix: [: child]]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -504,7 +504,7 @@ fn before_directive_rejects_runtime_values() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = template_tokens_from_source(
-        "[$before = value: [: child]]",
+        "[$before value: [: child]]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -553,27 +553,29 @@ fn before_directive_rejects_runtime_values() {
 
 #[test]
 fn before_directive_rejects_non_string_values() {
-    let error = template_parse_error("[$before = 42: [: child]]");
+    let error = template_parse_error("[$before 42: [: child]]");
     assert!(
-        error
-            .contains("`$before` requires `= <compile-time String or constant template wrapper>`."),
+        error.contains(
+            "`$before` requires one bare compile-time `String` or constant template wrapper."
+        ),
         "unexpected non-string value diagnostic: {error}"
     );
 }
 
 #[test]
-fn before_directive_rejects_missing_assignment() {
+fn before_directive_requires_operand() {
     let error = template_parse_error("[$before: body]");
     assert!(
-        error
-            .contains("`$before` requires `= <compile-time String or constant template wrapper>`."),
-        "unexpected missing-assignment diagnostic: {error}"
+        error.contains(
+            "`$before` requires one bare compile-time `String` or constant template wrapper."
+        ),
+        "unexpected missing-operand diagnostic: {error}"
     );
 }
 
 #[test]
 fn decorator_value_rejects_default_slot_at_its_own_span() {
-    let source = "[$before = [:<b>[$slot]</b>]: [: child]]";
+    let source = "[$before [:<b>[$slot]</b>]: [: child]]";
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
@@ -640,7 +642,7 @@ fn decorator_value_rejects_default_slot_at_its_own_span() {
 
 #[test]
 fn decorator_value_rejects_positional_slot() {
-    let error = template_parse_error("[$after = [: [$slot 1] ]: [: child]]");
+    let error = template_parse_error("[$after [: [$slot 1] ]: [: child]]");
     assert!(
         error.contains("A `$before` or `$after` value may only contain named slots."),
         "unexpected positional-slot diagnostic: {error}"
@@ -649,7 +651,7 @@ fn decorator_value_rejects_positional_slot() {
 
 #[test]
 fn duplicate_before_directive_is_rejected_in_one_head() {
-    let error = template_parse_error("[$before = [: a], $before = [: b]: body]");
+    let error = template_parse_error("[$before [: a], $before [: b]: body]");
     assert!(
         error.contains("`$before` cannot appear more than once in a template head."),
         "unexpected duplicate-before reason: {error}"
@@ -658,7 +660,7 @@ fn duplicate_before_directive_is_rejected_in_one_head() {
 
 #[test]
 fn duplicate_after_directive_is_rejected_in_one_head() {
-    let error = template_parse_error("[$after = [: a], $after = [: b]: body]");
+    let error = template_parse_error("[$after [: a], $after [: b]: body]");
     assert!(
         error.contains("`$after` cannot appear more than once in a template head."),
         "unexpected duplicate-after reason: {error}"
@@ -667,7 +669,7 @@ fn duplicate_after_directive_is_rejected_in_one_head() {
 
 #[test]
 fn both_decorators_wrap_each_direct_child() {
-    let rendered = folded_template_output("[$before = [:<b>], $after = [:</b>]:[:first][:second]]");
+    let rendered = folded_template_output("[$before [:<b>], $after [:</b>]:[:first][:second]]");
 
     assert_eq!(
         rendered, "<b>first</b><b>second</b>",
@@ -677,13 +679,13 @@ fn both_decorators_wrap_each_direct_child() {
 
 #[test]
 fn string_before_wrapper_prepends_to_child() {
-    let rendered = folded_template_output("[$before = \"prefix: \":[:child]]");
+    let rendered = folded_template_output("[$before \"prefix: \":[:child]]");
     assert_eq!(rendered, "prefix: child");
 }
 
 #[test]
 fn decorators_do_not_apply_to_grandchildren() {
-    let rendered = folded_template_output("[$before = [:<wrap>]:[:[:body]]]");
+    let rendered = folded_template_output("[$before [:<wrap>]:[:[:body]]]");
 
     assert_eq!(rendered, "<wrap>body");
     assert_eq!(rendered.matches("<wrap>").count(), 1);
@@ -693,8 +695,8 @@ fn decorators_do_not_apply_to_grandchildren() {
 fn nested_inline_templates_inside_table_cells_do_not_become_extra_cells() {
     let rendered = folded_template_output(
         "[
-            $before = [:<tr>], $after = [:</tr>]:
-            [$before = [:<td>], $after = [:</td>]:
+            $before [:<tr>], $after [:</tr>]:
+            [$before [:<td>], $after [:</td>]:
                 [: Cell with [:inline] content]
                 [: Plain cell]
             ]
@@ -730,7 +732,7 @@ fn decorator_wrapper_named_slot_stays_addressable() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, context) = parse_decorator_template(
-        "[$before = [:<tr style=\"[$slot row_style]\">], $after = [:</tr>]: [$slot]]",
+        "[$before [:<tr style=\"[$slot row_style]\">], $after [:</tr>]: [$slot]]",
         &mut expression_builder,
         &mut const_values,
         &mut string_table,

@@ -7,7 +7,7 @@ what other modules can see.
 
 ### A compact export block
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     private_helper || -> String:
         return "private"
     ;

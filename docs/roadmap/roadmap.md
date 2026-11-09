@@ -163,7 +163,7 @@ SQL profiles on one shared role palette. The current baseline includes:
 - plain Moth template bodies around highlighted heads and interpolations
 
 Future formats should extend the single `CodeLanguage` owner in
-`src/projects/html_project/styles/code.rs`, including its aliases, comment syntax,
+`src/compiler_frontend/ast/templates/styles/code.rs`, including its aliases, comment syntax,
 keyword/type rules, supported-values diagnostic and focused formatter tests.
 
 Suggested extension order:

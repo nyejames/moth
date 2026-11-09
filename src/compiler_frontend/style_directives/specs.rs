@@ -1,8 +1,7 @@
-//! Data contracts for frontend and project-provided style directives.
+//! Data contracts for frontend-owned style directives.
 //!
 //! These types describe directive syntax, parser effects, formatter factories, and core
-//! compiler-owned behavior. Registry merge policy lives in `registry`; frontend-owned directive
-//! values live in `builtins`.
+//! compiler-owned behavior. Frontend-owned directive values live in `builtins`.
 
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{BodyWhitespacePolicy, Formatter};
@@ -54,21 +53,31 @@ pub enum CoreStyleDirectiveKind {
     Raw,
 }
 
-/// Supported optional single-argument types for handler-based directives.
+/// Supported optional single-operand types for handler-based directives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StyleDirectiveArgumentType {
     String,
+    // Parser normalization still understands these operand kinds, but no frontend directive
+    // currently declares them.
+    #[allow(dead_code)]
     Template,
+    #[allow(dead_code)]
     Number,
+    #[allow(dead_code)]
     Bool,
 }
 
-/// Parsed value for an optional handler-based style argument.
+/// Parsed value for an optional handler-based style operand.
 #[derive(Clone, Debug)]
 pub enum StyleDirectiveArgumentValue {
     String(String),
+    // Produced by parser normalization for the dormant argument types above. Formatter
+    // factories only consume `String` today, so these payloads stay unread.
+    #[allow(dead_code)]
     Template(Box<Template>),
+    #[allow(dead_code)]
     Number(f64),
+    #[allow(dead_code)]
     Bool(bool),
 }
 
@@ -93,24 +102,23 @@ pub struct StyleDirectiveEffects {
 ///
 /// Returns:
 /// - `Ok(formatter)` to set/replace the active formatter.
-/// - `Err(message)` for user-facing directive argument/configuration errors.
+/// - `Err(message)` for user-facing directive operand/configuration errors.
 pub type FormatterFactory = fn(Option<&StyleDirectiveArgumentValue>) -> Result<Formatter, String>;
 
 /// Full behavior contract for one handler-based style directive.
 ///
 /// WHAT:
-/// - Carries optional argument typing, style-state effects, and formatter factory behavior.
+/// - Carries optional operand typing, style-state effects, and formatter factory behavior.
 ///
 /// WHY:
-/// - The same contract is used for frontend-owned formatter built-ins and project-owned
-///   directives, so file location determines ownership while parser dispatch stays generic.
+/// - Frontend-owned formatter built-ins share one contract so parser dispatch stays generic.
 #[derive(Clone, Debug)]
 pub struct StyleDirectiveHandlerSpec {
-    /// Optional single argument contract for `$name(...)`.
+    /// Optional single operand contract for `$name value`.
     pub argument_type: Option<StyleDirectiveArgumentType>,
     /// Template style-state toggles applied when this directive is parsed.
     pub effects: StyleDirectiveEffects,
-    /// Optional formatter factory invoked with the parsed optional argument.
+    /// Optional formatter factory invoked with the parsed optional operand.
     pub formatter_factory: Option<FormatterFactory>,
 }
 
@@ -124,14 +132,6 @@ impl StyleDirectiveHandlerSpec {
             argument_type,
             effects,
             formatter_factory,
-        }
-    }
-
-    pub fn no_op() -> Self {
-        Self {
-            argument_type: None,
-            effects: StyleDirectiveEffects::default(),
-            formatter_factory: None,
         }
     }
 }
@@ -172,16 +172,6 @@ impl StyleDirectiveSpec {
         }
     }
 
-    /// Register an explicit no-op handler-based directive.
-    pub fn handler_no_op(name: impl Into<String>, body_mode: TemplateBodyMode) -> Self {
-        Self::handler(
-            name,
-            body_mode,
-            TemplateHeadCompatibility::fully_compatible_meaningful(),
-            StyleDirectiveHandlerSpec::no_op(),
-        )
-    }
-
     /// Internal helper for compiler-owned core directives.
     pub(crate) fn core(
         name: &str,
@@ -195,9 +185,5 @@ impl StyleDirectiveSpec {
             head_compatibility,
             kind: StyleDirectiveKind::Core(kind),
         }
-    }
-
-    pub(crate) fn is_core(&self) -> bool {
-        matches!(self.kind, StyleDirectiveKind::Core(_))
     }
 }

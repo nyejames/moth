@@ -22,7 +22,7 @@ A `+` prefix is not a root marker in another source file. An ordinary supported 
 
 A root file can read its own top-level declarations and shared helper declarations. It cannot read a declaration written in another root file. Helper files cannot read declarations written in a root file either.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     site/
     ├── @mod.moth
     ├── @package.moth
@@ -44,7 +44,7 @@ An imported module never runs its entry. The build command runs only selected en
 
 A root filename never becomes an import name. `pages/@mod.moth` is imported as `@pages`, not `@mod`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @pages page_heading
 ]
 

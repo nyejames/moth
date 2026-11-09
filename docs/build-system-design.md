@@ -53,7 +53,7 @@ Bootstrap starts with a command selecting the artefact builder, build profile, t
 
 The selected builder does not supply or propagate a semantic numeric profile. It supplies its capability surface and exact typed primitive globals; compiler language policy owns the `I32`/`F64` literal defaults, while each source/input contract names an exact type. The build profile controls optimisation/planning effort, instrumentation and physical representation policy, not numeric semantics or mandatory access/lifetime legality. `docs/compiler-design-overview.md` > `Exact numeric identities and physical representation` owns numeric values and compatibility.
 
-The capability surface contains registered directive signatures/contexts, source-backed Core/Builder packages, binding-backed packages, template directives, import providers, runtime requirements, supported source kinds, primitive build globals and target-affinity/capability metadata.
+The capability surface contains source-backed Core/Builder packages, binding-backed packages, import providers, runtime requirements, supported source kinds, primitive build globals and target-affinity/capability metadata. Directives are not part of it: the compiler defines every directive and every builder sees the same set.
 
 Template constant scope is not a configurable capability. The compiler authority's Stage 2 source-kind section owns the fixed `@html` prelude and the rule that a builder enabling `.mtf` must register the official `packages/html` source package. A builder cannot opt arbitrary source packages into `.mtf` scope.
 

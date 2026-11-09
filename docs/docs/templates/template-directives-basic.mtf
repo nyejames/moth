@@ -6,7 +6,7 @@ accepted queued design. See @../directives (Directives) for their shared rules.
 
 They begin with `$`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     content = [$md:
         # A heading
 
@@ -18,7 +18,7 @@ Common directives include:
 
 - `$slot` for `$slot`, `$slot name` and `$slot 1` declarations
 - `$in name:` to fill one named slot
-- `$before = ...` and `$after = ...` to wrap direct children
+- `$before ...` and `$after ...` to wrap direct children
 - `$fresh` to skip one parent wrapper
 - `$md` for Moth Markdown
 - `$raw` for unformatted text

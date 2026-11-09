@@ -47,7 +47,7 @@ init_docs_sidebar()!
     `moth-mon` for an independent application. Existing compiler clients can
     change the import to `moth::mon` without changing the API.
 
-    [codeblock, $code("rust"):
+    [codeblock, $code "rust":
         use moth_mon::{
             Field, MonErrorCode, Schema, SchemaType, Value, decode_document,
         };

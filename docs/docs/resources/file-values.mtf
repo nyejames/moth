@@ -2,7 +2,7 @@ A file path written in expression position evaluates to a `String`. There is no 
 
 An explicit extension makes the path a file value. The same `@` spelling without an extension names a dependency provider. A path followed by one symbol in expression position is a qualified reference, not a file value:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     intro #= @docs/intro.mtf      -- file value
     name #= @settings site_name   -- qualified reference to one declaration
     @settings site_name           -- top-level dependency clause
@@ -12,7 +12,7 @@ The qualified reference selects one declaration and produces its ordinary value.
 
 ### The file kind decides the value
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     intro   #= @docs/intro.mtf
     license #= @legal/license.md
     logo    #= @assets/logo.svg
@@ -30,7 +30,7 @@ Every accepted file value above has language type `String`. Nothing exposes a fi
 A direct root builder slot can receive a resource-bearing `String`, such as a
 favicon:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     #[$in favicon:[@assets/logo.svg]]
 ]
 
@@ -49,7 +49,7 @@ metadata effect.
 
 A direct `.mtf` or `.md` value is the same folded `content` constant a dependency clause binds. The file is compiled once, by its normal owner.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @docs/intro content as intro
 
     same #= @docs/intro.mtf
@@ -61,7 +61,7 @@ Whichever form is used, plain Markdown links and images inside a `.md` file stay
 
 ### `.moth` files have no file value
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     source = @helpers.moth
 ]
 
@@ -69,7 +69,7 @@ That is rejected. Preparation records the spelling as `SourceKindNoFileValue`, a
 
 A `.moth` file exposes declarations, and declarations are consumed through dependency clauses:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @helpers build_value
 ]
 
@@ -79,7 +79,7 @@ Source text is never exposed as a string. A source kind may be a file value only
 
 A resource file value is a normal `String`, so ordinary string rules apply.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     logo = @assets/logo.svg
 
     logo_for |name String| -> String:
@@ -99,7 +99,7 @@ It may be mutable, a parameter, a return, an optional, a collection element, a m
 
 Internally a resource file value is not the text `"./assets/logo.svg"`. It carries a resource anchor, and the string stays structural until a builder knows which artefact will contain the text.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     image #= [$html:
         <img src="[@assets/logo.svg]" alt="Moth">
     ]
@@ -119,7 +119,7 @@ There is no second source-visible string type. A resource-bearing string is a `S
 
 Resource identity, byte source, emitted output path and rendered URL are four separate facts. The builder chooses the output path, then chooses the artefact whose URL rules observe the rendered text, and renders a relative URL from there.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     resource: assets/logo.svg
     context:  index.html
     URL:      ./assets/logo.svg
@@ -143,7 +143,7 @@ Site navigation is the separate case. A route is not a file the build emits, so 
 
 A file value obeys filesystem ownership, so it cannot reach into a child module's or support package's private files. Content and resources cross a boundary as ordinary exported strings instead:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     export:
         logo  #= @assets/logo.svg
         intro #= @docs/intro.mtf
@@ -156,7 +156,7 @@ A consumer binds those as ordinary exported `String` constants. Aliases and re-e
 
 `.mtf` files remain declarationless and dependency-clause-free. A file value is used through a nested Moth template inside the implicit Markdown body.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     [$html:
         <img src="[@images/ownership.webp]" alt="Ownership graph">
     ]

@@ -3,7 +3,7 @@ A conditional loop keeps repeating while a condition is `true`.
 The condition is checked before each trip through the loop. This means the body
 might not run at all.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count ~= 0
 
     loop count < 3:
@@ -19,7 +19,7 @@ program continues after it.
 
 A condition that never becomes `false` keeps the loop running forever.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     running ~= true
 
     loop running:

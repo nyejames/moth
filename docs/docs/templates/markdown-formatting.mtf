@@ -2,7 +2,7 @@
 
 It is intentionally not a full CommonMark implementation.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     content = [$md:
         # Title
 
@@ -29,7 +29,7 @@ Normalisation lowercases Unicode text, keeps Unicode letters and numeric charact
 
 Equal labels produce equal IDs. There are no suffixes, no registry and no diagnostic, so keep linkable labels unique on each page.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     content = [$md:
         See @#getting-started (Getting started).
         See @./guide#getting-started (Getting started).
@@ -45,7 +45,7 @@ A Moth-aware link target is a URL, never a file value. It is never resolved agai
 
 A target beginning with a single `/` is a site route. It renders through the site root, so the project's configured `origin` is applied for you.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     content = [$md:
         Read the @/docs/packages (Packages) reference.
     ]
@@ -89,7 +89,7 @@ Not supported:
 - fenced code blocks
 - Markdown-level backtick escaping
 
-Use `$code(language)` for highlighted code blocks.
+Use `$code "language"` for highlighted code blocks.
 
 ### Dynamic content boundaries
 

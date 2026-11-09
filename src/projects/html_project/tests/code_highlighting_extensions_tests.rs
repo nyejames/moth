@@ -2,7 +2,7 @@
 //!
 //! Incomplete and deferred snippets exercise highlighting, not compiler acceptance.
 
-use crate::projects::html_project::styles::code::{CodeLanguage, highlight_code_html};
+use crate::compiler_frontend::ast::templates::styles::code::{CodeLanguage, highlight_code_html};
 
 #[test]
 fn final_moth_placement_and_decimal_names_have_distinct_roles() {
@@ -235,7 +235,7 @@ fn moth_template_bodies_are_plain_text_around_highlighted_interpolations() {
     // Heads keep code roles, including nested templates inside head arguments,
     // while body markup and quotes stay plain.
     let highlighted = highlight_code_html(
-        "[$before = [:<li>[$slot style]]: <ul class=\"x\">[$slot]</ul>]",
+        "[$before [:<li>[$slot style]]: <ul class=\"x\">[$slot]</ul>]",
         CodeLanguage::Moth,
     );
     assert_eq!(

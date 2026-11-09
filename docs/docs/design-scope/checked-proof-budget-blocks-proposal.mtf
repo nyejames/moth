@@ -13,7 +13,7 @@ than the normal checker should spend by default.
 The proposal introduces a lexical **proof-budget scope**. Its agreed future
 source-block spelling is `$checked:`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     $checked:
         -- difficult but safe alias relationships
     ;
@@ -29,7 +29,7 @@ same static safety rules. It would not make code outside the scope less checked.
 
 The proposed meaning is:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     ordinary source
         -> normal proof budget
 
@@ -54,7 +54,7 @@ A checked block would affect compiler effort, not runtime meaning.
 The future production checker is expected to start with cheap analysis and only
 refine a candidate conflict when needed. Checked scopes fit that structure:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     cheap borrow solve
         |
         +-- proven safe -> accept
@@ -103,7 +103,7 @@ capabilities may enter the scope and later uses may occur after it.
 
 A likely architecture is:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     normal entry facts
         -> checked deep refinement
         -> compact proven exit facts
@@ -151,7 +151,7 @@ the supported checked tier. It never means "probably safe".
 
 A useful final design should preserve these properties:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     normal analysis accepts P
         -> checked analysis also accepts P
 
@@ -173,7 +173,7 @@ is accepted.
 
 The research sequence should distinguish:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     coarse result
     normal refinement result
     deep refinement result

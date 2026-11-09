@@ -6,7 +6,7 @@ A directive modifies an existing construct. Template-head directives modify thei
 
 A directive in a template head modifies the containing template. For example, $md formats the template body as Markdown:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     message #= [$md: Hello from Moth]
 ]
 
@@ -14,7 +14,7 @@ The target is the template whose head contains the directive, not an enclosing t
 
 A source directive modifies the next eligible declaration or statement. The compiler defines which kinds of constructs each directive can modify. For example, the accepted $config design marks a typed compile-time constant as a build input:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     $config
     api_url #String = "https://example.com"
 ]
@@ -23,7 +23,7 @@ This $config syntax is not yet implemented. The current spelling uses #Config of
 
 Source directives use their own line. The next eligible construct must follow without an empty line. Comments may appear between the directive and its target as long as no blank line intervenes:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     $config
     -- Default server address.
     api_url #String = "https://example.com"
@@ -35,7 +35,7 @@ An empty line, even one containing only spaces, breaks attachment. A directive a
 
 A directive may accept one compile-time operand, with either a value or a named value. Its permitted form depends on the directive:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     $name
     $name value
     $name key = value
@@ -43,9 +43,9 @@ A directive may accept one compile-time operand, with either a value or a named 
 
 A named operand contains one key and one value. It is not a function parameter list, and it cannot have an authored type annotation. Values use Moth's compile-time expression rules and cannot depend on runtime state or cause side effects.
 
-Directive calls such as $name(...) are not part of this accepted grammar. Ordinary function calls such as f() are unaffected.
+Directive calls such as `$name(...)` are rejected with a placement error rather than parsed as a call. Ordinary function calls such as `f()` are unaffected.
 
-Template heads retain their own separators and slot labels. For example, $slot title names a slot, $slot title = "Untitled" supplies a default and $in title contributes to that slot. The currently supported $code("moth") spelling will become a single-operand directive, and $before = value and $after = value will use $before value and $after value. These changes do not alter how those directives compose templates.
+Template heads retain their own separators and slot labels. For example, `$slot title` names a slot, `$slot title = "Untitled"` supplies a default and `$in title` contributes to that slot. `$code "moth"`, `$css "inline"`, `$before value` and `$after value` are single-operand forms. These forms do not alter how those directives compose templates.
 
 ### Module roots and configuration
 
@@ -53,7 +53,7 @@ Module roles come from filenames rather than directives. A directory can contain
 
 The separate config.moth file continues to use ordinary named constants for project and builder settings:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     project #= (
         name = "my_site",
     )

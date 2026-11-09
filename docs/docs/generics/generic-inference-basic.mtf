@@ -4,7 +4,7 @@ until an exact receiving use resolves it within the same body.
 
 ### Inference from an argument
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     identity type A |value A| -> A:
         return value
     ;
@@ -17,7 +17,7 @@ defaults to `I32`, so `A` resolves to `I32`.
 
 ### Inference from the result type
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     empty type A || -> {A}:
         return {}
     ;

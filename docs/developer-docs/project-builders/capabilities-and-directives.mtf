@@ -8,7 +8,7 @@ retained facts consumed by later stages.
 
 Use the configuration helper for builder-owned settings:
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     let definition = BuilderDefinition::new("game")
         .config("game", |config| {
             config.string("asset_root").default("assets");
@@ -41,40 +41,6 @@ separate receiving rules. A builder global is stable semantic configuration,
 not a way to expose host architecture, secrets or operating-system identity to
 source evaluation.
 
-### Add a metadata directive
-
-Metadata directives describe facts a builder consumes. For example, a module
-may declare a bundle label through a root-local directive. Its Rust definition
-specifies the name, permitted context and typed argument:
-
-[codeblock, $code("rust"):
-    use moth::builder::{
-        DirectiveArgument, DirectiveContext, MetadataDirective,
-    };
-
-    let bundle = MetadataDirective::new("bundle")
-        .context(DirectiveContext::ModuleRoot)
-        .argument(DirectiveArgument::string("name").required())
-        .finish()?;
-
-    let definition = BuilderDefinition::new("game")
-        .metadata_directive(bundle)
-        .finish()?;
-]
-
-The compiler recognises the directive through its registered descriptor,
-validates placement, parses arguments with the shared argument owner and folds
-their compile-time values. `CompiledProject` exposes the resulting metadata
-through its registered metadata views, paired with authored locations and
-typed argument access. The builder consumes those facts rather than scanning
-source, matching reserved constant names or inspecting generated strings.
-
-This example declares metadata only. It doesn't create an execution entry.
-A root-purpose registration also needs a consumer contract that defines entry
-selection, signature, lifecycle and outcome handling. A function declaration
-modifier or a semantic block requires its own compiler-owned contract.
-Registering a name isn't permission to invent one.
-
 ### Keep root slot destinations builder-owned
 
 A builder surface may register statically known named destinations for direct
@@ -98,46 +64,22 @@ This registration belongs to the builder capability surface, not to source
 packages or arbitrary callbacks. Keep slot-specific validation, escaping,
 fallbacks and output deduplication in the builder that owns the meaning.
 
-### Keep directive powers bounded
+### Directives stay compiler-owned
 
-A descriptor fixes the directive's context, form, argument contract and
-processing role. A builder can provide template formatting and consume
-configuration, metadata and permitted root-purpose facts. It cannot use that
-registration to rewrite a function, change nominal type identity, alter exports,
-mutate HIR or relax borrow and lifetime validation.
+A builder exposes no directive registration path. Directives, their contexts,
+operand contracts and formatters are compiler-defined, so every builder sees the
+same set. A builder contributes root-slot destinations, configuration schemas,
+source kinds, packages and external providers; it cannot add syntax, supply a
+formatter or name a directive.
 
-The registry rejects duplicate and compiler-owned names. Unknown directives,
-wrong placement and an unavailable selected capability remain distinct errors.
-Ordinary static conditional code doesn't suppress frontend validation.
-Structural exclusion belongs to the compiler's pre-graph feature-selection
-contract, not to a builder callback or configuration Boolean.
+Unknown directives, wrong placement and malformed operands remain distinct
+compiler errors. Ordinary static conditional code doesn't suppress frontend
+validation. Structural exclusion belongs to the compiler's pre-graph
+feature-selection contract, not to a builder callback or configuration Boolean.
 
-Metadata preserves its declared scope. Project settings don't automatically
-merge with builder slot contributions. A provider's metadata isn't inherited by its
-consumer. Repeated directive occurrences are accepted only when their
-registered cardinality allows them.
-
-### Register template behaviour
-
-Use `template_directive` with a template descriptor to supply a formatter and
-its permitted argument and body-mode contracts. Body modes, head compatibility,
-whitespace policy and formatting effects come from the compiler's supported
-vocabulary. They aren't an arbitrary lexer or grammar plugin.
-
-The compiler owns argument typing and the structural template input. A
-formatter consumes its documented view and preserves structural resource and
-site-root anchors when composing output. It doesn't replace those anchors with
-guessed URLs or mutate the compiler's template store. Invalid arguments produce
-located diagnostics through the normal compiler path.
-
-Template directives remain head operations. They don't make a String into a
-component instance, subscription or saved renderer. A directive that generates
-HTML still needs the appropriate escaping for each output context. Returning
-HTML is not proof that interpolated text is safe to insert as markup.
-
-Source-backed Moth helpers are the simpler choice when ordinary template
-composition and functions already express the operation. Use a Rust formatter
-only for behaviour that belongs at the formatting boundary.
+Builder-owned facts preserve their declared scope. Project settings don't
+automatically merge with builder slot contributions. A provider's facts aren't
+inherited by its consumer.
 
 ### Select source adapters and external providers
 
@@ -167,11 +109,12 @@ by scanning emitted JavaScript, HTML or Wasm.
 
 Checking and editor analysis use the same builder definition as compilation.
 Tooling can add analysis and validation roots without creating a competing
-package registry or output builder. A directive or binding has the same meaning
-in an editor, a check and a release build.
+package registry or output builder. A binding has the same meaning in an editor,
+a check and a release build, and the directive set is the compiler's in every
+command.
 
 A definition becomes immutable before source compilation. Changes to packages,
-signatures, directives or relevant configuration invalidate the affected
-semantic or physical work through the normal dependency facts. Runtime state,
+signatures or relevant configuration invalidate the affected semantic or
+physical work through the normal dependency facts. Runtime state,
 function-pointer addresses and absolute installation paths aren't stable
 semantic fingerprint keys.

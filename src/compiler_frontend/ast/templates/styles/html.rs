@@ -1,11 +1,12 @@
-//! HTML-project-owned `$html` formatter/validator.
+//! Frontend-owned `$html` formatter/validator.
 //!
 //! WHAT:
 //! - Preserves HTML text exactly as authored while emitting sanitation warnings.
 //! - Uses shared flattened-source span tracking so warnings stay source-mapped.
 //!
 //! WHY:
-//! - HTML-specific safety heuristics are output-policy concerns owned by the HTML project builder.
+//! - The frontend registers and executes this formatter under every builder, so HTML-specific
+//!   safety heuristics live here rather than in a project builder.
 
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::formatter_contract::FormatterInput;
@@ -14,10 +15,12 @@ use crate::compiler_frontend::ast::templates::template::{
     Formatter, FormatterResult, TemplateFormatter,
 };
 
+use crate::compiler_frontend::ast::templates::styles::validation::{
+    PassThroughFormatterInput, SourceWarning,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::{HtmlTemplateWarning, MalformedTemplateReason};
 use crate::compiler_frontend::style_directives::StyleDirectiveArgumentValue;
-use crate::projects::html_project::styles::validation::{PassThroughFormatterInput, SourceWarning};
 use std::sync::Arc;
 
 #[derive(Debug)]

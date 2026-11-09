@@ -62,7 +62,7 @@ Use the saying library macro `say!()` for user-facing stdout that may need colou
 
 Import long paths at module scope, including types used only in signatures. Use short qualified paths where they improve local reasoning.
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     // ACCEPTABLE: terse and locally clear.
     let type_id = builtin_type_ids::BOOL
 
@@ -109,7 +109,7 @@ Use named intermediate values, short single-purpose functions, explicit multi-st
 
 Be comment-positive, but not noisy. Comments should be grammatical and readable. Do not narrate syntax, repeat a descriptive name or paraphrase a clear signature.
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     // Register same-file declarations before dependencies so aliases cannot shadow local names.
     for declaration in same_file_declarations {
         visible_names.register_same_file_declaration(declaration)?;
@@ -184,7 +184,7 @@ If a match grows too large, extract branch handling into named helpers.
 
 Prefer:
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     match resolution {
         // Constants create dependency edges.
         ConstantReference::SourceConstant { path, source_file } => {
@@ -220,7 +220,7 @@ Avoid:
 
 Prefer named types and straightforward flow:
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     pub(crate) struct DependencyResolution {
         pub(crate) target: ResolvedDependencyTarget,
         pub(crate) local_name: StringId,
@@ -230,7 +230,7 @@ Prefer named types and straightforward flow:
 
 Instead of:
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     Result<(ResolvedDependencyTarget, StringId, SourceSpan), DiagnosticDraft>
 ]
 
@@ -260,7 +260,7 @@ The diagnostic lane rules above apply to every local error boundary.
 - Centralise repeated diagnostic construction in the owning typed constructor or narrow helper instead of duplicating it across branches.
 - Include exact tokens, types or names and suggest practical corrections where possible.
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     // Typed diagnostic family constructor.
     return Err(names_declarations::invalid_assignment_target(
         InvalidAssignmentTargetReason::ImmutableBinding,

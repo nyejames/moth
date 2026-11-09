@@ -1,6 +1,6 @@
 A full match checks one value against a sequence of patterns.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if score is:
         < 0 => io.line("invalid")
         0 => io.line("zero")
@@ -24,7 +24,7 @@ A full match checks one value against a sequence of patterns.
 
 `else =>` is the only catch-all arm.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if value is:
         0 => io.line("zero")
         else =>
@@ -40,7 +40,7 @@ case.
 
 A match can produce values with `then` at a closed receiving site.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     label = if status is:
         Ready => then "ready"
         Waiting => then "waiting"
@@ -62,7 +62,7 @@ predicate. The inline and block forms are equivalent one-arm matches with a
 required `else`. They are not full `if value is:` matches and do not use `=>`
 arms.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     label = if maybe_name is |name| then name else "guest"
 
     block_label = if maybe_name is |name|:

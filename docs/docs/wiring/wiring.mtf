@@ -62,7 +62,7 @@ cannot become a collection element by applying `of`.
 Wire and Route are parameter contracts. A pipe-delimited list does not imply a
 shared meaning across declarations:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     show |value String| -> String:
         return value
     ;
@@ -88,7 +88,7 @@ struct and choice references for those ordinary position contracts.
 
 A source function parameter may require `Wire of T`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     read_name |value Wire of String| -> String:
         return value
     ;
@@ -152,7 +152,7 @@ UI ownership and cross-task retention require separate contracts.
 
 The route contract allows zero or one future input:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     on_click Route of FormMessage
     on_input Route of String -> FormMessage
     messages Route of EditorMessage -> AppMessage
@@ -168,7 +168,7 @@ list and keeps its existing meaning.
 Only an immediate route-receiving parameter permits a direct choice constructor
 to leave payload fields for future input:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     FormMessage ::
         NameChanged | value String |,
         Submit,
@@ -216,7 +216,7 @@ The immediate receiving parameter is what permits a direct constructor to be
 partial. Outside that boundary, ordinary construction still requires every
 field:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     on_rename |route Route of String -> TodoMessage| -> String:
         return "route received"
     ;
@@ -268,7 +268,7 @@ Messages remain ordinary choice values consumed by ordinary update functions.
 This self-contained snippet uses currently executable Moth syntax; its update
 function receives an ordinary choice value and does not use Wire or Route:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     TodoMessage ::
         Rename | id I32, text String |,
         Delete | id I32 |,
@@ -286,7 +286,7 @@ One child-to-parent Route can be forwarded through another compatible Route
 parameter. The partial parent constructor captures its leading `editor_id`;
 the future `EditorMessage` fills the remaining field:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     EditorMessage ::
         Changed | value String |,
     ;
@@ -352,7 +352,7 @@ separate accepted contracts.
 
 The accepted channel construction form is:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     reader, writer Channel of AppMessage = Channel()
 ]
 

@@ -2,7 +2,7 @@ Trait requirements describe the method shapes a conforming type must provide. Th
 
 ### Receiver syntax
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     RESETTABLE must:
         reset |~This|
     ;
@@ -35,7 +35,7 @@ Trait requirements describe the method shapes a conforming type must provide. Th
 
 Multiple method requirements may appear in one trait. The current separator between requirements is a newline. Each requirement has no body and no standalone semicolon. The trait itself closes with a final semicolon.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     NAMED must:
         name |This| -> String
         id |This| -> I32
@@ -44,7 +44,7 @@ Multiple method requirements may appear in one trait. The current separator betw
 
 ### Non-receiver `This`
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     SAME must:
         equals |This, other This| -> Bool
     ;

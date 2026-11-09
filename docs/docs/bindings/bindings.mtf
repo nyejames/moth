@@ -1,13 +1,13 @@
 A binding gives a value a visible name.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count = 42
     ratio F64 = 0.5
 ]
 
 ### Declaration forms
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     name = value
     name Type = value
 ]

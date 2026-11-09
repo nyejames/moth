@@ -2,7 +2,7 @@ Generic bounds use traits to promise that a generic parameter provides certain b
 
 ### Generic trait bound syntax
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     DISPLAY_TEXT must:
         display |This| -> String
     ;
@@ -38,7 +38,7 @@ exposed method must discharge that failure at the declared boundary. See
 
 ### Multiple bounds on one parameter
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     NAMED must:
         name |This| -> String
     ;
@@ -50,7 +50,7 @@ exposed method must discharge that failure at the declared boundary. See
 
 ### Multiple parameters with bounds
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     render_pair type A is DISPLAY_TEXT, B is DISPLAY_TEXT |left A, right B| -> String:
         return [left.display(), right.display()]
     ;
@@ -62,7 +62,7 @@ Concrete calls and instantiations require reusable evidence. User-authored reusa
 
 Compiler-owned evidence also exists for the builtin cast table.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Label = |
         text String,
     |

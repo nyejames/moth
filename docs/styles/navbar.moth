@@ -1,6 +1,6 @@
 @html table, div, p, span
 
-nav_style #= [$css("inline"):
+nav_style #= [$css "inline":
     display: flex;
     justify-content: space-between;
     align-items: center;

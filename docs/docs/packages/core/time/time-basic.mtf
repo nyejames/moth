@@ -12,7 +12,7 @@ These types stay opaque. Pass them to the package functions. Do not construct th
 
 Use `TimeMark` for a monotonic measurement point. Use `Duration` for the elapsed amount.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/time TimeMark, mark_now, duration_between, as_seconds
 
     previous ~= mark_now()
@@ -30,7 +30,7 @@ This shape works for frame-delta style code without requiring a scheduler or ani
 
 Use `Timestamp` for real-world UTC instants that may be logged, stored or exchanged with external systems.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/time Timestamp, timestamp_from_iso_string, timestamp_from_unix_milliseconds, to_iso_string
 
     parse_created || -> Timestamp, Error!:

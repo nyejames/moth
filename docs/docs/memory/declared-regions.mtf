@@ -8,14 +8,14 @@ The following is accepted end-state syntax. Implementation is deferred and must 
 
 A declaration targets the declared region with the `into` keyword:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     request:
         parsed ParsedPost into request = parse_post(post)
         html String into request = render_post(parsed)
     ;
 ]
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     name [access/type] into region_name = expression
 ]
 
@@ -56,7 +56,7 @@ Moth does not add labelled `break`, labelled `continue` or `goto`. Unlabelled `b
 
 An ordinary statically known `if true:` can provide a rare local lexical scope:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if true:
         temporary = calculate()
         use(temporary)
@@ -71,7 +71,7 @@ Future compiler-owned scopes such as `$async:` remain distinct. Their marker des
 
 `into region_name` appears after access or type syntax and before `=`. V1 has no expression-site placement. Declarations are the only placement surface.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     parsed into scratch = parse_post(post)
     parsed ParsedPost into scratch = parse_post(post)
     rows ~{Row} into scratch = {}
@@ -80,14 +80,14 @@ Future compiler-owned scopes such as `$async:` remain distinct. Their marker des
 
 Prefer:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     row Row into scratch = parse_row(raw)
     ~rows.push(row)
 ]
 
 Do not initially add:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- INVALID: expression-site placement is not supported in V1
     ~rows.push(parse_row(raw) into scratch)
 ]
@@ -120,7 +120,7 @@ A fresh result root may retain parameters or other pre-existing values only when
 
 Nested declared regions are valid.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     request:
         config Config into request = load_config()
 

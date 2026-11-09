@@ -12,7 +12,7 @@ AST owns that static work.
 
 `greeting_prefix` begins as source:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
 greeting_prefix #= "Hello"
 ]
 
@@ -26,7 +26,7 @@ Current typed build configuration values and source `#Config` primitives (the Al
 
 Stage 4 owns the boundary:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
 fully checked authored AST
 -> constant evaluation
 -> known Bool branch selection

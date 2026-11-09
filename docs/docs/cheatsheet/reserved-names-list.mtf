@@ -41,19 +41,16 @@ The `@project` dependency root is reserved for project globals.
 - `$doc` - mark documentation content.
 - `$raw` - preserve unformatted template content.
 - `$md` - format Moth Markdown.
-
-### HTML builder template directives
-
 - `$html` - HTML content.
-- `$css` - CSS checking and formatting, with optional `$css("inline")`.
+- `$css` - CSS checking and formatting, with optional `$css "inline"`.
 - `$escape_html` - escape HTML-sensitive content.
-- `$code` - code blocks with optional highlighting, such as `$code("moth")`.
+- `$code` - code blocks with optional highlighting, such as `$code "moth"`.
 
 ### General directives
 
 - `$config` - mark a compile-time declaration as a build input (compiler).
 
-`$config` is accepted language design and is queued for implementation. The template directives above are already registered by the compiler or HTML builder.
+`$config` is accepted language design and is queued for implementation. Every template directive above is registered by the compiler and available under every builder.
 
 No `$project`, `$builder` or `$html_builder` directive exists. Project and builder settings use the ordinary named `project` and builder records in `config.moth`.
 

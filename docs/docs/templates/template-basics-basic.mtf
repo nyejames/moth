@@ -1,6 +1,6 @@
 Templates form Moth's string-building engine.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     name = "Priya"
 
     greeting = [:

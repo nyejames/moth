@@ -1,6 +1,6 @@
 `copy` requests an independent value from an existing place.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     items ~= {"a", "b"}
     independent_items ~= copy items
 
@@ -21,14 +21,14 @@ The operand must be a place with stable storage:
 Literals, templates, constructor calls, function calls and computed
 expressions are not copy targets.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     copied_title = copy config.title
     copied_items = copy (items)
 ]
 
 These forms are invalid:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     copied_number = copy 42
     copied_result = copy make_value()
     copied_template = copy [: text]
@@ -47,7 +47,7 @@ Fresh expressions already create their own result values.
 Expressions that construct a new result from existing inputs are not implicit
 copies of one input.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     total = unit_price + shipping
     label = [: [first_name] [last_name]]
 ]

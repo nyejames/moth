@@ -3199,12 +3199,6 @@ impl BackendBuilder for SuccessfulPackageWarningBuilder {
         Ok(())
     }
 
-    fn frontend_style_directives(
-        &self,
-    ) -> Vec<crate::compiler_frontend::style_directives::StyleDirectiveSpec> {
-        Vec::new()
-    }
-
     fn frontend_surface(&self) -> BuilderSurface {
         let mut surface = BuilderSurface::with_mandatory_core();
         surface

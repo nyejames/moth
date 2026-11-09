@@ -6,7 +6,7 @@
 
 Bind individual symbols or the whole namespace:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/random random_float, random_int
 
     @core/random

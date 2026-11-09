@@ -3,7 +3,7 @@
 plain_prefix #= [:<strong>]
 structural_prefix #= [:<img src="[@assets/mark.svg]" data-site="[@/]" alt="mark">]
 
-plain_rows = [$before = plain_prefix, $after = [$html:</strong>]:[$slot]]
-structural_rows = [$before = structural_prefix:[$slot]]
+plain_rows = [$before plain_prefix, $after [$html:</strong>]:[$slot]]
+structural_rows = [$before structural_prefix:[$slot]]
 
 [:[plain_rows:[:text]][structural_rows:[:structural]]]

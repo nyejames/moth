@@ -1,7 +1,7 @@
 Unconstrained whole-number spelling defaults to `I32`. Decimal-point and
 exponent spelling defaults to `F64`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     score = 42
     ratio = 0.5
     population = 1e6
@@ -13,7 +13,7 @@ unary `+` and spaced `- count`. Small values do not infer narrow types.
 
 An exact receiver materialises a literal directly:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     small U8 = 200
     large U64 = 18_000_000_000
     half F16 = 0.5
@@ -22,7 +22,7 @@ An exact receiver materialises a literal directly:
 
 An exact receiver can also type unresolved literal arithmetic:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     total U8 = 1 + 2
     money Dec4 = 0.1 + 0.2
 ]

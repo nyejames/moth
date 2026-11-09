@@ -1,6 +1,6 @@
 A binding names a value.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     score = 10
     player_name = "Priya"
 ]
@@ -13,7 +13,7 @@ own inferred types.
 Write the type when it makes the code clearer or gives the compiler needed
 context:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     score I32 = 10
     player_name String = "Priya"
 ]

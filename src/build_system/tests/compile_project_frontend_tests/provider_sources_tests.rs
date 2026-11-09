@@ -762,8 +762,7 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
 
     let mut config = Config::new(dir.clone());
     let builder = crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new();
-    let style_directives = StyleDirectiveRegistry::merged(&builder.frontend_style_directives())
-        .expect("HTML style directives should merge");
+    let style_directives = StyleDirectiveRegistry::built_ins();
     let mut frontend_surface = builder.frontend_surface();
     let canvas_package_id = frontend_surface
         .binding_packages

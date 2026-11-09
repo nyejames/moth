@@ -1,4 +1,4 @@
-[codeblock, $code("text"):
+[codeblock, $code "text":
         mtf baseline
             mtf nested
     mtf less indented

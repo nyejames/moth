@@ -22,7 +22,6 @@ use crate::compiler_frontend::compiler_errors::CompilationOutcome;
 use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_reports;
-use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::projects::settings::{Config, ProjectConfigError};
 use std::path::PathBuf;
 
@@ -190,11 +189,6 @@ impl BackendBuilder for ProjectBuilderAdapter<'_> {
 
     fn frontend_surface(&self) -> BuilderSurface {
         self.definition.surface().clone()
-    }
-
-    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
-        // SDK builders register no template style directives.
-        Vec::new()
     }
 
     fn validate_project_config(

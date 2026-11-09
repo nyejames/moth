@@ -2,7 +2,7 @@ A concrete generic instance substitutes the generic parameters with concrete typ
 
 ### Field and payload substitution
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Box type A = |
         value A,
     |
@@ -15,7 +15,7 @@ A concrete generic instance substitutes the generic parameters with concrete typ
 
 ### Generic choices
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Maybe type A ::
         Some | value A |,
         Empty,
@@ -31,7 +31,7 @@ Choice payload matching uses the substituted payload types.
 
 Same constructor plus same concrete arguments yields the same instance type. Different arguments yield incompatible instance types.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Box type A = |
         value A,
     |
@@ -45,7 +45,7 @@ Same constructor plus same concrete arguments yields the same instance type. Dif
 
 Generic struct and choice constructors infer type arguments from immediate arguments and the immediate receiving type. A constructor may preserve an existing numeric origin through its known generic field shape until eligible exact receivers resolve it through direct uses in the same function body, including connected copies and writes. This does not infer other type arguments or structure from later uses. See @../numbers/#numeric-literals (Numeric literals) for the full inference contract. No explicit constructor type arguments are supported.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Box type A = |
         value A,
     |
@@ -61,7 +61,7 @@ Generic struct and choice constructors infer type arguments from immediate argum
 
 A receiver method may be declared on a generic type when the method's generic parameters align exactly with the receiver constructor's parameters.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Box type A = |
         value A,
     |

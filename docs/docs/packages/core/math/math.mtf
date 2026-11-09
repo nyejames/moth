@@ -6,7 +6,7 @@
 
 Bind individual symbols or the whole namespace:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math PI, sin, clamp
 
     @core/math
@@ -17,7 +17,7 @@ Bind individual symbols or the whole namespace:
 
 A namespace alias creates a file-local name:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math as math
 ]
 

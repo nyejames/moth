@@ -89,7 +89,7 @@ This is what makes declared regions count-free. Because no declared-region-owned
 
 Count-free is a property of the target owner, not of every edge source located inside a declared region. A declared-region-owned target allocation family carries no REC counter. An internal retained edge to a target owned by the same declared region is count-free because the declared region's bulk exit already covers it.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     declared-region-owned target:
         count-free
 
@@ -116,14 +116,14 @@ Direct source construction of cyclic graphs remains deferred with the rest of de
 
 ## Declared region header
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     request:
         parsed ParsedPost into request = parse_post(post)
         html String into request = render_post(parsed)
     ;
 ]
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     name [access/type] into region_name = expression
 ]
 
@@ -150,7 +150,7 @@ Moth has no dedicated general lexical-block construct. `block` is an ordinary id
 
 ## into declaration placement
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     parsed into scratch = parse_post(post)
     parsed ParsedPost into scratch = parse_post(post)
     rows ~{Row} into scratch = {}
@@ -161,14 +161,14 @@ Moth has no dedicated general lexical-block construct. `block` is an ordinary id
 
 V1 has no expression-site placement. Prefer:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     row Row into scratch = parse_row(raw)
     ~rows.push(row)
 ]
 
 Do not initially add:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- INVALID: expression-site placement is not supported in V1
     ~rows.push(parse_row(raw) into scratch)
 ]
@@ -198,7 +198,7 @@ Canonical V1 rule:
 
 Valid nested placement:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     request:
         scratch:
             parsed ParsedPost into scratch = parse_post(post)
@@ -211,7 +211,7 @@ Valid nested placement:
 
 Invalid branch placement:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     request:
         if condition:
             html String into request = render_post() -- invalid in V1
@@ -223,7 +223,7 @@ Invalid branch placement:
 
 Conditional replacement:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     request:
         html String into request = if condition:
             then render_post()
@@ -235,7 +235,7 @@ Conditional replacement:
 
 Invalid loop placement:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     request:
         loop posts |post|:
             html String into request = render_post(post) -- invalid repeated declaration
@@ -263,7 +263,7 @@ A fresh result root may retain parameters or other pre-existing values only when
 
 Nested declared regions are valid.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     request:
         config Config into request = load_config()
 
@@ -330,7 +330,7 @@ Backend GC representation does not legalise these cases.
 
 ### Crossing a declared region boundary
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     request:
         scratch:
             label String into scratch = [: temporary]
@@ -347,7 +347,7 @@ A fresh producer may avoid the copy by allocating directly into the destination 
 
 An interior alias rooted in declared-region-owned storage cannot escape its declared region by itself.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     load_name |id String| -> String, Error!:
         scratch:
             user User into scratch = load_user(id)!

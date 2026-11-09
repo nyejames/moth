@@ -17,7 +17,6 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{self, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
-use crate::projects::html_project::style_directives::html_project_style_directives;
 use std::fmt;
 use std::fs;
 use std::num::NonZeroU32;
@@ -421,20 +420,14 @@ fn measure_excluded_js(
 
 /// The directive set the census measures with.
 ///
-/// WHY: the docs corpus is authored against the HTML project's directives, exactly as
-/// `moth_template::compile` registers them. Tokenizing with built-ins alone rejects every
-/// `$html`/`$css` template, which is where the longest spans live, and a census missing its
-/// longest spans selects the wrong split.
-fn census_style_directives() -> Result<StyleDirectiveRegistry, SpanCensusError> {
-    StyleDirectiveRegistry::merged(&html_project_style_directives())
-        .map_err(|_| SpanCensusError::new("HTML project style directives failed to register"))
-}
-
+/// WHY: the docs corpus is authored against the frontend's built-in directives, including the
+/// `$html`/`$css` formatters. Tokenizing with a narrower set rejects those templates, which is
+/// where the longest spans live, and a census missing its longest spans selects the wrong split.
 pub(super) fn tokenize_corpus(
     workspace_root: &Path,
     token_sources: &[PathBuf],
 ) -> Result<TokenizedCorpus, SpanCensusError> {
-    let style_directives = census_style_directives()?;
+    let style_directives = StyleDirectiveRegistry::built_ins();
     let mut collected = Vec::new();
     let mut failures = Vec::new();
     let mut longest_spans = Vec::new();

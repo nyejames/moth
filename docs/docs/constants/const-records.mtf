@@ -1,6 +1,6 @@
 A fully folded struct instance stored in a constant may become a const record.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Defaults = |
         title String,
         year I32,
@@ -22,7 +22,7 @@ receiver method.
 
 Use a folded field when runtime code needs its ordinary value:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     io.line(defaults.title)
 ]
 
@@ -39,7 +39,7 @@ folded export and provenance rules remain in force.
 Anonymous construction uses the named-only form of
 @../language-overview/#mon-syntax (MON syntax):
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     labels #= (
         first = "Priya",
         second = "Rob",
@@ -59,7 +59,7 @@ record merely because its fields could fold.
 A field may contain an inline anonymous const record, an already declared const
 record or an explicitly constructed nominal value that satisfies constant rules.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Size = |
         width I32,
         height I32,

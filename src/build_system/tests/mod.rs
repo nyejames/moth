@@ -31,7 +31,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerStage, DiagnosticBag, InvalidConfigReason, NamingConvention, PreparedFailure,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::projects::settings::{Config, ProjectConfigError};
 
@@ -309,10 +308,6 @@ impl BackendBuilder for LateFailureBuilder {
             .expect("test source root should register");
         surface
     }
-
-    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
-        Vec::new()
-    }
 }
 
 struct ValidationTrackingBuilder {
@@ -364,10 +359,6 @@ impl BackendBuilder for EntryTrackingBuilder {
     fn frontend_surface(&self) -> BuilderSurface {
         BuilderSurface::with_mandatory_core()
     }
-
-    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
-        Vec::new()
-    }
 }
 
 impl BackendBuilder for ValidationTrackingBuilder {
@@ -403,10 +394,6 @@ impl BackendBuilder for ValidationTrackingBuilder {
     fn frontend_surface(&self) -> BuilderSurface {
         BuilderSurface::with_mandatory_core()
     }
-
-    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
-        Vec::new()
-    }
 }
 
 struct FailingValidationBuilder;
@@ -440,10 +427,6 @@ impl BackendBuilder for FailingValidationBuilder {
 
     fn frontend_surface(&self) -> BuilderSurface {
         BuilderSurface::with_mandatory_core()
-    }
-
-    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
-        Vec::new()
     }
 }
 
@@ -481,10 +464,6 @@ impl BackendBuilder for NoDirectiveBuilder {
 
     fn frontend_surface(&self) -> BuilderSurface {
         BuilderSurface::with_mandatory_core()
-    }
-
-    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
-        Vec::new()
     }
 }
 
@@ -550,10 +529,6 @@ impl BackendBuilder for MultiModuleDiagnosticBuilder {
 
     fn frontend_surface(&self) -> BuilderSurface {
         BuilderSurface::with_mandatory_core()
-    }
-
-    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
-        Vec::new()
     }
 }
 

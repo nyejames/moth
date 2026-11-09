@@ -22,7 +22,7 @@ rejects a source package whose path equals, contains or nests inside another
 registered source or host package path, including case-only variants. Siblings
 such as `@game/ui` and `@game/audio` don't overlap.
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     let install_root = std::path::PathBuf::from("/srv/game/installed-packages");
     let package = SourcePackage::new("@ui")
         .from_dir(install_root.join("ui"));
@@ -46,7 +46,7 @@ ambient state.
 Apply `["#[moth::host_function]"]` to a supported concrete Rust free function. Add
 its generated descriptor to a package explicitly:
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     let package = HostPackage::new("@platform")
         .function(moth::host_binding!(has_prefix));
 ]
@@ -185,7 +185,7 @@ normal Moth error returns.
 Use `["#[moth::host_type]"]` for a Rust-owned resource whose internals stay on the
 host. Register its type and free-function surface in the package:
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     #[moth::host_type]
     struct Window {
         width: u32,
@@ -228,7 +228,7 @@ wrappers can provide a higher-level API through ordinary source-owned types.
 A host-context parameter is supplied by the runtime rather than by the Moth
 caller. Mark it explicitly and keep it separate from ordinary parameters:
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     struct HostState {
         user_name: Option<String>,
     }

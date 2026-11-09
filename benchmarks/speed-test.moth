@@ -393,7 +393,7 @@ global_styles #= [$in style, $css:
     }
 ]
 
-page #= [$before = [:<section class="section">], $after = [:</section>]:
+page #= [$before [:<section class="section">], $after [:</section>]:
     <main class="page">
         [$slot]
     </main>
@@ -432,7 +432,7 @@ accent_title_4 #= [$in style:
 color: [accent_4];
 ]
 
-bullet_list #= [$before = [:<li>], $after = [:</li>]:
+bullet_list #= [$before [:<li>], $after [:</li>]:
 <ul class="tight-list">
     [$slot]
 </ul>
@@ -452,9 +452,9 @@ chip_row #= [:
 </div>
 ]
 
-compare_table #= [$before = [:<div class="compare-row">], $after = [:</div>]:
+compare_table #= [$before [:<div class="compare-row">], $after [:</div>]:
 <div class="compare-table">
-    [$before = [:<div class="compare-cell">], $after = [:</div>]:[$slot]]
+    [$before [:<div class="compare-cell">], $after [:</div>]:[$slot]]
 </div>
 ]
 
@@ -476,7 +476,7 @@ escaped_snippet #= [$escape_html:
 </div>
 ]
 
-fresh_list #= [$before = [:<li>], $after = [:</li>]:
+fresh_list #= [$before [:<li>], $after [:</li>]:
 <ul class="tight-list">
     [$slot]
 </ul>

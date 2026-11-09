@@ -8,7 +8,7 @@ An unconstrained whole-number value defaults to `I32`. An unconstrained
 decimal/exponent value defaults to `F64`. These defaults do not set a minimum
 arithmetic width. For example, `I8 + I8` stays `I8` and can overflow `I8`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     small I8 = 12
     ratio F16 = 0.5
 ]

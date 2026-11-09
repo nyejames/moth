@@ -5,7 +5,7 @@ mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-SYNTAX-0021"]
 message_contains = [
-    "Unsupported '$code(...)' language \"rustt\"",
+    "Unsupported `$code` language \"rustt\"",
     "Supported aliases are",
 ]
 

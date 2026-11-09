@@ -1,6 +1,6 @@
 A constant can hold a fully known struct value.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Defaults = |
         title String,
         year I32,
@@ -11,7 +11,7 @@ A constant can hold a fully known struct value.
 
 Read its fields during compilation or use an ordinary field in runtime code:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     site_title #= defaults.title
     io.line(defaults.title)
 ]
@@ -24,7 +24,7 @@ instead. A field that is itself a const record keeps the same restriction.
 Anonymous construction uses
 @../language-overview/#mon-syntax (MON syntax) and requires all fields to fold.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     settings #= (
         title = "Strategy",
         window = (width = 1280, height = 720),

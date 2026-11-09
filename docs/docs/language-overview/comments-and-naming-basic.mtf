@@ -1,6 +1,6 @@
 In ordinary Moth code, comments begin with two minus signs:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- This source-code line is ignored by the compiler.
     score = 10
 ]
@@ -10,7 +10,7 @@ are text rather than source comments.
 
 Use `regular_snake_case` for values and functions:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     player_score = 10
 
     double_score |score I32| -> I32:
@@ -20,7 +20,7 @@ Use `regular_snake_case` for values and functions:
 
 Use `PascalCase` for named types:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     PlayerScore = |
         value I32,
     |

@@ -1,7 +1,7 @@
 Postfix `!` propagates a typed error through the enclosing function's compatible
 error slot.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     wrapper |text String| -> I32, Error!:
         value = parse_number(text)!
         return value
@@ -18,7 +18,7 @@ error slot.
 - A no-success fallible operation may still use postfix `!` as a statement.
 - Multi-success fallible calls may feed a matching multi-bind.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     items ~{4 I32} = {}
 
     ~items.push(value)!
@@ -34,7 +34,7 @@ boundary. See @../casts (Casts) for its target and evidence rules.
 
 Old inline fallback and bang-handler spellings are invalid.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- INVALID: old inline fallback and bang-handler spellings
     value = parse_number(text)!0
     value = parse_number(text) err!
@@ -49,7 +49,7 @@ source-visible `Error!` expression. Under the accepted contract, private
 functions without an error slot infer and propagate it within the same semantic
 module. Their internal callers do not add postfix `!`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     product |left I32, right I32| -> I32:
         return left * right
     ;

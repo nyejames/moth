@@ -2,7 +2,7 @@
 concrete receiving boundary. Moth adds no target annotation after the
 expression and no constructor-like numeric conversion.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     octet U8 = 42
     count U64 = cast octet
     ratio F32 = cast count
@@ -15,7 +15,7 @@ Integer-to-`Dec2` preserves the integer exactly at that scale.
 
 ### Forms
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     value Target = cast expression
 
     value Target = cast expression catch:
@@ -69,7 +69,7 @@ These positions do not supply a cast target:
 
 An explicit target never chooses or immediately defaults the source:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     value = 1
     take_u32(cast value)
     take_i64(value)
@@ -84,7 +84,7 @@ has no target and remains invalid.
 
 Type names do not act as conversion functions:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- INVALID: type names are not conversion functions
     I32(value)
     U8(value)
@@ -94,13 +94,13 @@ Type names do not act as conversion functions:
 
 `Error(...)` remains a constructor:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     err = Error("Missing number", 200)
 ]
 
 Use `cast` when converting to `Error` rather than constructing one:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     err Error = cast "Missing number"
 ]
 

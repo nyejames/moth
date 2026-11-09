@@ -8,7 +8,7 @@ Templates create owned `String` values.
 
 They use square brackets. Collections and maps use braces.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     name = "Priya"
 
     greeting = [:
@@ -20,7 +20,7 @@ They use square brackets. Collections and maps use braces.
 
 A colon separates the template head from its body.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     ["prefix": body]
 ]
 
@@ -60,7 +60,7 @@ Double-quoted string slices still use normal escaping in expression position.
 To render a literal open or close square bracket inside a template body, insert
 a string slice:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     content = [: ["[literal]"]]
 ]
 

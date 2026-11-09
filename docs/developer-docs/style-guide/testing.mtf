@@ -140,7 +140,7 @@ static builder remain separate future work.
 Use package-scoped commands so standalone tests don't depend on compiler feature
 unification:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     cargo test -p moth-lexical
     cargo test -p moth-mon
     cargo test -p moth-mon --doc
@@ -203,7 +203,7 @@ game simulation. They should have a purpose and deliberately combine:
 For example, a logistics simulation can validate conservation across several
 mutating functions rather than merely checking that each function compiles:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Excerpt from a larger scenario, not a standalone fixture.
     validate_state |game Simulation|:
         carried ~= 0
@@ -249,7 +249,7 @@ baseline protects harness and target invariants. It is not the case's authored s
 Use `success_contract = "acceptance_only"` only when that backend has no stronger case-specific
 semantic, artifact, golden, absence or expected-warning assertion.
 
-[codeblock, $code("toml"):
+[codeblock, $code "toml":
     [backends.html]
     mode = "success"
     warnings = "forbid"
@@ -270,7 +270,7 @@ before policy evaluation, listing, audit, or execution.
 
 Canonical fixture shape:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     tests/cases/
     +-- manifest.toml
     +-- case_name/
@@ -302,7 +302,7 @@ Canonical fixture shape:
 
 Manifest entry shape:
 
-[codeblock, $code("toml"):
+[codeblock, $code "toml":
     [[case]]
     id = "borrow_conflict_resolved_by_reordering"
     path = "borrow_conflict_resolved_by_reordering"
@@ -315,7 +315,7 @@ Manifest entry shape:
 
 Use the canonical case ID and retained metadata for local iteration:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     cargo run --quiet -- tests --case arithmetic_operator_precedence --backend html
     cargo run --quiet -- tests --tag borrows --tag diagnostics --backend html
     cargo run --quiet -- tests --contract <contract-id>
@@ -332,7 +332,7 @@ Use the canonical case ID and retained metadata for local iteration:
 
 Use the audit mode to validate and inventory the complete canonical suite without compiling cases:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     cargo run --quiet -- tests --audit
 ]
 
@@ -398,7 +398,7 @@ Choose the narrowest field that owns the behaviour:
   An unrequested terminal outcome fails the case. Other engine errors, including `TypeError`,
   `WebAssembly.CompileError` and `WebAssembly.LinkError`, remain harness failures.
 
-[codeblock, $code("toml"):
+[codeblock, $code "toml":
     [backends.html]
     mode = "success"
     warnings = "forbid"
@@ -411,7 +411,7 @@ Choose the narrowest field that owns the behaviour:
 Use a returned-entry contract for an unchecked numeric failure propagated to start. Exact empty
 output also protects success-only runtime fragment publication:
 
-[codeblock, $code("toml"):
+[codeblock, $code "toml":
     [backends.html]
     mode = "success"
     warnings = "forbid"
@@ -472,7 +472,7 @@ Stateful owners - the timing collector, the frontend counter stores, output writ
 current-directory guards and the Node harness - only misbehave under a thread schedule or a repeat
 that one default-parallelism run never produces. That schedule has an owned command:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     just stress
 ]
 
@@ -493,7 +493,7 @@ and keeps running after a failing lane so the whole matrix is visible.
 - Do not use full rendered diagnostic snapshots when a stable code and structured assertion are sufficient.
 - Do not weaken a diagnostic case into a generic "must fail" assertion.
 
-[codeblock, $code("toml"):
+[codeblock, $code "toml":
     [backends.html]
     mode = "failure"
     warnings = "forbid"
@@ -505,7 +505,7 @@ remapping is part of the contract. Each table selects one diagnostic by stable c
 occurrence. A unique code may omit `occurrence`. Repeat the code in `diagnostic_codes` to preserve
 its exact multiplicity.
 
-[codeblock, $code("toml"):
+[codeblock, $code "toml":
     [[backends.html.diagnostic_assertions]]
     code = "MOTH-RULE-0057"
     reason = "invalid_generic_instantiation.recursive_function_instantiation"
@@ -532,7 +532,7 @@ additional diagnostics part of the accepted current behaviour. Every contains-mo
 substantive `diagnostic_match_reason`. The suite audit reports the reason and treats a missing or
 blank reason as a hard policy finding.
 
-[codeblock, $code("toml"):
+[codeblock, $code "toml":
     diagnostic_match = "contains"
     diagnostic_match_reason = "Independent recovery may emit additional diagnostics from another source unit."
 ]
@@ -545,7 +545,7 @@ Warnings use a separate backend-local contract:
 - `warnings = "exact"` requires `warning_codes` as an exact unordered multiset. Repeat duplicate
   codes to preserve their required count.
 
-[codeblock, $code("toml"):
+[codeblock, $code "toml":
     [backends.html]
     mode = "success"
     warnings = "exact"
@@ -557,7 +557,7 @@ Warnings use a separate backend-local contract:
 
 Use one `expect.toml` per case with backend-specific assertion blocks.
 
-[codeblock, $code("toml"):
+[codeblock, $code "toml":
     entry = "."
 
     [backends.html]
@@ -591,7 +591,7 @@ the remaining Wasm gates.
   `input/` directory, including through symlinks.
 - Store strict goldens in:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     golden/<backend>/
 ]
 
@@ -628,7 +628,7 @@ A feature-gated test that no command runs is not a test. Every declared Cargo fe
 lane. Standard lanes run in the feature matrix. Deliberately expensive developer systems may use an
 opt-in lane with its own named command:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     just test-feature-matrix
 ]
 
@@ -729,7 +729,7 @@ the same named recipes as their compiler counterparts.
 
 Feature coverage is checked mechanically, without running a lane:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     just feature-lane-check
 ]
 

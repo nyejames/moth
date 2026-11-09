@@ -1,7 +1,7 @@
 `cast` converts a value to the type required by its immediate typed
 destination:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count U64 = cast 42
     label String = cast count
 ]
@@ -9,7 +9,7 @@ destination:
 The destination must already give a concrete type. An untyped binding cannot
 supply one:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- INVALID: no immediate typed destination
     invalid = cast source
 ]
@@ -17,7 +17,7 @@ supply one:
 Use `catch` to handle a fallible conversion and any failure while evaluating
 its operand:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count I32 = cast text catch then 0
 ]
 

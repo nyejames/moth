@@ -1,6 +1,6 @@
 A new name for an existing value doesn't automatically copy that value.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     names = {"Priya", "Rob"}
     same_names = names
 ]

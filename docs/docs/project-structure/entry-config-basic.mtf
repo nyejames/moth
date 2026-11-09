@@ -4,7 +4,7 @@
 
 Bind `@project` to read predefined project fields:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @project version
 
     footer #= [: v[version]]
@@ -16,7 +16,7 @@ Bind `@project` to read predefined project fields:
 
 Direct const inserts in `@entry.moth` set document metadata:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     #[$in title:About]
     #[$in stylesheets:[@styles/site.css]]
     #[: <main>About this site</main>]

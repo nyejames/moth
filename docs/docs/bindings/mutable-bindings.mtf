@@ -1,13 +1,13 @@
 `~` on a declaration marks the binding as mutation-capable.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count ~= 0
     names ~{String} = {}
 ]
 
 ### Declaration and reassignment
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count ~= 0
     ~count = 1
 ]
@@ -26,7 +26,7 @@ the same binding a second type.
 
 Declaration mutability and call-site exclusive access are separate operations.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     add_name |names ~{String}, name String|:
         ~names.push(name)
     ;

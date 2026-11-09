@@ -6,7 +6,7 @@ Build configuration values are typed primitive values resolved before module AST
 
 `$config` prefixes one explicitly typed top-level `#` binding. The name is the input name, the type is the contract and `=` is the fallback.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     $config
     analytics #Bool = false
 
@@ -76,7 +76,7 @@ Bootstrap contracts resolve from explicit input, a compatible builder primitive 
 
 Operational source uses declaration-owned `#Config of T` contracts:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     api_url #Config of String = "https://api.example.com"
     max_retries #Config of I32 = 3
     analytics #Config of Bool = false
@@ -97,14 +97,14 @@ The command accepts repeated `--input name=value` arguments. It splits at the fi
 
 Numeric destination examples:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     --input count=4_294_967_296 -> accepted by U64
     --input ratio=1 -> accepted by F32
     --input count=1.0 -> rejected by an integer contract
     --input count=256 -> rejected by U8
 ]
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     moth build . --input analytics=true
     moth build . --input retries=4
     moth build . --input ratio=0.75
@@ -128,7 +128,7 @@ checks remain unchanged.
 
 Ordinary `if` is the only conditional source form. There is no `$config if` and no `#Config if`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     $config
     analytics #Bool = false
 

@@ -66,7 +66,7 @@ Authors interact with collections through language-level syntax and receiver met
 
 `get`, `set`, `remove` and fixed-collection `push` take the fallible path. `length` and growable `push` stay infallible. `set`, both push forms and `remove` require mutable receiver access through `~`. Both push forms return no success value, and growable `push` rejects `catch` and postfix `!`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     values ~= {1, 2, 3}
 
     ~values.push(4)

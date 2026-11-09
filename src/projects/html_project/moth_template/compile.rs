@@ -45,7 +45,6 @@ use crate::projects::html_project::moth_template::render::{
 use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, PlannedResourceOutput,
 };
-use crate::projects::html_project::style_directives::html_project_style_directives;
 use std::sync::Arc;
 
 pub(crate) fn compile_moth_template(
@@ -87,12 +86,7 @@ pub(crate) fn compile_moth_template_with_registry(
         Err(failure) => return prepared_failure_to_result(failure, None, string_table),
     };
 
-    let style_directives = match StyleDirectiveRegistry::merged(&html_project_style_directives()) {
-        Ok(style_directives) => style_directives,
-        Err(error) => {
-            return prepared_failure_to_result(PreparedFailure::from(error), None, string_table);
-        }
-    };
+    let style_directives = StyleDirectiveRegistry::built_ins();
 
     let mut documents = Vec::with_capacity(sources.len());
     let mut resource_plan = HtmlResourceOutputPlan::new(DIRECT_TEMPLATE_PROJECT_NAME);

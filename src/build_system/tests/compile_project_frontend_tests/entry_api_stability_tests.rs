@@ -68,8 +68,7 @@ fn compile_fixture_result(
     if template_surface {
         let builder =
             crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new();
-        let style_directives = StyleDirectiveRegistry::merged(&builder.frontend_style_directives())
-            .expect("HTML style directives should merge");
+        let style_directives = StyleDirectiveRegistry::built_ins();
         let mut frontend_surface = builder.frontend_surface();
         compile_project_frontend(
             &mut config,

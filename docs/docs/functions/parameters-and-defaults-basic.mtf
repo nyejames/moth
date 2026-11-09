@@ -1,6 +1,6 @@
 Parameters describe the values a function needs.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     greet |name String, excited Bool|:
         if excited:
             io.line([: Hello, [name]!])
@@ -12,7 +12,7 @@ Each parameter has a name and a type.
 
 A default makes a parameter optional at the call site:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     describe |prefix String = "item", subject String| -> String:
         return [prefix, ": ", subject]
     ;

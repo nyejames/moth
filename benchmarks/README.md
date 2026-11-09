@@ -717,7 +717,7 @@ allocation, lookup, folding, import, and lowering pressure.
 - `benchmark-root-single-file.moth`: root-level single-file check case that
   exercises the non-project single-file path.
 - `template-stress.moth`: deeply nested template composition, slot usage, before/after wrappers, and formatter directive stress.
-- `code-highlighter-stress.moth`: one large `$code("moth")` constant whose source-like body
+- `code-highlighter-stress.moth`: one large `$code "moth"` constant whose source-like body
   exercises the compile-time HTML code formatter over a realistic mix of tokens.
 - `type-stress.moth`: type and method-heavy source with structs, choices, aliases, receivers, and constructor patterns.
 - `fold-stress.moth`: constant folding coverage with large arithmetic trees, chained dependencies, and const record creation.

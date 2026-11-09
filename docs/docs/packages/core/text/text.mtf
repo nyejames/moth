@@ -6,7 +6,7 @@
 
 Bind individual symbols or the whole namespace:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/text length, contains
 
     @core/text
@@ -79,7 +79,7 @@ availability.
 
 All five functions evaluate at compile time when every argument is a compile-time `String` with known content. The compiler evaluates them with the same contract as the runtime helpers, including the scalar-value length unit.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/text
 
     greeting #= "Hello, Priya"

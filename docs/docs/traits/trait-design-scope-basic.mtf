@@ -2,7 +2,7 @@ Traits are for static reuse, not runtime flexibility.
 
 ### Static reuse
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     render type Item is DISPLAY_TEXT |item Item| -> String:
         return item.display()
     ;
@@ -14,7 +14,7 @@ The compiler knows at compile time which concrete `display` method to call.
 
 When you need different types at runtime, use a choice instead.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Renderable ::
         LabelItem | value Label |,
         ButtonItem | value Button |,

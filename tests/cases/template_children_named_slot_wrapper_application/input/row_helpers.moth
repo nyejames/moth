@@ -1,1 +1,1 @@
-rows #= [$before = [$html:<tr style="[$slot row_style]">], $after = [$html:</tr>]:[$slot]]
+rows #= [$before [$html:<tr style="[$slot row_style]">], $after [$html:</tr>]:[$slot]]

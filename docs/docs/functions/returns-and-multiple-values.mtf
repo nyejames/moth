@@ -1,6 +1,6 @@
 `return` produces the success values declared by a function.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     double |value I32| -> I32:
         return value * 2
     ;
@@ -33,7 +33,7 @@ Three contracts are distinct:
   diverge without becoming Never to those callers.
 - Write `-> !` only when the callable never returns control normally.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     greet |name String|:
         io.line([: Hello, [name]])
     ;
@@ -56,7 +56,7 @@ Callers of `load_name` still see an ordinary `String` result. See
 
 A function may declare and return more than one success value.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     pair || -> String, I32:
         return "Priya", 2
     ;
@@ -69,7 +69,7 @@ The receiving multi-bind must match the success arity.
 Each target independently declares a new binding or updates an existing place.
 An update requires a leading `~` on that target:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     next || -> I32, String:
         return 1, "ready"
     ;
@@ -89,7 +89,7 @@ referents. These receiving rules also apply to value-producing `if`, match,
 
 Multi-bind targets may continue on a following line only after a comma:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     name,
         count = pair()
 ]
@@ -113,7 +113,7 @@ A function signature may contain at most one error-channel slot marked with
 
 That slot must be last.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     load |id String| -> String, Error!:
         if id is "":
             return! Error("Missing id")

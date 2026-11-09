@@ -410,7 +410,7 @@ Tokenization recognises lexical forms and records exact source locations, string
 
 The neutral numeric spelling and destination-aware materialisation service belongs to `moth-lexical`. Tokenization retains source-local spelling so the compiler can select that service for its receiving type, rather than assigning every literal an `i32` or `f64` value early.
 
-Frontend directive names are always present. Builders extend one registry without overriding them. Tokenization and template parsing use that registry while retaining their distinct lexical modes. A descriptor records ownership, permitted context, form, signature, processing phase and effects. It does not grant arbitrary callbacks into semantic stages. Recognition distinguishes unknown names, wrong placement and unavailable capabilities.
+The frontend owns every directive name, and there is no builder extension point. Tokenization and template parsing use one frontend registry while retaining their distinct lexical modes. A descriptor records ownership, permitted context, form, operand contract, processing phase and effects. It does not grant arbitrary callbacks into semantic stages. Recognition distinguishes unknown names, wrong placement and unavailable capabilities.
 
 Ordinary `.moth` starts in code mode. `.mtf` starts in an implicit template body while preserving original locations. Plain Markdown `.md` is prepared before tokenization and has no tokenizer entry mode. Tokenization does not resolve dependencies, types or declarations.
 
@@ -689,7 +689,7 @@ A call whose declared contract is Never is valid only as a standalone statement.
 
 AST validates `~` on existing-place writes and on existing mutable places passed to mutable parameters, including named argument values. Each existing multi-bind target carries its own marker, and all incoming results are evaluated before updates. Mutable receivers separately require `~` on an existing mutable place. Fresh values, including `copy place`, enter ordinary mutable parameters unmarked. A mutable alias declaration uses `writer ~= source` without marking the source. These forms express access, not inferred transfer or type identity. Wire and Route retain their own receiving contracts.
 
-Handler directive signatures require compile-time arguments, reject escaping/mutable evaluation and distinguish standalone invocations from declaration modifiers. Core template directives keep their own head syntax: `$slot` declarations with an optional compile-time String default, `$in` named targets, and assigned `$before`/`$after` values. Builders cannot turn the shared parser or directive registry into an arbitrary source-transform API.
+Handler directives take at most one bare compile-time operand, reject escaping or mutable evaluation and reject the call spelling `$name(...)`. Core template directives keep their own head syntax: `$slot` declarations with an optional compile-time String default, `$in` named targets, and bare `$before`/`$after` operands. Directives are compiler-defined; no builder or source file can extend the parser.
 
 `assert` is a reserved statement intrinsic with compiler-owned expectations equivalent to:
 

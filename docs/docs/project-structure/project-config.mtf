@@ -4,7 +4,7 @@
 
 ### Named project and builder records
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     project #= (
         name = "my_site",
         version = "1.0.0",
@@ -197,7 +197,7 @@ Names other than the selected builder's recognised settings section remain ordin
 
 Operational config uses declaration-owned `#Config` inputs and parenthesised grouped records:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     version #Config of String = "0.1.0"
     project_error_limit #I32? = none
 

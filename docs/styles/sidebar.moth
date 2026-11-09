@@ -4,7 +4,7 @@
 
 @web/page
 
-sidebar_toggle_style #= [$css("inline"):
+sidebar_toggle_style #= [$css "inline":
     position: absolute;
     width: 1px;
     height: 1px;
@@ -14,7 +14,7 @@ sidebar_toggle_style #= [$css("inline"):
     white-space: nowrap;
 ]
 
-sidebar_style #= [$css("inline"):
+sidebar_style #= [$css "inline":
     box-sizing: border-box;
     padding: 0.65rem;
     border: 1px solid light-dark(#c8d2e3, #364259);
@@ -22,26 +22,26 @@ sidebar_style #= [$css("inline"):
     background: light-dark(rgb(255 255 255 / 80%), rgb(18 24 39 / 85%));
 ]
 
-sidebar_header_style #= [$css("inline"):
+sidebar_header_style #= [$css "inline":
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 0.25rem;
 ]
 
-sidebar_breadcrumb_style #= [$css("inline"):
+sidebar_breadcrumb_style #= [$css "inline":
     min-width: 0;
     padding: 0.45rem 0.6rem;
     line-height: 1.35;
 ]
 
-sidebar_home_style #= [$css("inline"):
+sidebar_home_style #= [$css "inline":
     color: light-dark(#243f66, #d8e6ff);
     font-weight: 700;
     text-decoration: none;
 ]
 
-sidebar_button_style #= [$css("inline"):
+sidebar_button_style #= [$css "inline":
     display: inline-grid;
     place-items: center;
     flex: none;
@@ -54,13 +54,13 @@ sidebar_button_style #= [$css("inline"):
     user-select: none;
 ]
 
-sidebar_nav_style #= [$css("inline"):
+sidebar_nav_style #= [$css "inline":
     margin-top: 0.7rem;
     padding-top: 0.35rem;
     border-top: 1px solid light-dark(#dce3ef, #364259);
 ]
 
-sidebar_group_style #= [$css("inline"):
+sidebar_group_style #= [$css "inline":
     margin: 1.1rem 0 0.3rem;
     padding-inline: 0.6rem;
     color: light-dark(#5a6980, #9faec6);
@@ -70,7 +70,7 @@ sidebar_group_style #= [$css("inline"):
     text-transform: uppercase;
 ]
 
-sidebar_link_style #= [$css("inline"):
+sidebar_link_style #= [$css "inline":
     display: block;
     padding: 0.43rem 0.6rem;
     border-radius: 0.45rem;

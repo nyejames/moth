@@ -83,20 +83,9 @@ fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token(
 }
 
 #[test]
-fn incompatible_head_item_retains_exact_extended_multibyte_span() {
-    let long_directive_name = format!("formatter_{}", "x".repeat(1_020));
-    let long_directive = StyleDirectiveSpec::handler(
-        long_directive_name.clone(),
-        TemplateBodyMode::Normal,
-        TemplateHeadCompatibility::blocks_same(
-            TemplateHeadTag::FORMATTER_DIRECTIVE,
-            TemplateHeadConflictReason::MultipleFormatters,
-        ),
-        StyleDirectiveHandlerSpec::no_op(),
-    );
-    let style_directives = StyleDirectiveRegistry::merged(&[long_directive])
-        .expect("the test formatter directive should merge");
-    let source = format!("// π\n[$raw, ${long_directive_name}: body]");
+fn incompatible_head_item_retains_exact_multibyte_source_span() {
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let source = "// π\n[$raw, $escape_html: body]";
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -158,7 +147,7 @@ fn incompatible_head_item_retains_exact_extended_multibyte_span() {
     assert_eq!(
         view.string_ids(),
         [
-            string_table.intern(&long_directive_name),
+            string_table.intern("escape_html"),
             string_table.intern("raw"),
         ]
         .as_slice()
@@ -193,11 +182,11 @@ fn incompatible_head_item_retains_exact_extended_multibyte_span() {
     );
     assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
     let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
-    let target = format!("${long_directive_name}");
+    let target = "$escape_html";
     let expected_start = source
-        .find(&target)
-        .expect("the long directive should occur in the source") as u32;
-    assert!(target.len() > 1_022, "the target must use an extended span");
+        .find(target)
+        .expect("the formatter directive should occur in the source")
+        as u32;
     assert_eq!(
         (range.start(), range.end()),
         (expected_start, expected_start + target.len() as u32)

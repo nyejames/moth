@@ -6,7 +6,7 @@ A template can be required to finish during compilation.
 
 A normal constant binding can hold a folded template string.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     site_name #= "Moth"
 
     heading #= [$md:
@@ -21,7 +21,7 @@ returned from a function remains a value and does not become a page fragment by 
 
 Direct const-template fragments are valid in `@entry.moth`. The file's presence already makes the directory entry-eligible, so a metadata-only entry produces a complete page.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     #[$md:
         # Compile-time heading
     ]
@@ -42,7 +42,7 @@ The HTML builder registers `title`, `description`, `lang`, `favicon`,
 `body_style`, `stylesheets` and `head`. Ordinary direct const fragments still
 render into the body. A metadata-only `@entry.moth` still produces a complete page.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     #[$in title:Moth]
     #[$in description:A language for creating reliable software]
     #[$in lang:en]
@@ -102,7 +102,7 @@ Runtime top-level named builder inserts are not supported. `$required`,
 
 ### Const template `if`
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     #[if show_heading:
         Visible heading
     ]
@@ -119,7 +119,7 @@ body contributes output.
 
 ### Const template loops
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     #[loop items |item|:
         [item]
     ]
@@ -137,7 +137,7 @@ and a collection loop's second binding is the actual source index.
 
 The project config field `template_const_loop_iteration_limit` guards expansion:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     template_const_loop_iteration_limit
 ]
 

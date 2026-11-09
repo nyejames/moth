@@ -8,7 +8,7 @@ identity |value String| -> String:
     return value
 ;
 
-row_wrap #= [$before = [$html:<tr style="[$slot row_style]">], $after = [$html:</tr>]:[:row]]
+row_wrap #= [$before [$html:<tr style="[$slot row_style]">], $after [$html:</tr>]:[:row]]
 table #= [$html:<table>[row_wrap]</table>[$slot]]
 
 runtime_style = identity("background: blue;")

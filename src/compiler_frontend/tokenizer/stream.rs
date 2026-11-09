@@ -261,6 +261,18 @@ impl<'a> TokenStream<'a> {
         self.emit_payload(tag, 0, 0)
     }
 
+    /// Emit `(` while recording whether it attaches to the preceding token.
+    pub(crate) fn emit_open_parenthesis(
+        &mut self,
+        attached: bool,
+    ) -> Result<TokenTag, TokenEmitError> {
+        self.emit_payload(
+            TokenTag::OPEN_PARENTHESIS,
+            TokenShape::open_parenthesis_attached_flags(attached),
+            0,
+        )
+    }
+
     pub(crate) fn emit_double_colon(
         &mut self,
         qualifier_attached: bool,

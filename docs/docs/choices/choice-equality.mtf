@@ -1,7 +1,7 @@
 Two values of the same choice type support structural equality when every
 possible payload field supports equality.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     left = Status::Ready
     right = Status::Ready
 

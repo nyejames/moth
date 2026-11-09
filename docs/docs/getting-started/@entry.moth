@@ -32,7 +32,7 @@ init_docs_sidebar()!
 
     If you are running the compiler from the repository instead of an installed `moth` binary, use `cargo run --` before the same commands:
 
-    [codeblock, $code("bash"):
+    [codeblock, $code "bash":
         cargo run -- dev .
         cargo run -- check .
         cargo run -- build .
@@ -140,7 +140,7 @@ init_docs_sidebar()!
 
     The named `project` record and its `name` field are optional. Version is optional too:
 
-    [codeblock, $code("moth"):
+    [codeblock, $code "moth":
         project #= (
             name = "my_site",
         )
@@ -153,7 +153,7 @@ init_docs_sidebar()!
     `@entry.moth` supplies HTML metadata with direct const builder slots. An empty or
     metadata-only entry still produces a page:
 
-    [codeblock, $code("moth"):
+    [codeblock, $code "moth":
         #[$in title:Welcome]
     ]
 
@@ -163,7 +163,7 @@ init_docs_sidebar()!
 
     Start a new project:
 
-    [codeblock, $code("bash"):
+    [codeblock, $code "bash":
         moth new html
         moth new html my-site
         moth new html ~/projects/my-site
@@ -171,14 +171,14 @@ init_docs_sidebar()!
 
     If you omit the path, moth asks for confirmation in the current directory:
 
-    [codeblock, $code("text"):
+    [codeblock, $code "text":
         No project path specified. Current directory: /your/path
         Create the new HTML project in this directory? y/N:
     ]
 
     If the target directory already exists, you are given three choices:
 
-    [codeblock, $code("text"):
+    [codeblock, $code "text":
         Target directory already exists:
         /path/to/target
 
@@ -192,7 +192,7 @@ init_docs_sidebar()!
 
     If the path contains directories that do not exist, moth asks before creating them:
 
-    [codeblock, $code("bash"):
+    [codeblock, $code "bash":
         The project target contains directories that do not exist:
         /path/to/new/site
 
@@ -201,13 +201,13 @@ init_docs_sidebar()!
 
     After the final directory is chosen, moth asks for the project name:
 
-    [codeblock, $code("bash"):
+    [codeblock, $code "bash":
         Project name (press Enter to use project directory name):
     ]
 
     Then it asks whether to add a .gitignore with Moth defaults:
 
-    [codeblock, $code("bash"):
+    [codeblock, $code "bash":
         Add a .gitignore with Moth defaults? Y/n:
     ]
 
@@ -217,7 +217,7 @@ init_docs_sidebar()!
 
     A project after its first build looks like this:
 
-    [codeblock, $code("text"):
+    [codeblock, $code "text":
         project-root/
         ├── config.moth
         ├── @entry.moth
@@ -237,7 +237,7 @@ init_docs_sidebar()!
 
     --force allows replacing scaffold-owned files when they already exist:
 
-    [codeblock, $code("bash"):
+    [codeblock, $code "bash":
         moth new html my-site --force
     ]
 
@@ -245,7 +245,7 @@ init_docs_sidebar()!
 
     After creation, check and run the project:
 
-    [codeblock, $code("bash"):
+    [codeblock, $code "bash":
         cd my-site
         moth check .
         moth dev .
@@ -258,19 +258,19 @@ init_docs_sidebar()!
     `dev` handles normal day-to-day Moth project work.
     It builds the project, serves the generated files locally, watches for source changes and sends reload events to the browser.
 
-    [codeblock, $code("bash"):
+    [codeblock, $code "bash":
         moth dev .
     ]
 
     By default, open:
 
-    [codeblock, $code("text"):
+    [codeblock, $code "text":
         http://127.0.0.1:6342/
     ]
 
     Useful dev-server options:
 
-    [codeblock, $code("bash"):
+    [codeblock, $code "bash":
         moth dev . --port 8080
         moth dev . --host 0.0.0.0
         moth dev . --poll-interval-ms 100
@@ -285,13 +285,13 @@ init_docs_sidebar()!
 
     Use `build` when you want files written to disk without running the dev server.
 
-    [codeblock, $code("bash"):
+    [codeblock, $code "bash":
         moth build .
     ]
 
     For a release build:
 
-    [codeblock, $code("bash"):
+    [codeblock, $code "bash":
         moth build . --release
     ]
 
@@ -305,19 +305,19 @@ init_docs_sidebar()!
     `check` gives the fastest correctness signal for editor loops and CI-style validation.
     It doesn't write output artifacts, but it runs the shared frontend diagnostics that all backends use.
 
-    [codeblock, $code("bash"):
+    [codeblock, $code "bash":
         moth check .
     ]
 
     Use terse mode when another tool will read the output:
 
-    [codeblock, $code("bash"):
+    [codeblock, $code "bash":
         moth check . --terse
     ]
 
     Terse diagnostics have a stable compact shape:
 
-    [codeblock, $code("bash"):
+    [codeblock, $code "bash":
         E|type|@entry.moth|4:12|Expected Bool, found I32|help=Use a Bool expression here.
         W|identifier_naming_convention|button.moth|1:1|Dependency alias case mismatch
     ]
@@ -340,7 +340,7 @@ init_docs_sidebar()!
 
     Example shape:
 
-    [codeblock, $code("text"):
+    [codeblock, $code "text":
         Type Error (ಠ_ಠ) 🔥
         Declaration 'count' has incompatible initializer type. Expected 'I32', but found 'String'.
 
@@ -428,7 +428,7 @@ init_docs_sidebar()!
 
     The intended workflow will be:
 
-    [codeblock, $code("bash"):
+    [codeblock, $code "bash":
         moth check .
         moth suggest .
         moth fmt .

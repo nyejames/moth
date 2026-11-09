@@ -25,15 +25,14 @@ The command selects:
 
 The selected builder exposes a **capability surface** before config compilation:
 
-- owned compiler and builder directive signatures, with config-only contexts
 - source-backed Core and Builder packages
 - binding-backed packages
-- style directives and external import providers
+- external import providers
 - supported source file kinds
 - builder-provided primitive globals
 - target-affinity and capability metadata
 
-Frontend-owned directives and compiler-owned builtins join that surface. A builder cannot replace them. Unknown directives error and known-but-unavailable forms receive a deferred-feature diagnostic; there is no inactive-builder ignore policy. Multi-builder projects wait for future structural `$feature` selection.
+Directives are compiler-owned and join no builder surface. Unknown directives error and known-but-unavailable forms receive a deferred-feature diagnostic; there is no inactive-builder ignore policy. Multi-builder projects wait for future structural `$feature` selection.
 
 The command chooses what kind of project this build is allowed to be. That choice decides which source kinds, packages and targets the project may use.
 
@@ -116,7 +115,7 @@ Config operates on exactly one authored file identity. It rejects source depende
 
 The ordinary compiler owners still touch that one file:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
 tokenization
 -> declaration-shell preparation with retained directive and input-contract facts
 -> interface binding for the single config source
@@ -133,7 +132,7 @@ Rejected shape includes dependency clauses, runtime declarations, functions, tra
 
 The accepted starter shape is:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
 project #= (
     name = "compiler_walkthrough",
 )

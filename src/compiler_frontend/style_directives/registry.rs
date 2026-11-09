@@ -1,10 +1,8 @@
-//! Merged style directive registry used by tokenizer and AST template parsing.
+//! Frontend style directive registry used by tokenizer and AST template parsing.
 //!
 //! Registry order is stable and intentionally used for diagnostics, so unsupported-directive
 //! errors show a deterministic directive list.
 
-use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::style_directives::builtins::frontend_built_in_directives;
 use crate::compiler_frontend::style_directives::specs::StyleDirectiveSpec;
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
@@ -22,75 +20,11 @@ pub struct StyleDirectiveRegistry {
 }
 
 impl StyleDirectiveRegistry {
-    /// Frontend-owned directives that are always available.
+    /// Frontend-owned directives available under every builder.
     pub fn built_ins() -> Self {
         Self {
             ordered: frontend_built_in_directives().into(),
         }
-    }
-
-    /// Merge project-builder directives over frontend-owned directives.
-    ///
-    /// Rules:
-    /// - Frontend-owned directive names cannot be overridden by project builders.
-    /// - Project builders may only provide `StyleDirectiveKind::Handler`.
-    /// - For project-owned names, later entries replace earlier entries by exact name.
-    /// - A spec whose compatibility tags can reject another item must declare a
-    ///   `conflict_reason`.
-    pub fn merged(builder_specs: &[StyleDirectiveSpec]) -> Result<Self, InfrastructureFailure> {
-        let frontend_owned = frontend_built_in_directives();
-        let mut merged = frontend_owned.clone();
-
-        for builder_spec in builder_specs {
-            if builder_spec.is_core() {
-                return Err(InfrastructureFailure::internal(
-                    CompilerStage::AstConstruction,
-                    format!(
-                        "Project builder style directive '${}' cannot be registered as a core directive.",
-                        builder_spec.name
-                    ),
-                ));
-            }
-
-            if let Some(frontend_conflict) = frontend_owned
-                .iter()
-                .find(|spec| spec.name == builder_spec.name)
-            {
-                return Err(InfrastructureFailure::internal(
-                    CompilerStage::AstConstruction,
-                    format!(
-                        "Project builder style directive '${}' cannot override frontend-owned directive '${}'.",
-                        builder_spec.name, frontend_conflict.name
-                    ),
-                ));
-            }
-
-            let compatibility = builder_spec.head_compatibility;
-            let can_reject = !compatibility.blocks_future_tags.is_empty()
-                || !compatibility.required_absent_tags.is_empty();
-            if can_reject && compatibility.conflict_reason.is_none() {
-                return Err(InfrastructureFailure::internal(
-                    CompilerStage::AstConstruction,
-                    format!(
-                        "Project builder style directive '${}' declares a head compatibility rule that can reject another item but has no conflict reason.",
-                        builder_spec.name
-                    ),
-                ));
-            }
-
-            if let Some(existing) = merged
-                .iter_mut()
-                .find(|spec| spec.name == builder_spec.name)
-            {
-                *existing = builder_spec.clone();
-            } else {
-                merged.push(builder_spec.clone());
-            }
-        }
-
-        Ok(Self {
-            ordered: merged.into(),
-        })
     }
 
     pub fn find(&self, name: &str) -> Option<&StyleDirectiveSpec> {

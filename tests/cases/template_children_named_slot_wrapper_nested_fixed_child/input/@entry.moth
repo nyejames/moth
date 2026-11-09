@@ -10,7 +10,7 @@ identity |value I32| -> I32:
     return value
 ;
 
-rows = [$before = [:[$before = [$html:<b style="[$slot row_style]">], $after = [$html:</b>]:[:fixed]][$html:<b style="[$slot row_style]">]], $after = [$html:</b>]:[$slot]]
+rows = [$before [:[$before [$html:<b style="[$slot row_style]">], $after [$html:</b>]:[:fixed]][$html:<b style="[$slot row_style]">]], $after [$html:</b>]:[$slot]]
 
 show_condition = 1
 skip_condition = 2

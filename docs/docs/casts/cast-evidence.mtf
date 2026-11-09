@@ -28,7 +28,7 @@ A same-file nominal struct, choice or aligned generic nominal constructor can
 provide evidence for one supported target. It must define the required
 receiver method and declare explicit conformance:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Label = |
         text String,
     |
@@ -45,7 +45,7 @@ receiver method and declare explicit conformance:
 
 Fallible evidence declares its actual typed route:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     try_to_i32 |this Label| -> I32, Error!:
         value I32 = cast this.text
         return value

@@ -52,7 +52,7 @@ A root marker may be a symlink, but every root must resolve to a distinct physic
 
 Only `@mod.moth`, `@package.moth` and `@entry.moth` are authored root files. Any other `.moth` filename whose stem starts with `@`, `+` or `#` is a Stage 0 structure error:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     @page.moth          rejected
     @home.moth          rejected
     @api.moth           rejected
@@ -83,7 +83,7 @@ Shared helper declarations are prepared once and carry one shared origin. A root
 
 Same-spelling declarations in disjoint roots stay independent. A name that conflicts with a shared helper already in scope is an ordinary visible-name collision.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     site/
     ├── @mod.moth          public facade
     ├── @package.moth      support facade
@@ -105,7 +105,7 @@ An API facade has no implicit start, route metadata or entry lifecycle. An entry
 
 The authored root filename never supplies a dependency name. Names come from the containing directory or the registered package identity.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     @entry.moth
     pages/
     ├── @mod.moth
@@ -114,13 +114,13 @@ The authored root filename never supplies a dependency name. Names come from the
 
 Valid dependency from a sibling module:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @pages page_heading
 ]
 
 Invalid dependency spellings:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @@pages
     @@mod
 ]

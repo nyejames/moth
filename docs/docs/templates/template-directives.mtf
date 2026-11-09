@@ -11,15 +11,17 @@ Template-head directives modify their containing template, regardless of whether
 the head also has ordinary expressions. Their syntax does not change the placement
 rules for following-construct source modifiers.
 
-Directive availability comes from one merged registry:
+Every template directive is compiler-owned and available under every builder. There is no
+builder extension point, so availability never depends on the selected builder:
 
-- frontend directives are always available
-- a project builder may add constrained project-specific template directives
+- the compiler defines the directive set
+- a builder contributes root-slot destinations through direct const `$in` slots, which are not
+  directives
 - an unknown directive is a syntax or rule error
 
 ### Frontend directives
 
-`$before = value` and `$after = value`:
+`$before value` and `$after value`:
 
 - add a prefix and suffix to each direct child; either directive may be omitted
 - each may appear once per head, so a repeated `$before` or `$after` is rejected
@@ -77,9 +79,9 @@ Builder destinations are builder-interpreted. The HTML builder registers
 Runtime top-level named builder inserts are not supported, and their final
 design remains unsettled.
 
-### HTML builder directives
+### Formatter directives
 
-The selected HTML project builder may add constrained template-formatting directives:
+The compiler owns these template-formatting directives. They are available under every builder:
 
 `$html`:
 
@@ -87,13 +89,13 @@ The selected HTML project builder may add constrained template-formatting direct
 
 `$css`:
 
-- applies the HTML builder's CSS checking and formatting path
+- applies balanced-body CSS checking and formatting
 
 `$escape_html`:
 
 - escapes HTML-sensitive body content
 
-`$code(language)`:
+`$code "language"`:
 
 - highlights a code body
 - removes formatting-only indentation from multiline bodies using the first content line as the baseline
@@ -102,9 +104,9 @@ The selected HTML project builder may add constrained template-formatting direct
 - suppresses nested child-template interpretation inside the code content
 
 
-Builder template directives remain constrained to formatting and composition contracts;
+Formatter directives remain constrained to formatting and composition contracts;
 they cannot rewrite functions, change nominal identity, mutate HIR or weaken language
-safety. For the shared directive family and no-empty-parentheses rule, see
+safety. For the shared directive grammar and its single-operand rule, see
 @../directives (Directives).
 
 ### Formatter scope
@@ -130,7 +132,7 @@ head. A slot declaration marks a place for content that arrives from elsewhere,
 and the comment directives turn the template into a comment, so any other item
 in that head would have nothing to act on:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Error: the slot shares its head with a string
     card = [:
         <section>["prefix", $slot]</section>
@@ -139,7 +141,7 @@ in that head would have nothing to act on:
 
 Put the extra content in the surrounding template body instead:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     card = [:
         <section>prefix[$slot]</section>
     ]
@@ -149,7 +151,7 @@ Each template head can contain at most one formatter. `$md`, `$raw`, `$html`,
 `$css`, `$escape_html` and `$code` each decide how the body is formatted, so
 the compiler rejects a second formatter, including a repeat of the same one:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Error: both directives format the body
     io.line([$md, $raw: Hello])
 ]
@@ -158,7 +160,7 @@ the compiler rejects a second formatter, including a repeat of the same one:
 head. Each insert sends its body to one named slot, so use one insert template
 for each slot you fill:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     [card:
         [$in title:Hello]
         [$in footer:Goodbye]

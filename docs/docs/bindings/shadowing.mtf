@@ -1,6 +1,6 @@
 Moth doesn't allow a visible name to be redeclared.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     ready = true
     label = "outer"
 
@@ -19,7 +19,7 @@ Moth doesn't allow a visible name to be redeclared.
 - Assignment to an existing mutable binding is not a redeclaration.
 - Separate scopes may reuse a name when neither declaration is visible from the other.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     first || -> I32:
         value = 1
         return value

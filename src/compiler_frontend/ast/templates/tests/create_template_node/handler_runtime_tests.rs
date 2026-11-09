@@ -10,7 +10,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
 fn handler_directive_argument_preserves_infrastructure_failure() {
-    assert_stale_template_directive_argument_is_infrastructure("[$code(stale_template): body]");
+    assert_stale_template_directive_argument_is_infrastructure("[$code stale_template: body]");
 }
 
 #[test]

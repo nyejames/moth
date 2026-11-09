@@ -4,7 +4,7 @@
 
 ### Project and builder settings
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     project #= (
         name = "my_site",
         version = "1.0.0",
@@ -17,7 +17,7 @@ The `project` record is optional. Omitting `name` uses the selected directory na
 
 ### Typed configuration inputs
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     version #Config of String = "1.0.0"
 
     project #= (

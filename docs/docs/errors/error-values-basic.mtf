@@ -1,6 +1,6 @@
 An `Error` carries a message and an unsigned numeric code.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     missing = Error("Missing value")
     coded = Error("Missing value", 200)
 ]

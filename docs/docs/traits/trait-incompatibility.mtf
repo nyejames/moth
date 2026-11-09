@@ -2,7 +2,7 @@ Trait incompatibility records that two traits cannot both be claimed by the same
 
 ### Trait incompatibility syntax
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     TEXT must:
         text |This| -> String
     ;

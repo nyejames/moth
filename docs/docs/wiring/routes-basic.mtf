@@ -1,7 +1,7 @@
 A Route parameter describes a known choice constructor and the payload it will
 receive later. Routes are parameter contracts, not callable values.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     TodoMessage ::
         Rename | id I32, text String |,
         Delete | id I32 |,
@@ -28,7 +28,7 @@ construction outside that context must provide every field.
 
 Rows can use the same zero-input shape to retain their own item identity:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     make_row_delete_offer |id I32| -> String:
         return offer_delete(TodoMessage::Delete(id))
     ;
@@ -43,7 +43,7 @@ Choice values still describe application state changes in the ordinary way.
 This self-contained example uses currently executable Moth syntax; the update
 function receives an ordinary choice value and does not use Wire or Route:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     TodoMessage ::
         Rename | id I32, text String |,
         Delete | id I32 |,
@@ -60,7 +60,7 @@ function receives an ordinary choice value and does not use Wire or Route:
 A child message can be lifted into one parent choice constructor by capturing a
 leading field:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     EditorMessage ::
         Changed | value String |,
     ;

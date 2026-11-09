@@ -1,12 +1,12 @@
-//! HTML-project-owned `$css` formatter/validator.
+//! Frontend-owned `$css` formatter/validator.
 //!
 //! WHAT:
 //! - Preserves CSS text exactly as authored while emitting malformed-CSS warnings.
-//! - Supports optional inline mode (`$css("inline")`) for style-attribute use cases.
+//! - Supports optional inline mode (`$css "inline"`) for style-attribute use cases.
 //!
 //! WHY:
-//! - CSS validation and inline-style policy are owned by the HTML project builder, even though
-//!   the frontend executes the formatter during parsing and folding.
+//! - The frontend owns CSS validation and inline-style policy because it registers and executes
+//!   this formatter under every builder during parsing and folding.
 
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::formatter_contract::FormatterInput;
@@ -16,9 +16,11 @@ use crate::compiler_frontend::ast::templates::template::{
 };
 use crate::compiler_frontend::compiler_messages::{CssTemplateWarning, MalformedTemplateReason};
 
+use crate::compiler_frontend::ast::templates::styles::validation::{
+    PassThroughFormatterInput, SourceWarning,
+};
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::style_directives::StyleDirectiveArgumentValue;
-use crate::projects::html_project::styles::validation::{PassThroughFormatterInput, SourceWarning};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,12 +52,12 @@ pub(crate) fn css_formatter_factory(
         }
         Some(StyleDirectiveArgumentValue::String(value)) => {
             return Err(format!(
-                "Unsupported '$css(...)' argument \"{value}\". The only supported argument is \"inline\"."
+                "Unsupported `$css` operand \"{value}\". The only supported operand is \"inline\"."
             ));
         }
         Some(_) => {
             return Err(
-                "The '$css(...)' directive expects an optional string argument, for example '$css(\"inline\")'."
+                "The `$css` directive takes at most one bare mode operand, for example `$css \"inline\"`."
                     .to_string(),
             );
         }
@@ -579,5 +581,5 @@ fn advance_scan_state(state: &mut ScanState, chars: &[char], index: &mut usize) 
 }
 
 #[cfg(test)]
-#[path = "../../../compiler_frontend/ast/templates/tests/css_tests.rs"]
+#[path = "../tests/css_tests.rs"]
 mod css_tests;

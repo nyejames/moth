@@ -1,6 +1,6 @@
 A growable collection can gain and lose items.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     names ~{String} = {}
 
     ~names.push("Priya")
@@ -13,7 +13,7 @@ fixed-size collection is the one that can be full.
 
 An immutable collection can still be read:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     names = {"Priya", "Rob"}
 
     first = names.get(0) catch:

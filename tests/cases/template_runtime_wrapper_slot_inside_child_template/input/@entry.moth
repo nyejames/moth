@@ -1,5 +1,5 @@
 inner #= [:<span class="nested-slot">]
-list = [$before = [inner], $after = [:</span>]:
+list = [$before [inner], $after [:</span>]:
     <ul>[$slot]</ul>
 ]
 

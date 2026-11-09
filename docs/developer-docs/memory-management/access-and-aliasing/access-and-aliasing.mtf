@@ -101,7 +101,7 @@ Reads of existing values are shared. Ordinary immutable arguments are shared. Mu
 
 Shared access is a source-semantic relationship. It does not require every scalar to be heap allocated or represented by a pointer.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     first = load_items()
     second = first
 
@@ -131,7 +131,7 @@ baseline keeps that capability conservative until canonical semantics adopt the 
 - Branches are analysed independently; joins conservatively retain activity when any incoming path may still use the alias.
 - Loops use fixed-point future-use reasoning.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     items ~= {"a", "b"}
     shared = items
     inspect(shared)
@@ -139,7 +139,7 @@ baseline keeps that capability conservative until canonical semantics adopt the 
     change(~items)   -- valid: shared has no later potential use
 ]
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     items ~= {"a", "b"}
     shared = items
 
@@ -151,7 +151,7 @@ Lexical scope does not define alias activity. See @../lifetime-regions-and-escap
 
 ## Alias bindings
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     alias = source
 ]
 
@@ -161,7 +161,7 @@ Borrow-checker slot and alias states are analysis concepts, not source-visible r
 
 ## Mutable aliases versus mutable slots
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     alias ~= source
 ]
 
@@ -173,7 +173,7 @@ Borrow-checker slot and alias states are analysis concepts, not source-visible r
 
 A mutable declaration initialized from a fresh value creates an independent mutable slot:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count ~= 0
     ~count = 1
 ]
@@ -184,7 +184,7 @@ Mutable binding syntax differs from call-site exclusive access. Mutability is an
 
 ## Explicit copies
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     snapshot = copy source
 ]
 
@@ -202,14 +202,14 @@ Mutable binding syntax differs from call-site exclusive access. Mutability is an
 - A non-copyable graph member produces a source diagnostic. The compiler must not silently retain an alias.
 Expressions can construct new values from shared inputs: constructing a result doesn't implicitly copy the inputs. Template interpolation reads inputs and produces a new output string.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- conceptual: non-copyable external handle inside a graph
     -- copy payload   -- invalid when payload contains a non-copyable resource
 ]
 
 ## Exclusive access with ~
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     items ~{String} = {"Priya"}
 
     update(~items)
@@ -220,7 +220,7 @@ The source form `~place` requests access to an existing mutable place for a writ
 
 ## Fresh values and hidden locals
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     update({"fresh"})
     update(Vector2(x = 1.0, y = 2.0))
     update([: generated])
@@ -228,7 +228,7 @@ The source form `~place` requests access to an existing mutable place for a writ
 
 These forms are valid for ordinary mutable parameters. Source `~` on a fresh value isn't:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     update(~{"fresh"})   -- invalid
     update(~Vector2(x = 1.0, y = 2.0))   -- invalid
 ]

@@ -1068,7 +1068,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 ));
             }
             Err(ExpressionParseError::Diagnostic(diagnostic))
-            | Err(ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic))
             | Err(ExpressionParseError::NonConstantReferenceInConstant(diagnostic)) => {
                 let diagnostic = with_generic_instantiation_context(
                     diagnostic,
@@ -1719,7 +1718,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     ) -> PreparedFailure {
         match error {
             TemplateError::Diagnostic(diagnostic)
-            | TemplateError::EmptyArguments(diagnostic)
             | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
                 self.diagnostic_messages(diagnostic, string_table)
             }
@@ -1741,7 +1739,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             }
             Err(
                 ExpressionParseError::Diagnostic(_)
-                | ExpressionParseError::TemplateDirectiveEmptyArguments(_)
                 | ExpressionParseError::NonConstantReferenceInConstant(_)
                 | ExpressionParseError::NumericDeferral(_),
             ) => crate::compiler_bug!(

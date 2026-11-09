@@ -2,7 +2,7 @@
 
 Look at the page fragment again:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
 [$html:
     <p>[greet(visitor)]</p>
 ]
@@ -31,7 +31,7 @@ One module AST build owns one `TemplateIrStore`. Parser emission writes text, ex
 
 The phase sequence is:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
 Parsed -> Composed -> Formatted -> Finalized
 ]
 
@@ -119,7 +119,7 @@ Later ordering and folding treat both as ordinary compile-time constants. Return
 
 An `.mtf` body can read application data with an explicit qualified reference:
 
-[codeblock, $code("md"):
+[codeblock, $code "md":
     # Welcome to [@settings site_name]
 ]
 

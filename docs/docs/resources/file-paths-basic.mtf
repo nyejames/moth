@@ -2,7 +2,7 @@ A file path tells the compiler that a file belongs to your project. Write the pa
 
 ### Naming a file
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     logo #= @images/logo.svg
 ]
 
@@ -12,7 +12,7 @@ A file path tells the compiler that a file belongs to your project. Write the pa
 
 An extension is required, and it tells the compiler what kind of file you mean.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     logo  #= @images/logo.svg
     intro #= @docs/intro.mtf
 ]
@@ -23,7 +23,7 @@ An extension is required, and it tells the compiler what kind of file you mean.
 
 A page on your site is a route, not a file the compiler emits. Write `@/` for your site root.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     docs #= [$html:<a href="[@/]docs/">Docs</a>]
 ]
 
@@ -33,7 +33,7 @@ A page on your site is a route, not a file the compiler emits. Write `@/` for yo
 
 A web address somewhere else is not a project file, so write it as an ordinary string.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     external #= "https://example.com/logo.svg"
 ]
 

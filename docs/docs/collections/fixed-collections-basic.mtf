@@ -1,6 +1,6 @@
 A fixed collection has a maximum number of items in its type.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     values {3 I32} = {10, 20}
 ]
 
@@ -8,7 +8,7 @@ This value has length `2` and capacity `3`.
 
 A compile-time constant can name the capacity:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     capacity #I32 = 4
     names ~{capacity String} = {}
 ]

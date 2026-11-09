@@ -1,7 +1,7 @@
 Every ordinary function parameter has a name and an explicit exact value type
 or parameter capability contract.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     describe |prefix String, subject String| -> String:
         return [prefix, ": ", subject]
     ;
@@ -9,7 +9,7 @@ or parameter capability contract.
 
 ### Parameter forms
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     name Type
     name ~Type
     name Type = default
@@ -33,7 +33,7 @@ remains valid. Only directive syntax rejects an authored empty `()`.
 
 A default belongs to the declaration.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     describe |prefix String = "item", subject String| -> String:
         return [prefix, ": ", subject]
     ;
@@ -43,7 +43,7 @@ A caller can omit a defaulted parameter.
 
 Named arguments can skip an earlier default:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     label = describe(subject = "apple")
 ]
 
@@ -56,7 +56,7 @@ A parameter default must be a compile-time value.
 
 Accepted:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     DEFAULT_PREFIX #= "item"
 
     describe |prefix String = DEFAULT_PREFIX, subject String| -> String:

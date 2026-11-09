@@ -2,7 +2,7 @@ Trait requirements describe the methods a conforming type must have. The receive
 
 ### `This` means the implementing type
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     DISPLAY_TEXT must:
         display |This| -> String
     ;
@@ -12,7 +12,7 @@ Trait requirements describe the methods a conforming type must have. The receive
 
 ### Mutable receiver
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     RESETTABLE must:
         reset |~This|
     ;
@@ -22,7 +22,7 @@ Trait requirements describe the methods a conforming type must have. The receive
 
 ### Named `This` parameters
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     SAME must:
         equals |This, other This| -> Bool
     ;

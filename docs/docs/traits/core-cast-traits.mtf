@@ -41,7 +41,7 @@ ordinary lowercase `this` receiver and its concrete type.
 
 ### Infallible evidence
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Label = |
         text String,
     |
@@ -63,7 +63,7 @@ failure contract.
 A fallible method returns through builtin `Error!`. Its caller uses the same
 plain `cast` syntax:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Label = |
         text String,
     |

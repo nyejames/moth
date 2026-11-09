@@ -2,7 +2,7 @@ Scoped support packages are `@package.moth` roots in the project source tree. Th
 
 ### A simple support package
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     @entry.moth
     blog/
     ├── @package.moth
@@ -13,7 +13,7 @@ Scoped support packages are `@package.moth` roots in the project source tree. Th
 
 ### Binding from a package
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @blog post_title
 ]
 

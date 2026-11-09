@@ -1,6 +1,6 @@
 Use `$md` when a template body should be formatted as Markdown.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     content = [$md:
         # Welcome
 
@@ -10,7 +10,7 @@ Use `$md` when a template body should be formatted as Markdown.
 
 Small inline code spans use one backtick on each side.
 
-Use `$code("moth")` or another language name for a full highlighted code block.
+Use `$code "moth"` or another language name for a full highlighted code block.
 
 Moth Markdown stays small. It does not support fenced code
 blocks or pipe tables.
@@ -19,7 +19,7 @@ blocks or pipe tables.
 
 Static headings render kebab-case IDs from their visible labels, so a link can jump to a section.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     content = [$md:
         ## Getting started
 

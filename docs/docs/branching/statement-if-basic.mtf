@@ -1,6 +1,6 @@
 Use `if` when code should run only under one condition.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if ready:
         io.line("Ready!")
     ;
@@ -8,7 +8,7 @@ Use `if` when code should run only under one condition.
 
 Add `else` for the other path:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if ready:
         io.line("Ready!")
     else

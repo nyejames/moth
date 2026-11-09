@@ -3,12 +3,14 @@
 ## Status and scope
 
 - Status: ACTIVE. Fixed root roles and builder slots are integrated.
-- Current slice: Directive grammar and template migration.
+- Current slice: Source directive recognition and attachment.
 - Blockers: None known.
-- Next action: Implement source modifier attachment and template operand migration.
+- Next action: Recognise source-context directive names outside template heads, carry the blank-line boundary fact, and attach modifiers to the following declaration or statement.
 - Roadmap file: `docs/roadmap/plans/general-directives-plan.md`.
 - Deliver: a constrained two-context directive grammar, frontend ownership of existing template formatters and `$config` input contracts.
 - Preserve: optional `config.moth` and its existing named `project` and builder-settings records, including the selected builder's current schema, defaults and validation policy.
+
+Delivered: the frontend owns `$html`, `$css`, `$escape_html` and `$code` with `StyleDirectiveRegistry::merged` and the builder directive hook deleted. Template-head operands are one bare compile-time value, an attached `(` is rejected as the removed call spelling, and `$before`/`$after` take one bare operand. Authored sources, templates, fixtures, benchmarks and the shipped wrapper package use the bare spellings.
 
 Baseline: `cargo test -p moth --lib` filters `build_config`, `style_directives` and `project_config` passed (34, 14 and 61 tests). Focused integration cases `template_style_code_success`, `template_style_css_success`, `html_builder_slot_head_dedup`, `template_runtime_children_wrapper_applied_once`, `template_children_named_slot_wrapper_application`, `html_builder_root_slot_metadata_only_entry` and `html_builder_slot_metadata_scalars` passed their configured backends. `cargo run --quiet -p moth-cli --bin moth -- build docs --release` built 88 files. HTML's live schema makes its configuration section optional.
 

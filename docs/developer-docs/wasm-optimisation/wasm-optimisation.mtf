@@ -224,7 +224,7 @@ dispatch, conversion and the host operation itself.
 
 For a representative program, compare four configurations:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     Moth development output + Cranelift None
     Moth development output + Cranelift Speed
     Moth release output     + Cranelift None

@@ -63,20 +63,20 @@ export:
             </tr>
 
             [$note: Each remaining row can be styled differently.]
-            [$before = [$html:<tr style="[$slot row_style]">], $after = [$html:</tr>]:
+            [$before [$html:<tr style="[$slot row_style]">], $after [$html:</tr>]:
                 [$slot]
             ]
         </table>
     ]
 
     td #= [$html:
-        [$before = [$html: <td style="[$slot style]">], $after = [$html:</td>]:
+        [$before [$html: <td style="[$slot style]">], $after [$html:</td>]:
             [$slot]
         ]
     ]
 
     th #= [$html:
-        [$before = [$html:<th scope="col" style="[$slot style]">], $after = [$html:</th>]:
+        [$before [$html:<th scope="col" style="[$slot style]">], $after [$html:</th>]:
             [$slot]
         ]
     ]

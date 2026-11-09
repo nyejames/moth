@@ -9,7 +9,7 @@
 //!   control flow belongs in one dedicated module.
 
 use super::child_decorators::{ChildDecoratorEdge, parse_child_decorator_directive};
-use super::directive_args::reject_unexpected_directive_arguments;
+use super::directive_args::reject_directive_operand;
 use super::head_parser::parse_head_expression_with_resources;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::store::{
@@ -458,11 +458,13 @@ pub(super) fn parse_core_style_directive(
     match kind {
         CoreStyleDirectiveKind::Raw => {
             let raw_name = string_table.intern("raw");
-            reject_unexpected_directive_arguments(raw_name, token_stream)?;
+            reject_directive_operand(raw_name, token_stream)?;
             configure_raw_style(build_state);
         }
 
         CoreStyleDirectiveKind::Fresh => {
+            let fresh_name = string_table.intern("fresh");
+            reject_directive_operand(fresh_name, token_stream)?;
             // `$fresh` opts this template out of parent-applied direct-child
             // wrappers while still allowing local directives/wrappers in the same head.
             build_state.style.skip_parent_child_wrappers = true;
@@ -470,21 +472,21 @@ pub(super) fn parse_core_style_directive(
 
         CoreStyleDirectiveKind::Note => {
             let note_name = string_table.intern("note");
-            reject_unexpected_directive_arguments(note_name, token_stream)?;
+            reject_directive_operand(note_name, token_stream)?;
             build_state.kind = TemplateType::Comment(CommentDirectiveKind::Note);
             build_state.style = Style::default();
         }
 
         CoreStyleDirectiveKind::Todo => {
             let todo_name = string_table.intern("todo");
-            reject_unexpected_directive_arguments(todo_name, token_stream)?;
+            reject_directive_operand(todo_name, token_stream)?;
             build_state.kind = TemplateType::Comment(CommentDirectiveKind::Todo);
             build_state.style = Style::default();
         }
 
         CoreStyleDirectiveKind::Doc => {
             let doc_name = string_table.intern(DOC_DIRECTIVE_NAME);
-            reject_unexpected_directive_arguments(doc_name, token_stream)?;
+            reject_directive_operand(doc_name, token_stream)?;
             apply_doc_comment_defaults(build_state);
         }
 

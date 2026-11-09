@@ -6,13 +6,13 @@ A directive modifies an existing construct. Template-head directives modify thei
 
 Place a template directive in the template head to modify that template:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     message #= [$md: Hello from Moth]
 ]
 
 Place a source directive immediately before the declaration or statement it modifies. The following $config example is accepted design and is not yet implemented:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     $config
     api_url #String = "https://example.com"
 ]

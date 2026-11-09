@@ -2,7 +2,7 @@ Generics form declaration-site type abstractions for top-level structs, choices 
 
 ### Generic declaration syntax
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     identity type A |value A| -> A:
         return value
     ;
@@ -38,7 +38,7 @@ Generic parameters follow the declaration name after `type`. Multiple parameters
 
 ### Multiple parameters
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Pair type A, B = |
         first A,
         second B,
@@ -49,7 +49,7 @@ Generic parameters follow the declaration name after `type`. Multiple parameters
 
 A generic parameter must be used in the public type shape of the declaration. An unused parameter is rejected.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Error: parameter 'A' is declared but never used
     identity type A |value String| -> String:
         return value
@@ -60,7 +60,7 @@ A generic parameter must be used in the public type shape of the declaration. An
 
 Generic parameters belong in the declaration header, not inside ordinary parameter lists.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Error
     identity |value type A| -> A:
         return value

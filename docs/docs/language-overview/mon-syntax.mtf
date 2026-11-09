@@ -16,7 +16,7 @@ and const or runtime records retain their own semantic contracts.
 Pipes enclose declared parameters and typed nominal fields. Parentheses supply
 values or group an expression.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Size = |
         width I32,
         height I32,
@@ -38,7 +38,7 @@ still need the type and compile-time evidence their receiving declaration requir
 A single unnamed expression in parentheses is grouping. A named initializer
 selects anonymous record construction, including a record with one field.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     total #= (1 + 2)
     label #= (name = "Moth")
     labels #= (first = "Priya", second = "Rob",)
@@ -80,7 +80,7 @@ spelling is the exception because it is not a non-empty map entry.
 A field label does not bind a local name. Every initializer resolves names in
 the surrounding scope. Earlier fields are not bare names visible to later fields.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     title #= "Strategy"
     panel #= (
         title = title,
@@ -101,7 +101,7 @@ which empty literals can infer their own type.
 
 Anonymous values nest directly. Named nominal children still use their constructors.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Size = |
         width I32,
         height I32,

@@ -1,6 +1,6 @@
 Pattern matching is useful when one value can take several meaningful shapes.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if score is:
         < 0 => io.line("invalid")
         0 => io.line("zero")

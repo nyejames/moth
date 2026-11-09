@@ -4,7 +4,7 @@ A `.md` file is plain Markdown content. It uses a separate plain-Markdown render
 
 A `.md` file is rendered to HTML at compile time and exposed as one generated constant:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     content #String = "<rendered html>"
 ]
 

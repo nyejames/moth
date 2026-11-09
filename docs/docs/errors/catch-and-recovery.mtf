@@ -7,7 +7,7 @@ expression may also use a safety catch when no failure currently exists.
 `catch` has lower precedence than ordinary operators. Parentheses around the
 protected expression are optional:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     value = left * right + offset catch:
         then 0
     ;
@@ -16,7 +16,7 @@ protected expression are optional:
 The handler covers both arithmetic operations, receiver evaluation, arguments,
 nested calls and cast operands:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     amount = load_amount(left * right + offset) catch then 0
 ]
 
@@ -82,7 +82,7 @@ error effect, and safety catches do not receive a new default warning.
 The handler participates in ordinary receiving and numeric constraints even
 when failure analysis later proves it unreachable:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     fallback U64 = 0
     result = 1 + 2 catch then fallback
 ]
@@ -114,7 +114,7 @@ failure. A bound catch materialises the compatible error.
 Use `catch:` for a block handler without an error binding, or
 `catch |err|:` when the handler needs the error:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     value = parse_number(text) catch:
         then 0
     ;
@@ -127,7 +127,7 @@ Use `catch:` for a block handler without an error binding, or
 
 Inline recovery uses `then` on one logical line and has no statement body:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     value = parse_number(text) catch then 0
     other = parse_number(text) catch |err| then 0
 ]
@@ -141,7 +141,7 @@ handler does not complete it. The handler path must still produce, exit or
 diverge after that loop, and it cannot fall through without producing or
 exiting. Multi-success handlers match the expression's arity:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     name, score = load_user(id) catch |err|:
         io.line(err.message)
         then "guest", 0.0

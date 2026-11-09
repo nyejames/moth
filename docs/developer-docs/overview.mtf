@@ -38,7 +38,7 @@ For the public Rust builder API, use
 
 ## Compiler flow
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     command and Stage 0 build orchestration
         -> tokenization and header syntax preparation
         -> provider graph compilation

@@ -1307,7 +1307,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 PreparedFailure::Infrastructure(errors)
             }
             Err(ExpressionParseError::Diagnostic(_))
-            | Err(ExpressionParseError::TemplateDirectiveEmptyArguments(_))
             | Err(ExpressionParseError::NonConstantReferenceInConstant(_))
             | Err(ExpressionParseError::NumericDeferral(_)) => {
                 crate::compiler_bug!(

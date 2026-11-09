@@ -1,4 +1,4 @@
-list = [$before = [:<section class="agg-slot">], $after = [:</section>]:
+list = [$before [:<section class="agg-slot">], $after [:</section>]:
     <ul>[$slot]</ul>
 ]
 

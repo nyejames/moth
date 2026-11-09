@@ -1,7 +1,7 @@
 `$before` and `$after` wrap each direct child with a prefix and suffix.
 
-[codeblock, $code("moth"):
-    list #= [$before = [:<li>], $after = [:</li>]:
+[codeblock, $code "moth":
+    list #= [$before [:<li>], $after [:</li>]:
         <ul>
             [$slot]
         </ul>
@@ -16,9 +16,9 @@ contain named slots, filled by the enclosing application. If a value contains a
 slot, it must be named: an explicit default or positional slot is rejected. The
 child insertion point is implicit.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     row #= [$html:<tr style="[$slot row_style]">]
-    rows #= [$before = row, $after = [$html:</tr>]:[$slot]]
+    rows #= [$before row, $after [$html:</tr>]:[$slot]]
 
     [rows:
         [$in row_style:background: red;]
@@ -31,7 +31,7 @@ selected empty String still does.
 
 Use `$fresh` when one child should skip the immediate wrapper:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     [list:
         [: wrapped]
         [$fresh: [: not wrapped]]

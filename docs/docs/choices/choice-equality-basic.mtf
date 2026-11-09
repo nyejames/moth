@@ -1,6 +1,6 @@
 Choices can use `is` and `is not` when their payloads are equality-safe.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     first = Status::Ready
     second = Status::Ready
 

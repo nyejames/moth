@@ -2,7 +2,7 @@ Some trait contracts are mutually exclusive. A type cannot claim both.
 
 ### Two ways to produce text
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     TEXT must:
         text |This| -> String
     ;

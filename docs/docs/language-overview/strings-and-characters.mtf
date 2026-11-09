@@ -1,6 +1,6 @@
 Moth has two string source forms and one character form. Both string forms share one semantic `String` type at ordinary typed boundaries.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     escaped_slice = "Hello\nworld"
     letter = '🦋'
 
@@ -33,7 +33,7 @@ compared, passed, returned, stored and inserted into templates. A mutable
 binding that currently holds a slice may be reassigned. That doesn't make the
 slice contents mutable.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     name ~= "Priya"
     ~name = "Rob"  -- reassigns the mutable binding, doesn't mutate the slice
 ]
@@ -54,7 +54,7 @@ Templates are the idiomatic and canonical way to:
 - build runtime or compile-time text
 - produce strings that need full template composition
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     first = "Hello, "
     second = "world"
     message = [first, second]
@@ -65,7 +65,7 @@ Templates are the idiomatic and canonical way to:
 
 Use ["[left, right]"] for concatenation. Don't use `+`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- VALID: template concatenation
     joined = [left, right]
 
@@ -101,7 +101,7 @@ call-compatibility rules.
 `String` supports `is` and `is not`. `String` doesn't support ordering
 operators (`<`, `<=`, `>`, `>=`).
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     slice = "hello"
     template = [: hello]
 
@@ -118,7 +118,7 @@ A mutable binding that holds a string can be reassigned. Quoted slices are
 immutable. Templates produce owned `String` values. The current source
 surface does not yet expose in-place string mutation operations.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     text ~= "initial"
     ~text = "replacement"  -- valid: reassigns the binding
 

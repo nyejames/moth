@@ -8,7 +8,7 @@ private function can carry implicit failure through its existing local
 failure route. A compatible builtin `Error!` slot can return it. A custom
 `E!` slot does not automatically convert builtin failure.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     parse_count |text String| -> I32, Error!:
         return cast text
     ;
@@ -22,7 +22,7 @@ fallible calls and does not attach to a cast.
 
 Use `catch` to recover a fallible conversion:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count I32 = cast text catch:
         then 0
     ;
@@ -37,7 +37,7 @@ The handler produces the success values required by the receiving site or
 leaves through `return` or `return!`. It protects both operand evaluation and
 conversion:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     narrow |left U32, right U32| -> U8:
         value U8 = cast left + right catch then 0
         return value
@@ -60,7 +60,7 @@ postfix marker.
 receivers, arguments, nested calls and cast operands. Parentheses do not shrink
 an outer handler:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     amount = load_amount(left * right + offset) catch then 0
 ]
 

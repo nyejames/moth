@@ -10,7 +10,7 @@ These docs teach the concepts rather than document every behaviour the compiler 
 
 ### The file structure
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
 compiler_walkthrough/
 ├── config.moth
 ├── @entry.moth
@@ -20,7 +20,7 @@ compiler_walkthrough/
 ### The code
 
 `greeting.moth`
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
 greeting_prefix #= "Hello"
 
 greet |name String| -> String:
@@ -30,7 +30,7 @@ greet |name String| -> String:
 
 
 `@entry.moth`
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
 @greeting greet
 
 visitor = "Priya"
@@ -42,7 +42,7 @@ visitor = "Priya"
 
 The final fragment the series aims at:
 
-[codeblock, $code("html"):
+[codeblock, $code "html":
 <p>Hello, Priya!</p>
 ]
 
@@ -52,7 +52,7 @@ Priya never changes. The file names never change. The fragment never changes. Si
 
 One checkpoint strip runs through every article:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
 project tree
 -> command and config
 -> canonical source graph

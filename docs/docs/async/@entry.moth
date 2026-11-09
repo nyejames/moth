@@ -93,7 +93,7 @@ init_docs_sidebar()!
 
     The separately accepted future channel construction is:
 
-    [codeblock, $code("moth"):
+    [codeblock, $code "moth":
         reader, writer Channel of AppMessage = Channel()
     ]
 
@@ -116,7 +116,7 @@ init_docs_sidebar()!
 
     Values are sent into a channel with `>>`.
 
-    [codeblock, $code("moth"):
+    [codeblock, $code "moth":
         value >> writer
     ]
 
@@ -151,7 +151,7 @@ init_docs_sidebar()!
 
     Values are received from a channel with `<<`.
 
-    [codeblock, $code("moth"):
+    [codeblock, $code "moth":
         value << reader
     ]
 
@@ -173,7 +173,7 @@ init_docs_sidebar()!
     fixed. This page therefore does not invent typed `producer` or `consumer`
     parameters. Their bodies use the accepted channel operations:
 
-    [codeblock, $code("moth"):
+    [codeblock, $code "moth":
         message >> writer
         value << reader
     ]
@@ -188,7 +188,7 @@ init_docs_sidebar()!
 
     `yield` explicitly suspends the current coroutine and allows other coroutines to run.
 
-    [codeblock, $code("moth"):
+    [codeblock, $code "moth":
         yield
     ]
 
@@ -198,7 +198,7 @@ init_docs_sidebar()!
 
     Example:
 
-    [codeblock, $code("moth"):
+    [codeblock, $code "moth":
         loop 0 to 1_000_000 |i|:
             i >> writer
 
@@ -221,7 +221,7 @@ init_docs_sidebar()!
     Coroutines run inside a `$async:` scope. `$async:` is compiler-owned
     language structure, not builder metadata.
 
-    [codeblock, $code("moth"):
+    [codeblock, $code "moth":
         $async:
             reader, writer Channel of AppMessage = Channel()
             yield
@@ -290,7 +290,7 @@ init_docs_sidebar()!
 
     The accepted future declaration and scope spelling are shown together:
 
-    [codeblock, $code("moth"):
+    [codeblock, $code "moth":
         $async:
             reader, writer Channel of AppMessage = Channel()
             ...

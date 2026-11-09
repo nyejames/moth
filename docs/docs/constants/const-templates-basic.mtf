@@ -1,6 +1,6 @@
 A constant template is finished during compilation.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     title #= "Moth"
 
     heading #= [$md:
@@ -12,7 +12,7 @@ Direct top-level const templates contribute to `@entry.moth`. The file's
 presence selects the page. A direct const root `$in` insert supplies builder
 metadata, while an ordinary const fragment renders into the body.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     #[$in title:About]
     #[$in stylesheets:[@styles/site.css]]
 

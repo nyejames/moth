@@ -1,19 +1,19 @@
 Use double quotes for normal text:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     greeting = "Hello"
 ]
 
 Expression-position backtick strings aren't implemented. Use an ordinary string
 with escapes when the text contains backslashes:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     windows_path = "C:\\docs\\site"
 ]
 
 Use single quotes for one Unicode scalar value:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     seedling = '🦋'
 ]
 
@@ -22,7 +22,7 @@ character made from more than one scalar value needs a `String`.
 
 Use a template when text needs values or a larger structure:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     name = "Priya"
 
     greeting = [:
@@ -34,7 +34,7 @@ Use a template when text needs values or a larger structure:
 
 Use templates to join strings together. Put the parts inside square brackets:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     first = "Hello, "
     second = "world"
     message = [first, second]

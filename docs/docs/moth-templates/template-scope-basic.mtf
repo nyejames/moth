@@ -2,12 +2,12 @@ A `.mtf` file sees the fixed `@html` helpers and values from helper files in the
 
 ### Selecting a helper value
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- docs/settings.moth
     site_name #= "Moth"
 ]
 
-[codeblock, $code("md"):
+[codeblock, $code "md":
     -- docs/intro.mtf
     # Welcome to [@settings site_name]
 ]
@@ -24,7 +24,7 @@ A value written in `@mod.moth`, `@package.moth` or `@entry.moth` is not visible 
 
 `.mtf` files see constants from `@html` without a dependency clause:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     [p: A paragraph.]
 ]
 
@@ -32,7 +32,7 @@ That prelude always comes from the official HTML package set. It supplies HTML c
 
 ### A nested override
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     [$raw: <div>Raw HTML here</div>]
 ]
 

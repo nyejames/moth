@@ -1,6 +1,6 @@
 A statement `if` runs a block when its condition is `true`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if ready:
         io.line("ready")
     else
@@ -21,7 +21,7 @@ A statement `if` runs a block when its condition is `true`.
 
 The ordinary `if` form is the only conditional source form; there is no new static-branch syntax. Both bodies are frontend-validated before a known `Bool` selects the executable body before HIR. The selected lexical scope remains intact, and inactive downstream compiler work is absent. An unknown `Bool` lowers normally.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     enabled #= false
 
     if enabled:
@@ -38,7 +38,7 @@ A same-line `else if` chain is not syntax.
 
 Use a nested `if` inside the `else` body:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if first_condition:
         io.line("first")
     else
@@ -56,7 +56,7 @@ Use a full match when one value is being compared against several patterns.
 
 A statement can test an optional value and bind its present payload:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if maybe_name is |name|:
         io.line(name)
     ;
@@ -64,7 +64,7 @@ A statement can test an optional value and bind its present payload:
 
 It can also test for absence:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if maybe_name is none:
         io.line("missing")
     ;

@@ -3,7 +3,7 @@ the permitted receiving and peer constraints have resolved its exact type.
 
 ### Spelling and defaults
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     whole = 42
     decimal = 0.5
     large = 1e6
@@ -55,7 +55,7 @@ declaration boundaries. No pending numeric unknown crosses a module boundary.
 
 Inference applies this priority before materialisation:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     eligible receiving context
         -> eligible local numeric peer context
         -> language default
@@ -65,7 +65,7 @@ An exact receiver reaches unresolved literal arithmetic and grouping, including
 raw literal leaves beside named operands. It never retypes a named binding,
 constant, field, call result or completed operator result.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     base I32 = 10
     total I64 = base + 1
 ]
@@ -80,7 +80,7 @@ peer never changes its own type. A subtree containing a binding, field, call
 result or cast result is not literal-only. Call arguments use their own
 parameter receivers.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     small U8 = 10
     same_width = small + 1
 ]
@@ -89,7 +89,7 @@ The local `U8` peer types the raw `1` as `U8`, so `same_width` has type `U8`.
 An explicit wider receiver can type the raw leaf wider without changing
 `small`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     wider U16 = small + 1
 ]
 
@@ -101,7 +101,7 @@ Here `1` receives `U16` and ordinary mixed-integer arithmetic produces `U16`.
 A later consumer can resolve an initializer that still consists only of
 unresolved literal arithmetic:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     value = 1 + 2
     take_u64(value) -- Assume this parameter requires U64.
 ]
@@ -109,7 +109,7 @@ unresolved literal arithmetic:
 The initializer becomes `U64` before operator selection. A completed operation
 over named values cannot search backwards for a wider operand type:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     base = 1
     twice = base + base
     take_u64(twice) -- Rejected without an independent U64 constraint on base.
@@ -128,7 +128,7 @@ back through a completed named arithmetic expression.
 
 Assume `take_u64` accepts a `U64` parameter:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     source = 1
     duplicate = copy source
     take_u64(duplicate)
@@ -150,7 +150,7 @@ until an exact collection receiver or another eligible use resolves it. Raw
 whole and decimal/exponent literals select the binary-float family regardless
 of order:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     values = {1, 2.5}
     samples = {2.5, 1}
 ]
@@ -158,7 +158,7 @@ of order:
 Both default to `F64` unless a receiver selects another binary-float precision.
 A bound integer never changes family to fit:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count = 1
     mixed = {count, 2.5} -- Rejected: count remains an integer.
 ]
@@ -172,7 +172,7 @@ collection storage type.
 A literal materialises directly at an immediate concrete numeric receiver.
 The compiler does not first construct a default value and convert it:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     small U8 = 200
     large U64 = 18_000_000_000
     half F16 = 0.5
@@ -192,7 +192,7 @@ An explicit `Dec` receiver reaches every unresolved literal leaf in its
 arithmetic and grouping. Each leaf materialises directly at the selected scale,
 without passing through a binary float or a formatted intermediate:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     whole Dec4 = 1 + 1
     fraction Dec4 = 0.1 + 0.2
     grouped Dec4 = (1 + 2) * 3
@@ -218,7 +218,7 @@ A cast destination never chooses the source type. Resolve the source from its
 own eligible constraints or its language default, then check the complete
 source-target pair:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     value = 1
     take_u32(cast value)
     take_i64(value)

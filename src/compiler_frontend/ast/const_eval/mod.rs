@@ -175,7 +175,6 @@ impl From<TemplateError> for ConstantFoldError {
     fn from(error: TemplateError) -> Self {
         match error {
             TemplateError::Diagnostic(diagnostic)
-            | TemplateError::EmptyArguments(diagnostic)
             | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
                 Self::Diagnostic(diagnostic)
             }

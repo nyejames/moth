@@ -44,7 +44,6 @@ pub(crate) struct NumericDeferral {
 pub(crate) enum ExpressionParseError {
     Diagnostic(DiagnosticDraft),
     /// An empty template directive argument that remains eligible for an enclosing directive rewrite.
-    TemplateDirectiveEmptyArguments(DiagnosticDraft),
     /// A constant-context name failure whose semantic cause is needed by member-shell resolution.
     NonConstantReferenceInConstant(DiagnosticDraft),
     Infrastructure(Box<InfrastructureErrors>),
@@ -119,9 +118,6 @@ impl From<TemplateError> for ExpressionParseError {
     fn from(error: TemplateError) -> Self {
         match error {
             TemplateError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
-            TemplateError::EmptyArguments(diagnostic) => {
-                Self::TemplateDirectiveEmptyArguments(diagnostic)
-            }
             TemplateError::NonConstantReferenceInConstant(diagnostic) => {
                 Self::NonConstantReferenceInConstant(diagnostic)
             }
@@ -176,7 +172,6 @@ impl ExpressionParseError {
     ) -> Result<DiagnosticDraft, ExpressionParseError> {
         match self {
             ExpressionParseError::Diagnostic(diagnostic)
-            | ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic)
             | ExpressionParseError::NonConstantReferenceInConstant(diagnostic) => Ok(diagnostic),
             ExpressionParseError::Infrastructure(error) => {
                 Err(ExpressionParseError::Infrastructure(error))

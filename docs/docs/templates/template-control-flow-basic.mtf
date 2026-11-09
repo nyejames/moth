@@ -1,6 +1,6 @@
 A template `if` includes its body only when a `Bool` condition is true.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     [if signed_in:
         Welcome back
     ]
@@ -9,7 +9,7 @@ A template `if` includes its body only when a `Bool` condition is true.
 An option-present capture includes its body only when the option has a value.
 The captured value is available inside that body.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     [if maybe_name is |name|:
         Hello [name]
     ]
@@ -18,7 +18,7 @@ The captured value is available inside that body.
 Template `if` has no `else` or `else if` form. Template loops repeat content
 with an ordinary loop header, including its signed `by` step and bindings.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     [loop names |name|:
         <p>Hello [name]</p>
     ]

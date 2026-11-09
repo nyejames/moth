@@ -9,7 +9,7 @@ identity |value I32| -> I32:
     return value
 ;
 
-sections = [$before = [:[$before = [$html:<b style="[$slot row_style]">], $after = [$html:</b>]:[:fixed]]], $after = [$html:</section>]:[$slot]]
+sections = [$before [:[$before [$html:<b style="[$slot row_style]">], $after [$html:</b>]:[:fixed]]], $after [$html:</section>]:[$slot]]
 
 show_condition = 1
 skip_condition = 2

@@ -5,7 +5,7 @@ defaults it.
 
 ### Inference sources
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     identity type A |value A| -> A:
         return value
     ;
@@ -41,7 +41,7 @@ numeric identities.
 
 ### What inference does not use
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Error: T has no immediate evidence and no numeric origin.
     values = empty()
 ]
@@ -64,7 +64,7 @@ anonymous structure or turn an empty container into a numeric origin.
 Use an intermediate annotation when a nested generic call has no immediate
 evidence.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     empty type A || -> {A}:
         return {}
     ;
@@ -86,7 +86,7 @@ A generic function declared `-> !` has no result shape. Inference uses the
 immediate arguments only. There is no expected result type to solve a
 parameter.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     abort type A |value A| -> !:
         assert(false, "aborted")
     ;
@@ -101,7 +101,7 @@ receiving site that would otherwise supply result evidence.
 
 Generic functions may return optional or fallible values when the concrete envelope is solved by immediate evidence.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     wrap_optional type T |value T| -> T?:
         return value
     ;
@@ -132,7 +132,7 @@ classifies the completed source/target pair.
 
 A concrete callee error type does not specialise an otherwise unsolved generic error parameter merely because it appears inside the generic body. Immediate declaration and call-site evidence must still solve the parameter.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Rejected: E is not solved by the concrete Error inside the body.
     generic_fail type E || -> I32, E!:
         return! Error("bad")
@@ -145,7 +145,7 @@ A generic error parameter must be solved by immediate call-site evidence, like a
 
 All of these are rejected:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     identity of I32(42)
     identity<I32>(42)
     identity[I32](42)

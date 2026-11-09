@@ -61,7 +61,6 @@ unit_code! {
         InvalidArgument = 3,
         DirectiveNotAllowedHere = 4,
         UnexpectedArguments = 5,
-        EmptyArguments = 6,
         InvalidSlotTarget = 7,
         InvalidInsertTarget = 8,
         InvalidChildDecoratorValue = 9,
@@ -87,7 +86,6 @@ impl InvalidTemplateDirectiveCode {
             InvalidTemplateDirectiveReason::UnexpectedArguments => {
                 (Self::UnexpectedArguments, None)
             }
-            InvalidTemplateDirectiveReason::EmptyArguments => (Self::EmptyArguments, None),
             InvalidTemplateDirectiveReason::InvalidSlotTarget => (Self::InvalidSlotTarget, None),
             InvalidTemplateDirectiveReason::InvalidSlotDefault => (Self::InvalidSlotDefault, None),
             InvalidTemplateDirectiveReason::InvalidInsertTarget => {
@@ -108,7 +106,6 @@ impl InvalidTemplateDirectiveCode {
                 InvalidTemplateDirectiveReason::DirectiveNotAllowedHere
             }
             Self::UnexpectedArguments => InvalidTemplateDirectiveReason::UnexpectedArguments,
-            Self::EmptyArguments => InvalidTemplateDirectiveReason::EmptyArguments,
             Self::InvalidSlotTarget => InvalidTemplateDirectiveReason::InvalidSlotTarget,
             Self::InvalidSlotDefault => InvalidTemplateDirectiveReason::InvalidSlotDefault,
             Self::InvalidInsertTarget => InvalidTemplateDirectiveReason::InvalidInsertTarget,

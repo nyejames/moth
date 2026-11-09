@@ -68,7 +68,7 @@ Each folded fragment records how many runtime fragments precede it. For a
 constant fragment A, a runtime fragment B and another constant fragment C, the
 assembly records:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     A: before runtime position 0
     B: runtime position 0
     C: before runtime position 1

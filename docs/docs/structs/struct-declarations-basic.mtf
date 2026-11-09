@@ -1,6 +1,6 @@
 A struct groups named values into one new type.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Player = |
         name String,
         score I32,
@@ -11,7 +11,7 @@ Each field has a name and a type.
 
 Fields can have defaults:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Player = |
         name String,
         score I32 = 0,

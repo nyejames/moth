@@ -36,7 +36,7 @@ init_docs_sidebar()!
 #[section, $md:
     ## Compiler flow
 
-    [codeblock, $code("text"):
+    [codeblock, $code "text":
         project files
             -> Stage 0: project structure and source discovery
             -> Stage 1: tokenization

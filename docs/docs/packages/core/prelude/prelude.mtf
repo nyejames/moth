@@ -32,7 +32,7 @@ Prelude names participate in the ordinary no-shadowing collision model. Same-fil
 
 `io` is the only Core package in the prelude. It's there for convenience rather than semantic importance: it gathers the common host interactions ordinary programs need immediately. Every other Core package requires an explicit dependency clause, and changing that is a language-wide decision rather than a package-level one:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math sin
     @core/time mark_now
     @core/text length

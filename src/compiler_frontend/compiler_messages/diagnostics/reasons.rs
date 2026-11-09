@@ -895,8 +895,6 @@ pub enum InvalidTemplateDirectiveReason {
     DirectiveNotAllowedHere,
     /// Directive received parenthesized arguments it does not accept.
     UnexpectedArguments,
-    /// Directive parentheses are empty.
-    EmptyArguments,
     /// `$slot` received an invalid target declaration.
     InvalidSlotTarget,
     /// `$slot ... = ...` received a default that is not a compile-time `String`.

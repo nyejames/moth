@@ -4,7 +4,7 @@ A Moth project is a directory tree rooted at the directory selected by the comma
 
 The optional project config uses ordinary named compile-time records:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     project #= (
         name = "my_site",
     )
@@ -18,7 +18,7 @@ A configurable value uses the ordinary typed input spelling until the queued `$c
 
 ### Project root contents
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     website/
     ├── config.moth           # optional
     ├── @entry.moth
@@ -53,7 +53,7 @@ Any other `@*.moth` or `+*.moth` spelling is rejected as a structure error. The 
 
 A project produces an HTML page for each `@entry.moth` directory. Entry eligibility comes from file presence, not from the amount of authored activity:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     #[$in title:Welcome]
 ]
 
@@ -79,7 +79,7 @@ For the full package contract see @../packages/#project-local-packages (Project-
 
 `moth new html` creates a `config.moth` with an explicit valid project name, a root-level `@entry.moth` and a `.gitignore` containing `/_dev` and `/_release`. The generated config is:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     project #= (
         name = "my_site",
     )

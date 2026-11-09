@@ -2,7 +2,7 @@ When you apply concrete types to a generic declaration, you get a concrete insta
 
 ### A concrete generic struct
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Box type A = |
         value A,
     |
@@ -15,7 +15,7 @@ When you apply concrete types to a generic declaration, you get a concrete insta
 
 ### A concrete generic choice
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Maybe type A ::
         Some | value A |,
         Empty,

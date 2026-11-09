@@ -1,6 +1,6 @@
 list = [:
     <ul>
-        [$before = [:<li>], $after = [:</li>]:
+        [$before [:<li>], $after [:</li>]:
             [$slot]
         ]
     </ul>

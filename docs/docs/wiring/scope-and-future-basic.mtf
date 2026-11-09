@@ -12,7 +12,7 @@ Statements run in source order until control flow exits or redirects
 the block, and each nested block creates a child scope. Moth has no general bare
 block for grouping statements.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     greet |name String| -> String:
         if name is "Priya":
             return [: Hello, [name]!]
@@ -30,7 +30,7 @@ statements) reference and @../templates/#head-and-body (Template head and body).
 
 The accepted channel construction syntax is future-only:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     reader, writer Channel of AppMessage = Channel()
 ]
 

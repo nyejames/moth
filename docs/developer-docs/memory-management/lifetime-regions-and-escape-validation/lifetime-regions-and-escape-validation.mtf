@@ -154,7 +154,7 @@ Every runtime allocation has exactly one semantic lifetime owner.
 
 Multiple bindings, fields, elements or returned values may alias one allocation without becoming additional lifetime owners.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     Page region owns Theme
 
     header.theme ─┐
@@ -170,7 +170,7 @@ Every allocation has exactly one semantic lifetime owner. An object may retain a
 
 Formal rule:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     R_value >= R_container
 ]
 
@@ -203,7 +203,7 @@ An ordinary allocation begins in the narrowest inferred region capable of owning
 
 The inference sequence:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     choose the narrowest initial owner
     -> collect retained observers
     -> widen only when required
@@ -249,7 +249,7 @@ Mandatory source topology must already be valid without field-sensitive splittin
 
 Because splitting depends on physical layout, target/layout-aware splitting happens after build-owned target partition and target-contract validation, once a candidate physical variant exists. For each candidate variant, field-sensitive family refinement rebuilds the affected direct family graph and revalidates affected outlives, family-base and may-coexist SCC facts:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     validated unsplit topology
     -> target/layout-aware split candidate
     -> rebuild affected direct family graph
@@ -258,7 +258,7 @@ Because splitting depends on physical layout, target/layout-aware splitting happ
 
 If refinement succeeds, memory planning uses the refined families. If it cannot be proven:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     reject the optimisation
     -> keep the original unsplit family
     -> retain conservatively
@@ -350,7 +350,7 @@ The initial whole-domain kill primitives are:
 
 Individual `remove`, `set` or partial cleanup does not establish uniqueness or a frontier by itself. Uniqueness scans, alias registries and adaptive owner recovery are rejected from the design.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     populate(~index)
     use(index)
     ~index.clear()
@@ -362,7 +362,7 @@ The collection may continue living. If no other live alias or retention domain c
 
 Repeated population and whole-domain cleanup may form compiler-generated region epochs. The aggregate object and its backing capacity outlive each retained-value epoch.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     R_index_epoch_0
         population 0
         -> first clear
@@ -382,7 +382,7 @@ A failed mutation does not commit its retained-edge effects. It preserves the ol
 
 For example, two branches can produce opposite edges without producing one runtime cycle:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     branch A:
         A -> B
 
@@ -394,7 +394,7 @@ A path-insensitive union must not automatically be presented as proof that a run
 
 A replacement likewise transitions between committed states:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     old committed state:
         A -> B
 

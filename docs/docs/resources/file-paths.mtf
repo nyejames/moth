@@ -6,7 +6,7 @@ Together with dependency clauses, which bring in source and provider files, file
 
 A file path is an ordinary expression.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     logo  #= @images/logo.svg
     font  #= @fonts/cmunss.woff2
     intro #= @docs/intro.mtf
@@ -35,7 +35,7 @@ The same explicit-extension spelling means different things in different positio
 - In a dependency clause it names an already registered provider target.
 - In expression position it names one file value.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @vendor/drawing.js as drawing
 
     drawing_url = @vendor/drawing.js
@@ -49,7 +49,7 @@ Dependency-clause source rules are unchanged. `@docs/intro content` is the claus
 
 Resolution starts at the owning module root, exactly like dependency paths. The physical directory of the declaring file has no effect.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- in internal/deep/renderer.moth, whose module root is the selected project root
     logo #= @images/logo.svg
 ]
@@ -63,7 +63,7 @@ Each physical-target-bearing file path is resolved once. Repeating it in the sam
 Root builder slots use the same file-path expressions as other source code.
 A tracked favicon remains a resource-bearing `String`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     #[$in favicon:[@assets/favicon.svg]]
 ]
 
@@ -106,7 +106,7 @@ A file path in `config.moth` is also rejected. Config is compiled before the sou
 
 Bare `@/` is the site-root URL. It is a `String` and it names no file.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     home #= [$html:<a href="[@/]">Home</a>]
     docs #= [$html:<a href="[@/]docs/">Docs</a>]
 ]
@@ -125,7 +125,7 @@ Moth-aware Markdown links share that site root. A `$md` link target beginning wi
 
 These remain ordinary untracked strings:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     external  #= "https://example.com/logo.svg"
     cdn       #= "//cdn.example.com/app.js"
     favicon   #= "/favicon.svg"

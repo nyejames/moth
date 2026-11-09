@@ -345,6 +345,11 @@ macro_rules! token_schema {
 const TOKEN_NUMERIC_FLAGS: u16 = 0b11;
 const TOKEN_DOUBLE_COLON_LEFT_ATTACHED: u16 = 1 << 0;
 const TOKEN_DOUBLE_COLON_RIGHT_ATTACHED: u16 = 1 << 1;
+/// `(` immediately follows the preceding token with no whitespace between them.
+///
+/// WHY: a directive operand and a call share this token, and only adjacency distinguishes
+/// `$code("rust")` from a whitespace-separated parenthesised value.
+const TOKEN_OPEN_PARENTHESIS_ATTACHED: u16 = 1 << 0;
 const TOKEN_DOUBLE_COLON_ADJACENCY_FLAGS: u16 =
     TOKEN_DOUBLE_COLON_LEFT_ATTACHED | TOKEN_DOUBLE_COLON_RIGHT_ATTACHED;
 
@@ -553,7 +558,7 @@ token_schema! {
         29,
         "`(`",
         Static,
-        0,
+        TOKEN_OPEN_PARENTHESIS_ATTACHED,
         TOKEN_CLASS_DELIMITER | TOKEN_CLASS_CONTINUES_EXPRESSION | TOKEN_CLASS_OPERAND_START,
         None
     ),
@@ -1212,6 +1217,18 @@ impl TokenShape {
 
     pub(crate) fn double_colon_variant_attached(self) -> bool {
         self.tag == TokenTag::DOUBLE_COLON && self.flags & TOKEN_DOUBLE_COLON_RIGHT_ATTACHED != 0
+    }
+
+    pub(crate) const fn open_parenthesis_attached_flags(attached: bool) -> u16 {
+        if attached {
+            TOKEN_OPEN_PARENTHESIS_ATTACHED
+        } else {
+            0
+        }
+    }
+
+    pub(crate) fn open_parenthesis_is_attached(self) -> bool {
+        self.tag == TokenTag::OPEN_PARENTHESIS && self.flags & TOKEN_OPEN_PARENTHESIS_ATTACHED != 0
     }
 
     pub(crate) const fn data(self) -> u32 {

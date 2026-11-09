@@ -2,12 +2,12 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterInput, FormatterInputPiece, FormatterOpaqueKind, FormatterOpaquePiece,
     FormatterOutputPiece, FormatterTextPiece,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::html_project::styles::code::{
+use crate::compiler_frontend::ast::templates::styles::code::{
     CodeLanguage, code_formatter, highlight_code_html,
 };
-use crate::projects::html_project::styles::escape_html::escape_html_formatter;
+use crate::compiler_frontend::ast::templates::styles::escape_html::escape_html_formatter;
+use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
 fn generic_code_highlighter_marks_syntax_but_not_keywords() {
@@ -946,7 +946,8 @@ fn html_markdown_and_toml_aliases_select_dedicated_profiles() {
 fn language_alias_table_is_consistent_with_supported_values_message() {
     let supported = CodeLanguage::supported_aliases();
 
-    for (alias, expected_language) in crate::projects::html_project::styles::code::LANGUAGE_ALIASES
+    for (alias, expected_language) in
+        crate::compiler_frontend::ast::templates::styles::code::LANGUAGE_ALIASES
     {
         assert_eq!(
             CodeLanguage::from_alias(alias),

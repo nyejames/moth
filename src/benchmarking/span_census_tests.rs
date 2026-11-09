@@ -1,8 +1,7 @@
 use super::span_census::{
     LengthHistogramBucket, PrototypeEncodedSpan, decode_candidate_span, encode_candidate_span,
-    inline_start_limit, tokenize_corpus, tokenize_source,
+    inline_start_limit, tokenize_corpus,
 };
-use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 
 /// Hand-computed 22/10 split: 2^10 - 2 = 1022 is the last inline length, 1023 is not.
 #[test]
@@ -196,14 +195,14 @@ fn extended_table_accepts_its_last_usable_index_and_rejects_the_next() {
         .expect_err("one entry past the usable capacity must be rejected");
 }
 
-/// The census must tokenize with the same directives `moth_template::compile` registers. Measuring
-/// with built-ins alone silently rejected every `$html` template - the documentation files that
-/// carry the longest spans in the corpus - and a census that loses its longest spans selects the
-/// wrong split. This drives `tokenize_corpus`, not the registry helper, so that the wiring is
-/// covered as well as the construction.
+/// The census tokenizes every corpus file with the compiler's built-in directive set. A
+/// documentation file that carries `$html` and `$code` must therefore tokenize instead of being
+/// reported as a failure, otherwise the census silently drops the longest spans in the corpus and
+/// selects the wrong split. This drives `tokenize_corpus` rather than the registry helper so the
+/// wiring is covered as well as the construction.
 #[test]
-fn the_census_tokenizes_an_html_template_that_built_ins_reject() {
-    let source = "[codeblock, $code(\"moth\"):\n    image #= [$html:\n        <img src=\"logo.svg\">\n    ]\n]\n";
+fn the_census_tokenizes_a_docs_template_with_frontend_formatters() {
+    let source = "[codeblock, $code \"moth\":\n    image #= [$html:\n        <img src=\"logo.svg\">\n    ]\n]\n";
     let workspace = tempfile::tempdir().expect("should create a temporary workspace");
     let template = workspace.path().join("probe.mtf");
     std::fs::write(&template, source).expect("should write the probe template");
@@ -213,28 +212,14 @@ fn the_census_tokenizes_an_html_template_that_built_ins_reject() {
 
     assert!(
         tokenized.failures.is_empty(),
-        "the census must tokenize an $html template, not report it as a failure: {:?}",
+        "the census must tokenize a formatter template, not report it as a failure: {:?}",
         tokenized.failures
     );
-    let span_counts: Vec<usize> = tokenized
-        .collected
-        .iter()
-        .map(|source| source.spans.len())
-        .collect();
-
     assert_eq!(
-        span_counts,
-        vec![13],
-        "the template must tokenize to its authored tokens, not to nothing"
+        tokenized.collected.len(),
+        1,
+        "the census must measure the probe template exactly once"
     );
-
-    tokenize_source(
-        "probe.mtf",
-        source,
-        &mut Vec::new(),
-        &StyleDirectiveRegistry::built_ins(),
-    )
-    .expect_err("built-ins alone must reject $html, which is why the census merges the project's");
 }
 
 #[test]

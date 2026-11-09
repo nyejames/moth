@@ -1,7 +1,7 @@
 A collection loop visits values from a Moth collection. By default it walks
 from the first item to the last.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     names = {"Priya", "Rob", "Emmy"}
 
     loop names |name, index|:
@@ -11,7 +11,7 @@ from the first item to the last.
 
 ### Forms of collection loops
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     loop items:
         ~count += 1
     ;
@@ -71,7 +71,7 @@ A literal zero step is rejected during compilation with `MOTH-SYNTAX-0029`. A
 dynamic zero step fails with built-in error code 306 (`InvalidLoopStep`) before
 the empty-source check.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     stride_items = {10, 20, 30, 40, 50}
 
     loop stride_items by 2 |item, index|:
@@ -91,7 +91,7 @@ index `0`.
 
 The old `in` form is not valid.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     loop item in items:
         inspect(item)
     ;
@@ -99,7 +99,7 @@ The old `in` form is not valid.
 
 Write the collection source first, then any `by` step, then bindings after it:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     loop items by 2 |item|:
         inspect(item)
     ;

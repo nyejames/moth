@@ -1,7 +1,7 @@
 A struct constructor uses the struct name and supplies its fields through
 @../language-overview/#mon-syntax (MON syntax).
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Point = |
         x I32,
         y I32 = 0,
@@ -31,7 +31,7 @@ A constructor creates a fresh value.
 
 Construct a named child at its field's receiving boundary:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Size = | width I32, height I32 |
     Window = | size Size |
 
@@ -50,7 +50,7 @@ Source construction above is unchanged: an anonymous record never becomes a nomi
 
 Use `.` to read a field.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     point = Point(10, 20)
     horizontal = point.x
 ]
@@ -61,7 +61,7 @@ A field read uses normal shared access.
 
 The root value must be a mutable place. Prefix the whole field target with `~`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     point ~= Point(10, 20)
     ~point.x = 30
 ]

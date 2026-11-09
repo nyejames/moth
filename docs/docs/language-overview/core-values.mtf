@@ -1,7 +1,7 @@
 Values have a semantic type. A binding may infer that type from its initializer
 or state it explicitly.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     enabled = true
     count I32 = 42
     ratio F64 = 0.5
@@ -37,7 +37,7 @@ Options are documented with Errors and options.
 
 Collections use braces. String templates use square brackets.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     names = {"Priya", "Rob"}
 
     message = [:

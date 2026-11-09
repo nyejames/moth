@@ -12,7 +12,7 @@ The text doesn't ride along inside the token. The kind carries a small handle in
 
 Take the page dependency clause:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
 @greeting greet
 ]
 
@@ -131,7 +131,7 @@ Some mistakes die at the first cut:
 
 ## Boundary of ownership
 
-Tokenization recognises directive spelling through the supplied registry, locations and delimiter context. It preserves enough metadata for later placement and availability diagnostics; it does not implement directive semantics or silently skip unsupported forms.
+Tokenization recognises directive spelling through the frontend directive registry, locations and delimiter context. It preserves enough metadata for later placement and availability diagnostics; it does not implement directive semantics or silently skip unsupported forms.
 
 It does **not**:
 

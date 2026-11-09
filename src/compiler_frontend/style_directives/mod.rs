@@ -6,20 +6,17 @@
 //! - `compatibility` keeps template-head compatibility tags and policies out of parser
 //!   branches.
 //! - `builtins` owns frontend-provided directive data in stable diagnostic order.
-//! - `registry` merges frontend and project-builder directives for tokenizer/AST lookup.
+//! - `registry` exposes the frontend-owned directive set for tokenizer/AST lookup.
 //!
 //! WHY:
 //! - The frontend must know the directive set before backend lowering.
-//! - Project builders can register project-specific directives without changing parser code.
-//! - A single merged registry avoids tokenizer/AST drift and keeps diagnostics consistent.
+//! - A single frontend-owned registry avoids tokenizer/AST drift and keeps diagnostics
+//!   consistent.
 //!
 //! Directive ownership policy:
-//! - Frontend built-ins define language/template semantics and generic formatter directives
-//!   such as `$md`.
-//! - Project builders may only register additional project-owned directives such as the HTML
-//!   project's `$html`, `$css`, `$escape_html` and `$code`.
-//! - The frontend always executes directive handlers during parsing/folding, regardless of
-//!   whether the directive itself is frontend-owned or project-owned.
+//! - The frontend owns every template directive, including core template semantics and the
+//!   `$md`, `$html`, `$css`, `$escape_html` and `$code` formatter directives.
+//! - Every builder sees the same directive set.
 
 mod builtins;
 mod compatibility;

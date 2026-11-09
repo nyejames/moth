@@ -14,7 +14,6 @@ use super::core_directives::{
     mark_template_body_whitespace_style_controlled, maybe_parse_structural_helper_directive,
     parse_core_style_directive,
 };
-use super::directive_args::directive_has_arguments;
 use super::handler_directives::apply_handler_style_directive;
 use super::head_expressions::{
     TemplateHeadExpressionContext, handle_template_value_in_template_head,
@@ -1144,15 +1143,17 @@ fn parse_style_directive_from_spec(
     string_table: &mut StringTable,
     path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
 ) -> TemplateHeadResult<bool> {
-    let had_arguments = directive_has_arguments(token_stream);
-    let directive_result = match &spec.kind {
-        StyleDirectiveKind::Core(kind) => parse_core_style_directive(
-            token_stream,
-            build_state,
-            directive_name,
-            *kind,
-            string_table,
-        ),
+    let operand_consumed = match &spec.kind {
+        StyleDirectiveKind::Core(kind) => {
+            parse_core_style_directive(
+                token_stream,
+                build_state,
+                directive_name,
+                *kind,
+                string_table,
+            )?;
+            false
+        }
         StyleDirectiveKind::Handler(handler_spec) => apply_handler_style_directive(
             token_stream,
             context,
@@ -1164,19 +1165,15 @@ fn parse_style_directive_from_spec(
             handler_spec,
             string_table,
             path_fork,
-        ),
+        )?,
     };
 
-    if directive_result.is_ok() {
-        // Any explicit style directive switches the template into style-controlled
-        // whitespace mode. Individual formatters can opt into shared whitespace
-        // passes explicitly via `Formatter` pre/post pass profiles.
-        mark_template_body_whitespace_style_controlled(build_state);
-    }
+    // Any explicit style directive switches the template into style-controlled whitespace mode.
+    // Individual formatters can opt into shared whitespace passes explicitly via `Formatter`
+    // pre/post pass profiles.
+    mark_template_body_whitespace_style_controlled(build_state);
 
-    directive_result?;
-
-    Ok(had_arguments)
+    Ok(operand_consumed)
 }
 
 /// Parses one template-head expression as the owner of its complete fragment.

@@ -5,10 +5,10 @@
 #[$in description:["Current implementation status, coverage and accepted follow-ups for Moth packages and project builders."]]
 #[$in head:[theme_head]]
 
-red #= [$css("inline"): background-color: rgb(239, 112, 112); color: black;]
-pink #= [$css("inline"): background-color: rgb(231, 133, 218); color: black;]
-orange #= [$css("inline"): background-color: rgb(223, 162, 100); color: black;]
-green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
+red #= [$css "inline": background-color: rgb(239, 112, 112); color: black;]
+pink #= [$css "inline": background-color: rgb(231, 133, 218); color: black;]
+orange #= [$css "inline": background-color: rgb(223, 162, 100); color: black;]
+green #= [$css "inline": background-color: rgb(109, 232, 138); color: black;]
 
 #[navbar]
 #[sidebar]

@@ -2,7 +2,7 @@
 
 `$config` is a marker for an input contract, not a replacement for ordinary constants:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     $config
     api_url #String
 ]
@@ -12,7 +12,7 @@ then reports a missing-input error, while an optional input resolves to absence.
 
 `#` marks a compile-time constant binding.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     site_name #= "Moth"
     major_version #I32 = 1
     names #{String} = {"Priya", "Rob"}
@@ -21,7 +21,7 @@ then reports a missing-input error, while an optional input resolves to absence.
 
 ### Declaration forms
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     name #= value
     name #Type = value
 ]

@@ -1054,7 +1054,11 @@ fn get_token_tag(
         // -----------------
 
         if current_char == '(' {
-            return emit_static(stream, TokenTag::OPEN_PARENTHESIS);
+            let attached = !context.has_leading_whitespace(whitespace_before_current);
+            let source = stream.file_id;
+            return stream
+                .emit_open_parenthesis(attached)
+                .map_err(|error| map_token_emit_error(error, source));
         }
 
         if current_char == ')' {

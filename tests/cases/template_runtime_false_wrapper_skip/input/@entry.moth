@@ -1,4 +1,4 @@
-list #= [$before = [:<li class="skipped-item">], $after = [:</li>]:<ul class="skipped-list">[$slot]</ul>]
+list #= [$before [:<li class="skipped-item">], $after [:</li>]:<ul class="skipped-list">[$slot]</ul>]
 
 render |include_child Bool, include_sibling Bool| -> String:
     return [list:["skip-head", if include_child:hidden branch][if include_sibling:visible sibling]]

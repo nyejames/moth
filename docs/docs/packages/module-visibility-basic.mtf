@@ -2,14 +2,14 @@ Declarations are private to their module. An `export:` block in `@mod.moth` or `
 
 ### An internal helper file
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- components/utils.moth
     internal_value #= 42
 ]
 
 ### The child root uses it directly
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- components/@mod.moth
     @utils internal_value
 
@@ -26,7 +26,7 @@ A declaration written directly in `@mod.moth`, `@package.moth` or `@entry.moth` 
 
 ### Other modules need the export block
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- @entry.moth
     @components internal_value
 ]

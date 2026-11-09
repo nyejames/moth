@@ -47,7 +47,6 @@ use crate::compiler_frontend::hir::utils::terminator_targets;
 use crate::compiler_frontend::module_compilation::Module;
 use crate::compiler_frontend::source::line_index::LinePosition;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -138,10 +137,6 @@ impl BackendBuilder for PanickingBackendBuilder {
         _strings: &mut DiagnosticStringBuilder<'_>,
     ) -> Result<(), ProjectConfigError> {
         unreachable!("frontend_surface panics before project-config validation")
-    }
-
-    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
-        unreachable!("frontend_surface is the first backend-builder method")
     }
 
     fn frontend_surface(&self) -> BuilderSurface {
@@ -346,8 +341,7 @@ impl EntryFixture {
         config.project_name = "entry_contract".to_owned();
 
         let builder = HtmlProjectBuilder::new();
-        let style_directives = StyleDirectiveRegistry::merged(&builder.frontend_style_directives())
-            .expect("HTML style directives should merge");
+        let style_directives = StyleDirectiveRegistry::built_ins();
         let mut builder_surface = builder.frontend_surface();
         let mut warning_owner = BoundaryAccumulator::with_root_string_table(StringTable::new());
         let result = compile_project_frontend(

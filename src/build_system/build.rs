@@ -69,7 +69,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceClass;
 
 use crate::compiler_frontend::source::{SourceDatabase, SourceDatabaseBuilder};
-use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::compiler_symbols::CompilerSymbolSet;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -1576,13 +1576,6 @@ pub trait BackendBuilder {
         strings: &mut DiagnosticStringBuilder<'_>,
     ) -> Result<(), ProjectConfigError>;
 
-    /// Project-specific frontend style directives provided by this backend.
-    ///
-    /// Frontend-owned directives are always present in registry construction and cannot be
-    /// overridden by project builders. This hook supplies only project-owned additions for
-    /// tokenization/template parsing.
-    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec>;
-
     /// Builder-provided surface.
     ///
     /// WHAT: returns the complete builder surface this builder exposes, including external
@@ -1981,9 +1974,10 @@ pub(crate) fn build_project<E>(
 
 /// Build the shared Stage 0/bootstrap state used by both CLI builds and the dev server.
 ///
-/// WHAT: merges frontend/project directives, loads `config.moth`, and runs backend-specific
-/// config validation into one reusable setup step. The caller's typed build-config inputs are
-/// carried onto the bootstrap state unchanged.
+/// WHAT: reuses the single compiler-owned directive set, loads `config.moth`, and runs
+/// backend-specific config validation into one reusable setup step. No builder supplies
+/// directive syntax. The caller's typed build-config inputs are carried onto the bootstrap state
+/// unchanged.
 /// WHY: directory builds and the dev server must share one bootstrap path so config/output
 /// behavior does not drift between "build" and "serve" flows, and explicit inputs must ride
 /// the same shared state instead of command-local storage.
@@ -2012,17 +2006,7 @@ pub(crate) fn bootstrap_project_build<E>(
     // see the same set of allowed config keys, external packages, and source-backed packages.
     let frontend_surface = backend.frontend_surface();
 
-    let frontend_style_directives = backend.frontend_style_directives();
-    let style_directives = match StyleDirectiveRegistry::merged(&frontend_style_directives) {
-        Ok(style_directives) => style_directives,
-        Err(error) => {
-            return Err(BootstrapFailure::Prepared {
-                failure: PreparedFailure::from(error),
-                string_table,
-                project_source_builder: project_source_builder.map(Box::new),
-            });
-        }
-    };
+    let style_directives = StyleDirectiveRegistry::built_ins();
     // WHAT: Load and validate project config before compilation begins (Stage 0).
     // WHY: Backends and serving code both depend on the same validated config surface.
     let config_services = ProjectConfigParseServices {

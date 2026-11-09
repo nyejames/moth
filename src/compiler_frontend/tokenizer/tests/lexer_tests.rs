@@ -28,10 +28,7 @@ use crate::compiler_frontend::source::line_index::{LineIndex, line_start_offsets
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
 };
-use crate::compiler_frontend::style_directives::{
-    StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
-    TemplateHeadCompatibility,
-};
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -163,32 +160,6 @@ fn tokenize_source_with_registry(
         source_path,
         TokenizerEntryMode::SourceFile,
         style_directives,
-        &mut string_table,
-        &mut path_fork,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
-    .expect("tokenization should succeed");
-    (lexed, string_table)
-}
-
-fn tokenize_source_with_directives(
-    source: &str,
-    directives: &[StyleDirectiveSpec],
-) -> (LexedSource, StringTable) {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork
-        .try_intern_portable_path("test.moth", &mut string_table)
-        .expect("test path fits");
-    let registry = StyleDirectiveRegistry::merged(directives)
-        .expect("test style directives should merge with core directives");
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let lexed = tokenize(
-        source,
-        source_path,
-        TokenizerEntryMode::SourceFile,
-        &registry,
         &mut string_table,
         &mut path_fork,
         SourceId::COMPILATION_ROOT,
@@ -1733,35 +1704,29 @@ fn rejects_unknown_style_directive_name() {
 }
 
 #[test]
-fn tokenizes_style_directive_with_template_argument() {
-    let (file_tokens, string_table) = tokenize_source("[$code([:prefix]), $md:\nhello\n]");
+fn tokenizes_style_directive_with_template_operand() {
+    let (file_tokens, string_table) = tokenize_source("[$code [:prefix], $md:\nhello\n]");
     let tokens = file_tokens.tokens.as_ref();
 
     let outer_head = find_token_index(tokens, |token| token.tag() == TokenTag::TEMPLATE_HEAD);
-    let children = find_token_index(tokens, |token| {
+    let directive = find_token_index(tokens, |token| {
         token.tag() == TokenTag::STYLE_DIRECTIVE && token_string_is(token, &string_table, "code")
     });
-    let open_paren = find_token_index(tokens, |token| token.tag() == TokenTag::OPEN_PARENTHESIS);
     let child_template = token_refs(tokens)
         .enumerate()
-        .skip(open_paren + 1)
+        .skip(directive + 1)
         .find_map(|(index, token)| (token.tag() == TokenTag::TEMPLATE_HEAD).then_some(index))
-        .expect("expected child template opener");
+        .expect("expected the bare operand to begin a child template");
     let close = token_refs(tokens)
         .enumerate()
         .skip(child_template + 1)
         .find_map(|(index, token)| (token.tag() == TokenTag::TEMPLATE_CLOSE).then_some(index))
-        .expect("expected the child template to close");
-    let close_paren = token_refs(tokens)
-        .enumerate()
-        .skip(close + 1)
-        .find_map(|(index, token)| (token.tag() == TokenTag::CLOSE_PARENTHESIS).then_some(index))
-        .expect("expected ')' after the child template");
+        .expect("expected the operand template to close");
     let comma = token_refs(tokens)
         .enumerate()
-        .skip(close_paren + 1)
+        .skip(close + 1)
         .find_map(|(index, token)| (token.tag() == TokenTag::COMMA).then_some(index))
-        .expect("expected a comma after the child template");
+        .expect("expected a comma after the operand template");
     let markdown = token_refs(tokens)
         .enumerate()
         .skip(comma + 1)
@@ -1772,12 +1737,10 @@ fn tokenizes_style_directive_with_template_argument() {
         })
         .expect("expected the outer head to continue with '$md'");
 
-    assert!(outer_head < children);
-    assert!(children < open_paren);
-    assert!(open_paren < child_template);
+    assert!(outer_head < directive);
+    assert!(directive < child_template);
     assert!(child_template < close);
-    assert!(close < close_paren);
-    assert!(close_paren < comma);
+    assert!(close < comma);
     assert!(comma < markdown);
 }
 
@@ -1919,7 +1882,7 @@ fn rejects_numeric_slot_directive_prefixes() {
 #[test]
 fn code_template_body_keeps_nested_square_brackets_as_literal_text() {
     let (file_tokens, string_table) =
-        tokenize_source("[$code(\"bst\"):\nconcatenated = [string_slice, a_mutable_string]\n]");
+        tokenize_source("[$code \"bst\":\nconcatenated = [string_slice, a_mutable_string]\n]");
     let tokens = file_tokens.tokens.as_ref();
 
     let template_heads = token_refs(tokens)
@@ -2074,15 +2037,8 @@ fn html_template_body_tokenizes_symbol_wrappers_with_general_template_rules() {
 }
 
 #[test]
-fn custom_balanced_directive_uses_general_balanced_mode() {
-    let directives = vec![StyleDirectiveSpec::handler(
-        "highlight",
-        TemplateBodyMode::Balanced,
-        TemplateHeadCompatibility::fully_compatible_meaningful(),
-        StyleDirectiveHandlerSpec::no_op(),
-    )];
-    let (file_tokens, string_table) =
-        tokenize_source_with_directives("[$highlight:\n[data-kind=\"cta\"]\n]", &directives);
+fn balanced_directive_uses_general_balanced_mode() {
+    let (file_tokens, string_table) = tokenize_html_source("[$css:\n[data-kind=\"cta\"]\n]");
     let tokens = file_tokens.tokens.as_ref();
 
     let template_heads = token_refs(tokens)

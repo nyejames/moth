@@ -1,6 +1,6 @@
 Pattern matching inspects choice payloads.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if status is:
         Ready => io.line("ready")
         Waiting => io.line("waiting")
@@ -21,7 +21,7 @@ no whitespace, line break or comment may appear on either side of `::`.
 - Payload captures are immutable arm-local bindings.
 - A valid payload arm covers the complete variant regardless of payload values.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Response ::
         Pending |
             retry_count I32,
@@ -39,7 +39,7 @@ no whitespace, line break or comment may appear on either side of `::`.
 
 Payload captures also work in inline and block single-predicate value matches:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     message = if response is Failed(message) then message else "ok"
 
     message = if response is Failed(message):
@@ -53,7 +53,7 @@ Payload captures also work in inline and block single-predicate value matches:
 
 Direct payload field access is deferred:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     message = response.message
 ]
 
@@ -63,7 +63,7 @@ Wildcard payload captures are not supported.
 
 Named assignment is not match syntax:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Failed(message = text) => io.line(text)
 ]
 

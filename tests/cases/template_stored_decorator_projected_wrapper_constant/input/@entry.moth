@@ -5,7 +5,7 @@ theme #= (
 )
 prefix_alias #= theme.prefix
 
-direct_folded #= [$before = theme.prefix, $after = [$html:</tr>]:[$slot]]
-alias_folded #= [$before = prefix_alias, $after = [$html:</tr>]:[$slot]]
+direct_folded #= [$before theme.prefix, $after [$html:</tr>]:[$slot]]
+alias_folded #= [$before prefix_alias, $after [$html:</tr>]:[$slot]]
 
 [:[direct_folded:[$in tone:background: green;][:constant-direct]][alias_folded:[$in tone:background: green;][:constant-alias]]]

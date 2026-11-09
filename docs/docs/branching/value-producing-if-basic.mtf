@@ -2,19 +2,19 @@ An `if` can choose a value.
 
 The short form fits on one line:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     label = if ready then "ready" else "waiting"
 ]
 
 The inline form also handles option capture:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     label = if maybe_name is |name| then name else "guest"
 ]
 
 Use block form when a branch needs more room:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     label = if ready:
         then "ready"
     else
@@ -24,7 +24,7 @@ Use block form when a branch needs more room:
 
 Block form also inspects a present option:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     label = if maybe_name is |name|:
         then name
     else

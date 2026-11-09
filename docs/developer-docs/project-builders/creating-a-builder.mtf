@@ -23,9 +23,8 @@ sequence parsing, type checking or borrow analysis itself.
 prototype registers source and host packages, selects a profile and exposes
 an opaque project-facade handle. It discards its empty artefact set and
 publishes no files. The `.config(...)` helper, settings and entry accessors,
-custom directive registration, Wasm compilation, artefact/output APIs,
-macros and executable Rust host adapters describe accepted target design,
-not current SDK APIs. See
+Wasm compilation, artefact/output APIs, macros and executable Rust host
+adapters describe accepted target design, not current SDK APIs. See
 @../../docs/progress/packages-and-builders (Packages and Builders Progress)
 and
 @https://github.com/nyejames/moth/blob/lappet-and-packages-work/docs/roadmap/plans/lappet-native-binding-handoff-plan.md (native-binding handoff plan).
@@ -36,7 +35,7 @@ This builder compiles the application's explicit project package facade to
 Wasm. It also makes a Moth source package and a Rust host package available.
 The example package has no output-relative resource strings.
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     use std::path::PathBuf;
 
     use moth::builder::{
@@ -111,7 +110,7 @@ installed builder package locations separate from the application source root.
 This example obtains the package directory relative to the Rust crate that
 contains the builder:
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     use moth::builder::{BuildRequest, build_project};
 
     fn main() -> Result<(), moth::builder::Error> {

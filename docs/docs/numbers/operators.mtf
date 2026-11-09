@@ -1,6 +1,6 @@
 Moth uses word forms for equality and logic:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     same = left is right
     different = left is not right
     ready = has_input and is_valid
@@ -125,7 +125,7 @@ implicitly. An integer operation never falls back to `Dec` on overflow.
 
 These examples show why decimal operations round at their own result scale:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     chain Dec4 = 1 / 3 * 3 -- 0.9999: division rounds before multiplication
     cube Dec2 = 1.07 ^ 3 -- 1.23: power rounds its exact result once
     repeated Dec2 = (1.07 * 1.07) * 1.07 -- 1.22: each multiplication rounds
@@ -182,14 +182,14 @@ override normal precedence.
 Symbolic binary operators require spaces on both sides. Assignment `=` follows
 the same outer-spacing rule but is not a binary operator.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     total = left + right
     count = 1
 ]
 
 These forms are invalid:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- INVALID: missing required spacing
     total=left+right
     count=1
@@ -197,7 +197,7 @@ These forms are invalid:
 
 Compound forms follow the same rule:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     ~count += 1
     ~count //= 2
 ]
@@ -207,7 +207,7 @@ Compound forms follow the same rule:
 The mutable declaration spelling `~=` stays adjacent. It needs whitespace
 before `~` and after `=`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count ~= 1
 ]
 

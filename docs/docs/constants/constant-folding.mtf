@@ -2,7 +2,7 @@
 
 A constant initializer must fully evaluate during AST construction.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     base #I32 = 4
     larger #I32 = base + 2
     label #= [: size [larger]]
@@ -45,7 +45,7 @@ A folded `String` is not always plain text. A file path, and the bare site root 
 `String` that carries a structural anchor rather than characters, because the final URL depends on
 output placement the frontend has not chosen yet.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     logo #= @assets/logo.svg
     image #= [: <img src="[logo]">]
 ]

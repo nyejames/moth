@@ -1,7 +1,7 @@
 A Wire parameter asks the caller to preserve the identity of one named local
 binding. No special marker is written on the declaration or argument.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     read_name |value Wire of String| -> String:
         return value
     ;
@@ -36,7 +36,7 @@ computed value cannot supply Wire identity directly.
 `#=` does not declare a Wire or another runtime binding. A fully folded record
 stored in a named constant is compile-time data, not a runtime type declaration:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     labels #= (
         first = "Priya",
         second = "Rob",

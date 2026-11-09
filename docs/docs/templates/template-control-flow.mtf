@@ -3,7 +3,7 @@ Templates support `if` and `loop` as final head suffixes.
 If the head already contains a value, helper or directive, add a comma before
 the control-flow suffix.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     [if show:
         Visible
     ]
@@ -19,7 +19,7 @@ A template `if` conditionally includes one body. Its selector is either a `Bool`
 condition or an option-present capture. The captured value is scoped to the
 body.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     [if show:
         Visible
     ]
@@ -36,7 +36,7 @@ option produces structural no-output. Template control flow has no `else` or
 For richer decisions in `.moth` code, choose a value with ordinary
 value-producing `if` and then interpolate it:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     maybe_name String? = none
     name = if maybe_name is |present_name| then present_name else "guest"
     greeting = [: Hello, [name]]
@@ -55,7 +55,7 @@ Template loops repeat their body using the ordinary loop-header families:
 - collection loops
 - numeric ranges
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     [loop items by 2 |item, index|:
         [index]: [item]
     ]

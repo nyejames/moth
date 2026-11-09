@@ -1,146 +1,4 @@
 use super::*;
-use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
-
-#[test]
-fn builder_cannot_override_frontend_owned_directive_by_name() {
-    let builder_specs = vec![StyleDirectiveSpec::handler_no_op(
-        "raw",
-        TemplateBodyMode::Normal,
-    )];
-
-    let error = StyleDirectiveRegistry::merged(&builder_specs)
-        .expect_err("overriding a frontend-owned directive should fail");
-
-    assert!(
-        error
-            .message
-            .contains("cannot override frontend-owned directive"),
-        "unexpected error message: {}",
-        error.message
-    );
-}
-
-#[test]
-fn builder_cannot_override_frontend_owned_markdown_directive_by_name() {
-    let builder_specs = vec![StyleDirectiveSpec::handler_no_op(
-        "md",
-        TemplateBodyMode::Normal,
-    )];
-
-    let error = StyleDirectiveRegistry::merged(&builder_specs)
-        .expect_err("overriding a frontend-owned formatter directive should fail");
-
-    assert!(
-        error
-            .message
-            .contains("cannot override frontend-owned directive"),
-        "unexpected error message: {}",
-        error.message
-    );
-}
-
-#[test]
-fn builder_directive_is_added_when_name_is_new() {
-    let builder_specs = vec![StyleDirectiveSpec::handler_no_op(
-        "custom",
-        TemplateBodyMode::Balanced,
-    )];
-    let merged =
-        StyleDirectiveRegistry::merged(&builder_specs).expect("registry merge should succeed");
-    let custom = merged
-        .find("custom")
-        .expect("custom directive should be present after merge");
-
-    assert_eq!(custom.body_mode, TemplateBodyMode::Balanced);
-    assert!(matches!(custom.kind, StyleDirectiveKind::Handler(_)));
-}
-
-#[test]
-fn builder_cannot_register_core_directive_behavior() {
-    let builder_specs = vec![StyleDirectiveSpec::core(
-        "project_core",
-        TemplateBodyMode::Normal,
-        TemplateHeadCompatibility::fully_compatible_meaningful(),
-        CoreStyleDirectiveKind::Fresh,
-    )];
-
-    let error = StyleDirectiveRegistry::merged(&builder_specs)
-        .expect_err("project builders must not register core directive behavior");
-
-    assert!(
-        error
-            .message
-            .contains("cannot be registered as a core directive"),
-        "unexpected error message: {}",
-        error.message
-    );
-}
-
-#[test]
-fn later_project_owned_duplicate_replaces_earlier_entry() {
-    let builder_specs = vec![
-        StyleDirectiveSpec::handler_no_op("brand", TemplateBodyMode::Normal),
-        StyleDirectiveSpec::handler(
-            "brand",
-            TemplateBodyMode::Balanced,
-            TemplateHeadCompatibility::fully_compatible_meaningful(),
-            StyleDirectiveHandlerSpec::new(
-                Some(StyleDirectiveArgumentType::String),
-                StyleDirectiveEffects {
-                    style_id: Some("brand-later"),
-                    ..StyleDirectiveEffects::default()
-                },
-                None,
-            ),
-        ),
-    ];
-
-    let merged =
-        StyleDirectiveRegistry::merged(&builder_specs).expect("registry merge should succeed");
-    let brand = merged
-        .find("brand")
-        .expect("project-owned directive should be present after merge");
-
-    assert_eq!(brand.body_mode, TemplateBodyMode::Balanced);
-
-    let StyleDirectiveKind::Handler(handler) = &brand.kind else {
-        panic!("brand directive should keep handler behavior");
-    };
-
-    assert_eq!(handler.effects.style_id, Some("brand-later"));
-}
-
-#[test]
-fn handler_directive_contract_is_preserved() {
-    let builder_specs = vec![StyleDirectiveSpec::handler(
-        "brand",
-        TemplateBodyMode::Normal,
-        TemplateHeadCompatibility::fully_compatible_meaningful(),
-        StyleDirectiveHandlerSpec::new(
-            Some(StyleDirectiveArgumentType::String),
-            StyleDirectiveEffects {
-                style_id: Some("brand"),
-                ..StyleDirectiveEffects::default()
-            },
-            None,
-        ),
-    )];
-    let merged =
-        StyleDirectiveRegistry::merged(&builder_specs).expect("registry merge should succeed");
-    let brand = merged
-        .find("brand")
-        .expect("brand directive should be present after merge");
-
-    let StyleDirectiveKind::Handler(handler) = &brand.kind else {
-        panic!("brand directive should be registered as handler behavior");
-    };
-
-    assert_eq!(
-        handler.argument_type,
-        Some(StyleDirectiveArgumentType::String)
-    );
-    assert_eq!(handler.effects.style_id, Some("brand"));
-}
 
 #[test]
 fn supported_directives_for_diagnostic_uses_stable_registry_order() {
@@ -148,7 +6,7 @@ fn supported_directives_for_diagnostic_uses_stable_registry_order() {
 
     assert_eq!(
         registry.supported_directives_for_diagnostic(),
-        "'$before', '$after', '$fresh', '$slot', '$in', '$note', '$todo', '$doc', '$raw', '$md'"
+        "'$before', '$after', '$fresh', '$slot', '$in', '$note', '$todo', '$doc', '$raw', '$md', '$html', '$css', '$escape_html', '$code'"
     );
 }
 
@@ -165,26 +23,12 @@ fn frontend_built_ins_have_expected_classification() {
         assert!(matches!(directive.kind, StyleDirectiveKind::Core(_)));
     }
 
-    let markdown = built_ins
-        .find("md")
-        .expect("missing frontend-owned '$md' directive");
-    assert!(matches!(markdown.kind, StyleDirectiveKind::Handler(_)));
-
-    for non_core in ["css", "html", "escape_html"] {
-        assert!(
-            built_ins.find(non_core).is_none(),
-            "non-core directive '{non_core}' should not be compiler built-in"
-        );
+    for handler_directive in ["md", "html", "css", "escape_html", "code"] {
+        let directive = built_ins
+            .find(handler_directive)
+            .unwrap_or_else(|| panic!("missing frontend-owned '${handler_directive}' directive"));
+        assert!(matches!(directive.kind, StyleDirectiveKind::Handler(_)));
     }
-}
-
-#[test]
-fn handler_no_op_defaults_to_fully_compatible_meaningful_head_item() {
-    let no_op = StyleDirectiveSpec::handler_no_op("brand", TemplateBodyMode::Normal);
-    assert_eq!(
-        no_op.head_compatibility,
-        TemplateHeadCompatibility::fully_compatible_meaningful()
-    );
 }
 
 #[test]
@@ -253,7 +97,7 @@ fn frontend_built_in_head_compatibility_profiles_match_contract() {
         );
     }
 
-    for formatter_directive in ["md", "raw"] {
+    for formatter_directive in ["md", "raw", "html", "css", "escape_html", "code"] {
         let directive = built_ins
             .find(formatter_directive)
             .unwrap_or_else(|| panic!("missing '${formatter_directive}' directive"));
@@ -270,41 +114,6 @@ fn frontend_built_in_head_compatibility_profiles_match_contract() {
         assert_eq!(
             directive.head_compatibility.conflict_reason,
             Some(TemplateHeadConflictReason::MultipleFormatters)
-        );
-    }
-}
-
-#[test]
-fn builder_directive_that_can_reject_another_item_must_declare_conflict_reason() {
-    let rejecting_compatibilities = [
-        TemplateHeadCompatibility {
-            presence_tags: TemplateHeadTag::MEANINGFUL_ITEM | TemplateHeadTag::FORMATTER_DIRECTIVE,
-            required_absent_tags: TemplateHeadTag::empty(),
-            blocks_future_tags: TemplateHeadTag::FORMATTER_DIRECTIVE,
-            conflict_reason: None,
-        },
-        TemplateHeadCompatibility {
-            presence_tags: TemplateHeadTag::MEANINGFUL_ITEM,
-            required_absent_tags: TemplateHeadTag::MEANINGFUL_ITEM,
-            blocks_future_tags: TemplateHeadTag::empty(),
-            conflict_reason: None,
-        },
-    ];
-
-    for compatibility in rejecting_compatibilities {
-        let builder_specs = vec![StyleDirectiveSpec::handler(
-            "brand",
-            TemplateBodyMode::Normal,
-            compatibility,
-            StyleDirectiveHandlerSpec::no_op(),
-        )];
-
-        let error = StyleDirectiveRegistry::merged(&builder_specs)
-            .expect_err("a rejecting builder rule without a conflict reason should fail");
-        assert!(
-            error.message.contains("no conflict reason"),
-            "unexpected error message: {}",
-            error.message
         );
     }
 }

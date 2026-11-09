@@ -2,7 +2,7 @@ A conformance declaration states that a type implements one or more traits. Matc
 
 ### Conformance syntax
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Label = |
         text String,
     |
@@ -48,7 +48,7 @@ and @../progress (Progress) for the contract and current support.
 
 ### Multiple traits
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Label must DISPLAY_TEXT, SERIALIZABLE
 ]
 
@@ -56,7 +56,7 @@ and @../progress (Progress) for the contract and current support.
 
 A generic type declared in the same file may declare conformance. The trait requirements use `This`. The source implementation uses the concrete receiver type and lowercase `this`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Box type A = |
         value A,
     |
@@ -74,7 +74,7 @@ A generic type declared in the same file may declare conformance. The trait requ
 
 ### Rejected targets
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Error: builtin types cannot declare user-authored conformance
     I32 must CASTABLE_TO_STRING
 ]

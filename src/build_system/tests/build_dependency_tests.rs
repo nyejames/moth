@@ -723,10 +723,6 @@ impl BackendBuilder for RegisteredJsPackageBuilder {
         surface
     }
 
-    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
-        HtmlProjectBuilder::new().frontend_style_directives()
-    }
-
     fn validate_project_config(
         &self,
         config: &Config,

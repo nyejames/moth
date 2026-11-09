@@ -653,9 +653,6 @@ fn signature_member_error_with_span(
         ExpressionParseError::Diagnostic(diagnostic) => {
             ExpressionParseError::Diagnostic(attach_member_span(diagnostic))
         }
-        ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic) => {
-            ExpressionParseError::TemplateDirectiveEmptyArguments(attach_member_span(diagnostic))
-        }
         ExpressionParseError::NonConstantReferenceInConstant(diagnostic) => {
             ExpressionParseError::NonConstantReferenceInConstant(attach_member_span(diagnostic))
         }

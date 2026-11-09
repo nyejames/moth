@@ -19,7 +19,7 @@ A wider register or scratch value may compute or validate the result. It cannot
 expose a wider semantic type, silently wrap or postpone a required check until
 assignment.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- INVALID: known overflow in I8
     overflow I8 = 127 + 1
 ]
@@ -27,7 +27,7 @@ assignment.
 This known `I8` overflow diagnoses at compile time. Runtime operations use the
 same selected-width check:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     add_i8 |left I8, right I8| -> I8, Error!:
         return left + right
     ;
@@ -37,7 +37,7 @@ same selected-width check:
 
 Negating a signed minimum also fails in its original narrow type:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- INVALID: negating the signed minimum
     minimum #I8 = -128
     negative #I8 = -minimum
@@ -46,7 +46,7 @@ Negating a signed minimum also fails in its original narrow type:
 `negative` diagnoses during compilation. A runtime operand uses the same
 check:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     negate_i8 |value I8| -> I8, Error!:
         return -value
     ;
@@ -61,7 +61,7 @@ or compound write-back forms a separate check.
 Widen the operands before arithmetic when the operation needs a wider domain.
 Casting the result cannot widen an operation that has already completed:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     add_wide |left I8, right I8| -> I16:
         wide_left I16 = cast left
         wide_right I16 = cast right
@@ -97,7 +97,7 @@ Each binary-float operation finishes at its selected precision. In particular,
 `F32` may act as an implementation carrier for an `F16` operation, but cannot
 replace its rounding and finite check:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- INVALID: non-finite result at F16 precision
     too_large F16 = 65504.0 + 65504.0
 ]
@@ -105,7 +105,7 @@ replace its rounding and finite check:
 The constant result exceeds finite `F16` and diagnoses even though `F32` can
 hold the intermediate. Runtime code must check the same boundary:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     double_f16 |value F16| -> F16, Error!:
         return value + value
     ;
@@ -117,7 +117,7 @@ F16 completion also rounds between operations. With concrete `F16` operands,
 `(2048 + 1) - 2048` produces `0`, not `1`, because the first addition rounds
 to `F16`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     large #F16 = 2048
     one #F16 = 1
     constant_round #F16 = (large + one) - large
@@ -125,7 +125,7 @@ to `F16`:
 
 A runtime function must finish the same operations at `F16` precision:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     round_f16 |large F16| -> F16, Error!:
         one F16 = 1
         return (large + one) - large
@@ -143,7 +143,7 @@ correctly-rounded Core Math promise.
 A function with builtin `Error!` as its error slot materialises escaping
 implicit failure as `Error`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     divide |left I32, right I32| -> F64, Error!:
         return left / right
     ;
@@ -164,7 +164,7 @@ Numeric operators remain ordinary source expressions. See
 A `catch` protects the complete selected expression, including arithmetic,
 receivers, arguments, nested calls and cast operands. Parentheses are optional:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     total = left * right + offset catch then 0
 ]
 

@@ -1,6 +1,6 @@
 wrapper #= [:
-    [$before = [:H: ]:[$slot 1]]
-    [$before = [:R: ]:[$slot]]
+    [$before [:H: ]:[$slot 1]]
+    [$before [:R: ]:[$slot]]
 ]
 
 [wrapper:

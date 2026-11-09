@@ -2,7 +2,7 @@ Project-local source-backed packages are scoped `@package.moth` support packages
 
 ### Directory structure
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     project-root/
     ├── config.moth
     ├── @entry.moth
