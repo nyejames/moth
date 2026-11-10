@@ -446,12 +446,20 @@ pub(crate) fn invalid_template_directive_message(
         }
         InvalidTemplateDirectiveReason::DirectiveNotAllowedHere => match name {
             "export" => {
-                "`$export` is only valid in `@mod.moth` or `@package.moth`.".to_owned()
+                "`$export` is only valid in `@mod.moth` or `@package.moth`, on its own line before an eligible public declaration or direct-selection dependency clause.".to_owned()
             }
-            "config" => "`$config` is not allowed in this file.".to_owned(),
+            "config" => {
+                "`$config` is only valid on an explicitly typed top-level compile-time `#` binding."
+                    .to_owned()
+            }
             _ => format!("Directive '{name}' is not allowed here."),
         },
         InvalidTemplateDirectiveReason::UnexpectedArguments => match name {
+            "export" | "config" => {
+                format!(
+                    "`${name}` takes no operand and must occupy its own line. Remove the operand, colon, or parentheses after it."
+                )
+            }
             "slot" => {
                 "`$slot` takes one name or position and at most one compile-time default.\n                 Use `$slot`, `$slot title`, `$slot title = \"Untitled\"`, or `$slot 1`; remove parentheses or a second value.".to_owned()
             }
@@ -506,9 +514,13 @@ pub(crate) fn invalid_template_directive_message(
         InvalidTemplateDirectiveReason::DuplicateModifier => {
             format!("`${name}` is already attached to the next item.")
         }
-        InvalidTemplateDirectiveReason::DanglingModifier => format!(
-            "`${name}` must immediately precede an eligible declaration or dependency clause.\n                 Add an eligible item on the following line, or remove the directive."
-        ),
+        InvalidTemplateDirectiveReason::DanglingModifier => match name {
+            "export" => "`$export` must immediately precede an eligible public declaration or direct-selection dependency clause.\n                 Add an eligible item on the following line, or remove the directive.".to_owned(),
+            "config" => "`$config` must immediately precede an explicitly typed top-level compile-time `#` binding.\n                 Add that binding on the following line, or remove the directive.".to_owned(),
+            _ => format!(
+                "`${name}` must immediately precede an eligible declaration or dependency clause.\n                 Add an eligible item on the following line, or remove the directive."
+            ),
+        },
         InvalidTemplateDirectiveReason::WrongTarget => match name {
             "config" => {
                 "`$config` must modify one explicitly typed top-level compile-time `#` binding."

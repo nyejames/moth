@@ -676,6 +676,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
     let declaration_name = string_table.intern("Card");
     let template_directive = string_table.intern("insert");
     let export_directive = string_table.intern("export");
+    let config_directive = string_table.intern("config");
     let namespace_name = string_table.intern("card");
     let cases = [
         (
@@ -754,8 +755,44 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
                 InvalidTemplateDirectiveReason::DirectiveNotAllowedHere,
                 None,
             ),
-            "`$export` is only valid in `@mod.moth` or `@package.moth`.",
+            "`$export` is only valid in `@mod.moth` or `@package.moth`, on its own line before an eligible public declaration or direct-selection dependency clause.",
             "DirectiveNotAllowedHere",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(config_directive),
+                InvalidTemplateDirectiveReason::DirectiveNotAllowedHere,
+                None,
+            ),
+            "`$config` is only valid on an explicitly typed top-level compile-time `#` binding.",
+            "DirectiveNotAllowedHere",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(export_directive),
+                InvalidTemplateDirectiveReason::UnexpectedArguments,
+                None,
+            ),
+            "`$export` takes no operand and must occupy its own line. Remove the operand, colon, or parentheses after it.",
+            "UnexpectedArguments",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(export_directive),
+                InvalidTemplateDirectiveReason::DanglingModifier,
+                None,
+            ),
+            "`$export` must immediately precede an eligible public declaration or direct-selection dependency clause.",
+            "DanglingModifier",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(config_directive),
+                InvalidTemplateDirectiveReason::DanglingModifier,
+                None,
+            ),
+            "`$config` must immediately precede an explicitly typed top-level compile-time `#` binding.",
+            "DanglingModifier",
         ),
         (
             names_declarations::invalid_type_annotation(
