@@ -87,11 +87,8 @@ Directive spellings do not reserve ordinary identifiers. Names such as `export`,
 The file `config.moth` and the dependency root `@project` retain their separate
 path and package semantics.
 
-**Current support.** `$config` is delivered, and the retired input qualifier no
-longer parses. The shared source-word inventory still reserves `Config` and its
-case-insensitive, leading-underscore shadow names, and the shared name law also
-rejects `config` names in MON. Identifier reclamation is a separate change from the
-directive cutover.
+The shared identifier rules reserve `Config`, including case-insensitive spellings
+and leading-underscore variants. This also applies to MON names.
 
 `import` is not a keyword. `Import` is an ordinary valid PascalCase user name:
 

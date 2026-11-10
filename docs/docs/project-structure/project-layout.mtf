@@ -75,7 +75,7 @@ A directory may contain both an `@mod.moth` normal root and an `@package.moth` s
 
 For the full package contract see @../packages/#project-local-packages (Project-local packages).
 
-### Current scaffold notice
+### Project scaffold
 
 `moth new html` creates a `config.moth` with an explicit valid project name, a root-level `@entry.moth` and a `.gitignore` containing `/_dev` and `/_release`. The generated config is:
 
@@ -94,7 +94,7 @@ Developers own source directories. The builder generates hidden output folders a
 
 ### Builder-neutral frontend versus builder-owned output
 
-The compiler frontend discovers modules, resolves dependencies, checks types, lowers code and validates borrowing. A project builder then decides how compiled modules become real output files. The current user-facing builder is the HTML project builder.
+The compiler frontend discovers modules, resolves dependencies, checks types, lowers code and validates borrowing. A project builder then decides how compiled modules become real output files. The HTML project builder uses this frontend.
 
 This separation lets the same frontend feed other builders. The frontend does not decide which modules produce artefacts. The builder owns that decision.
 

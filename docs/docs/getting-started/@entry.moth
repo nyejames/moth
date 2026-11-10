@@ -22,13 +22,6 @@ init_docs_sidebar()!
     `moth` compiles and tools Moth projects.
     You use it from the command line to create projects, check them, build them and run the hot-reloading dev server.
 
-    **Support notice.** Live config syntax uses grouped parenthesised `project` and
-    `html` records with `$config` input declarations. There are no `$project` or
-    `$html_builder` directives. Direct const inserts in `@entry.moth` supply HTML
-    metadata, and a folder with `@entry.moth` produces a page.
-
-    Other tooling continues rapid development.
-
     If you are running the compiler from the repository instead of an installed `moth` binary, use `cargo run --` before the same commands:
 
     [codeblock, $code "bash":
@@ -58,8 +51,8 @@ init_docs_sidebar()!
 
         [data:
             [$md:`new html`]
-            [: Creates the current HTML project scaffold.]
-            [$md: Accepts an optional path and `--force`. If path is omitted, moth shows the current directory and asks for confirmation before scaffolding there. It then asks for a project name, a .gitignore choice and creates a minimal grouped parenthesised config with an explicit valid name, a root-level `@entry.moth` with direct builder slot metadata and an optional .gitignore. The config keeps the named `project` and `html` records. Use structural `@package.moth` packages under the selected source root for project-local packages.]
+            [: Creates an HTML project.]
+            [$md: Accepts an optional path and `--force`. Creates `config.moth`, `@entry.moth` and optionally `.gitignore`. The project and HTML settings are top-level compile-time constants.]
         ]
 
         [data:
@@ -89,7 +82,7 @@ init_docs_sidebar()!
 ]
 
 #[section, $md:
-    ## Current flags
+    ## Flags
 
     [styled_table:
         [header: [: Flag] [: Applies to] [: Effect] ]
@@ -103,7 +96,7 @@ init_docs_sidebar()!
         [data:
             [$md:`--html-wasm`]
             [: HTML builds]
-            [: Uses the experimental HTML-Wasm backend path. The JavaScript HTML backend currently targets Alpha.]
+            [: Selects the HTML-Wasm backend for an HTML build.]
         ]
 
         [data:
@@ -129,15 +122,13 @@ init_docs_sidebar()!
 #[section, $md:
     ## Create a new HTML project
 
-    The current scaffold creates a project with a minimal grouped parenthesised config and an explicit valid name, a
-    root-level `@entry.moth` and an optional .gitignore. The first build creates the hidden output folders and their manifests.
-    The HTML project builder itself has more rules than this page needs to
-    cover. See @../project-structure (the project structure guide) for page
-    layout, routing, assets, fragments and generated output details.
+    An HTML project keeps settings in `config.moth` and executable page content in `@entry.moth`.
+    The first build creates output folders and manifests. See @../project-structure (Project structure)
+    for routing, assets and output rules.
 
     ### Starter shape
 
-    The named `project` record and its `name` field are optional. Version is optional too:
+    Project and builder settings are ordinary top-level compile-time constants. The `project` and `html` records are optional:
 
     [codeblock, $code "moth":
         project #= (
@@ -156,9 +147,7 @@ init_docs_sidebar()!
         #[$in title:Welcome]
     ]
 
-    `moth new` emits the named config records and an `@entry.moth` with builder slots.
-    Entry eligibility comes from that file's presence, so no `$entry` or `$page`
-    directive is involved.
+    A directory with `@entry.moth` is entry-eligible, including when the file is empty.
 
     Start a new project:
 
@@ -416,39 +405,11 @@ init_docs_sidebar()!
 ]
 
 #[section, $md:
-    ## Warnings and future suggestions
+    ## Warnings
 
-    Warnings are for code that can still compile but deserves attention.
-    Current warnings include things like malformed CSS/HTML template content, naming convention issues and dependency alias case mismatches.
-
-    Moth separates correctness from style pressure.
-    The future `suggest` command will become the pedantic style and cleanup pass: closer to a full Clippy-style assistant for Moth code.
-    Noisy suggestions such as unused variables, unused dependency bindings, unused declarations and more specific style improvements belong there.
-
-    The intended workflow will be:
-
-    [codeblock, $code "bash":
-        moth check .
-        moth suggest .
-        moth fmt .
-    ]
-
-    For now, use `check` and the compiler's normal warnings as the practical baseline.
-]
-
-#[section, $md:
-    ## Planned moth extensions
-
-    `moth` will become the main Moth project tool, not a thin compiler launcher.
-    Planned additions include:
-
-    - a package manager for Moth packages and project dependencies
-    - a formatter for stable project-wide formatting
-    - `suggest`, a pedantic style and cleanup command to use alongside `check`
-    - richer `new` project options, including more complete config templates
-    - stronger project maintenance commands as the build system matures
-
-    The short-term rule is simple: `dev` for fast browser feedback, `check` for correctness and `build` when you want output files.
+    Warnings identify source that can compile but deserves attention, such as naming mismatches
+    and malformed HTML or CSS template content. Use `moth check .` to review them without
+    writing build output.
 ]
 
 #[section:

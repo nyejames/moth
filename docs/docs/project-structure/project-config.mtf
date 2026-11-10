@@ -1,4 +1,4 @@
-**Current support.** The Alpha compiler uses an optional `config.moth` with ordinary grouped `project` and active-builder records such as `html`. These named records remain the accepted configuration design. `$config` marks build-input declarations and replaces only the retired input qualifier spelling. There are no `$project`, `$builder` or `$html_builder` directives. `entry_root` is retired. See @../progress (Progress) for implementation status.
+Project and builder settings are ordinary top-level compile-time constants in an optional `config.moth` at the selected build root. The `project` and selected builder records hold settings. `$config` separately marks typed external inputs those constants can use.
 
 `config.moth` is one self-contained compile-time source at the selected project root. It has no source dependencies, package resolution or authored file-value paths. A nested `config.moth` is inert to an enclosing build.
 

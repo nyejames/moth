@@ -1,12 +1,10 @@
 `$` is the general directive marker. This page covers template-specific meanings.
 For general directive ownership and syntax, see @../directives (Directives).
 
-These template directives are current support. The compiler owns every directive
-and formatter under every builder; `$config` is the only source directive. There is
-no builder extension point for new directives. See
-@../directives (Directives) for their shared rules.
+The compiler owns template directives and formatters. Source modifiers such as
+`$export` and `$config` have separate targets. Builders cannot register directives.
 
-They begin with `$`.
+Template directives begin with `$`.
 
 [codeblock, $code "moth":
     content = [$md:
@@ -30,9 +28,6 @@ Common directives include:
 A slot declaration occupies its head alone. Each `$in` directive fills one named
 slot. See @../templates/#template-slots (Template slots) and
 @../templates/#child-wrappers (Child wrappers) for composition details.
-
-The compiler defines the directive set and executes every formatter. Builders cannot
-add, remove or override directives.
 
 A formatter applies only to the template that declares it. Nested child
 templates choose their own formatter.

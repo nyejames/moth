@@ -1,5 +1,3 @@
-**Current support.** Static `if` is implemented with `$config` input values. `$config` is a marker on an ordinary typed `#` binding.
-
 The compiler must finish a constant before runtime code begins.
 
 [codeblock, $code "moth":
@@ -13,8 +11,7 @@ It cannot use a runtime variable or call a runtime function.
 
 When a constant expression is invalid, the compiler reports it during the build instead of leaving the failure for runtime.
 
-Static Bool `if` specialisation is implemented for ordinary `if` syntax, including
-`$config` input values:
+A compile-time-known `Bool`, including one provided through `$config`, can select an ordinary `if` branch:
 
 [codeblock, $code "moth":
     $config
