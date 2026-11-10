@@ -511,6 +511,8 @@ define_stable_reason_keys! {
         &InvalidTemplateStructureCode::TemplateLoopBodyNotConst => "invalid_template_structure.template_loop_body_not_const",
         &InvalidTemplateStructureCode::TemplateConstLoopExpansionLimitExceeded => "invalid_template_structure.template_const_loop_expansion_limit_exceeded",
         &InvalidTemplateStructureCode::BuilderRootSlotNotRegistered => "invalid_template_structure.builder_root_slot_not_registered",
+        &InvalidTemplateStructureCode::InvalidMarkdownSectionMarker => "invalid_template_structure.invalid_markdown_section_marker",
+        &InvalidTemplateStructureCode::DuplicateMarkdownSectionMarker => "invalid_template_structure.duplicate_markdown_section_marker",
     },
 
     InvalidSignatureMemberReason => {

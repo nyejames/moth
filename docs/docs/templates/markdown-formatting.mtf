@@ -18,16 +18,37 @@ It is intentionally not a full CommonMark implementation.
 - ordered lists: `1.` items
 - links: `@./relative-path (link text)`, `@/site-route (link text)` or `@https://... (link text)`
 - emphasis: `**bold**` and `*italic*`
+- section IDs: `@#id` on a heading, paragraph or list item
 
-### Automatic heading ID rules
+### Explicit section IDs @#explicit-section-ids
 
-A static heading renders an `id` from its complete visible label. Emphasis markers add nothing, inline code contributes its content without backticks and a Moth link contributes its label rather than its target. HTML-sensitive text contributes its visible characters before escaping.
+A bare `@#id` section marker sets the HTML `id` of the heading, paragraph or list item that contains it. Place it at block start or after Markdown whitespace. It is zero-width and adds no visible text. When removal would leave doubled or edge whitespace, one adjacent separator is removed, so `A @#x B` renders `A B`.
 
-A heading with a dynamic expression or child template anywhere in its label is opaque: it renders no `id` and reports no warning. A label with no letters or numeric characters also renders no `id`.
+An ID starts with a Unicode letter and continues with Unicode letters, digits, `_` or `-`. Authored case and Unicode spelling are preserved; there is no lowercasing, slugification, URL escaping or suffix generation. The marker ends at whitespace, the end of its inline block or a star run that closes active emphasis. A marker embedded directly after other text, such as `prefix@#id`, stays literal.
 
-Normalisation lowercases Unicode text, keeps Unicode letters and numeric characters, folds each run of whitespace, `_` and `-` into one `-` and drops other punctuation. It never leaves a leading or trailing `-`. There is no transliteration and no Unicode normalisation, so NFC and NFD spellings of one text can produce different IDs.
+[codeblock, $code "moth":
+    content = [$md:
+        # Release notes @#release-notes
 
-Equal labels produce equal IDs. There are no suffixes, no registry and no diagnostic, so keep linkable labels unique on each page.
+        @#summary A paragraph can own an ID too.
+
+        - Install the package @#install
+    ]
+]
+
+A paragraph containing only a marker has no paragraph element to decorate, so it renders a standalone empty `span`:
+
+[codeblock, $code "moth":
+    content = [$md:
+        @#release
+    ]
+]
+
+Inside a list, a nested item owns its own marker. A marker in item continuation text decorates the outer `<li>`, never a child item or an inner paragraph. A marker followed by a link-label introducer is decided as a link first; an incomplete label keeps the existing literal fallback.
+
+The compiler does not check document-wide uniqueness or resolve fragment targets. Keep IDs unique within the final page. Generic HTML attributes, whole-element links and an `id` template helper are not part of `$md`.
+
+A labelled link is unchanged: `@#getting-started (Getting started)` is a link, not a marker. Marker-like text inside a link label or inline code stays literal. A malformed ID or two markers on one block is a source error. Unmarked headings have no `id`.
 
 [codeblock, $code "moth":
     content = [$md:
@@ -116,7 +137,7 @@ Do not rely on pipe-table text rendering as a table.
 
 Moth template `.mtf` files use an implicit compile-time `$md` template.
 
-Plain `.md` files use the separate raw Markdown content path.
+Plain `.md` files use the separate raw Markdown content path and do not understand `@#id` section markers.
 
 See @../moth-templates (Moth template files) and @../markdown (Plain Markdown) for those file
 contracts.
