@@ -70,9 +70,7 @@ Moth has no accepted primitive-backed nominal wrapper syntax. Such a wrapper
 remains an open design question and any future mechanism would stay separate
 from transparent `as` aliases.
 
-The accepted alias contract includes external package types. The current
-compiler still rejects aliases to external opaque types. See @../progress
-(Progress matrix) for current support.
+Aliases may target externally provided types when those types are valid in type positions.
 
 ### Empty literals and aliases
 
