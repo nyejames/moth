@@ -130,7 +130,7 @@ fn template_loop_composition_formats_body_without_repeating_shared_head_prefix()
         &string_table,
         &expression_builder,
         &const_values,
-        "<h1 id=\"item\">Item</h1>",
+        "<h1>Item</h1>",
     );
     assert_body_node_static_excludes(
         loop_body_node(loop_node, &context),

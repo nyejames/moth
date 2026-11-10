@@ -6,20 +6,28 @@
 //!      one paragraph-grouping path so child-template line rules cannot drift apart.
 
 use super::output::MarkdownOutputBuilder;
-use super::parsing::{
-    join_paragraph_lines, parse_heading_line, parse_list_item_line, trim_atoms,
-    trim_leading_horizontal_whitespace,
+use super::parsing::{join_paragraph_lines, parse_heading_line, parse_list_item_line};
+use super::{
+    MarkdownAtomsRef, MarkdownInlineAtom, MarkdownLine, MarkdownListKind,
+    ParsedMarkdownHeadingLine, ParsedMarkdownMarker,
 };
-use super::{MarkdownInlineAtom, MarkdownLine, MarkdownListKind, ParsedMarkdownHeadingLine};
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterOpaqueKind, FormatterOutputPiece,
 };
 
 /// One inline-rendered unit inside a plain region or a list item.
 enum MarkdownInlineBlock<'a> {
-    Paragraph(Vec<&'a [MarkdownInlineAtom]>),
-    StandaloneInline(&'a [MarkdownInlineAtom]),
+    Paragraph(Vec<MarkdownAtomsRef<'a>>),
+    StandaloneInline(MarkdownAtomsRef<'a>),
     NestedList(Vec<FormatterOutputPiece>),
+}
+
+/// Whether each paragraph owns its marker ID or an enclosing list item collects them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BlockMarkerMode {
+    PerParagraph,
+    CollectForListItem,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,23 +52,23 @@ enum LeadingChildTemplateLine {
 #[derive(Default)]
 struct InlineBlockBuilder<'a> {
     blocks: Vec<MarkdownInlineBlock<'a>>,
-    paragraph_lines: Vec<&'a [MarkdownInlineAtom]>,
+    paragraph_lines: Vec<MarkdownAtomsRef<'a>>,
 }
 
 impl<'a> InlineBlockBuilder<'a> {
-    fn push_line(&mut self, atoms: &'a [MarkdownInlineAtom]) {
+    fn push_line(&mut self, atoms: MarkdownAtomsRef<'a>) {
         match classify_leading_child_template_line(atoms) {
             LeadingChildTemplateLine::Standalone => {
                 self.flush_paragraph();
                 self.blocks.push(MarkdownInlineBlock::StandaloneInline(
-                    trim_leading_horizontal_whitespace(atoms),
+                    atoms.trim_leading_horizontal_whitespace(),
                 ));
             }
 
             LeadingChildTemplateLine::InlineContinuation => {
                 self.flush_paragraph();
                 self.blocks.push(MarkdownInlineBlock::Paragraph(vec![
-                    trim_leading_horizontal_whitespace(atoms),
+                    atoms.trim_leading_horizontal_whitespace(),
                 ]));
             }
 
@@ -90,27 +98,32 @@ impl<'a> InlineBlockBuilder<'a> {
 pub(super) fn render_plain_region(
     lines: &[MarkdownLine],
     default_tag: &str,
-) -> Vec<FormatterOutputPiece> {
+) -> Result<Vec<FormatterOutputPiece>, TemplateError> {
     let mut builder = InlineBlockBuilder::default();
     for line in lines {
-        builder.push_line(&line.atoms);
+        builder.push_line(MarkdownAtomsRef::whole(line));
     }
 
-    render_inline_blocks(builder.finish(), Some(default_tag))
+    let rendered = render_inline_blocks(
+        builder.finish(),
+        Some(default_tag),
+        BlockMarkerMode::PerParagraph,
+    )?;
+    Ok(rendered.pieces)
 }
 
 /// Parses a list block recursively so nested list items keep mixed content in one `<li>`.
 pub(super) fn render_list_block(
     lines: &[MarkdownLine],
     default_tag: &str,
-) -> (Vec<FormatterOutputPiece>, usize) {
+) -> Result<(Vec<FormatterOutputPiece>, usize), TemplateError> {
     struct MarkdownRenderedListSection {
         kind: MarkdownListKind,
-        items: Vec<Vec<FormatterOutputPiece>>,
+        items: Vec<RenderedListItem>,
     }
 
     let Some(first_item) = lines.first().and_then(parse_list_item_line) else {
-        return (Vec::new(), 0);
+        return Ok((Vec::new(), 0));
     };
     let current_indent = first_item.indent_width;
 
@@ -140,7 +153,7 @@ pub(super) fn render_list_block(
                 }
 
                 let (nested_rendered, nested_consumed) =
-                    render_list_block(&lines[consumed_lines..], default_tag);
+                    render_list_block(&lines[consumed_lines..], default_tag)?;
                 if nested_consumed == 0 {
                     break;
                 }
@@ -150,11 +163,11 @@ pub(super) fn render_list_block(
                 continue;
             }
 
-            item_blocks.push_line(trim_atoms(&next_line.atoms));
+            item_blocks.push_line(MarkdownAtomsRef::whole(next_line).trimmed());
             consumed_lines += 1;
         }
 
-        let rendered_item = render_list_item(item_blocks.finish(), default_tag);
+        let rendered_item = render_list_item(item_blocks.finish(), default_tag)?;
 
         // Adjacent items of a different list kind start a new sibling list.
         match sections.last_mut() {
@@ -171,22 +184,32 @@ pub(super) fn render_list_block(
         output.push_raw(section.kind.open_tag());
 
         for item in section.items {
-            output.push_raw("<li>");
-            output.append_pieces(item);
+            output.push_raw("<li");
+            if let Some(marker) = &item.marker {
+                push_id_attribute(&mut output, &marker.id);
+            }
+            output.push_raw(">");
+            output.append_pieces(item.pieces);
             output.push_raw("</li>");
         }
 
         output.push_raw(section.kind.close_tag());
     }
 
-    (output.finish(), consumed_lines)
+    Ok((output.finish(), consumed_lines))
+}
+
+/// Rendered list item content plus the marker that gives the enclosing `<li>` its ID.
+struct RenderedListItem {
+    pieces: Vec<FormatterOutputPiece>,
+    marker: Option<ParsedMarkdownMarker>,
 }
 
 /// Renders one list item. A lone paragraph stays unwrapped so simple items read as `<li>text</li>`.
 fn render_list_item(
     blocks: Vec<MarkdownInlineBlock<'_>>,
     default_tag: &str,
-) -> Vec<FormatterOutputPiece> {
+) -> Result<RenderedListItem, TemplateError> {
     let paragraph_block_count = blocks
         .iter()
         .filter(|block| matches!(block, MarkdownInlineBlock::Paragraph(_)))
@@ -201,66 +224,161 @@ fn render_list_item(
         None
     };
 
-    render_inline_blocks(blocks, paragraph_tag)
+    let rendered =
+        render_inline_blocks(blocks, paragraph_tag, BlockMarkerMode::CollectForListItem)?;
+    ensure_at_most_one_marker(&rendered.markers)?;
+
+    Ok(RenderedListItem {
+        pieces: rendered.pieces,
+        marker: rendered.markers.into_iter().next(),
+    })
 }
 
-/// Renders grouped blocks. `paragraph_tag` wraps paragraphs, while standalone anchor lines
-/// only open `default_tag` lazily when same-line text follows the anchor.
+struct RenderedInlineBlocks {
+    pieces: Vec<FormatterOutputPiece>,
+    markers: Vec<ParsedMarkdownMarker>,
+}
+
+/// Renders grouped blocks. `paragraph_tag` wraps paragraphs; standalone child-anchor lines
+/// stay unwrapped. Per-paragraph mode validates each paragraph's marker and drops the fact;
+/// list-item mode returns the markers so the enclosing `<li>` can own them.
 fn render_inline_blocks(
     blocks: Vec<MarkdownInlineBlock<'_>>,
     paragraph_tag: Option<&str>,
-) -> Vec<FormatterOutputPiece> {
+    marker_mode: BlockMarkerMode,
+) -> Result<RenderedInlineBlocks, TemplateError> {
     let mut output = MarkdownOutputBuilder::default();
+    let mut collected_markers = Vec::new();
 
     for block in blocks {
         match block {
             MarkdownInlineBlock::Paragraph(lines) => {
                 let atoms = join_paragraph_lines(&lines);
-                if let Some(tag) = paragraph_tag {
-                    output.push_raw(&format!("<{tag}>"));
-                }
-                output.append_pieces(super::inline::render_inline_atoms(&atoms));
-                if let Some(tag) = paragraph_tag {
-                    output.push_raw(&format!("</{tag}>"));
+                let rendered = super::inline::render_inline_atoms(atoms.view())?;
+                if marker_mode == BlockMarkerMode::PerParagraph {
+                    ensure_at_most_one_marker(&rendered.markers)?;
+                    append_owned_paragraph(&mut output, rendered, paragraph_tag);
+                } else {
+                    collected_markers.extend(rendered.markers);
+                    append_unowned_paragraph(&mut output, rendered.pieces, paragraph_tag);
                 }
             }
 
             // The grouping pass only emits this form when the line held a child anchor
-            // and no same-line content. It is deliberately unwrapped so a direct child
-            // template never gains a paragraph its author did not write.
+            // and no same-line content; markers count as content, so they cannot appear
+            // here. It is deliberately unwrapped so a direct child template never gains
+            // a paragraph its author did not write.
             MarkdownInlineBlock::StandaloneInline(atoms) => {
-                output.append_pieces(super::inline::render_inline_atoms(atoms));
+                let rendered = super::inline::render_inline_atoms(atoms)?;
+                output.append_pieces(rendered.pieces);
             }
 
             MarkdownInlineBlock::NestedList(pieces) => output.append_pieces(pieces),
         }
     }
 
-    output.finish()
+    Ok(RenderedInlineBlocks {
+        pieces: output.finish(),
+        markers: collected_markers,
+    })
 }
 
-/// Renders a heading with its automatic fragment ID when the whole label is static.
+/// Appends a paragraph that owns its marker. An empty paragraph leaves no element, so an
+/// authored marker emits a standalone empty span instead; otherwise the paragraph carries
+/// the ID and no span is added.
+fn append_owned_paragraph(
+    output: &mut MarkdownOutputBuilder,
+    rendered: super::inline::RenderedInline,
+    paragraph_tag: Option<&str>,
+) {
+    let Some(marker) = rendered.markers.first() else {
+        append_unowned_paragraph(output, rendered.pieces, paragraph_tag);
+        return;
+    };
+
+    if rendered.pieces.is_empty() {
+        push_standalone_span(output, marker);
+        return;
+    }
+
+    if let Some(tag) = paragraph_tag {
+        output.push_raw(&format!("<{tag}"));
+        push_id_attribute(output, &marker.id);
+        output.push_raw(">");
+    }
+    output.append_pieces(rendered.pieces);
+    if let Some(tag) = paragraph_tag {
+        output.push_raw(&format!("</{tag}>"));
+    }
+}
+
+fn append_unowned_paragraph(
+    output: &mut MarkdownOutputBuilder,
+    pieces: Vec<FormatterOutputPiece>,
+    paragraph_tag: Option<&str>,
+) {
+    if let Some(tag) = paragraph_tag {
+        output.push_raw(&format!("<{tag}>"));
+    }
+    output.append_pieces(pieces);
+    if let Some(tag) = paragraph_tag {
+        output.push_raw(&format!("</{tag}>"));
+    }
+}
+
+/// Renders a heading. A marker assigns its ID; there is no automatic ID.
 pub(super) fn render_heading_line(
     output: &mut MarkdownOutputBuilder,
     heading: &ParsedMarkdownHeadingLine<'_>,
-) {
+) -> Result<(), TemplateError> {
     let level = heading.level;
-    let content = super::inline::render_heading_content(heading.content);
+    let content = super::inline::render_inline_atoms(heading.content)?;
+    ensure_at_most_one_marker(&content.markers)?;
 
     output.push_raw(&format!("<h{level}"));
-    if let Some(id) = &content.id {
-        // IDs contain only letters, digits and `-`, so they need no attribute escaping.
-        output.push_raw(" id=\"");
-        output.push_raw(id);
-        output.push_raw("\"");
+    if let Some(marker) = content.markers.first() {
+        push_id_attribute(output, &marker.id);
     }
     output.push_raw(">");
     output.append_pieces(content.pieces);
     output.push_raw(&format!("</h{level}>"));
+    Ok(())
 }
 
-fn classify_leading_child_template_line(atoms: &[MarkdownInlineAtom]) -> LeadingChildTemplateLine {
-    let anchor_index = super::parsing::skip_leading_horizontal_whitespace(atoms);
+/// Writes an escaped ` id="…"` attribute.
+fn push_id_attribute(output: &mut MarkdownOutputBuilder, id: &str) {
+    output.push_raw(" id=\"");
+    output.push_escaped_text(id);
+    output.push_raw("\"");
+}
+
+/// Emits the standalone empty span for an authored marker with no owning element.
+fn push_standalone_span(output: &mut MarkdownOutputBuilder, marker: &ParsedMarkdownMarker) {
+    if marker.span.is_none() {
+        return;
+    }
+
+    output.push_raw("<span");
+    push_id_attribute(output, &marker.id);
+    output.push_raw("></span>");
+}
+
+/// Rejects a second marker on one Markdown-owned block, labelling the first when it has a span.
+pub(super) fn ensure_at_most_one_marker(
+    markers: &[ParsedMarkdownMarker],
+) -> Result<(), TemplateError> {
+    let Some(second) = markers.get(1) else {
+        return Ok(());
+    };
+
+    Err(super::duplicate_section_marker(
+        second.span,
+        markers[0].span,
+    ))
+}
+
+fn classify_leading_child_template_line(atoms: MarkdownAtomsRef<'_>) -> LeadingChildTemplateLine {
+    let anchor_index = atoms.skip_leading_horizontal_whitespace();
 
     let Some(MarkdownInlineAtom::Opaque(anchor)) = atoms.get(anchor_index) else {
         return LeadingChildTemplateLine::None;

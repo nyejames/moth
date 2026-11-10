@@ -2,7 +2,8 @@ Moth template files use a small Markdown subset, not full CommonMark.
 
 ### What works
 
-- Headings with `#`, with automatic IDs from `$md`
+- Headings with `#`, plus explicit `@#id` section IDs; a marker-only paragraph renders a standalone empty `span`
+- Plain `.md` does not use section markers
 - Paragraphs separated by blank lines
 - `*italic*` and `**bold**`
 - Links

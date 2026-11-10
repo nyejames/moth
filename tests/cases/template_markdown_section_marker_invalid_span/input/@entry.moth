@@ -1,0 +1,5 @@
+name #String = "World"
+
+#[$md:
+    Café [name] @#bad/name
+]

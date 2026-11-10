@@ -9,8 +9,9 @@ Moth template files use Moth's `$md` Markdown flavour. This is intentionally sma
 - Unordered lists: `- item`
 - Ordered lists: `1. item`
 - Inline code: paired isolated single backticks on the same line
+- Section IDs: a bare `@#id` marker on a heading, paragraph or list item
 
-Static headings inherit `$md` automatic IDs. See @../templates/#automatic-heading-ids (Automatic heading IDs).
+A heading, paragraph or list item can carry a bare `@#id` marker for an explicit HTML ID. A marker-only paragraph renders a standalone empty `span`, while a labelled `@#id (label)` remains a link. Plain `.md` does not use section markers. See @../templates/#explicit-section-ids (Explicit section IDs).
 
 ### HTML escaping
 

@@ -82,7 +82,7 @@ If a fact is missing, an upstream owner failed. The builder should not open `gre
     ]
 ]
 
-## Document shell and fragments
+## Document shell and fragments @#document-shell-and-fragments
 
 Assembly plans route and document metadata, then builds a shell.
 

@@ -1,5 +1,6 @@
 use super::MarkdownTemplateFormatter;
 use super::{MarkdownInlineAtom, MarkdownLine};
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterAnchorId, FormatterInput, FormatterInputPiece, FormatterOpaqueKind,
     FormatterOpaquePiece, FormatterOutputPiece, FormatterTextPiece,
@@ -7,6 +8,7 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
 use crate::compiler_frontend::ast::templates::styles::markdown::render_markdown_stream;
 use crate::compiler_frontend::ast::templates::template::TemplateFormatter;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
+use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 fn child_anchor(id: usize) -> FormatterOpaquePiece {
@@ -42,7 +44,8 @@ fn split_text_into_lines(content: &str) -> Vec<MarkdownLine> {
 
 fn to_markdown(content: &str, default_tag: &str) -> String {
     let lines = split_text_into_lines(content);
-    let pieces = render_markdown_stream(&lines, default_tag);
+    let pieces = render_markdown_stream(&lines, default_tag)
+        .expect("markdown rendering should not produce a source error");
 
     pieces
         .into_iter()
@@ -54,6 +57,69 @@ fn to_markdown(content: &str, default_tag: &str) -> String {
             },
         })
         .collect()
+}
+
+fn formatter_text_piece_with_source_span(
+    text: &str,
+    start: u32,
+    string_table: &mut StringTable,
+) -> FormatterInputPiece {
+    let length = u32::try_from(text.len()).expect("test text length should fit u32");
+    let local = LocalSpan::exact_inline(start, length)
+        .expect("test source spans should fit inline encoding");
+    FormatterInputPiece::Text(FormatterTextPiece {
+        text: string_table.intern(text),
+        span: Some(SourceSpan::new(SourceId::COMPILATION_ROOT, local)),
+    })
+}
+
+fn spanned_pieces_input(pieces: &[&str], string_table: &mut StringTable) -> FormatterInput {
+    let mut start = 0u32;
+    let input_pieces = pieces
+        .iter()
+        .map(|text| {
+            let piece = formatter_text_piece_with_source_span(text, start, string_table);
+            start += u32::try_from(text.len()).expect("test text length should fit u32");
+            piece
+        })
+        .collect();
+    FormatterInput {
+        pieces: input_pieces,
+    }
+}
+
+fn markdown_output_from_spanned_pieces(pieces: &[&str]) -> String {
+    let mut string_table = StringTable::new();
+    let input = spanned_pieces_input(pieces, &mut string_table);
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
+
+    MarkdownTemplateFormatter
+        .format(input, &mut diagnostic_strings)
+        .expect("markdown formatter should succeed")
+        .output
+        .pieces
+        .into_iter()
+        .map(|piece| match piece {
+            FormatterOutputPiece::Text(text) => text,
+            FormatterOutputPiece::Opaque(anchor) => match anchor.kind {
+                FormatterOpaqueKind::ChildTemplate => format!("{{child:{}}}", anchor.id.0),
+                FormatterOpaqueKind::DynamicExpression => {
+                    format!("{{dynamic:{}}}", anchor.id.0)
+                }
+                FormatterOpaqueKind::SiteRoot => "{site-root}".to_owned(),
+            },
+        })
+        .collect()
+}
+
+fn markdown_error_from_spanned_pieces(pieces: &[&str]) -> TemplateError {
+    let mut string_table = StringTable::new();
+    let input = spanned_pieces_input(pieces, &mut string_table);
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
+
+    MarkdownTemplateFormatter
+        .format(input, &mut diagnostic_strings)
+        .expect_err("markdown content should produce a source error")
 }
 
 fn markdown_formatter_output_from_text_and_anchors(
@@ -129,7 +195,8 @@ fn parses_links_for_all_supported_target_prefixes() {
 #[test]
 fn single_slash_link_emits_site_root_anchor_before_suffix() {
     let lines = split_text_into_lines("@/docs (Docs)");
-    let pieces = render_markdown_stream(&lines, "p");
+    let pieces = render_markdown_stream(&lines, "p")
+        .expect("markdown rendering should not produce a source error");
 
     assert_eq!(pieces.len(), 3);
     assert!(matches!(
@@ -162,7 +229,8 @@ fn non_site_root_link_targets_remain_literal_without_resource_anchors() {
 
     for target in targets {
         let input = format!("@{target} (Target)");
-        let pieces = render_markdown_stream(&split_text_into_lines(&input), "p");
+        let pieces = render_markdown_stream(&split_text_into_lines(&input), "p")
+            .expect("markdown rendering should not produce a source error");
         let rendered = pieces
             .into_iter()
             .map(|piece| match piece {
@@ -255,10 +323,7 @@ fn malformed_candidate_keeps_literal_at_symbol() {
 #[test]
 fn link_parsing_works_inside_heading_and_emphasis() {
     let heading = to_markdown("\n# @/docs (Docs)\n", "p");
-    assert_eq!(
-        heading,
-        "<h1 id=\"docs\"><a href=\"{site-root}docs\">Docs</a></h1>"
-    );
+    assert_eq!(heading, "<h1><a href=\"{site-root}docs\">Docs</a></h1>");
 
     let emphasis = to_markdown("\n*@/docs (Docs)*\n", "p");
     assert_eq!(
@@ -281,7 +346,7 @@ fn escapes_html_characters_inside_heading_and_emphasis_content() {
     let heading = to_markdown("\n# <h1> & \"q\" 'x'\n", "p");
     assert_eq!(
         heading,
-        "<h1 id=\"h1-q-x\">&lt;h1&gt; &amp; &quot;q&quot; &#39;x&#39;</h1>"
+        "<h1>&lt;h1&gt; &amp; &quot;q&quot; &#39;x&#39;</h1>"
     );
 
     let emphasis = to_markdown("\n*<tag>&\"'*\n", "p");
@@ -393,7 +458,7 @@ fn heading_line_breaks_out_of_list_without_blank_line() {
 
     assert_eq!(
         rendered,
-        "<ul><li>first line</li></ul><h2 id=\"heading\">Heading</h2><p>plain paragraph</p>"
+        "<ul><li>first line</li></ul><h2>Heading</h2><p>plain paragraph</p>"
     );
 }
 
@@ -623,7 +688,7 @@ fn code_spans_inside_active_emphasis() {
 #[test]
 fn inline_code_in_headings() {
     let rendered = to_markdown("# `Title`", "p");
-    assert_eq!(rendered, "<h1 id=\"title\"><code>Title</code></h1>");
+    assert_eq!(rendered, "<h1><code>Title</code></h1>");
 }
 
 #[test]
@@ -688,21 +753,18 @@ fn code_spans_do_not_cross_soft_line_boundaries() {
 }
 
 #[test]
-fn static_headings_at_every_level_carry_kebab_case_ids() {
-    let cases = [
-        ("# Hello", "<h1 id=\"hello\">Hello</h1>"),
-        ("## Hello", "<h2 id=\"hello\">Hello</h2>"),
-        ("### Hello", "<h3 id=\"hello\">Hello</h3>"),
-        ("#### Hello", "<h4 id=\"hello\">Hello</h4>"),
-        ("##### Hello", "<h5 id=\"hello\">Hello</h5>"),
-        ("###### Hello", "<h6 id=\"hello\">Hello</h6>"),
-    ];
-
-    for (input, expected) in cases {
+fn headings_without_markers_have_no_fragment_ids() {
+    for (input, expected) in [
+        ("# Hello", "<h1>Hello</h1>"),
+        ("## Hello", "<h2>Hello</h2>"),
+        ("### Hello", "<h3>Hello</h3>"),
+        ("#### Hello", "<h4>Hello</h4>"),
+        ("##### Hello", "<h5>Hello</h5>"),
+        ("###### Hello", "<h6>Hello</h6>"),
+    ] {
         assert_eq!(to_markdown(input, "p"), expected, "input: {input:?}");
     }
 }
-
 #[test]
 fn heading_runs_longer_than_six_hashes_are_plain_text() {
     assert_eq!(to_markdown("####### Seven", "p"), "<p>####### Seven</p>");
@@ -710,78 +772,50 @@ fn heading_runs_longer_than_six_hashes_are_plain_text() {
 }
 
 #[test]
-fn heading_ids_fold_case_and_collapse_separator_runs() {
-    let cases = [
-        ("# Hello World", "hello-world", "Hello World"),
-        ("# HELLO WORLD", "hello-world", "HELLO WORLD"),
-        ("# Hello\tWorld", "hello-world", "Hello\tWorld"),
-        ("# Hello_World", "hello-world", "Hello_World"),
-        ("# Hello-World", "hello-world", "Hello-World"),
-        (
-            "# Hello   __--\t__  World",
-            "hello-world",
-            "Hello   __--\t__  World",
-        ),
-        ("# --Hello--", "hello", "--Hello--"),
-        ("# __Hello__", "hello", "__Hello__"),
-        ("#   Hello   ", "hello", "  Hello   "),
-        ("# What's new?", "whats-new", "What&#39;s new?"),
-        (
-            "# Compiler - architecture",
-            "compiler-architecture",
-            "Compiler - architecture",
-        ),
-    ];
-
-    for (input, id, body) in cases {
-        assert_eq!(
-            to_markdown(input, "p"),
-            format!("<h1 id=\"{id}\">{body}</h1>"),
-            "input: {input:?}"
-        );
-    }
-}
-
-#[test]
-fn heading_without_letters_or_digits_omits_the_id() {
-    assert_eq!(to_markdown("# !!!", "p"), "<h1>!!!</h1>");
-    assert_eq!(to_markdown("# - _ -", "p"), "<h1>- _ -</h1>");
-}
-
-#[test]
-fn heading_ids_keep_unicode_letters_and_digits_without_transliteration() {
+fn heading_markers_assign_the_heading_id_without_changing_the_label() {
     assert_eq!(
-        to_markdown("# Café Ünïcode 42", "p"),
-        "<h1 id=\"café-ünïcode-42\">Café Ünïcode 42</h1>"
+        to_markdown("# Title @#intro", "p"),
+        "<h1 id=\"intro\">Title</h1>"
+    );
+    assert_eq!(
+        to_markdown("# @#intro Title", "p"),
+        "<h1 id=\"intro\">Title</h1>"
+    );
+    assert_eq!(
+        to_markdown("# Title @#intro More", "p"),
+        "<h1 id=\"intro\">Title More</h1>"
     );
 }
 
 #[test]
-fn heading_ids_use_visible_text_of_formatted_spans() {
+fn explicit_section_ids_preserve_authored_case_and_separators() {
     assert_eq!(
-        to_markdown("# **Bold** title", "p"),
-        "<h1 id=\"bold-title\"><strong>Bold</strong> title</h1>"
+        to_markdown("# Title @#Hello-World_42", "p"),
+        "<h1 id=\"Hello-World_42\">Title</h1>"
     );
     assert_eq!(
-        to_markdown("# `String values`", "p"),
-        "<h1 id=\"string-values\"><code>String values</code></h1>"
+        to_markdown("# Title @#Café42", "p"),
+        "<h1 id=\"Café42\">Title</h1>"
+    );
+}
+
+#[test]
+fn heading_markers_work_inside_formatted_spans() {
+    assert_eq!(
+        to_markdown("# **Bold** title @#intro", "p"),
+        "<h1 id=\"intro\"><strong>Bold</strong> title</h1>"
     );
     assert_eq!(
-        to_markdown("# @/docs/other-words (Templates)", "p"),
+        to_markdown("# `String values` @#code", "p"),
+        "<h1 id=\"code\"><code>String values</code></h1>"
+    );
+    assert_eq!(
+        to_markdown("# @/docs/other-words (Templates) @#templates", "p"),
         "<h1 id=\"templates\"><a href=\"{site-root}docs/other-words\">Templates</a></h1>"
     );
 }
-
 #[test]
-fn heading_ids_derive_from_visible_text_before_html_escaping() {
-    assert_eq!(
-        to_markdown("# <a> & b", "p"),
-        "<h1 id=\"a-b\">&lt;a&gt; &amp; b</h1>"
-    );
-}
-
-#[test]
-fn opaque_anchors_anywhere_in_a_heading_omit_the_id() {
+fn opaque_anchors_render_inside_headings_without_an_automatic_id() {
     // A line-leading anchor is a paragraph boundary, not heading content, so every
     // probe below keeps the anchor inside one `#` heading line.
     for (anchor, placeholder) in [
@@ -804,7 +838,7 @@ fn opaque_anchors_anywhere_in_a_heading_omit_the_id() {
             let rendered = markdown_formatter_output_from_text_and_anchors(&pieces);
             assert!(
                 rendered.starts_with("<h1>") && !rendered.contains("id="),
-                "opaque anchor {placeholder} must omit the id: {rendered:?}"
+                "opaque anchor {placeholder} must not create an id: {rendered:?}"
             );
             assert!(
                 rendered.contains(placeholder),
@@ -813,9 +847,8 @@ fn opaque_anchors_anywhere_in_a_heading_omit_the_id() {
         }
     }
 }
-
 #[test]
-fn dynamic_anchor_inside_heading_code_span_omits_the_id() {
+fn dynamic_anchor_inside_heading_code_span_renders_opaque_placeholder() {
     let rendered = markdown_formatter_output_from_text_and_anchors(&[
         (Some("# `foo "), None),
         (None, Some(dynamic_anchor(1))),
@@ -824,20 +857,379 @@ fn dynamic_anchor_inside_heading_code_span_omits_the_id() {
 
     assert_eq!(rendered, "<h1><code>foo {dynamic:1} bar</code></h1>");
 }
-
 #[test]
-fn equal_heading_labels_produce_equal_unsuffixed_ids() {
+fn explicit_section_ids_are_not_suffixed_for_repeated_headings() {
     assert_eq!(
-        to_markdown("# Hello\n\n# Hello", "p"),
-        "<h1 id=\"hello\">Hello</h1><h1 id=\"hello\">Hello</h1>"
+        to_markdown("# Hello @#same\n\n# Hello @#same", "p"),
+        "<h1 id=\"same\">Hello</h1><h1 id=\"same\">Hello</h1>"
     );
 }
-
 #[test]
-fn paragraphs_and_list_items_never_carry_heading_ids() {
+fn plain_paragraphs_and_list_items_without_markers_have_no_ids() {
     assert_eq!(to_markdown("Hello World", "p"), "<p>Hello World</p>");
     assert_eq!(
         to_markdown("- Hello World", "p"),
         "<ul><li>Hello World</li></ul>"
+    );
+}
+fn markdown_error(content: &str) -> TemplateError {
+    render_markdown_stream(&split_text_into_lines(content), "p")
+        .expect_err("markdown content should produce a source error")
+}
+
+#[test]
+fn section_marker_is_zero_width_and_removes_an_adjacent_separator() {
+    assert_eq!(to_markdown("A @#intro B", "p"), "<p id=\"intro\">A B</p>");
+    assert_eq!(
+        to_markdown("@#intro\nHello", "p"),
+        "<p id=\"intro\">Hello</p>"
+    );
+    assert_eq!(
+        to_markdown("Hello @#intro", "p"),
+        "<p id=\"intro\">Hello</p>"
+    );
+}
+
+#[test]
+fn section_marker_requires_whitespace_or_block_start_before_the_at_sign() {
+    assert_eq!(to_markdown("email@#intro", "p"), "<p>email@#intro</p>");
+}
+
+#[test]
+fn section_marker_inside_a_heading_assigns_its_id() {
+    assert_eq!(
+        to_markdown("# Title @#intro", "p"),
+        "<h1 id=\"intro\">Title</h1>"
+    );
+}
+
+#[test]
+fn marker_does_not_leave_empty_emphasis_markup() {
+    assert_eq!(to_markdown("*@#intro*", "p"), "");
+    assert_eq!(to_markdown("A *@#intro*", "p"), "<p id=\"intro\">A</p>");
+    assert_eq!(to_markdown("A **@#intro**", "p"), "<p id=\"intro\">A</p>");
+    assert_eq!(to_markdown("A *@#intro* B", "p"), "<p id=\"intro\">A B</p>");
+    assert_eq!(
+        to_markdown("*A @#intro*", "p"),
+        "<p id=\"intro\"><em>A </em></p>"
+    );
+}
+
+#[test]
+fn marker_candidate_inside_a_link_label_stays_literal() {
+    assert_eq!(
+        to_markdown("@https://example.com (#intro)", "p"),
+        "<p><a href=\"https://example.com\">#intro</a></p>"
+    );
+}
+
+#[test]
+fn invalid_section_marker_reports_a_source_error() {
+    assert!(matches!(
+        markdown_error("A @#intro/name"),
+        TemplateError::Diagnostic(_)
+    ));
+}
+
+#[test]
+fn duplicate_markers_in_one_paragraph_report_a_source_error() {
+    assert!(matches!(
+        markdown_error("A @#one B @#two"),
+        TemplateError::Diagnostic(_)
+    ));
+}
+
+#[test]
+fn duplicate_markers_in_separate_paragraphs_are_allowed() {
+    assert_eq!(
+        to_markdown("A @#intro\n\nB @#intro", "p"),
+        "<p id=\"intro\">A</p><p id=\"intro\">B</p>"
+    );
+}
+
+#[test]
+fn empty_marker_id_before_emphasis_close_reports_a_source_error() {
+    assert!(matches!(
+        markdown_error("*@#*"),
+        TemplateError::Diagnostic(_)
+    ));
+}
+
+#[test]
+fn list_items_use_one_marker_for_the_whole_item() {
+    assert_eq!(
+        to_markdown("- Item @#intro", "p"),
+        "<ul><li id=\"intro\">Item</li></ul>"
+    );
+
+    assert!(matches!(
+        markdown_error("- First @#one\n  continued @#two"),
+        TemplateError::Diagnostic(_)
+    ));
+}
+
+#[test]
+fn headings_reject_duplicate_markers() {
+    assert!(matches!(
+        markdown_error("# Title @#one @#two"),
+        TemplateError::Diagnostic(_)
+    ));
+}
+
+#[test]
+fn empty_paragraph_marker_emits_a_standalone_span_when_authored() {
+    assert_eq!(
+        markdown_output_from_spanned_pieces(&["@#release"]),
+        "<span id=\"release\"></span>"
+    );
+    assert_eq!(
+        markdown_output_from_spanned_pieces(&["@#release\n\nTail"]),
+        "<span id=\"release\"></span><p>Tail</p>"
+    );
+}
+
+#[test]
+fn spanned_marker_on_text_or_headings_prefers_the_owning_element() {
+    assert_eq!(
+        markdown_output_from_spanned_pieces(&["A @#release B"]),
+        "<p id=\"release\">A B</p>"
+    );
+    assert_eq!(
+        markdown_output_from_spanned_pieces(&["# @#release"]),
+        "<h1 id=\"release\"></h1>"
+    );
+}
+
+#[test]
+fn list_item_marker_uses_the_li_even_when_the_item_is_empty() {
+    assert_eq!(
+        markdown_output_from_spanned_pieces(&["- @#release"]),
+        "<ul><li id=\"release\"></li></ul>"
+    );
+}
+
+#[test]
+fn marker_span_falling_back_to_its_piece_still_emits_a_standalone_span() {
+    assert_eq!(
+        markdown_output_from_spanned_pieces(&["@", "#release"]),
+        "<span id=\"release\"></span>"
+    );
+}
+
+#[test]
+fn synthetic_marker_without_a_source_span_emits_no_element() {
+    assert_eq!(to_markdown("@#release", "p"), "");
+}
+
+#[test]
+fn section_marker_syntax_inside_code_spans_or_link_labels_stays_literal() {
+    assert_eq!(
+        to_markdown("# `@#release`", "p"),
+        "<h1><code>@#release</code></h1>"
+    );
+    assert_eq!(
+        to_markdown("@https://example.com (#release)", "p"),
+        "<p><a href=\"https://example.com\">#release</a></p>"
+    );
+}
+
+fn marker_error_byte_range(error: TemplateError) -> (u32, u32) {
+    let TemplateError::Diagnostic(diagnostic) = error else {
+        panic!("marker errors should be source diagnostics");
+    };
+    let span = diagnostic
+        .primary_span()
+        .expect("marker error should carry a primary span");
+    let range = span
+        .local()
+        .inline_range()
+        .expect("test marker spans should use inline encoding");
+    (range.start(), range.end())
+}
+
+#[test]
+fn invalid_marker_primary_span_covers_the_offending_syntax() {
+    assert_eq!(
+        marker_error_byte_range(markdown_error_from_spanned_pieces(&["A @#bad/name"])),
+        (2, 8)
+    );
+    assert_eq!(
+        marker_error_byte_range(markdown_error_from_spanned_pieces(&["A @#1x"])),
+        (2, 5)
+    );
+    assert_eq!(
+        marker_error_byte_range(markdown_error_from_spanned_pieces(&["A @#"])),
+        (2, 4)
+    );
+}
+
+#[test]
+fn duplicate_marker_primary_span_is_the_second_marker() {
+    let error = markdown_error_from_spanned_pieces(&["A @#one B @#two"]);
+    let TemplateError::Diagnostic(diagnostic) = &error else {
+        panic!("duplicate marker should be a source diagnostic");
+    };
+    let earlier = diagnostic
+        .label_span(0)
+        .expect("duplicate marker should label the earlier marker");
+    let earlier_range = earlier
+        .local()
+        .inline_range()
+        .expect("test marker spans should use inline encoding");
+
+    assert_eq!(marker_error_byte_range(error), (10, 15));
+    assert_eq!((earlier_range.start(), earlier_range.end()), (2, 7));
+}
+
+#[test]
+fn marker_span_crossing_pieces_falls_back_to_the_containing_piece() {
+    let error = markdown_error_from_spanned_pieces(&["@", "#bad/"]);
+    assert_eq!(marker_error_byte_range(error), (0, 1));
+}
+
+#[test]
+fn section_marker_inside_emphasis_decorates_the_paragraph() {
+    assert_eq!(
+        to_markdown("A **bold @#inside text**", "p"),
+        "<p id=\"inside\">A <strong>bold text</strong></p>"
+    );
+}
+
+#[test]
+fn section_marker_adjacent_to_an_opaque_child_decorates_the_paragraph() {
+    let rendered = markdown_formatter_output_from_text_and_anchors(&[
+        (Some("A "), None),
+        (None, Some(child_anchor(1))),
+        (Some(" @#inside B"), None),
+    ]);
+
+    assert_eq!(rendered, "<p id=\"inside\">A {child:1} B</p>");
+}
+
+#[test]
+fn ordered_nested_and_continuation_list_items_keep_their_own_ids() {
+    assert_eq!(
+        to_markdown("1. Item @#ordered", "p"),
+        "<ol><li id=\"ordered\">Item</li></ol>"
+    );
+    assert_eq!(
+        to_markdown("- Parent @#parent\n  - Child @#child", "p"),
+        "<ul><li id=\"parent\">Parent<ul><li id=\"child\">Child</li></ul></li></ul>"
+    );
+    assert_eq!(
+        to_markdown("- Item @#item\ncontinuation", "p"),
+        "<ul><li id=\"item\">Item continuation</li></ul>"
+    );
+}
+
+#[test]
+fn every_heading_level_accepts_a_marker_at_start_middle_and_end() {
+    for level in 1..=6usize {
+        let hashes = "#".repeat(level);
+        for (input, expected_label) in [
+            (format!("{hashes} @#sample Title"), "Title"),
+            (format!("{hashes} Start @#sample Middle"), "Start Middle"),
+            (format!("{hashes} Title @#sample"), "Title"),
+        ] {
+            assert_eq!(
+                to_markdown(&input, "p"),
+                format!("<h{level} id=\"sample\">{expected_label}</h{level}>"),
+                "input: {input:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn marker_only_blocks_stay_separate_before_after_and_between_other_blocks() {
+    assert_eq!(
+        markdown_output_from_spanned_pieces(&["@#before\n# Heading\n@#after"]),
+        "<span id=\"before\"></span><h1>Heading</h1><span id=\"after\"></span>"
+    );
+    assert_eq!(
+        markdown_output_from_spanned_pieces(&["Text\n\n@#middle\n\nMore"]),
+        "<p>Text</p><span id=\"middle\"></span><p>More</p>"
+    );
+}
+
+#[test]
+fn labelled_fragment_links_accept_one_wrapped_separator_newline() {
+    assert_eq!(
+        to_markdown("See @#intro \t\n (Intro)", "p"),
+        "<p>See <a href=\"#intro\">Intro</a></p>"
+    );
+}
+
+#[test]
+fn marker_without_a_valid_terminator_reports_a_source_error() {
+    assert!(matches!(
+        markdown_error("A @#intro* B"),
+        TemplateError::Diagnostic(_)
+    ));
+}
+
+#[test]
+fn marker_diagnostic_byte_mapping_keeps_non_ascii_prefixes() {
+    assert_eq!(
+        marker_error_byte_range(markdown_error_from_spanned_pieces(&["Café @#bad/name"])),
+        (6, 12)
+    );
+}
+
+#[test]
+fn list_item_marker_never_migrates_to_a_following_paragraph() {
+    assert_eq!(
+        to_markdown("- First @#item\n\n  Second @#second", "p"),
+        "<ul><li id=\"item\">First</li></ul><p id=\"second\">  Second</p>"
+    );
+}
+
+#[test]
+fn list_item_marker_decorates_the_li_not_an_inner_paragraph() {
+    let rendered = markdown_formatter_output_from_text_and_anchors(&[
+        (Some("- "), None),
+        (None, Some(child_anchor(1))),
+        (Some("\n  text @#item"), None),
+    ]);
+
+    assert_eq!(
+        rendered,
+        "<ul><li id=\"item\">{child:1}<p>text</p></li></ul>"
+    );
+}
+
+#[test]
+fn labelled_link_accepts_one_soft_newline_separator() {
+    for separator in ["\n", "\r\n", "\r"] {
+        let input = format!("See @#intro \t{separator} (Introduction)");
+        assert_eq!(
+            to_markdown(&input, "p"),
+            "<p>See <a href=\"#intro\">Introduction</a></p>",
+            "separator {separator:?}"
+        );
+    }
+}
+
+#[test]
+fn marker_like_target_with_empty_or_unclosed_label_stays_literal() {
+    assert_eq!(to_markdown("@#intro ()", "p"), "<p>@#intro ()</p>");
+    assert_eq!(to_markdown("@#intro (Intro", "p"), "<p>@#intro (Intro</p>");
+}
+
+#[test]
+fn marker_rejects_empty_or_nonletter_starting_ids() {
+    for input in ["A @# bad", "A @#_id", "A @#-id", "A @#1id"] {
+        assert!(
+            matches!(markdown_error(input), TemplateError::Diagnostic(_)),
+            "input should be rejected: {input:?}"
+        );
+    }
+}
+
+#[test]
+fn bare_non_fragment_url_without_a_label_stays_literal() {
+    assert_eq!(
+        to_markdown("Visit @https://example.com", "p"),
+        "<p>Visit @https://example.com</p>"
     );
 }
