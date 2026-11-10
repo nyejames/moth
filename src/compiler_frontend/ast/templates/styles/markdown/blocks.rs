@@ -352,12 +352,8 @@ fn push_id_attribute(output: &mut MarkdownOutputBuilder, id: &str) {
     output.push_raw("\"");
 }
 
-/// Emits the standalone empty span for an authored marker with no owning element.
+/// Emits the standalone empty span for a parsed marker with no owning element.
 fn push_standalone_span(output: &mut MarkdownOutputBuilder, marker: &ParsedMarkdownMarker) {
-    if marker.span.is_none() {
-        return;
-    }
-
     output.push_raw("<span");
     push_id_attribute(output, &marker.id);
     output.push_raw("></span>");

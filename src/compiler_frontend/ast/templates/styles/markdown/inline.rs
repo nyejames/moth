@@ -8,7 +8,7 @@
 //!      The block layer owns wrapper elements and applies any marker ID to them.
 
 use super::inline_code::{ParsedInlineCodeSpan, try_parse_inline_code_span_at_atoms};
-use super::parsing::try_parse_reference_at_atoms;
+use super::parsing::{consume_soft_newline, try_parse_reference_at_atoms};
 use super::{
     MarkdownAtomsRef, MarkdownInlineAtom, MarkdownOutputBuilder, ParsedMarkdownLink,
     ParsedMarkdownMarker, ParsedMarkdownReference, atom_char,
@@ -99,11 +99,12 @@ impl InlineRenderer {
                 MarkdownInlineAtom::Char('\n' | '\r') => {
                     self.literalize_pending_stars();
                     // Soft line boundaries render as one space but remain newline atoms
-                    // so inline parsing can apply each construct's newline rule.
+                    // so inline parsing can apply each construct's newline rule. CRLF is
+                    // one logical boundary even though the splitter retains both atoms.
                     self.output.push_escaped_char(' ');
                     self.last_was_separator = true;
                     prev_whitespace = true;
-                    atom_index += 1;
+                    atom_index = consume_soft_newline(&atoms, atom_index);
                 }
 
                 MarkdownInlineAtom::Char('*') => {
@@ -191,7 +192,7 @@ impl InlineRenderer {
 
                         ParsedMarkdownReference::Marker(marker) => {
                             let next_index = atom_index + marker.consumed_atoms;
-                            atom_index = self.consume_marker(&marker, atoms, next_index);
+                            atom_index = self.consume_marker(marker, atoms, next_index);
                         }
 
                         ParsedMarkdownReference::InvalidMarker { span } => {
@@ -225,15 +226,11 @@ impl InlineRenderer {
     /// removed; between two separators one is removed so `A @#x B` becomes `A B`.
     fn consume_marker(
         &mut self,
-        marker: &ParsedMarkdownMarker,
+        marker: ParsedMarkdownMarker,
         atoms: MarkdownAtomsRef<'_>,
         next_index: usize,
     ) -> usize {
-        self.markers.push(ParsedMarkdownMarker {
-            id: marker.id.clone(),
-            span: marker.span,
-            consumed_atoms: marker.consumed_atoms,
-        });
+        self.markers.push(marker);
 
         let at_block_start = !self.has_visible_content;
         let next_is_separator = is_block_separator(atom_char(&atoms, next_index));
@@ -246,13 +243,20 @@ impl InlineRenderer {
                 return atoms.len();
             }
             if next_is_separator {
-                return next_index + 1;
+                return consume_soft_newline(&atoms, next_index);
             }
             return next_index;
         }
 
+        // A marker directly before a closing emphasis delimiter lets that delimiter trim
+        // the redundant separator before the zero-width marker.
+        if matches!(atom_char(&atoms, next_index), Some('*')) && self.emphasis_strength.is_some() {
+            self.output.trim_trailing_horizontal_whitespace();
+            return next_index;
+        }
+
         if self.last_was_separator && next_is_separator {
-            return next_index + 1;
+            return consume_soft_newline(&atoms, next_index);
         }
 
         next_index

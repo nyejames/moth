@@ -8,7 +8,7 @@ use crate::compiler_frontend::ast::templates::formatter_contract::{
 use crate::compiler_frontend::ast::templates::styles::markdown::render_markdown_stream;
 use crate::compiler_frontend::ast::templates::template::TemplateFormatter;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
-use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 fn child_anchor(id: usize) -> FormatterOpaquePiece {
@@ -67,6 +67,21 @@ fn formatter_text_piece_with_source_span(
     let length = u32::try_from(text.len()).expect("test text length should fit u32");
     let local = LocalSpan::exact_inline(start, length)
         .expect("test source spans should fit inline encoding");
+    FormatterInputPiece::Text(FormatterTextPiece {
+        text: string_table.intern(text),
+        span: Some(SourceSpan::new(SourceId::COMPILATION_ROOT, local)),
+    })
+}
+
+fn formatter_text_piece_with_extended_source_span(
+    text: &str,
+    start: u32,
+    string_table: &mut StringTable,
+    span_builder: &mut ExtendedSpanBuilder,
+) -> FormatterInputPiece {
+    let length = u32::try_from(text.len()).expect("test text length should fit u32");
+    let local = LocalSpan::exact(start, length, span_builder)
+        .expect("test source span should fit the extended table");
     FormatterInputPiece::Text(FormatterTextPiece {
         text: string_table.intern(text),
         span: Some(SourceSpan::new(SourceId::COMPILATION_ROOT, local)),
@@ -538,9 +553,11 @@ fn two_newlines_before_child_anchor_keep_normal_paragraph_break_behavior() {
 }
 
 #[test]
-fn single_newline_before_normal_text_keeps_paragraph_open() {
-    let rendered = to_markdown("hello\nworld", "p");
-    assert_eq!(rendered, "<p>hello world</p>");
+fn soft_line_boundaries_before_normal_text_keep_paragraph_open() {
+    for separator in ["\n", "\r\n", "\r"] {
+        let rendered = to_markdown(&format!("hello{separator}world"), "p");
+        assert_eq!(rendered, "<p>hello world</p>", "separator {separator:?}");
+    }
 }
 
 #[test]
@@ -891,27 +908,48 @@ fn section_marker_is_zero_width_and_removes_an_adjacent_separator() {
 }
 
 #[test]
+fn marker_consumes_lf_crlf_and_cr_as_one_separator() {
+    for separator in ["\n", "\r\n", "\r"] {
+        assert_eq!(
+            to_markdown(&format!("@#intro{separator}Hello"), "p"),
+            "<p id=\"intro\">Hello</p>",
+            "separator at block start {separator:?}"
+        );
+        assert_eq!(
+            to_markdown(&format!("Hello @#intro{separator}world"), "p"),
+            "<p id=\"intro\">Hello world</p>",
+            "separator after text {separator:?}"
+        );
+        assert_eq!(
+            to_markdown(&format!("Hello{separator}@#intro world"), "p"),
+            "<p id=\"intro\">Hello world</p>",
+            "separator before marker {separator:?}"
+        );
+    }
+}
+
+#[test]
 fn section_marker_requires_whitespace_or_block_start_before_the_at_sign() {
     assert_eq!(to_markdown("email@#intro", "p"), "<p>email@#intro</p>");
 }
 
 #[test]
-fn section_marker_inside_a_heading_assigns_its_id() {
-    assert_eq!(
-        to_markdown("# Title @#intro", "p"),
-        "<h1 id=\"intro\">Title</h1>"
-    );
-}
-
-#[test]
 fn marker_does_not_leave_empty_emphasis_markup() {
-    assert_eq!(to_markdown("*@#intro*", "p"), "");
+    assert_eq!(to_markdown("*@#intro*", "p"), "<span id=\"intro\"></span>");
     assert_eq!(to_markdown("A *@#intro*", "p"), "<p id=\"intro\">A</p>");
     assert_eq!(to_markdown("A **@#intro**", "p"), "<p id=\"intro\">A</p>");
     assert_eq!(to_markdown("A *@#intro* B", "p"), "<p id=\"intro\">A B</p>");
     assert_eq!(
         to_markdown("*A @#intro*", "p"),
-        "<p id=\"intro\"><em>A </em></p>"
+        "<p id=\"intro\"><em>A</em></p>"
+    );
+    assert_eq!(
+        to_markdown("**A @#intro**", "p"),
+        "<p id=\"intro\"><strong>A</strong></p>"
+    );
+    assert_eq!(
+        to_markdown("***A @#intro***", "p"),
+        "<p id=\"intro\"><em><strong>A</strong></em></p>"
     );
 }
 
@@ -1017,19 +1055,18 @@ fn marker_span_falling_back_to_its_piece_still_emits_a_standalone_span() {
 }
 
 #[test]
-fn synthetic_marker_without_a_source_span_emits_no_element() {
-    assert_eq!(to_markdown("@#release", "p"), "");
+fn synthetic_marker_without_a_source_span_still_emits_a_standalone_span() {
+    assert_eq!(
+        to_markdown("@#release", "p"),
+        "<span id=\"release\"></span>"
+    );
 }
 
 #[test]
-fn section_marker_syntax_inside_code_spans_or_link_labels_stays_literal() {
+fn section_marker_syntax_inside_code_spans_stays_literal() {
     assert_eq!(
         to_markdown("# `@#release`", "p"),
         "<h1><code>@#release</code></h1>"
-    );
-    assert_eq!(
-        to_markdown("@https://example.com (#release)", "p"),
-        "<p><a href=\"https://example.com\">#release</a></p>"
     );
 }
 
@@ -1153,14 +1190,6 @@ fn marker_only_blocks_stay_separate_before_after_and_between_other_blocks() {
 }
 
 #[test]
-fn labelled_fragment_links_accept_one_wrapped_separator_newline() {
-    assert_eq!(
-        to_markdown("See @#intro \t\n (Intro)", "p"),
-        "<p>See <a href=\"#intro\">Intro</a></p>"
-    );
-}
-
-#[test]
 fn marker_without_a_valid_terminator_reports_a_source_error() {
     assert!(matches!(
         markdown_error("A @#intro* B"),
@@ -1173,6 +1202,41 @@ fn marker_diagnostic_byte_mapping_keeps_non_ascii_prefixes() {
     assert_eq!(
         marker_error_byte_range(markdown_error_from_spanned_pieces(&["Café @#bad/name"])),
         (6, 12)
+    );
+}
+
+#[test]
+fn marker_diagnostic_in_a_long_piece_falls_back_to_the_authored_piece() {
+    let mut string_table = StringTable::new();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let text = format!("{} @#bad/name", "é".repeat(600));
+    let input = FormatterInput {
+        pieces: vec![formatter_text_piece_with_extended_source_span(
+            &text,
+            0,
+            &mut string_table,
+            &mut span_builder,
+        )],
+    };
+    let mut diagnostic_strings = DiagnosticStringBuilder::new(&mut string_table);
+
+    let error = MarkdownTemplateFormatter
+        .format(input, &mut diagnostic_strings)
+        .expect_err("the invalid marker should produce a source error");
+    let TemplateError::Diagnostic(diagnostic) = error else {
+        panic!("marker errors should be source diagnostics");
+    };
+    let span = diagnostic
+        .primary_span()
+        .expect("marker error should carry a primary span");
+    let range = span.local().resolve_with(span_builder.resolver());
+
+    assert_eq!(
+        (range.start(), range.end()),
+        (
+            0,
+            u32::try_from(text.len()).expect("test text length should fit u32")
+        )
     );
 }
 

@@ -293,7 +293,7 @@ fn scan_reference_candidate(
 }
 
 /// Consumes one LF, CRLF or CR separator and returns the atom after it.
-fn consume_soft_newline(atoms: &[MarkdownInlineAtom], index: usize) -> usize {
+pub(super) fn consume_soft_newline(atoms: &[MarkdownInlineAtom], index: usize) -> usize {
     if atom_char(atoms, index) == Some('\r') && atom_char(atoms, index + 1) == Some('\n') {
         index + 2
     } else {
