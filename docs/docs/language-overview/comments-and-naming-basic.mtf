@@ -29,6 +29,6 @@ Use `PascalCase` for named types:
 Clear names beat short names. `player_score` is easier to understand than
 `ps`, especially when the code grows.
 
-`Config` and its case-insensitive, leading-underscore variants are reserved.
-Directive spellings such as `export` and `config` do not reserve ordinary
-identifiers by themselves.
+`Config` and spellings differing only by case or leading underscores
+are reserved by the shared naming rules. `export` is an ordinary identifier
+even though `$export` is a compiler directive.
