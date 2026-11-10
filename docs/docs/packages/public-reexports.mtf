@@ -32,7 +32,7 @@ The provider path and first selected name must begin on the same physical line. 
 
 Without a comma, a newline ends the clause. A trailing comma is invalid because another selected name is required.
 
-Re-exports require a nonempty list of flat, explicit selections. Whole namespaces, namespace aliases, nested selections, wildcard exports and export lists are unsupported. A function or receiver method cannot be re-exported by inventing a name independent of an existing selected binding. Receiver methods remain attached to their receiver type.
+Re-exports require a nonempty list of flat, explicit selections. Whole namespaces, namespace aliases, nested selections, wildcard exports and export lists are unsupported. Receiver methods remain attached to their receiver type and cannot be re-exported as separate selected names.
 
 ### Public identity and validation
 

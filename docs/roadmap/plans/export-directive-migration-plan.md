@@ -5,7 +5,7 @@
 - Status: ACTIVE on `feature/export-directive`.
 - Current slice: 0 - confirm the branch baseline and inspect the owning parser, directive and diagnostic paths.
 - Blockers: None. Source modifiers, facade roles and public-interface construction are delivered.
-- Next action: Implement the slices below on this branch. Retire this plan in the completing implementation commit.
+- Next action: Implement the parser and diagnostic changes, migrate executable sources and validate the prepared docs. Retire this plan in the completing implementation commit.
 
 ## Goal
 
@@ -106,7 +106,9 @@ Also fix stale `export:` recommendations in other diagnostic renderers, includin
 
 ### 4. Migrate, test and validate
 
-Convert all first-party Moth `export:` sites in packages, examples, scenarios, scaffolds and docs to per-item `$export`, preserving public names and private declarations. Group related selected names into one re-export clause where already supported. Do not reorganise module topology just to reduce lines.
+The final-surface language references, basic guides, cheatsheet and compiler/build design authorities have been updated ahead of implementation on this branch. Recheck them after the compiler lands, but avoid a second wholesale rewrite. Keep the progress matrix truthful to implementation status until validation passes.
+
+Convert all remaining first-party Moth `export:` sites in packages, examples, scenarios and scaffolds to per-item `$export`, preserving public names and private declarations. Group related selected names into one re-export clause where already supported. Do not reorganise module topology just to reduce lines.
 
 Update the canonical public API, re-export, module-root and directive pages first. Follow with the cheatsheet, reserved-name list, package references, progress matrices, syntax highlighting and any old examples or diagnostic help. Remove transitional references to `export:` and future undecided `$export` forms. Keep JavaScript syntax unchanged.
 

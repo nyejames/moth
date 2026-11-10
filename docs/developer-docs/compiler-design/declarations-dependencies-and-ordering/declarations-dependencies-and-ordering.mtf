@@ -13,7 +13,7 @@ From located tokens, syntax preparation extracts **shells**:
 - const-template, entry-root body and trait-incompatibility shells
 - entry-root activity and fragment-placement metadata
 - structural provider references and structural file references for the graph
-- source configuration-contract shells and retained `$config` directive metadata
+- retained source directives, `$config` input contracts and per-item `$export` visibility
 - local declaration-ordering hints
 - source locations and remap information
 
@@ -69,15 +69,13 @@ A dependency-bound declaration is never a node in the consumer's local declarati
     ]
 ]
 
-*A dependency-bound declaration never becomes a node in the consumer's local graph. Copying provider declarations into every consumer would destroy identity and multiply the work.*
-
 ## Binding retained dependencies
 
 `PreparedHeaderSyntax` exists **before** providers compile. Dependency shells wait with their source locations intact.
 
 In the walkthrough both files live in one directory-scoped module, so `greeting.moth` is owned source rather than a separate provider. The module compiles once and the retained `@greeting` clause binds inside it. Provider-first scheduling is for the other case, where a dependency resolves to a different module or package.
 
-Either way, **interface binding** resolves retained dependency shells against a finished public interface:
+**Dependency binding** resolves each retained clause against its permitted source: same-module helper declarations or an external provider's finished public interface.
 
 - stable bound declaration identities
 - bound canonical type and folded-value facts
@@ -146,6 +144,12 @@ Final prose and rendering of diagnostics wait for the diagnostics article. Here 
 - **Current implementation:** header and dependency progress rows.
 - **Delivered:** a `$config` source modifier attaches to one typed compile-time binding, and the declaration shell retains the single contract fact the input stage consumes. Canonical module compilation, dependency binding and typed project values already landed. Use the progress matrix for remaining partial coverage.
 - **Deferred or outside scope:** this page does not teach body type checking.
+
+## Compiler references
+
+- @https://github.com/nyejames/moth/blob/main/src/compiler_frontend/headers/file_parser.rs (Source directive attachment and header walk)
+- @https://github.com/nyejames/moth/blob/main/src/compiler_frontend/headers/file_dependency_clauses.rs (Retained dependency shells)
+- @https://github.com/nyejames/moth/blob/main/src/compiler_frontend/headers/public_exports.rs (Public surface collection and re-export resolution)
 
 ## Exit state
 
