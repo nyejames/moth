@@ -23,6 +23,12 @@ pub(super) fn parse_heading_line(line: &MarkdownLine) -> Option<ParsedMarkdownHe
         return None;
     }
 
+    // The documented flavour stops at `h6`. A longer run is ordinary paragraph text,
+    // never an `h7` element.
+    if level > 6 {
+        return None;
+    }
+
     let separator = atom_char(&line.atoms, index)?;
     if !separator.is_whitespace() {
         return None;

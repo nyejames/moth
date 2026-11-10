@@ -704,6 +704,12 @@ fn static_headings_at_every_level_carry_kebab_case_ids() {
 }
 
 #[test]
+fn heading_runs_longer_than_six_hashes_are_plain_text() {
+    assert_eq!(to_markdown("####### Seven", "p"), "<p>####### Seven</p>");
+    assert_eq!(to_markdown("######## Eight", "p"), "<p>######## Eight</p>");
+}
+
+#[test]
 fn heading_ids_fold_case_and_collapse_separator_runs() {
     let cases = [
         ("# Hello World", "hello-world", "Hello World"),

@@ -96,7 +96,7 @@ pub(super) fn render_plain_region(
         builder.push_line(&line.atoms);
     }
 
-    render_inline_blocks(builder.finish(), default_tag, Some(default_tag))
+    render_inline_blocks(builder.finish(), Some(default_tag))
 }
 
 /// Parses a list block recursively so nested list items keep mixed content in one `<li>`.
@@ -201,14 +201,13 @@ fn render_list_item(
         None
     };
 
-    render_inline_blocks(blocks, default_tag, paragraph_tag)
+    render_inline_blocks(blocks, paragraph_tag)
 }
 
 /// Renders grouped blocks. `paragraph_tag` wraps paragraphs, while standalone anchor lines
 /// only open `default_tag` lazily when same-line text follows the anchor.
 fn render_inline_blocks(
     blocks: Vec<MarkdownInlineBlock<'_>>,
-    default_tag: &str,
     paragraph_tag: Option<&str>,
 ) -> Vec<FormatterOutputPiece> {
     let mut output = MarkdownOutputBuilder::default();
@@ -217,19 +216,20 @@ fn render_inline_blocks(
         match block {
             MarkdownInlineBlock::Paragraph(lines) => {
                 let atoms = join_paragraph_lines(&lines);
-                output.append_pieces(super::inline::render_inline_atoms(
-                    &atoms,
-                    paragraph_tag,
-                    paragraph_tag.is_some(),
-                ));
+                if let Some(tag) = paragraph_tag {
+                    output.push_raw(&format!("<{tag}>"));
+                }
+                output.append_pieces(super::inline::render_inline_atoms(&atoms));
+                if let Some(tag) = paragraph_tag {
+                    output.push_raw(&format!("</{tag}>"));
+                }
             }
 
+            // The grouping pass only emits this form when the line held a child anchor
+            // and no same-line content. It is deliberately unwrapped so a direct child
+            // template never gains a paragraph its author did not write.
             MarkdownInlineBlock::StandaloneInline(atoms) => {
-                output.append_pieces(super::inline::render_inline_atoms(
-                    atoms,
-                    Some(default_tag),
-                    false,
-                ));
+                output.append_pieces(super::inline::render_inline_atoms(atoms));
             }
 
             MarkdownInlineBlock::NestedList(pieces) => output.append_pieces(pieces),

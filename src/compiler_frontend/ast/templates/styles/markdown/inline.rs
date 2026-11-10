@@ -18,23 +18,14 @@ use crate::compiler_frontend::ast::templates::formatter_contract::FormatterOutpu
 /// WHAT:
 /// - Escapes text, parses the markdown link syntax, and maintains a narrow emphasis
 ///   state machine across both text and opaque anchors.
-/// - Supports lazy wrapper opening so child-template-leading lines can render an
-///   anchor first and only open `<p>` when later text appears.
 ///
 /// WHY:
 /// - Inline formatting needs to stay structurally continuous across child/dynamic
 ///   anchors without flattening them into temporary strings.
-pub(super) fn render_inline_atoms(
-    atoms: &[MarkdownInlineAtom],
-    wrapper_tag: Option<&str>,
-    open_wrapper_immediately: bool,
-) -> Vec<FormatterOutputPiece> {
-    let mut renderer = InlineRenderer::new(wrapper_tag, None);
-
-    if open_wrapper_immediately {
-        renderer.open_wrapper();
-    }
-
+/// - Block wrapping lives in `blocks`: its grouping pass already knows which paragraphs
+///   and child-template lines own a wrapper, so the inline walk only renders content.
+pub(super) fn render_inline_atoms(atoms: &[MarkdownInlineAtom]) -> Vec<FormatterOutputPiece> {
+    let mut renderer = InlineRenderer::new(None);
     renderer.render_atoms(atoms);
     renderer.finish()
 }
@@ -50,7 +41,7 @@ pub(super) struct RenderedHeadingContent {
 
 /// Renders heading content and derives its automatic ID from the same inline walk.
 pub(super) fn render_heading_content(atoms: &[MarkdownInlineAtom]) -> RenderedHeadingContent {
-    let mut renderer = InlineRenderer::new(None, Some(HeadingIdBuilder::default()));
+    let mut renderer = InlineRenderer::new(Some(HeadingIdBuilder::default()));
     renderer.render_atoms(atoms);
 
     let id = renderer
@@ -65,10 +56,8 @@ pub(super) fn render_heading_content(atoms: &[MarkdownInlineAtom]) -> RenderedHe
 }
 
 /// Output and emphasis state shared by every inline construct in one block.
-struct InlineRenderer<'tag> {
+struct InlineRenderer {
     output: MarkdownOutputBuilder,
-    wrapper_tag: Option<&'tag str>,
-    wrapper_open: bool,
     emphasis_strength: Option<usize>,
     pending_open_strength: usize,
     /// Present only while rendering a heading whose label is still fully static.
@@ -76,12 +65,10 @@ struct InlineRenderer<'tag> {
     heading_id: Option<HeadingIdBuilder>,
 }
 
-impl<'tag> InlineRenderer<'tag> {
-    fn new(wrapper_tag: Option<&'tag str>, heading_id: Option<HeadingIdBuilder>) -> Self {
+impl InlineRenderer {
+    fn new(heading_id: Option<HeadingIdBuilder>) -> Self {
         Self {
             output: MarkdownOutputBuilder::default(),
-            wrapper_tag,
-            wrapper_open: false,
             emphasis_strength: None,
             pending_open_strength: 0,
             heading_id,
@@ -142,7 +129,6 @@ impl<'tag> InlineRenderer<'tag> {
                             self.emphasis_strength = None;
                             atom_index += active_strength;
                         } else {
-                            self.open_wrapper();
                             self.output.push_raw(&"*".repeat(star_run));
                             atom_index += star_run;
                         }
@@ -157,7 +143,6 @@ impl<'tag> InlineRenderer<'tag> {
                     }
 
                     self.literalize_pending_stars();
-                    self.open_wrapper();
                     self.output.push_raw(&"*".repeat(star_run));
                     prev_whitespace = false;
                     atom_index += star_run;
@@ -166,7 +151,6 @@ impl<'tag> InlineRenderer<'tag> {
                 MarkdownInlineAtom::Char('`') => {
                     if let Some(span) = try_parse_inline_code_span_at_atoms(atoms, atom_index) {
                         self.literalize_pending_stars();
-                        self.open_wrapper();
                         self.push_inline_code_span(&span);
                         prev_whitespace = false;
                         atom_index += span.consumed_atoms;
@@ -209,23 +193,11 @@ impl<'tag> InlineRenderer<'tag> {
         }
     }
 
-    fn open_wrapper(&mut self) {
-        if self.wrapper_open {
-            return;
-        }
-
-        if let Some(tag) = self.wrapper_tag {
-            self.output.push_raw(&format!("<{tag}>"));
-            self.wrapper_open = true;
-        }
-    }
-
     fn open_pending_emphasis(&mut self) {
         if self.pending_open_strength == 0 {
             return;
         }
 
-        self.open_wrapper();
         self.output
             .push_raw(emphasis_open_tag(self.pending_open_strength));
         self.emphasis_strength = Some(self.pending_open_strength);
@@ -238,7 +210,6 @@ impl<'tag> InlineRenderer<'tag> {
             return;
         }
 
-        self.open_wrapper();
         self.output
             .push_raw(&"*".repeat(self.pending_open_strength));
         self.pending_open_strength = 0;
@@ -246,7 +217,6 @@ impl<'tag> InlineRenderer<'tag> {
 
     fn push_visible_char(&mut self, ch: char) {
         self.open_pending_emphasis();
-        self.open_wrapper();
         self.push_label_char(ch);
         self.output.push_escaped_char(ch);
     }
@@ -254,7 +224,6 @@ impl<'tag> InlineRenderer<'tag> {
     /// Renders a link whose label, not its target, contributes to a heading ID.
     fn push_link(&mut self, link: &ParsedMarkdownLink) {
         self.open_pending_emphasis();
-        self.open_wrapper();
         self.output.push_raw("<a href=\"");
 
         // Single-slash targets are site routes and render through the configured site root.
@@ -303,12 +272,6 @@ impl<'tag> InlineRenderer<'tag> {
 
         if let Some(active_strength) = self.emphasis_strength {
             self.output.push_raw(emphasis_close_tag(active_strength));
-        }
-
-        if self.wrapper_open
-            && let Some(tag) = self.wrapper_tag
-        {
-            self.output.push_raw(&format!("</{tag}>"));
         }
 
         self.output.finish()
