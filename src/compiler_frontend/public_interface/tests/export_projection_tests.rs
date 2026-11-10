@@ -67,7 +67,7 @@ fn parse_single_file_headers_with_fork(
         &mut span_builder,
         path_fork,
     )
-    .expect("a normal facade fixture should accept its export block");
+    .expect("a normal facade fixture should accept its `$export` declarations");
     let mut prepared_outputs = vec![output];
     let prepared = prepare_header_syntax(
         &mut prepared_outputs,
@@ -188,7 +188,7 @@ fn build_reexport_fixture_with_shared_sources(
                 &mut builder,
                 &mut path_fork,
             )
-            .expect("the active normal facade fixture should accept its export block");
+            .expect("the active normal facade fixture should accept its `$export` declarations");
             prepared_outputs.push(output);
             span_builders.push(builder);
         } else {
@@ -1081,7 +1081,7 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
         &mut active_span_builder,
         &mut path_fork,
     )
-    .expect("a normal facade fixture should accept its export block");
+    .expect("a normal facade fixture should accept its `$export` declarations");
     let mut imported_span_builder = ExtendedSpanBuilder::new();
     let imported_output = prepare_active_root_with_role(
         "$export\nImported = | value I32 |\n",
@@ -1091,7 +1091,7 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
         &mut imported_span_builder,
         &mut path_fork,
     )
-    .expect("a normal facade fixture should accept its export block");
+    .expect("a normal facade fixture should accept its `$export` declarations");
 
     assert_eq!(
         active_output.file_role,
@@ -1206,7 +1206,7 @@ fn public_source_nominal_origin_index_rejects_compilation_root_file_id() {
         &mut active_span_builder,
         &mut path_fork,
     )
-    .expect("a normal facade fixture should accept its export block");
+    .expect("a normal facade fixture should accept its `$export` declarations");
     let mut imported_span_builder = ExtendedSpanBuilder::new();
     let imported_output = prepare_active_root_with_role(
         "$export\nImported = | value I32 |\n",
@@ -1216,7 +1216,7 @@ fn public_source_nominal_origin_index_rejects_compilation_root_file_id() {
         &mut imported_span_builder,
         &mut path_fork,
     )
-    .expect("a normal facade fixture should accept its export block");
+    .expect("a normal facade fixture should accept its `$export` declarations");
 
     let source_files = SourceDatabase::build(
         [active_path.clone(), imported_path.clone()],
@@ -1297,7 +1297,7 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
         &mut active_span_builder,
         &mut path_fork,
     )
-    .expect("a normal facade fixture should accept its export block");
+    .expect("a normal facade fixture should accept its `$export` declarations");
     // A source-package module root not owned by the project graph: deliberately absent from the
     // origin map, so its table entry is None.
     let mut package_span_builder = ExtendedSpanBuilder::new();
@@ -1309,7 +1309,7 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
         &mut package_span_builder,
         &mut path_fork,
     )
-    .expect("a facade fixture should accept its export block");
+    .expect("a facade fixture should accept its `$export` declarations");
 
     let source_files = SourceDatabase::build(
         [active_path.clone(), package_path.clone()],
@@ -1409,7 +1409,7 @@ fn public_source_nominal_origin_index_includes_alias_targeted_normal_file_nomina
         &mut active_span_builder,
         &mut path_fork,
     )
-    .expect("a normal facade fixture should accept its export block");
+    .expect("a normal facade fixture should accept its `$export` declarations");
     let (impl_output, _span_builder) = prepare_single_file_with_fork(
         "Counter = | count I32 |\n",
         &impl_path,
@@ -1510,7 +1510,7 @@ fn public_source_nominal_origin_index_excludes_private_normal_file_nominal_witho
         &mut active_span_builder,
         &mut path_fork,
     )
-    .expect("a normal facade fixture should accept its export block");
+    .expect("a normal facade fixture should accept its `$export` declarations");
     let (impl_output, _span_builder) = prepare_single_file_with_fork(
         "Counter = | count I32 |\n",
         &impl_path,
@@ -1603,7 +1603,7 @@ fn public_source_trait_origin_index_includes_directly_defined_trait() {
         &mut span_builder,
         &mut path_fork,
     )
-    .expect("a normal facade fixture should accept its export block");
+    .expect("a normal facade fixture should accept its `$export` declarations");
     let mut headers: Vec<Header> = output.headers;
     let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),
@@ -1669,7 +1669,7 @@ fn public_source_trait_origin_index_includes_imported_provider_trait() {
         &mut active_span_builder,
         &mut path_fork,
     )
-    .expect("a normal facade fixture should accept its export block");
+    .expect("a normal facade fixture should accept its `$export` declarations");
     let mut imported_span_builder = ExtendedSpanBuilder::new();
     let imported_output = prepare_active_root_with_role(
         "$export\nIMPORTED_TRAIT must:\n    show |This| -> String\n;\n",
@@ -1679,7 +1679,7 @@ fn public_source_trait_origin_index_includes_imported_provider_trait() {
         &mut imported_span_builder,
         &mut path_fork,
     )
-    .expect("a normal facade fixture should accept its export block");
+    .expect("a normal facade fixture should accept its `$export` declarations");
 
     let source_files = SourceDatabase::build(
         [active_path.clone(), imported_path.clone()],
@@ -1776,7 +1776,7 @@ fn public_source_trait_origin_index_includes_alias_targeted_normal_file_trait() 
         &mut active_span_builder,
         &mut path_fork,
     )
-    .expect("a normal facade fixture should accept its export block");
+    .expect("a normal facade fixture should accept its `$export` declarations");
     let (impl_output, _span_builder) = prepare_single_file_with_fork(
         "DRAWABLE must:\n    draw |This| -> String\n;\n",
         &impl_path,
@@ -1926,7 +1926,7 @@ fn public_source_trait_origin_index_skips_unowned_source_package_trait() {
         &mut span_builder,
         &mut path_fork,
     )
-    .expect("a normal facade fixture should accept its export block");
+    .expect("a normal facade fixture should accept its `$export` declarations");
 
     let source_files = SourceDatabase::build(
         std::iter::once(package_path.clone()),
@@ -1989,7 +1989,7 @@ fn public_source_trait_origin_index_rejects_unowned_source_identity() {
         &mut span_builder,
         &mut path_fork,
     )
-    .expect("a normal facade fixture should accept its export block");
+    .expect("a normal facade fixture should accept its `$export` declarations");
     let mut headers: Vec<Header> = output.headers;
     let source_files = SourceDatabase::build(
         std::iter::once(file_path.clone()),

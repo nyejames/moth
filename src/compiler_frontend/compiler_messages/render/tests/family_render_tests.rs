@@ -41,17 +41,17 @@ use crate::compiler_frontend::compiler_messages::{
     BuiltinFailureOriginKind, BuiltinFailureWitness, CompileTimeEvaluationErrorReason,
     DeferredFeatureReason, DependencyClauseKind, DiagnosticBag,
     DiagnosticCompoundAssignmentOperator, DiagnosticOperator, DiagnosticSeverity,
-    ExportOutsideModuleRootReason, ExternalJsAnnotationDirective, ExternalJsDeclarationKind,
-    GenericApplicationErrorReason, InvalidAssignmentTargetReason, InvalidBuiltinCallReason,
-    InvalidCallShapeReason, InvalidCastReason, InvalidChoiceVariantReason,
-    InvalidCollectionTypeReason, InvalidConfigReason, InvalidDependencyClauseReason,
-    InvalidExpressionReason, InvalidExternalModuleReason, InvalidFallibleHandlingReason,
-    InvalidFunctionSignatureReason, InvalidGenericParameterReason, InvalidImportPathReason,
-    InvalidReceiverCallReason, InvalidSignatureMemberReason, InvalidStandaloneStatementReason,
-    InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidTemplateDirectiveReason,
-    InvalidTemplateStructureReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
-    NameNamespace, NamespaceMemberRole, NamespaceRecordKind, NamespaceTypeValueMisuseKind,
-    PathKind, ReceiverCallKind, TypeAnnotationContext, TypeMismatchContext, UnknownTypeNameSite,
+    ExternalJsAnnotationDirective, ExternalJsDeclarationKind, GenericApplicationErrorReason,
+    InvalidAssignmentTargetReason, InvalidBuiltinCallReason, InvalidCallShapeReason,
+    InvalidCastReason, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
+    InvalidConfigReason, InvalidDependencyClauseReason, InvalidExpressionReason,
+    InvalidExternalModuleReason, InvalidFallibleHandlingReason, InvalidFunctionSignatureReason,
+    InvalidGenericParameterReason, InvalidImportPathReason, InvalidReceiverCallReason,
+    InvalidSignatureMemberReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
+    InvalidStringEscapeReason, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
+    InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, NameNamespace,
+    NamespaceMemberRole, NamespaceRecordKind, NamespaceTypeValueMisuseKind, PathKind,
+    ReceiverCallKind, TypeAnnotationContext, TypeMismatchContext, UnknownTypeNameSite,
     ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
@@ -2304,35 +2304,5 @@ fn scalar_type_called_as_function_renders_cast_guidance() {
     assert!(
         terse_line.contains("Use `cast` at an explicit typed receiving boundary"),
         "{terse_line}"
-    );
-}
-
-#[test]
-fn export_outside_module_root_names_a_nested_selected_entry() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let file = path_fork
-        .try_intern_portable_path("docs/@entry.moth", &mut string_table)
-        .expect("portable path fits");
-    let compact = compact_bag_for_test(
-        DiagnosticBag::from(generics_traits_api::export_outside_module_root(
-            file,
-            ExportOutsideModuleRootReason::EntryRoot,
-            None,
-        )),
-        None,
-    );
-    let view = compact.first().expect("export rejection compacts");
-    assert_eq!(view.descriptor().code, "MOTH-RULE-0077");
-    let path_table = path_fork.snapshot_table();
-    let guidance = terminal::format_guidance_view(
-        view,
-        DiagnosticRenderContext::new(&string_table).with_path_table(&path_table),
-    )
-    .join("\n");
-
-    assert!(
-        guidance.contains("`export:` is not allowed in `docs/@entry.moth`"),
-        "{guidance}"
     );
 }

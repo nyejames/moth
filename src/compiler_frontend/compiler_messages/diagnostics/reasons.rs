@@ -275,15 +275,6 @@ pub enum RootLocalDeclarationRole {
     EntryRoot,
 }
 
-/// Why an authored `export:` clause is rejected for its file role.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ExportOutsideModuleRootReason {
-    /// The file is an ordinary helper, a config bootstrap, or a root that owns no export surface.
-    NoExportSurface,
-    /// `@entry.moth` owns start and runtime and has no export surface at all.
-    EntryRoot,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DiagnosticPlace {
     Local(StringId),

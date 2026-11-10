@@ -9,11 +9,11 @@ use super::*;
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidValueReceiverView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api::{
-    DuplicatePublicExportView, DuplicateTraitRequirementView, ExportOutsideModuleRootView,
-    GenericBoundPrivateSurfaceLeakView, InvalidTraitConformanceNames, InvalidTraitConformanceShape,
-    InvalidTraitConformanceView, InvalidTraitIncompatibilityView, InvalidTraitKeywordUsageView,
-    PrivateTypeInExportedApiView, TraitNameUsedAsTypeView, TraitPrivateSurfaceLeakView,
-    UnknownTraitView, UnsupportedTraitFeatureView, decode_invalid_trait_conformance_names,
+    DuplicatePublicExportView, DuplicateTraitRequirementView, GenericBoundPrivateSurfaceLeakView,
+    InvalidTraitConformanceNames, InvalidTraitConformanceShape, InvalidTraitConformanceView,
+    InvalidTraitIncompatibilityView, InvalidTraitKeywordUsageView, PrivateTypeInExportedApiView,
+    TraitNameUsedAsTypeView, TraitPrivateSurfaceLeakView, UnknownTraitView,
+    UnsupportedTraitFeatureView, decode_invalid_trait_conformance_names,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::imports::{
     AmbiguousImportTargetView, BareFileImportView, CrossModuleImportNotExportedView,
@@ -36,9 +36,9 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::types_bo
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::view::DiagnosticView;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticCapacityResource, ExportOutsideModuleRootReason, InvalidTraitIncompatibilityReason,
-    InvalidTraitKeywordUsageReason, ProjectContextEscapeReason, PublicGenericOwnerKind,
-    RootLocalDeclarationRole, TypeMismatchContext, ValueReceiverContext,
+    DiagnosticCapacityResource, InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason,
+    ProjectContextEscapeReason, PublicGenericOwnerKind, RootLocalDeclarationRole,
+    TypeMismatchContext, ValueReceiverContext,
 };
 
 pub(crate) struct RenderedPayload {
@@ -955,37 +955,6 @@ pub(crate) fn render_root_local_declaration_not_visible(
         message: format!(
             "Cannot bind '{symbol_path}' because root-local declarations are visible only inside {root_role} '{root_file}' itself. Another root file or an ordinary helper cannot read them; move shared implementation into an ordinary helper file."
         ),
-        guidance: Vec::new(),
-    }
-}
-
-fn export_outside_module_root_message(
-    file: PathId,
-    reason: ExportOutsideModuleRootReason,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
-    match reason {
-        // The descriptor title already states the module-root rule for helpers and config.
-        ExportOutsideModuleRootReason::NoExportSurface => String::new(),
-        ExportOutsideModuleRootReason::EntryRoot => {
-            // The entry root is not always `@entry.moth`: a selected single-file source becomes
-            // that unit's explicit entry, so name the file the author actually wrote.
-            let file = context.render_path(file);
-            format!(
-                "`export:` is not allowed in `{file}`: an entry root has no export surface. Move the declaration to a shared helper file and export it from `@mod.moth` or `@package.moth`."
-            )
-        }
-    }
-}
-
-/// Renders the `export:` role rejection from its source file and compact reason code.
-pub(crate) fn render_export_outside_module_root(
-    _diagnostic: &DiagnosticView<'_>,
-    view: &ExportOutsideModuleRootView,
-    context: DiagnosticRenderContext<'_>,
-) -> RenderedPayload {
-    RenderedPayload {
-        message: export_outside_module_root_message(view.file, view.reason, context),
         guidance: Vec::new(),
     }
 }

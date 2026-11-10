@@ -12966,10 +12966,10 @@ contract = "language.dependencies.module_facade_export_surface_acceptance"
 role = "primary"
 
 [[case]]
-id = "export_outside_ordinary_file_rejected"
-path = "export_outside_ordinary_file_rejected"
+id = "export_directive_ordinary_file_rejected"
+path = "export_directive_ordinary_file_rejected"
 tags = ["integration", "diagnostics", "dependencies", "facades"]
-contract = "language.dependencies.export_outside_module_root_rejected"
+contract = "language.dependencies.export_directive_outside_facade_rejected"
 role = "primary"
 
 [[case]]
@@ -12980,10 +12980,10 @@ contract = "language.dependencies.export_directive_active_root_acceptance"
 role = "primary"
 
 [[case]]
-id = "export_outside_config_file_rejected"
-path = "export_outside_config_file_rejected"
+id = "export_directive_config_file_rejected"
+path = "export_directive_config_file_rejected"
 tags = ["integration", "diagnostics", "config", "facades"]
-contract = "language.dependencies.export_outside_module_root_rejected"
+contract = "language.dependencies.export_directive_outside_facade_rejected"
 role = "boundary"
 
 [[case]]
@@ -14236,7 +14236,7 @@ role = "primary"
 id = "export_directive_outside_facade_rejected"
 path = "export_directive_outside_facade_rejected"
 tags = ["integration", "diagnostics", "dependencies", "facades"]
-contract = "language.dependencies.export_outside_module_root_rejected"
+contract = "language.dependencies.export_directive_outside_facade_rejected"
 role = "boundary"
 
 [[case]]
@@ -14289,10 +14289,10 @@ contract = "language.dependencies.export_directive_incompatibility_rejected"
 role = "primary"
 
 [[case]]
-id = "legacy_inline_export_rejected"
-path = "legacy_inline_export_rejected"
+id = "export_as_ordinary_identifier_success"
+path = "export_as_ordinary_identifier_success"
 tags = ["integration", "diagnostics", "dependencies", "facades"]
-contract = "language.dependencies.legacy_inline_export_rejected"
+contract = "language.dependencies.export_as_ordinary_identifier"
 role = "primary"
 
 [[case]]

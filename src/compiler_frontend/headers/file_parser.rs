@@ -18,8 +18,7 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
 };
 use crate::compiler_frontend::compiler_messages::{CapacityResource, CompilerStage};
 use crate::compiler_frontend::compiler_messages::{
-    ExportOutsideModuleRootReason, InvalidDeclarationReason, InvalidReceiverDeclarationReason,
-    InvalidTemplateDirectiveReason,
+    InvalidDeclarationReason, InvalidReceiverDeclarationReason, InvalidTemplateDirectiveReason,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::headers::file_dependency_clauses::parse_and_record_dependency;
@@ -35,8 +34,7 @@ use crate::compiler_frontend::headers::qualified_references::{
 use crate::compiler_frontend::headers::start_capture::capture_runtime_template_range_from_cursor;
 use crate::compiler_frontend::headers::symbol_collection::is_receiver_method_candidate;
 use crate::compiler_frontend::headers::top_level_classifier::{
-    HeaderFileItem, classify_current_item_ref, classify_export_block_item_ref,
-    classify_symbol_statement_start_at_source,
+    HeaderFileItem, classify_current_item_ref, classify_symbol_statement_start_at_source,
     starts_duplicate_top_level_header_declaration_at_source,
     starts_specialized_generic_conformance_declaration_at_source,
     starts_trait_declaration_after_must_at_source, statement_boundary_at_source,
@@ -104,8 +102,8 @@ fn record_start_body_token_from_source(
 }
 
 // Top-level declarations are same-module-visible by default; cross-module public visibility
-// comes only from the root `export:` block. Non-declaration statements are collected into the
-// compiler-owned entry header for that file.
+// comes only from `$export`-marked facade items. Non-declaration statements are collected into
+// the compiler-owned entry header for that file.
 
 /// One source modifier that has been read and is waiting for its eligible declaration.
 ///
@@ -332,9 +330,7 @@ fn parse_headers_in_file_inner(
                 HeaderFileItem::Hash { .. }
                 | HeaderFileItem::RuntimeTemplate
                 | HeaderFileItem::StartBodyToken
-                | HeaderFileItem::ReservedTraitSyntax
-                | HeaderFileItem::Export
-                | HeaderFileItem::ExportBlock => {
+                | HeaderFileItem::ReservedTraitSyntax => {
                     return Err(diagnostic_failure(wrong_target_source_modifier(
                         pending.name_id,
                         pending.span,
@@ -405,14 +401,6 @@ fn parse_headers_in_file_inner(
                     export_mode,
                     current_span,
                 )?;
-            }
-
-            HeaderFileItem::Export => {
-                reject_non_block_export(cursor, file_id, source_file, context, current_span)?;
-            }
-
-            HeaderFileItem::ExportBlock => {
-                handle_export_block(cursor, file_id, source_file, state, context, current_span)?;
             }
 
             HeaderFileItem::Hash {
@@ -505,326 +493,6 @@ fn parse_headers_in_file_inner(
     Ok(())
 }
 
-/// Reject an authored `export:` clause whose file role owns no export surface.
-///
-/// WHAT: entry roots receive a root-specific reason; helpers, config and non-facade roots keep
-///       the generic module-root rule.
-/// WHY: `@entry.moth` has no export surface, while ordinary helpers are not module roots at all.
-fn reject_export_outside_module_root(
-    context: &HeaderParseContext<'_>,
-    source_file: PathId,
-    export_span: SourceSpan,
-) -> FileParserResult<()> {
-    let reason = if context.is_config_file {
-        Some(ExportOutsideModuleRootReason::NoExportSurface)
-    } else {
-        match context.file_role {
-            FileRole::ActiveEntryRoot => Some(ExportOutsideModuleRootReason::EntryRoot),
-            role if role.is_export_capable() => None,
-            _ => Some(ExportOutsideModuleRootReason::NoExportSurface),
-        }
-    };
-
-    match reason {
-        Some(reason) => Err(diagnostic_failure(
-            generics_traits_api::export_outside_module_root(source_file, reason, Some(export_span)),
-        )),
-        None => Ok(()),
-    }
-}
-
-fn reject_non_block_export(
-    cursor: &TokenCursor<'_>,
-    file_id: SourceId,
-    source_file: PathId,
-    context: &mut HeaderParseContext<'_>,
-    export_span: SourceSpan,
-) -> FileParserResult<()> {
-    reject_export_outside_module_root(context, source_file, export_span)?;
-
-    // Without the block delimiter, the token is not an export target. Keep this diagnostic in
-    // header parsing instead of interpreting the following tokens through another syntax path.
-    let found = cursor.current().ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
-            CompilerStage::HeaderParsing,
-            "export-block cursor exceeded its source token owner",
-        ))
-    })?;
-    if found.source() != file_id {
-        return Err(HeaderParseFailure::Infrastructure(
-            InfrastructureFailure::internal(
-                CompilerStage::HeaderParsing,
-                "export-block source token owner does not match its file identity",
-            ),
-        ));
-    }
-    Err(diagnostic_failure(
-        token_lexical::expected_token_from_projections(
-            crate::compiler_frontend::compiler_messages::DiagnosticToken::from_static_tag(
-                TokenTag::COLON,
-            ),
-            Some(
-                crate::compiler_frontend::compiler_messages::DiagnosticToken::from_token_ref(found),
-            ),
-            Some(export_span),
-        ),
-    ))
-}
-fn handle_export_block(
-    cursor: &mut TokenCursor<'_>,
-    file_id: SourceId,
-    source_file: PathId,
-    state: &mut HeaderFileParseState,
-    context: &mut HeaderParseContext<'_>,
-    export_span: SourceSpan,
-) -> FileParserResult<()> {
-    reject_export_outside_module_root(context, source_file, export_span)?;
-
-    if state.seen_export_block.is_some() {
-        return Err(diagnostic_failure(
-            generics_traits_api::duplicate_export_block(Some(export_span)),
-        ));
-    }
-
-    // The classifier only produces ExportBlock when the current token is `:`, but consume it
-    // here so the item parser starts at the first ordinary top-level item.
-    let colon = cursor.current().ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
-            CompilerStage::HeaderParsing,
-            "export-block cursor exceeded its source token owner",
-        ))
-    })?;
-    if colon.source() != file_id {
-        return Err(HeaderParseFailure::Infrastructure(
-            InfrastructureFailure::internal(
-                CompilerStage::HeaderParsing,
-                "export-block source token owner does not match its file identity",
-            ),
-        ));
-    }
-    if colon.tag() != TokenTag::COLON {
-        return Err(diagnostic_failure(
-            token_lexical::expected_token_from_projections(
-                crate::compiler_frontend::compiler_messages::DiagnosticToken::from_static_tag(
-                    TokenTag::COLON,
-                ),
-                Some(
-                    crate::compiler_frontend::compiler_messages::DiagnosticToken::from_token_ref(
-                        colon,
-                    ),
-                ),
-                Some(export_span),
-            ),
-        ));
-    }
-    state.seen_export_block = Some(export_span);
-    state.export_mode = HeaderExportMode::Public;
-    cursor.advance();
-
-    loop {
-        let current = cursor.current().ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
-                CompilerStage::HeaderParsing,
-                "export-block cursor exceeded its source token owner",
-            ))
-        })?;
-        let current_tag = current.tag();
-        if current_tag == TokenTag::END || current_tag == TokenTag::EOF {
-            break;
-        }
-        if current_tag == TokenTag::NEWLINE {
-            cursor.advance();
-            continue;
-        }
-
-        let current_index = current.index();
-        let follower_index = current_index.index().checked_add(1).ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
-                CompilerStage::HeaderParsing,
-                "export-block follower index overflowed its source range",
-            ))
-        })?;
-        let follower = TokenIndex::try_from_index(follower_index)
-            .and_then(|index| cursor.source_tokens().token(index).ok());
-        let current_span = current.source_span();
-        let current_tag = current.tag();
-        let item = classify_export_block_item_ref(current, follower);
-        cursor.advance();
-        parse_export_block_item(
-            cursor,
-            file_id,
-            source_file,
-            state,
-            context,
-            ExportBlockItemRequest {
-                item,
-                current_tag,
-                current_span,
-                current_index,
-            },
-        )?;
-        state.export_block_item_count =
-            state
-                .export_block_item_count
-                .checked_add(1)
-                .ok_or_else(|| {
-                    HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
-                        CompilerStage::HeaderParsing,
-                        "export-block item count overflowed its source state",
-                    ))
-                })?;
-    }
-
-    let current = cursor.current().ok_or_else(|| {
-        HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
-            CompilerStage::HeaderParsing,
-            "export-block cursor exceeded its source token owner",
-        ))
-    })?;
-    if current.source() != file_id {
-        return Err(HeaderParseFailure::Infrastructure(
-            InfrastructureFailure::internal(
-                CompilerStage::HeaderParsing,
-                "export-block source token owner does not match its file identity",
-            ),
-        ));
-    }
-    if current.tag() == TokenTag::EOF {
-        return Err(diagnostic_failure(token_lexical::unexpected_end_of_file(
-            Some(context.string_table.intern(";")),
-            Some(current.source_span()),
-        )));
-    }
-
-    // The block terminator belongs to this parser mode and must not become an entry-body
-    // token for the surrounding file.
-    cursor.advance();
-    state.export_mode = HeaderExportMode::Private;
-
-    if state.export_block_item_count == 0 {
-        return Err(diagnostic_failure(
-            generics_traits_api::invalid_export_target(Some(export_span)),
-        ));
-    }
-
-    Ok(())
-}
-
-struct ExportBlockItemRequest {
-    item: HeaderFileItem,
-    current_tag: TokenTag,
-    current_span: SourceSpan,
-    current_index: TokenIndex,
-}
-
-fn parse_export_block_item(
-    cursor: &mut TokenCursor<'_>,
-    file_id: SourceId,
-    source_file: PathId,
-    state: &mut HeaderFileParseState,
-    context: &mut HeaderParseContext<'_>,
-    request: ExportBlockItemRequest,
-) -> FileParserResult<()> {
-    let ExportBlockItemRequest {
-        item,
-        current_tag,
-        current_span,
-        current_index,
-    } = request;
-    match item {
-        HeaderFileItem::Symbol(name_id) => handle_symbol_item(
-            cursor,
-            file_id,
-            source_file,
-            state,
-            context,
-            SymbolItemRequest {
-                name_id,
-                current_span,
-                current_index,
-                source_modifier: None,
-            },
-        ),
-
-        HeaderFileItem::BuiltinTypeConformanceTarget(type_name) => {
-            let name_id = context.string_table.intern(type_name);
-            handle_symbol_item(
-                cursor,
-                file_id,
-                source_file,
-                state,
-                context,
-                SymbolItemRequest {
-                    name_id,
-                    current_span,
-                    current_index,
-                    source_modifier: None,
-                },
-            )
-        }
-
-        HeaderFileItem::Dependency => parse_and_record_dependency(
-            cursor,
-            file_id,
-            state,
-            context,
-            HeaderExportMode::Public,
-            current_span,
-        ),
-
-        HeaderFileItem::Export | HeaderFileItem::ExportBlock => Err(diagnostic_failure(
-            generics_traits_api::invalid_export_target(Some(current_span)),
-        )),
-
-        HeaderFileItem::Hash {
-            at_statement_boundary,
-        } => handle_hash_item(
-            cursor,
-            file_id,
-            source_file,
-            state,
-            context,
-            HashItemRequest {
-                current_index,
-                current_span,
-                at_statement_boundary,
-            },
-        ),
-
-        HeaderFileItem::RuntimeTemplate | HeaderFileItem::StartBodyToken => {
-            Err(diagnostic_failure(
-                generics_traits_api::invalid_export_target(Some(current_span)),
-            ))
-        }
-
-        HeaderFileItem::StyleDirective(name_id) => {
-            Err(diagnostic_failure(templates::invalid_template_directive(
-                Some(name_id),
-                InvalidTemplateDirectiveReason::DirectiveNotAllowedHere,
-                Some(current_span),
-            )))
-        }
-
-        HeaderFileItem::ReservedTraitSyntax => {
-            if let Some(keyword) = reserved_trait_keyword_for_tag(current_tag) {
-                return Err(diagnostic_failure(reserved_trait_keyword_error(
-                    keyword,
-                    Some(current_span),
-                )));
-            }
-
-            Err(diagnostic_failure(
-                generics_traits_api::invalid_export_target(Some(current_span)),
-            ))
-        }
-
-        HeaderFileItem::Eof => Err(diagnostic_failure(token_lexical::unexpected_end_of_file(
-            Some(context.string_table.intern(";")),
-            Some(current_span),
-        ))),
-    }
-}
-
 /// One already-read top-level symbol with the source facts its header dispatch needs.
 struct SymbolItemRequest {
     name_id: StringId,
@@ -848,8 +516,7 @@ fn handle_symbol_item(
         current_index,
         source_modifier,
     } = symbol;
-    // A facade `$export` is the only new public-surface authoring form. The legacy block mode
-    // remains the fallback until its parser is removed, so this slice can migrate sources first.
+    // `$export` is the only authored public-surface form. An unmarked declaration stays private.
     let export_mode = match source_modifier {
         Some(modifier)
             if matches!(
@@ -859,7 +526,7 @@ fn handle_symbol_item(
         {
             HeaderExportMode::Public
         }
-        _ => state.export_mode,
+        _ => HeaderExportMode::Private,
     };
     let Some(follower_index) = TokenIndex::try_from_index(cursor.position().index()) else {
         crate::compiler_bug!(

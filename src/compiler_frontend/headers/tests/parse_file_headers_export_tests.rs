@@ -20,7 +20,7 @@ fn export_dependency_path_parsed_as_public_surface_dependency() {
         &mut span_builder,
         &mut path_fork,
     )
-    .expect("an API-only normal root should accept its export block");
+    .expect("an API-only normal root should accept its `$export` declarations");
 
     assert_eq!(output.file_dependency_clauses.len(), 1);
     assert_eq!(
@@ -203,7 +203,7 @@ fn public_dependency_and_private_dependency_keep_distinct_retained_shells() {
         &mut span_builder,
         &mut path_fork,
     )
-    .expect("an API-only normal root should accept its export block");
+    .expect("an API-only normal root should accept its `$export` declarations");
 
     assert_eq!(
         output.file_dependency_clauses.len(),

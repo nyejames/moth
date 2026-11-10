@@ -336,8 +336,8 @@ pub enum HeaderKind {
 /// Explicit export mode for a parsed header or file dependency.
 ///
 /// WHAT: distinguishes private source-file items from public module-root API surface.
-/// WHY: module-root files use one explicit `export:` block to mark public declarations and
-/// direct-selection re-exports. All other files keep every declaration as `Private`.
+/// WHY: module-root files use `$export` to mark public declarations and direct-selection
+/// re-exports. All other files keep every declaration as `Private`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeaderExportMode {
     /// Private to the source file or depending file.
@@ -597,7 +597,7 @@ pub struct Header {
     pub file_role: FileRole,
     /// Whether this header is part of the module public surface.
     ///
-    /// WHAT: `Public` only for items inside a module root's `export:` block; `Private` everywhere
+    /// WHAT: `Public` only for `$export`-marked items in a module root; `Private` everywhere
     /// else.
     /// WHY: dependency preparation builds module APIs from explicit public-surface metadata, not from
     /// file role alone.
@@ -1370,7 +1370,7 @@ pub struct RetainedDependencyClause {
     pub binding: DependencyBindingSyntax,
     /// Whether this dependency clause is part of the module public surface.
     ///
-    /// WHAT: `Public` for direct selections inside an `export:` block;
+    /// WHAT: `Public` for direct selections marked with `$export`;
     /// `Private` for ordinary dependency clauses.
     pub export_mode: HeaderExportMode,
 }

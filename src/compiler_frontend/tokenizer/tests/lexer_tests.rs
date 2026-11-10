@@ -1468,16 +1468,19 @@ fn tokenizes_spaced_bang_keyword_forms_as_separate_tokens() {
 }
 
 #[test]
-fn tokenizes_export_as_reserved_keyword() {
-    let (file_tokens, _string_table) = tokenize_source("export\n");
+fn tokenizes_export_as_ordinary_symbol() {
+    let (file_tokens, string_table) = tokenize_source("export\n");
     let token = token_at(file_tokens.tokens.as_ref(), 1);
-    assert_eq!(token.tag(), TokenTag::EXPORT);
-    assert_ne!(token.tag(), TokenTag::SYMBOL);
+    assert_eq!(token.tag(), TokenTag::SYMBOL);
+    assert_eq!(
+        string_table.resolve(token.string_id().expect("export symbol handle")),
+        "export"
+    );
 }
 
 #[test]
 fn template_body_preserves_export_as_literal_text() {
-    let (file_tokens, string_table) = tokenize_source("[: this contains export keyword]");
+    let (file_tokens, string_table) = tokenize_source("[: this contains export as ordinary text]");
     let tokens = file_tokens.tokens.as_ref();
     let body_literal = token_refs(tokens)
         .find_map(|token| {
@@ -1487,10 +1490,6 @@ fn template_body_preserves_export_as_literal_text() {
         .filter(|value| value.contains("export"))
         .expect("expected template body text to preserve 'export' as literal text");
 
-    assert!(
-        !token_refs(tokens).any(|token| token.tag() == TokenTag::EXPORT),
-        "export inside a template body should not tokenize as a keyword"
-    );
     assert!(body_literal.contains("export"));
 }
 

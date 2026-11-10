@@ -2868,7 +2868,7 @@ fn implicit_failure_private_helper_infallible_to_fallible_changes_exported_calle
         "project #= (\n    name = \"implicit-failure\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    // The export block is byte-identical in both versions: only the private helper
+    // The `$export` declarations are byte-identical in both versions: only the private helper
     // body changes. Every public signature text stays the same; only the private
     // helper's semantic failure summary widens from infallible to fallible.
     const EXPORT_BLOCK: &str = "$export\nproduct type T |marker T, left I32, right I32| -> I32:\n    return double(left)\n;\n";
