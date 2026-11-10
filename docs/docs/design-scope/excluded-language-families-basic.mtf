@@ -41,8 +41,7 @@ feature names must be distinguished from enabled features so typos cannot
 silently disable code. Excluded regions still need a sound structural boundary
 before unknown syntax can be skipped.
 
-Future `$layout` preserves nominal identity, `$export` replaces rather than
-duplicates export syntax, and `$test` remains a deferred root purpose. Custom
+Future `$layout` preserves nominal identity, and `$test` remains a deferred root purpose. `$export` is the source modifier for explicit public-facade declarations and re-exports. Custom
 metadata remains open design. Project configuration stays a closed named record.
 
 ### No explicit lifetime and ownership type system

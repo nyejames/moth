@@ -11,7 +11,7 @@ A directive modifies an existing construct. Template-head directives modify thei
 
 `$export` makes a declaration public in `@mod.moth` or `@package.moth`. It can also mark a direct-selection dependency clause as a public re-export.
 
-`$config` marks one explicitly typed compile-time `#` binding in `config.moth` as a build input:
+`$config` marks one explicitly typed top-level compile-time `#` binding in `config.moth` or a selected source module as a build input:
 
 [codeblock, $code "moth":
     $config

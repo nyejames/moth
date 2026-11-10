@@ -54,14 +54,14 @@ module. Their internal callers do not add postfix `!`.
         return left * right
     ;
 
-    export:
-        checked_product |left I32, right I32| -> I32, Error!:
-            return product(left, right)
-        ;
+    $export
+    checked_product |left I32, right I32| -> I32, Error!:
+        return product(left, right)
+    ;
 
-        product_or_zero |left I32, right I32| -> I32:
-            return product(left, right) catch then 0
-        ;
+    $export
+    product_or_zero |left I32, right I32| -> I32:
+        return product(left, right) catch then 0
     ;
 ]
 

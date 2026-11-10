@@ -24,7 +24,7 @@ Source directives occupy their own line and each has a specific target.
     @helpers render_greeting
 ]
 
-`$config` marks one explicitly typed top-level compile-time `#` binding in `config.moth` as a build input:
+`$config` marks one explicitly typed top-level compile-time `#` binding in `config.moth` or a selected source module as a build input:
 
 [codeblock, $code "moth":
     $config
