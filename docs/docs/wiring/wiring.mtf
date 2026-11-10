@@ -3,8 +3,6 @@
 This canonical reference owns the accepted Wiring syntax and observable semantics.
 It complements the ordinary function, generic, choice and binding references.
 `docs/compiler-design-overview.md` owns compiler-stage representation and handoffs.
-The progress matrix owns implementation and target support. Examples here describe
-the accepted contract, not a promise of an interactive UI package.
 
 ## Terminology and scope
 
@@ -348,7 +346,7 @@ live templates, route invocation, event queues, schedulers, mount lifecycles,
 rendering policy and channel bridges lie outside this foundation and require
 separate accepted contracts.
 
-## Future channel boundary
+## Channel boundary
 
 The accepted channel construction form is:
 
@@ -366,8 +364,6 @@ Wire identity is not channel data, and route formation performs no hidden send.
 The channel construction form settles no endpoint-parameter grammar, buffering,
 cancellation, close, selection, suspension or host-event ingress rules.
 
-Async operations, `>>`, `<<`, `spawn`, `yield` and structured `$async:` scopes keep
-their separately owned design boundaries. Channel implementation is not part of
-the Wiring foundation. Initialiser omission such as
-`reader, writer Channel of AppMessage` remains an open possibility, with no
-accepted zero-value initialisation or blanket constructor omission rule.
+Async operations, `>>`, `<<`, `spawn`, `yield` and structured `$async:` scopes
+belong to separate language contracts. Channel construction requires the
+initializer shown above.
