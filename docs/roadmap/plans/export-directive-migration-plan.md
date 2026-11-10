@@ -2,10 +2,10 @@
 
 ## Status
 
-- Status: ACTIVE on `feature/export-directive`.
-- Current slice: 0 - confirm the branch baseline and inspect the owning parser, directive and diagnostic paths.
+- Status: READY to activate on `feature/export-directive`.
+- Current slice: Not started. Begin with inventory and the current branch baseline.
 - Blockers: None. Source modifiers, facade roles and public-interface construction are delivered.
-- Next action: Implement the parser and diagnostic changes, migrate executable sources and validate the prepared docs. Retire this plan in the completing implementation commit.
+- Next action: Activate on this branch, implement the parser and diagnostic changes, migrate executable sources and validate the prepared docs. Retire this plan in the completing implementation commit.
 
 ## Goal
 
@@ -46,7 +46,7 @@ $export
 
 ## Authorities
 
-Read `AGENTS.md`, the compiler code review guide, `docs/compiler-design-overview.md`, `docs/build-system-design.md`, `docs/developer-docs/style-guide/{style-guide,testing,validation}.mtf` and the language navigation reference. Consult:
+Read `AGENTS.md`, `docs/compiler-design-overview.md`, `docs/build-system-design.md`, `docs/developer-docs/style-guide/{style-guide,testing,validation}.mtf` and the language navigation reference. Apply the compiler code review guide if supplied to the implementation agent. Consult:
 
 - `docs/docs/directives/directives.mtf` for attachment and contexts
 - `docs/docs/project-structure/{public-api,module-roots}.mtf` for facade role and visibility
@@ -69,7 +69,7 @@ Confirm the current branch tip and parent before editing. Search source, tests, 
 
 ### 1. Attach the directive and reuse the existing public flag
 
-Register compiler-owned `export` through `StyleDirectiveSpec::source_modifier` with one new `SourceModifierTarget` category for exportable public API items. Do not branch on the directive name string or create a second directive dispatcher. `PendingSourceModifier` already retains a typed target and authored span.
+Register compiler-owned `export` through `StyleDirectiveSpec::source_modifier` with one new `SourceModifierTarget` category for exportable public API items. Update the source-modifier context documentation to include dependency clauses. Do not branch on the directive name string or create a second directive dispatcher. `PendingSourceModifier` already retains a typed target and authored span.
 
 Extend the file walk so a pending modifier may reach either a declaration or `HeaderFileItem::Dependency`. Validate the target against the spec and `FileRole::is_export_capable()` (also respect config source classification). Consume the modifier once. Derive `HeaderExportMode::Public` solely from an attached `$export`, otherwise `Private`. Feed that mode through existing `HeaderDeclarationMetadata` and `RetainedDependencyClause`. Reuse `HeaderKind::is_authored_public_export_declaration()` rather than creating another kind whitelist. Preserve the special existing rejection of exported receiver methods.
 
@@ -121,6 +121,6 @@ Revise existing parser, lexical, module-role, renderer and integration tests ins
 5. Consumer-visible public names, private type/trait/error/receiver closure, origin identity, project-context rejection, valid public fingerprints and cache invalidation when exports change. Confirm private-only edits do not unnecessarily alter published interfaces under proven reuse.
 6. `export` as an identifier in ordinary Moth source and shared lexical classification. Verify unrelated JavaScript export scanning/highlighting survives.
 
-Use targeted checks first, then the applicable validation gate from `validation.mtf`, real package/project scenarios and release docs build. Audit leftover legacy code, diagnostics, help text and fixtures. Check changed-code bloat and keep the two-pass public export machinery untouched unless a proven correctness defect requires otherwise.
+Use targeted checks first, then the applicable validation gate from `validation.mtf`, real package/project scenarios and release docs build. `main` now uses explicit `@#id` Markdown section markers rather than automatic heading IDs: preserve these when touching docs, and check affected cross-page fragment links in the release build. Audit leftover legacy code, diagnostics, help text and fixtures. Check changed-code bloat and keep the two-pass public export machinery untouched unless a proven correctness defect requires otherwise.
 
-When the implementation passes, remove this plan **and its active roadmap bullet in the same completion commit**. Preserve stable design rules in canonical docs. This draft PR becomes implementation-ready only after code, tests and applicable CI gates pass.
+When the implementation passes, remove this plan **and its active roadmap bullet in the same completion commit**. Preserve stable design rules in canonical docs. This draft PR becomes merge-ready only after code, tests and applicable CI gates pass.
