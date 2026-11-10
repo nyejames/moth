@@ -16,7 +16,7 @@ They use square brackets. Collections and maps use braces.
     ]
 ]
 
-### Head and body
+### Head and body @#head-and-body
 
 A colon separates the template head from its body.
 

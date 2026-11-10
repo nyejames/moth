@@ -917,7 +917,7 @@ The same helpers are available automatically in `.mtf` files:
     ]
 ]
 
-Static headings receive kebab-case IDs, linkable with `@#hello (Hello)`.
+A bare `@#id` marker on a heading, paragraph or list item sets its HTML `id`; the marker is zero-width. A marker-only paragraph renders a standalone empty `span`. IDs preserve authored case and Unicode, and the compiler does not check page-wide uniqueness or resolve fragment targets. A labelled link such as `@#hello (Hello)` stays a link. Unmarked headings have no `id`; plain `.md` does not use section markers.
 
 Links use `@./path (label)`, `@/route (label)` or `@https://example.com (label)`.
 The target and label may be separated by spaces, tabs and **at most one newline** (including CRLF). Other content breaks the link.

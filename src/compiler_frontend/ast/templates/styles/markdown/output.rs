@@ -34,6 +34,20 @@ impl MarkdownOutputBuilder {
         }
     }
 
+    /// Removes trailing horizontal whitespace from the current text run.
+    ///
+    /// Section markers are zero-width, so deleting one beside a block separator must not
+    /// leave a doubled or edge whitespace run behind.
+    pub(super) fn trim_trailing_horizontal_whitespace(&mut self) {
+        while let Some(character) = self.text_buffer.chars().next_back() {
+            if matches!(character, ' ' | '\t') {
+                self.text_buffer.pop();
+            } else {
+                break;
+            }
+        }
+    }
+
     pub(super) fn push_opaque(&mut self, anchor: FormatterOpaquePiece) {
         self.flush_text();
         self.pieces.push(FormatterOutputPiece::Opaque(anchor));

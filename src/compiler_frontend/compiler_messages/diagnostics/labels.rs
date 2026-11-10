@@ -41,6 +41,7 @@ pub(crate) enum LabelDraftMessage {
     TraitRequirementSite,
     ReceiverMethodSite,
     EarlierDirective,
+    EarlierSectionMarker,
     EarlierTemplateHeadItem,
     ConflictsWithEarlierHeadItem,
     TemplateStartsHere,
@@ -96,6 +97,7 @@ impl LabelMessageCode {
     pub(super) const EXTERNAL_IMPORT_SITE: Self = Self(21);
     pub(super) const ROOT_LOCAL_DECLARATION_SITE: Self = Self(22);
     pub(super) const EARLIER_DIRECTIVE: Self = Self(23);
+    pub(super) const EARLIER_SECTION_MARKER: Self = Self(24);
 
     /// Whether the label keeps a row in `label_data`. Config origin, substitutions, typed failure producers
     /// and write-back origins carry data; the rest never read the row.
@@ -145,6 +147,7 @@ impl LabelMessageCode {
             Self::EXTERNAL_IMPORT_SITE => "EXTERNAL_IMPORT_SITE",
             Self::ROOT_LOCAL_DECLARATION_SITE => "ROOT_LOCAL_DECLARATION_SITE",
             Self::EARLIER_DIRECTIVE => "EARLIER_DIRECTIVE",
+            Self::EARLIER_SECTION_MARKER => "EARLIER_SECTION_MARKER",
             _ => crate::compiler_bug!(
                 CompilerStage::DiagnosticReporting,
                 "label codes are the constants above"
@@ -223,6 +226,7 @@ pub(super) fn encode_label(
         LabelDraftMessage::TraitRequirementSite => plain(LabelMessageCode::TRAIT_REQUIREMENT_SITE),
         LabelDraftMessage::ReceiverMethodSite => plain(LabelMessageCode::RECEIVER_METHOD_SITE),
         LabelDraftMessage::EarlierDirective => plain(LabelMessageCode::EARLIER_DIRECTIVE),
+        LabelDraftMessage::EarlierSectionMarker => plain(LabelMessageCode::EARLIER_SECTION_MARKER),
         LabelDraftMessage::EarlierTemplateHeadItem => {
             plain(LabelMessageCode::EARLIER_TEMPLATE_HEAD_ITEM)
         }
@@ -417,6 +421,7 @@ impl LabelWord {
             }
             LabelMessageCode::RECEIVER_METHOD_SITE => DurableLabelMessage::ReceiverMethodSite,
             LabelMessageCode::EARLIER_DIRECTIVE => DurableLabelMessage::EarlierDirective,
+            LabelMessageCode::EARLIER_SECTION_MARKER => DurableLabelMessage::EarlierSectionMarker,
             LabelMessageCode::EARLIER_TEMPLATE_HEAD_ITEM => {
                 DurableLabelMessage::EarlierTemplateHeadItem
             }
@@ -486,6 +491,7 @@ pub(crate) enum DurableLabelMessage<'a> {
     TraitRequirementSite,
     ReceiverMethodSite,
     EarlierDirective,
+    EarlierSectionMarker,
     EarlierTemplateHeadItem,
     ConflictsWithEarlierHeadItem,
     TemplateStartsHere,

@@ -848,7 +848,11 @@ Missing roots, phases, overlays or exact-view authority are compiler bugs. Templ
 
 Dec formatting uses the common value-to-string path. It does not add Dec-specific TIR nodes.
 
-The `$md` formatter owns automatic heading IDs. It derives each heading's `id` during formatting from the heading's complete static visible label, and omits the `id` when the label contains a dynamic expression or child template. IDs add no TIR node, anchor kind or metadata, and builders never scan rendered HTML to recreate them.
+The `$md` formatter owns explicit section IDs. A bare `@#id` marker requires block start or whitespace before `@`; the ID starts with a Unicode alphabetic character and continues with Unicode alphanumeric characters, `_` or `-`. A closing star run belongs to surrounding emphasis. The marker is zero-width and labels no target, so it adds no rendered text.
+
+A labelled link keeps precedence: `@target (label)` follows the existing link grammar, and marker-like text inside a link label, code span or opaque anchor stays literal. A marker assigns its ID to the heading, paragraph or list item that owns the surrounding block. A paragraph containing only a marker leaves no element, so an authored marker emits a standalone empty `span`; a synthetic marker with no source span emits nothing. One block reports a source diagnostic for a malformed marker or a second marker. Different blocks may reuse an ID without suffixing.
+
+Unmarked headings have no `id`. IDs add no TIR node, anchor kind or metadata, and builders never scan rendered HTML to recreate them.
 
 #### File values and resources
 

@@ -12,8 +12,10 @@
 //!   opaque child-template anchors into a temporary string buffer.
 
 use crate::compiler_frontend::ast::templates::formatter_contract::{
-    FormatterInput, FormatterInputPiece, FormatterOutput, FormatterOutputPiece,
+    FormatterInput, FormatterInputPiece, FormatterOpaquePiece, FormatterOutput,
+    FormatterOutputPiece, FormatterTextPiece,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::basic::CharacterParsing;
 
@@ -83,8 +85,9 @@ fn horizontal_whitespace_len(text: &str) -> usize {
 /// (optional spaces + newline + blank lines + indentation) and returns the shared
 /// dedent width and the byte end of the leading boundary block.
 ///
-/// WHY: the width counts chars because `dedent_after_newlines` removes chars, while the
-/// end is a byte offset so the caller can drain it without rebuilding the string.
+/// WHY: the width counts chars because `dedent_keep_ranges` and `WhitespaceTextPiece`
+/// dedenting remove chars, while the end is a byte offset so the caller can drain it
+/// without rebuilding the string.
 pub(crate) fn compute_leading_dedent_info(content: &str) -> (usize, usize) {
     // Skip optional leading horizontal whitespace before the first newline.
     let mut cursor = horizontal_whitespace_len(content);
@@ -138,83 +141,306 @@ pub(crate) fn compute_leading_dedent_info(content: &str) -> (usize, usize) {
     }
 }
 
-pub(crate) fn dedent_after_newlines(input: &str, dedent_width: usize) -> String {
-    if dedent_width == 0 {
-        return input.to_owned();
-    }
+// ---------------------------------------------------------------------------
+// Structured-input whitespace passes
+// ---------------------------------------------------------------------------
 
-    let mut output = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-
-    while let Some(current) = chars.next() {
-        output.push(current);
-
-        if current != '\n' {
-            continue;
-        }
-
-        // Drop up to `dedent_width` horizontal whitespace chars after each newline.
-        for _ in 0..dedent_width {
-            if chars
-                .next_if(|next| next.is_non_newline_whitespace())
-                .is_none()
-            {
-                break;
-            }
-        }
-    }
-
-    output
+/// One resolved text piece plus optional authored provenance.
+///
+/// WHAT: keeps the text seen by a formatter, its authored span and the sparse preserved source
+/// byte ranges still present after dedent/trim.
+/// WHY: `$md` reports source errors at marker locations after preprocessing. A run-level
+/// representative span would point at the wrong bytes, while per-character spans would be
+/// heavier than the few sparse ranges a normal body retains.
+struct WhitespaceTextPiece {
+    text: String,
+    span: Option<SourceSpan>,
+    /// Preserved source byte ranges in output order. `None` when the caller did not ask for
+    /// provenance or the piece had no authored span.
+    ranges: Option<Vec<PreservedByteRange>>,
+    /// Byte length of the authored text this span covers before preprocessing.
+    source_byte_len: u32,
 }
 
-/// Removes horizontal indentation from leading blank lines while preserving their newlines.
-///
-/// WHAT:
-/// - Strips all formatting-only indentation before every retained leading blank-line newline.
-/// - Leaves the first content line and every later line for the shared baseline dedent pass.
-///
-/// WHY:
-/// - A blank line can be indented more deeply than the first content baseline, so baseline
-///   dedenting alone must not leave formatting spaces in the preserved leading boundary.
-fn trim_leading_blank_line_indentation(content: &mut String) {
-    let mut output = String::with_capacity(content.len());
-    let mut line_start = 0usize;
+#[derive(Clone, Copy, Debug)]
+struct PreservedByteRange {
+    source_start: usize,
+    length: usize,
+}
+
+enum WhitespacePiece {
+    Text(WhitespaceTextPiece),
+    Opaque(FormatterOpaquePiece),
+}
+
+impl WhitespaceTextPiece {
+    /// Keeps only `kept` byte ranges from the current text and updates the sparse provenance.
+    ///
+    /// `kept` ranges are sorted, non-overlapping and measured in byte offsets of the current
+    /// text. Deletion is the only preprocessing operation, so concatenating the kept ranges
+    /// reproduces the old text-transformation output exactly.
+    fn retain(&mut self, kept: &[(usize, usize)]) {
+        let Some(ranges) = self.ranges.take() else {
+            let old_text = std::mem::take(&mut self.text);
+            self.text = kept
+                .iter()
+                .map(|&(start, end)| &old_text[start..end])
+                .collect();
+            return;
+        };
+
+        let old_text = std::mem::take(&mut self.text);
+        let mut new_text = String::with_capacity(kept.iter().map(|(start, end)| end - start).sum());
+        let mut new_ranges = Vec::new();
+        let mut range_index = 0usize;
+        let mut range_text_start = 0usize;
+
+        for &(keep_start, keep_end) in kept {
+            if keep_start >= keep_end {
+                continue;
+            }
+
+            let mut cursor = keep_start;
+            while cursor < keep_end {
+                // Advance past source ranges entirely before this kept range.
+                while range_index < ranges.len()
+                    && range_text_start + ranges[range_index].length <= cursor
+                {
+                    range_text_start += ranges[range_index].length;
+                    range_index += 1;
+                }
+
+                let Some(range) = ranges.get(range_index) else {
+                    break;
+                };
+                let range_text_end = range_text_start + range.length;
+                let overlap_end = keep_end.min(range_text_end);
+                let length = overlap_end.saturating_sub(cursor);
+                if length == 0 {
+                    break;
+                }
+
+                new_ranges.push(PreservedByteRange {
+                    source_start: range.source_start + (cursor - range_text_start),
+                    length,
+                });
+                new_text.push_str(&old_text[cursor..overlap_end]);
+                cursor = overlap_end;
+
+                if cursor == range_text_end {
+                    range_text_start = range_text_end;
+                    range_index += 1;
+                }
+            }
+        }
+
+        debug_assert_eq!(
+            new_text.len(),
+            new_ranges.iter().map(|range| range.length).sum::<usize>(),
+            "preserved text and provenance ranges must stay aligned"
+        );
+        self.text = new_text;
+        self.ranges = Some(new_ranges);
+    }
+
+    fn trim_leading_boundary(&mut self, leading_trim_end: usize) {
+        let kept = leading_boundary_keep_ranges(&self.text, leading_trim_end);
+        self.retain(&kept);
+    }
+
+    fn dedent(&mut self, dedent_width: usize) {
+        let kept = dedent_keep_ranges(&self.text, dedent_width);
+        self.retain(&kept);
+    }
+
+    fn trim_trailing_boundary(&mut self) {
+        let kept = trailing_boundary_keep_ranges(&self.text);
+        self.retain(&kept);
+    }
+}
+
+/// Returns the ranges retained by the leading boundary drain and blank-line indentation trim.
+fn leading_boundary_keep_ranges(text: &str, leading_trim_end: usize) -> Vec<(usize, usize)> {
+    let text_len = text.len();
+    let mut cursor = leading_trim_end.min(text_len);
+    let mut kept = Vec::new();
 
     loop {
-        let rest = &content[line_start..];
-        let indentation_len = horizontal_whitespace_len(rest);
-        match rest[indentation_len..].chars().next() {
+        let indentation_len = horizontal_whitespace_len(&text[cursor..]);
+        match text[cursor + indentation_len..].chars().next() {
+            // A formatting-only blank line keeps its newline and drops its indentation.
             Some('\n') => {
-                output.push('\n');
-                line_start += indentation_len + 1;
+                let newline = cursor + indentation_len;
+                kept.push((newline, newline + 1));
+                cursor = newline + 1;
             }
             Some(_) => {
-                output.push_str(rest);
+                kept.push((cursor, text_len));
                 break;
             }
             None => break,
         }
     }
 
-    *content = output;
+    kept
 }
 
-pub(crate) fn trim_trailing_whitespace_from_final_newline(content: &mut String) {
-    let Some(last_newline) = content.rfind('\n') else {
-        return;
+/// Returns the ranges retained by dropping up to `dedent_width` horizontal whitespace chars
+/// after every newline.
+fn dedent_keep_ranges(text: &str, dedent_width: usize) -> Vec<(usize, usize)> {
+    let text_len = text.len();
+    let mut kept = Vec::new();
+    let mut keep_start = 0usize;
+    let mut index = 0usize;
+
+    while index < text_len {
+        let Some(ch) = text[index..].chars().next() else {
+            break;
+        };
+        if ch != '\n' {
+            index += ch.len_utf8();
+            continue;
+        }
+
+        let newline_end = index + 1;
+        kept.push((keep_start, newline_end));
+
+        let mut skip_cursor = newline_end;
+        let mut skipped_chars = 0usize;
+        while skipped_chars < dedent_width {
+            let Some(next) = text[skip_cursor..].chars().next() else {
+                break;
+            };
+            if !next.is_non_newline_whitespace() {
+                break;
+            }
+            skip_cursor += next.len_utf8();
+            skipped_chars += 1;
+        }
+
+        keep_start = skip_cursor;
+        index = skip_cursor;
+    }
+
+    kept.push((keep_start, text_len));
+    kept
+}
+
+/// Returns the ranges retained by removing a final-newline suffix that holds only whitespace.
+fn trailing_boundary_keep_ranges(text: &str) -> Vec<(usize, usize)> {
+    let Some(last_newline) = text.rfind('\n') else {
+        return vec![(0, text.len())];
     };
 
-    if content[last_newline + 1..]
+    if text[last_newline + 1..]
         .chars()
         .all(|ch| ch.is_non_newline_whitespace())
     {
-        content.truncate(last_newline);
+        vec![(0, last_newline)]
+    } else {
+        vec![(0, text.len())]
     }
 }
 
-// ---------------------------------------------------------------------------
-// Structured-input whitespace passes
-// ---------------------------------------------------------------------------
+/// Resolves formatter input into whitespace pieces, optionally retaining authored provenance.
+fn whitespace_pieces_from_input(
+    input: FormatterInput,
+    string_table: &StringTable,
+    preserve_spans: bool,
+) -> Vec<WhitespacePiece> {
+    input
+        .pieces
+        .into_iter()
+        .map(|piece| match piece {
+            FormatterInputPiece::Text(text_piece) => {
+                let text = string_table.resolve(text_piece.text).to_owned();
+                let span = if preserve_spans {
+                    text_piece.span
+                } else {
+                    None
+                };
+                let source_byte_len = u32::try_from(text.len()).unwrap_or(u32::MAX);
+                let ranges = span.map(|_| {
+                    vec![PreservedByteRange {
+                        source_start: 0,
+                        length: text.len(),
+                    }]
+                });
+                WhitespacePiece::Text(WhitespaceTextPiece {
+                    text,
+                    span,
+                    ranges,
+                    source_byte_len,
+                })
+            }
+            FormatterInputPiece::Opaque(anchor) => WhitespacePiece::Opaque(anchor),
+        })
+        .collect()
+}
+
+fn whitespace_pieces_into_output(pieces: Vec<WhitespacePiece>) -> FormatterOutput {
+    FormatterOutput {
+        pieces: pieces
+            .into_iter()
+            .map(|piece| match piece {
+                WhitespacePiece::Text(text) => FormatterOutputPiece::Text(text.text),
+                WhitespacePiece::Opaque(anchor) => FormatterOutputPiece::Opaque(anchor),
+            })
+            .collect(),
+    }
+}
+
+/// Emits formatter input text pieces split at deleted gaps, each carrying its exact authored span.
+fn whitespace_pieces_into_input(
+    pieces: Vec<WhitespacePiece>,
+    string_table: &mut StringTable,
+) -> FormatterInput {
+    let mut output = Vec::new();
+
+    for piece in pieces {
+        let text_piece = match piece {
+            WhitespacePiece::Text(text_piece) => text_piece,
+            WhitespacePiece::Opaque(anchor) => {
+                output.push(FormatterInputPiece::Opaque(anchor));
+                continue;
+            }
+        };
+
+        let (Some(span), Some(ranges)) = (text_piece.span, text_piece.ranges) else {
+            output.push(FormatterInputPiece::Text(FormatterTextPiece {
+                text: string_table.intern(&text_piece.text),
+                span: text_piece.span,
+            }));
+            continue;
+        };
+
+        let mut cursor = 0usize;
+        for range in ranges {
+            let end = cursor + range.length;
+            let piece_span = u32::try_from(range.source_start)
+                .ok()
+                .and_then(|source_start| {
+                    u32::try_from(range.length).ok().and_then(|length| {
+                        span.narrow_inline(source_start, length, text_piece.source_byte_len)
+                    })
+                })
+                .or(Some(span));
+
+            output.push(FormatterInputPiece::Text(FormatterTextPiece {
+                text: string_table.intern(&text_piece.text[cursor..end]),
+                span: piece_span,
+            }));
+            cursor = end;
+        }
+        debug_assert_eq!(
+            cursor,
+            text_piece.text.len(),
+            "provenance ranges must cover the normalized text"
+        );
+    }
+
+    FormatterInput { pieces: output }
+}
 
 /// Runs whitespace passes directly on structured `FormatterInput` pieces.
 ///
@@ -231,24 +457,34 @@ pub(crate) fn apply_whitespace_passes_to_input(
     run_position: TemplateBodyRunPosition,
     string_table: &mut StringTable,
 ) -> FormatterOutput {
-    // Resolve interned text once; opaque anchors pass through unchanged.
-    let mut pieces: Vec<FormatterOutputPiece> = input
-        .pieces
-        .into_iter()
-        .map(|piece| match piece {
-            FormatterInputPiece::Text(t) => {
-                FormatterOutputPiece::Text(string_table.resolve(t.text).to_owned())
-            }
-            FormatterInputPiece::Opaque(id) => FormatterOutputPiece::Opaque(id),
-        })
-        .collect();
+    let mut pieces = whitespace_pieces_from_input(input, string_table, false);
 
     // Run each pass sequentially over the resolved piece list.
     for pass in passes {
         pieces = apply_structured_whitespace_pass(pieces, *pass, run_position);
     }
 
-    FormatterOutput { pieces }
+    whitespace_pieces_into_output(pieces)
+}
+
+/// Runs the same whitespace passes while retaining each text piece's authored span.
+///
+/// The markdown formatter owns source diagnostics after preprocessing, so it needs exact
+/// marker locations. Pieces are split at deleted byte gaps and every emitted piece carries
+/// a span narrowed from its authored source range.
+pub(crate) fn apply_whitespace_passes_to_input_preserving_spans(
+    input: FormatterInput,
+    passes: &[TemplateWhitespacePassProfile],
+    run_position: TemplateBodyRunPosition,
+    string_table: &mut StringTable,
+) -> FormatterInput {
+    let mut pieces = whitespace_pieces_from_input(input, string_table, true);
+
+    for pass in passes {
+        pieces = apply_structured_whitespace_pass(pieces, *pass, run_position);
+    }
+
+    whitespace_pieces_into_input(pieces, string_table)
 }
 
 /// Applies a single whitespace pass across a list of resolved pieces.
@@ -256,10 +492,10 @@ pub(crate) fn apply_whitespace_passes_to_input(
 /// Computes dedent width from the first text piece, then normalizes each text piece
 /// while keeping opaque anchors untouched.
 fn apply_structured_whitespace_pass(
-    pieces: Vec<FormatterOutputPiece>,
+    pieces: Vec<WhitespacePiece>,
     pass: TemplateWhitespacePassProfile,
     run_position: TemplateBodyRunPosition,
-) -> Vec<FormatterOutputPiece> {
+) -> Vec<WhitespacePiece> {
     let trim_leading = pass.trim_leading_boundary && run_position.is_first();
     let trim_trailing = pass.trim_trailing_boundary && run_position.is_last();
 
@@ -270,7 +506,7 @@ fn apply_structured_whitespace_pass(
     }
 }
 
-/// Structured version of `normalize_default_template_body_whitespace`.
+/// Structured version of the default template dedent/trim behavior.
 ///
 /// WHAT:
 /// - Computes dedent width from the first content line of the first text piece.
@@ -281,13 +517,13 @@ fn apply_structured_whitespace_pass(
 /// - Opaque anchors represent child templates whose content is sealed. They do not
 ///   contribute whitespace and must not be flattened into a text buffer.
 fn normalize_structured_default_whitespace(
-    pieces: Vec<FormatterOutputPiece>,
+    pieces: Vec<WhitespacePiece>,
     trim_leading: bool,
     trim_trailing: bool,
-) -> Vec<FormatterOutputPiece> {
+) -> Vec<WhitespacePiece> {
     // Find the first text piece to compute dedent width.
-    let first_text = pieces.iter().find_map(|p| match p {
-        FormatterOutputPiece::Text(t) if !t.is_empty() => Some(t.as_str()),
+    let first_text = pieces.iter().find_map(|piece| match piece {
+        WhitespacePiece::Text(text) if !text.text.is_empty() => Some(text.text.as_str()),
         _ => None,
     });
 
@@ -299,12 +535,12 @@ fn normalize_structured_default_whitespace(
     // Find the index of the last non-empty text piece for trailing trim.
     let last_text_index = pieces
         .iter()
-        .rposition(|p| matches!(p, FormatterOutputPiece::Text(t) if !t.is_empty()));
+        .rposition(|piece| matches!(piece, WhitespacePiece::Text(text) if !text.text.is_empty()));
 
     // Find the index of the first non-empty text piece for leading trim.
     let first_text_index = pieces
         .iter()
-        .position(|p| matches!(p, FormatterOutputPiece::Text(t) if !t.is_empty()));
+        .position(|piece| matches!(piece, WhitespacePiece::Text(text) if !text.text.is_empty()));
 
     // Boundary trimming only applies to actual run boundaries. Opaque anchors
     // before the first text or after the last text represent already-emitted
@@ -313,24 +549,22 @@ fn normalize_structured_default_whitespace(
     let leading_text_is_run_boundary = first_text_index.is_some_and(|first_index| {
         pieces[..first_index]
             .iter()
-            .all(|piece| matches!(piece, FormatterOutputPiece::Text(text) if text.is_empty()))
+            .all(|piece| matches!(piece, WhitespacePiece::Text(text) if text.text.is_empty()))
     });
     let trailing_text_is_run_boundary = last_text_index.is_some_and(|last_index| {
         pieces[last_index + 1..]
             .iter()
-            .all(|piece| matches!(piece, FormatterOutputPiece::Text(text) if text.is_empty()))
+            .all(|piece| matches!(piece, WhitespacePiece::Text(text) if text.text.is_empty()))
     });
 
     let mut result = Vec::with_capacity(pieces.len());
 
     for (index, piece) in pieces.into_iter().enumerate() {
         match piece {
-            FormatterOutputPiece::Opaque(id) => {
-                result.push(FormatterOutputPiece::Opaque(id));
-            }
-            FormatterOutputPiece::Text(mut text) => {
-                if text.is_empty() {
-                    result.push(FormatterOutputPiece::Text(text));
+            WhitespacePiece::Opaque(anchor) => result.push(WhitespacePiece::Opaque(anchor)),
+            WhitespacePiece::Text(mut text) => {
+                if text.text.is_empty() {
+                    result.push(WhitespacePiece::Text(text));
                     continue;
                 }
 
@@ -344,23 +578,21 @@ fn normalize_structured_default_whitespace(
                     && leading_text_is_run_boundary
                     && leading_trim_end > 0
                 {
-                    // Byte offset from compute_leading_dedent_info; drain it in place.
-                    text.drain(..leading_trim_end);
-                    trim_leading_blank_line_indentation(&mut text);
+                    text.trim_leading_boundary(leading_trim_end);
                 }
 
                 // Dedent after every newline using the shared dedent width.
                 if dedent_width > 0 {
-                    text = dedent_after_newlines(&text, dedent_width);
+                    text.dedent(dedent_width);
                 }
 
                 // Trailing boundary trim: remove whitespace-only content after the last
                 // newline in the final text piece.
                 if trim_trailing && is_last_text && trailing_text_is_run_boundary {
-                    trim_trailing_whitespace_from_final_newline(&mut text);
+                    text.trim_trailing_boundary();
                 }
 
-                result.push(FormatterOutputPiece::Text(text));
+                result.push(WhitespacePiece::Text(text));
             }
         }
     }

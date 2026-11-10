@@ -7,5 +7,7 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["<h1>Hello World</h1>"]
-must_not_contain = ["<h1 id="]
+must_contain = [
+    "<h1>Hello World</h1>",
+    "<h1 id=\"marked\">Marked World</h1>",
+]

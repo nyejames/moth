@@ -15,16 +15,20 @@ Use `$code "moth"` or another language name for a full highlighted code block.
 Moth Markdown stays small. It does not support fenced code
 blocks or pipe tables.
 
-### Automatic heading IDs
+### Section IDs @#section-ids
 
-Static headings render kebab-case IDs from their visible labels, so a link can jump to a section.
+Add a bare `@#id` at block start or after whitespace to set the HTML `id` of the heading, paragraph or list item that contains it. The marker is zero-width. An ID starts with a Unicode letter and continues with Unicode letters, digits, `_` or `-`, and its authored case is preserved.
 
 [codeblock, $code "moth":
     content = [$md:
-        ## Getting started
+        ## Getting started @#getting-started
 
         Jump back to @#getting-started (Getting started).
     ]
 ]
+
+A paragraph containing only a marker renders a standalone empty `span`.
+
+Unmarked headings have no `id`. `$md` does not check page-wide uniqueness, add generic HTML attributes or validate fragment targets. Plain `.md` does not use section markers.
 
 Advanced covers the full rules.
