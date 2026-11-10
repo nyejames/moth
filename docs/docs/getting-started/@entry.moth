@@ -223,7 +223,7 @@ init_docs_sidebar()!
 
     ### Using --force
 
-    --force allows replacing scaffold-owned files when they already exist:
+    `--force` allows replacing scaffold-owned files when they already exist:
 
     [codeblock, $code "bash":
         moth new html my-site --force

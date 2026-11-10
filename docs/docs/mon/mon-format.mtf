@@ -105,7 +105,7 @@ It covers record labels, named arguments and nominal qualifiers. It also
 covers choice and variant names plus schema field and payload names. Schema
 preparation and text reading enforce the rule. Validation and encoding also
 enforce it for programmatic values and defaults.
-This format tightening rejects formerly accepted names such as `__LoOp`,
+The format rejects invalid names such as `__LoOp`,
 `_U64`, `dec01` and `dec257`.
 Invalid supplied names report `InvalidIdentifier`. Preparation projects invalid
 schema names to `InvalidSchema` and invalid default names to `InvalidDefault`.

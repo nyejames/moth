@@ -100,7 +100,7 @@ This separation lets the same frontend feed other builders. The frontend does no
 
 ### Only config.moth has config semantics
 
-No other filename has config meaning. `@config.moth` is rejected as a module-root name, not read as a config file. Alternate config filenames and compatibility handling are not supported. A nested `config.moth` is reserved and inert to the enclosing build.
+Only the selected project's root-level `config.moth` defines its settings. A nested `config.moth` does not configure the enclosing build. Invalid special root filenames are rejected during source discovery.
 
 ### Concepts related to project layout
 

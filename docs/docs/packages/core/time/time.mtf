@@ -296,8 +296,6 @@ All parameters use shared access. No function requires mutable access. All retur
 
 HTML-JS lowers `mark_now` to `globalThis.performance.now()`. `timestamp_now` lowers to `Date.now()`. `timestamp_from_iso_string` and `to_iso_string` lower to validating runtime helpers. Every other function, including the Duration and Timestamp construction helpers and the arithmetic functions, lowers to an inline JavaScript expression.
 
-HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (progress matrix) for current target availability.
-
 ### Unsupported source forms
 
 - Direct symbol-path clauses such as `@core/time/mark_now` face rejection. Use direct selections or a namespace clause.

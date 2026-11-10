@@ -40,7 +40,7 @@ A command that explicitly selects one ordinary `.moth` file or one `@entry.moth`
     moth build index.moth       -> index.html
 ]
 
-A selected `@mod.moth` or `@package.moth` keeps its facade role. `check` validates it as an API facade, while an application build reports the no-entry outcome instead of manufacturing a page. Retired root spellings such as `@page.moth` and `+package.moth` are rejected before output planning.
+A selected `@mod.moth` or `@package.moth` keeps its facade role. `check` validates it as an API facade, while an application build reports the no-entry outcome instead of manufacturing a page. Other special root filenames are rejected during source discovery.
 
 The synthetic unit uses the same source identity, module service and error-reporting rules as a directory project. It never creates a filesystem-backed module API.
 
@@ -63,9 +63,9 @@ The builder generates output folders and manages them through manifests. Builder
 
 The default build writes to the hidden dev folder. The `--release` flag writes to the hidden release output folder. The dev server serves from the dev folder.
 
-### Experimental Wasm mode
+### HTML-Wasm output
 
-In the experimental `--html-wasm` mode, the builder can emit a route folder containing `index.html`, `page.js` and `page.wasm` instead of a single HTML file with embedded JavaScript.
+With `--html-wasm`, the builder can emit a route folder containing `index.html`, `page.js` and `page.wasm` instead of a single HTML file with embedded JavaScript.
 
 ### Concepts related to HTML routing and artefacts
 

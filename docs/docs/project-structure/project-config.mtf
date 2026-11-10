@@ -195,7 +195,7 @@ Names other than the selected builder's recognised settings section remain ordin
 
 ### Example with typed inputs
 
-Operational config uses `$config` input declarations and parenthesised grouped records:
+A project can use typed external inputs alongside its top-level settings constants:
 
 [codeblock, $code "moth":
     $config
@@ -212,11 +212,9 @@ Operational config uses `$config` input declarations and parenthesised grouped r
     html #= ()
 ]
 
-The `project` record may omit `name`, `version`, or both. An omitted name uses the selected directory name; an omitted version means unversioned. The record has no `entry_root`; the selected directory is the source root. The HTML section is optional and its schema defaults include `_dev` and `_release` outputs.
+The `project` record may omit `name` or `version`. HTML settings are also optional and use the builder defaults.
 
-The grouped `project` record accepts `max_errors_per_module` and `max_errors_per_project` as fixed-only `I32?` compiler controls. Omission uses the default of 5 module errors or 30 project errors. An explicit `none` disables that one limit and leaves the other unchanged. A present value must be an exact `I32` from 1 to 2147483647. The grouped record has no field type context, so write an explicit absence through a typed `I32?` constant as the example does. Writing `none` directly in the record is a language type error. The loader validates and stores both settings today. The module limit governs file preparation and ordinary-body diagnostic recovery. The project threshold is a soft scheduling cutoff for new work in check, build and dev. When discovery ends early, one line after the diagnostics names the reason and says that later code was not checked. The CLI, the dev server's terminal and browser error page and the builder SDK's error text all show it.
-
-Retired flat keys and `entry_root` remain rejected. Keep live `docs/config.moth` on this configuration model.
+The diagnostic limits use fixed-only `I32?` values. Use a typed constant for `none` because the record does not infer a type for an absent value. See Diagnostic limits above for bounds, defaults and scheduling rules.
 
 ### Concepts related to project config
 
