@@ -110,7 +110,7 @@ The final-surface language references, basic guides, cheatsheet and compiler/bui
 
 Convert all remaining first-party Moth `export:` sites in packages, examples, scenarios and scaffolds to per-item `$export`, preserving public names and private declarations. Group related selected names into one re-export clause where already supported. Do not reorganise module topology just to reduce lines.
 
-Update the canonical public API, re-export, module-root and directive pages first. Follow with the cheatsheet, reserved-name list, package references, progress matrices, syntax highlighting and any old examples or diagnostic help. Remove transitional references to `export:` and future undecided `$export` forms. Keep JavaScript syntax unchanged.
+After implementation, update the progress matrices to reflect actual support, update Moth syntax highlighting and diagnostic help, then audit source and documentation examples for drift. The final-design references are already prepared. Leave JavaScript export syntax unchanged.
 
 Revise existing parser, lexical, module-role, renderer and integration tests instead of keeping export-block-specific fixtures and adding parallel tests. Required distinct regression boundaries:
 
