@@ -29,6 +29,8 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Sequenced work
 
+- [Const-default direct top-level templates](./plans/const-default-top-level-templates-plan.md) - Ready for implementation on `feat/const-default-top-level-templates`. Make bare direct entry templates const-required, use `~[...]` for runtime fragments and remove the old `#[...]` spelling.
+
 - todo plan: `$export` directive to replace current `export:` block.
 
 - [Const functions and shared compile-time evaluation](./plans/const-functions-plan.md) - explicit `#|...|` compile-time-only callable contracts, a unified constant/function dependency graph, bounded shared function evaluation, cross-module const body publication, release-only ordinary function folding and low-priority budget suggestions. The first active slice is the Stage 4 ownership and early-HIR feasibility gate.
