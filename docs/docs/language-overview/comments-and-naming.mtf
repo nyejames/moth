@@ -81,9 +81,92 @@ legacy `Number` type alias.
 
 ### Configuration names
 
-The delivered source modifier uses the `$` marker: `$config`. Project and active-builder settings remain ordinary named records, so `$project`, `$builder` and `$html_builder` are not directives and no future form restores them. The future `$export` modifier will replace the current `export:` block only in `@mod.moth` and `@package.moth`.
+Source modifiers use the `In ordinary Moth code, `--` starts a single-line comment.
 
-Directive spellings do not reserve ordinary identifiers, so `project`, `html_builder` and `entry` remain ordinary names outside directive syntax.
+[codeblock, $code "moth":
+    -- Explain why this value exists.
+    retry_count = 3
+]
+
+Everything after `--` on that source-code line is comment text.
+
+### Template and moth template text
+
+Template bodies are content, not ordinary code-token context.
+
+Inside a template body, `--` is ordinary body text. A moth template `.mtf` file is
+the body of an implicit compile-time Markdown template, so `--` is text there
+too.
+
+Use template directives such as `$note` or `$todo` when template-authored
+content should be ignored.
+
+### Naming conventions
+
+- Variables and functions use `regular_snake_case`.
+- Structs, choices, type aliases and generic parameters use `PascalCase`.
+- Trait names use all-caps identifiers such as `DISPLAY_TEXT`.
+- Names should describe their role rather than their storage or implementation detail.
+
+[codeblock, $code "moth":
+    retry_count = 3
+
+    load_profile |user_id String| -> String:
+        return "profile"
+    ;
+
+    UserProfile = |
+        display_name String,
+    |
+]
+
+### Name collisions
+
+A visible name cannot be redeclared while it remains in scope.
+
+The complete no-shadowing contract is documented by
+@../bindings/#shadowing (Values and bindings). Dependency aliases and module API
+names have additional collision rules in the Packages documentation.
+
+### Identifier validity and reserved names
+
+Identifiers start with `_` or a Unicode alphabetic character and continue with
+`_` or a Unicode alphanumeric character. Exact source-word recognition remains
+case-sensitive, including `this` and `This`. `moth-lexical` owns one shared
+source-word inventory and user-name predicate for Moth and MON, including
+reserved-only names. The predicate strips leading underscores and
+matches reserved words without regard to ASCII case. It applies no Unicode
+normalisation or XID substitution. Naming conventions above describe style, not
+lexical validity: a style mismatch can produce a warning without making an
+otherwise valid identifier invalid.
+
+The shared policy reserves the numeric names `I8`, `I16`, `I32`, `I64`, `U8`,
+`U16`, `U32`, `U64`, `F16`, `F32`, `F64` and `Byte`. It also reserves the Dec
+family: bare `dec` and any ASCII-digit suffix match after leading underscores
+are removed, without regard to case. This includes invalid type spellings such
+as `dec01` and `dec257`. `DecBox` remains an ordinary name.
+
+Type recognition stays stricter: only canonical `Dec` and `Dec0` through
+`Dec256` spellings name Dec types. The removed `Int`, `Uint` and `Float`
+spellings receive no builtin alias or special reservation. `uint` and
+`UintBox` follow ordinary identifier rules.
+
+Any reservation change alters which MON documents and schemas pass, so it is a
+MON format compatibility change. Such a change updates the shared rule, the
+cross-parser conformance tests and the release-facing documentation together.
+See @../mon/#mon-format (MON format).
+
+The former `Number` spellings are not reserved. `Number`, `number`, `Number2`
+and `NumberBox` are ordinary user names again, and `Number`-family spellings no
+longer name builtin types. Without a matching user declaration, `Number` or
+`Number2` in a type position reports an unknown-type diagnostic. There is no
+legacy `Number` type alias.
+
+### Configuration names
+
+ marker. `$export` marks public declarations and direct-selection re-exports in `@mod.moth` and `@package.moth`. `$config` marks typed build inputs. Project and active-builder settings remain ordinary named records, so `$project`, `$builder` and `$html_builder` are not directives.
+
+Directive spellings do not reserve ordinary identifiers. Names such as `export`, `project`, `html_builder` and `entry` are available outside directive syntax.
 The file `config.moth` and the dependency root `@project` retain their separate
 path and package semantics.
 

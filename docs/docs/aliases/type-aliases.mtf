@@ -141,7 +141,7 @@ Aliases to scalar or otherwise non-constructible targets are not callable for th
 
 ### Visibility and module public surfaces
 
-Type aliases follow ordinary module visibility rules. A type alias declared in a source file is dependency-bindable by other files in the same module. Cross-module visibility is controlled by the module root's explicit `export:` surface. The normal module-root filename itself has no semantic role. A public re-export may expose a dependency-bound alias under a chosen public name. That operation is not the same as an ordinary file-local dependency alias.
+Type aliases follow ordinary module visibility. Same-module files can bind a helper's alias. To expose it across a module boundary, use `$export` on its declaration in a facade or on a direct-selection clause that re-exports it. A file-local dependency alias alone remains private.
 
 ### Concepts related to type aliases
 

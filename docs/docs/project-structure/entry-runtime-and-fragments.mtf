@@ -22,7 +22,7 @@ Assigned or returned template values are ordinary values, not direct output. The
 
 ### Entry-activated root runtime
 
-The entry file's top-level runtime code becomes a dormant compiler-owned entry. Entry assembly activates it exactly once. This includes top-level bindings, function calls and other runtime statements. Helper files define reusable declarations and never own an entry or an export block.
+The entry file's top-level runtime code becomes a dormant compiler-owned entry. Entry assembly activates it exactly once. This includes top-level bindings, function calls and other runtime statements. Helper files define reusable declarations and never own an entry or public facade.
 
 ### Page fragments
 

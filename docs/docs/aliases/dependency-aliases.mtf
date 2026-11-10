@@ -102,14 +102,14 @@ A clause cannot use a single alias for a direct-selection list. Clause-level `as
 
 ### Local and public-name distinction
 
-An ordinary dependency alias is private to the file that declares it. A public name chosen in a module root's export surface is a different operation. Cross-module visibility is controlled by the module root's explicit `export:` surface. The normal module-root filename itself has no semantic role. The current export syntax is owned by @../project-structure (Project Structure) and @../packages (Packages). Do not treat a local dependency alias as a public API rename.
+An ordinary dependency alias is local to its importing file. A facade can publish a different name only through a `$export`-marked direct-selection clause. This preserves the selected declaration's origin while exposing the chosen public name.
 
 [codeblock, $code "moth":
     -- Ordinary local dependency alias
     @models User as ModelUser
 ]
 
-The local `ModelUser` is visible only in this file. A public rename belongs inside the module root's current explicit `export:` block. See @../project-structure (Project Structure) and @../packages (Packages) for the exact current form.
+`ModelUser` is visible only in this file. For a public rename, use `$export` on the selection in `@mod.moth` or `@package.moth`. See @../packages/#public-reexports (Public re-exports).
 
 ### Dependency aliases with type aliases
 
