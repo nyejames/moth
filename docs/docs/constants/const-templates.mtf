@@ -92,10 +92,7 @@ bypasses scalar escaping.
 The full HTML contract is owned by
 @../project-structure/#entry-config (Entry metadata and builder slots).
 
-Named contributions keep their structural resources live, including on a page
-with no runtime work. The former `page_title`, `page_description`, `page_lang`,
-`page_favicon`, `page_body_style` and `page_head` names are ordinary constants
-with no implicit document effect.
+Named contributions keep their structural resources live, including on a page with no runtime work. Ordinary constants alone do not create builder metadata.
 
 ### Const template `if`
 

@@ -40,7 +40,7 @@ init_docs_sidebar()!
         [data:
             [$md: `help` ]
             [: Prints the current command list and supported flags.]
-            [: Use this when the docs and local compiler may be out of sync.]
+            [: Use this to find command-specific options.]
         ]
 
         [data:

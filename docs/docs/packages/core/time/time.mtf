@@ -292,10 +292,6 @@ Every failure this package itself detects is observable in Moth as a returned `E
 
 All parameters use shared access. No function requires mutable access. All return values stay fresh. `timestamp_from_iso_string` returns through `Error!` on text outside the accepted ISO format and on accepted text whose offset-adjusted instant leaves the renderable window. `to_iso_string` returns through `Error!` when the instant lies outside that window. Every other function declares no typed error slot; a non-finite `F64` at that shared boundary still halts unless a declared builtin `Error!` contract returns it.
 
-### Backend behaviour
-
-HTML-JS lowers `mark_now` to `globalThis.performance.now()`. `timestamp_now` lowers to `Date.now()`. `timestamp_from_iso_string` and `to_iso_string` lower to validating runtime helpers. Every other function, including the Duration and Timestamp construction helpers and the arithmetic functions, lowers to an inline JavaScript expression.
-
 ### Unsupported source forms
 
 - Direct symbol-path clauses such as `@core/time/mark_now` face rejection. Use direct selections or a namespace clause.
