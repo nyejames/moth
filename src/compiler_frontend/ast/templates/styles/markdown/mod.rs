@@ -90,11 +90,14 @@ pub(crate) fn markdown_formatter_factory(
 ///
 /// WHAT:
 /// - Splits text pieces on `\n`.
+/// - Consumes a `\r` immediately before `\n` as part of that line ending.
 /// - Preserves opaque anchors inline in the current line.
 ///
 /// WHY:
 /// - Block parsing needs line boundaries for headings/lists while inline rendering still
 ///   needs anchored child/dynamic pieces in the original order.
+/// - A CRLF terminator is one structural line ending; retaining its `\r` would leave a
+///   trailing space in headings and other block text.
 fn split_formatter_input_into_lines(
     input: FormatterInput,
     string_table: &StringTable,
@@ -111,6 +114,7 @@ fn split_formatter_input_into_lines(
 
                 for ch in text.chars() {
                     if ch == '\n' {
+                        discard_crlf_carriage_return(&mut current_line);
                         close_marker_origin_segment(&mut current_line, &mut segment_origins);
                         lines.push(std::mem::take(&mut current_line));
                         byte_offset += ch.len_utf8();
@@ -143,6 +147,27 @@ fn split_formatter_input_into_lines(
 
     lines.push(current_line);
     lines
+}
+
+/// Removes the retained `\r` from a line terminated by `\n`.
+///
+/// The `\r` may have arrived in a separate contiguous text piece, so line splitting must
+/// recognise it after the fact. Opaque atoms are never removed, which keeps a line ending
+/// from collapsing across a child-template or dynamic-expression boundary. Marker origins
+/// keep their authored byte offsets; only the atom end is clamped when the carriage return
+/// was the final atom of their source piece.
+fn discard_crlf_carriage_return(line: &mut MarkdownLine) {
+    if !matches!(line.atoms.last(), Some(MarkdownInlineAtom::Char('\r'))) {
+        return;
+    }
+
+    line.atoms.pop();
+    let atom_end = line.atoms.len();
+    for origin in &mut line.marker_origins {
+        if origin.atom_end > atom_end {
+            origin.atom_end = atom_end;
+        }
+    }
 }
 
 /// Finishes the marker origins contributed by one authored text piece segment.

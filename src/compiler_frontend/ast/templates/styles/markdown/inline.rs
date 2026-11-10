@@ -99,8 +99,9 @@ impl InlineRenderer {
                 MarkdownInlineAtom::Char('\n' | '\r') => {
                     self.literalize_pending_stars();
                     // Soft line boundaries render as one space but remain newline atoms
-                    // so inline parsing can apply each construct's newline rule. CRLF is
-                    // one logical boundary even though the splitter retains both atoms.
+                    // so inline parsing can apply each construct's newline rule. Structural
+                    // CRLF is already consumed by the line splitter; consume_soft_newline
+                    // keeps this branch correct for any remaining CRLF pair.
                     self.output.push_escaped_char(' ');
                     self.last_was_separator = true;
                     prev_whitespace = true;
@@ -222,8 +223,12 @@ impl InlineRenderer {
 
     /// Records one marker and applies its zero-width whitespace rule.
     ///
-    /// A marker is absent from rendered text. At a block edge its adjacent separators are
-    /// removed; between two separators one is removed so `A @#x B` becomes `A B`.
+    /// A marker is absent from rendered text. At a block edge the whole adjacent separator
+    /// run is removed so the marker cannot leave leading or trailing whitespace. Between
+    /// visible words, one logical separator is removed: a soft line break removes the
+    /// horizontal whitespace before it and the break itself, while same-line repeated
+    /// spaces lose only the first separator. This preserves authored spacing that is not
+    /// adjacent to a line-ending boundary.
     fn consume_marker(
         &mut self,
         marker: ParsedMarkdownMarker,
@@ -243,7 +248,7 @@ impl InlineRenderer {
                 return atoms.len();
             }
             if next_is_separator {
-                return consume_soft_newline(&atoms, next_index);
+                return consume_separator_run(&atoms, next_index);
             }
             return next_index;
         }
@@ -256,7 +261,7 @@ impl InlineRenderer {
         }
 
         if self.last_was_separator && next_is_separator {
-            return consume_soft_newline(&atoms, next_index);
+            return consume_marker_separator(&atoms, next_index);
         }
 
         next_index
@@ -354,6 +359,47 @@ impl InlineRenderer {
 
 fn is_block_separator(ch: Option<char>) -> bool {
     matches!(ch, Some(' ' | '\t' | '\n' | '\r'))
+}
+
+/// Consumes the whole adjacent separator run.
+///
+/// Used at block edges, where the zero-width marker must not leave leading or trailing
+/// whitespace. The run stops at the first visible atom or opaque anchor, never crossing it.
+fn consume_separator_run(atoms: &[MarkdownInlineAtom], index: usize) -> usize {
+    let mut cursor = index;
+    while is_block_separator(atom_char(atoms, cursor)) {
+        cursor = match atom_char(atoms, cursor) {
+            Some('\n' | '\r') => consume_soft_newline(atoms, cursor),
+            Some(_) => cursor + 1,
+            None => break,
+        };
+    }
+    cursor
+}
+
+/// Consumes one logical separator after a marker between visible words.
+///
+/// Horizontal whitespace immediately before a soft line break is line-ending padding, so
+/// the horizontal run and the break are removed together. On the same line only the first
+/// horizontal atom is removed, preserving any additional authored spaces. Whitespace after
+/// a soft break is continuation indentation and stays authored.
+fn consume_marker_separator(atoms: &[MarkdownInlineAtom], index: usize) -> usize {
+    match atom_char(atoms, index) {
+        Some(' ' | '\t') => {
+            let mut cursor = index;
+            while matches!(atom_char(atoms, cursor), Some(' ' | '\t')) {
+                cursor += 1;
+            }
+
+            if matches!(atom_char(atoms, cursor), Some('\n' | '\r')) {
+                consume_soft_newline(atoms, cursor)
+            } else {
+                index + 1
+            }
+        }
+        Some('\n' | '\r') => consume_soft_newline(atoms, index),
+        _ => index,
+    }
 }
 
 fn count_consecutive_star_chars(atoms: &[MarkdownInlineAtom], start_index: usize) -> usize {

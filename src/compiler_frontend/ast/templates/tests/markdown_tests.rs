@@ -1,5 +1,5 @@
 use super::MarkdownTemplateFormatter;
-use super::{MarkdownInlineAtom, MarkdownLine};
+use super::{MarkdownAtomsRef, MarkdownInlineAtom, MarkdownLine};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterAnchorId, FormatterInput, FormatterInputPiece, FormatterOpaqueKind,
@@ -561,6 +561,67 @@ fn soft_line_boundaries_before_normal_text_keep_paragraph_open() {
 }
 
 #[test]
+fn structural_crlf_renders_like_lf() {
+    let cases = [
+        ("# Hello\nNext", "<h1>Hello</h1><p>Next</p>"),
+        (
+            "# Hello @#intro world\nNext",
+            "<h1 id=\"intro\">Hello world</h1><p>Next</p>",
+        ),
+    ];
+
+    for (lf, expected) in cases {
+        let crlf = lf.replace('\n', "\r\n");
+        assert_eq!(to_markdown(lf, "p"), expected, "LF {lf:?}");
+        assert_eq!(to_markdown(&crlf, "p"), expected, "CRLF {crlf:?}");
+    }
+}
+
+#[test]
+fn crlf_across_text_pieces_preserves_marker_origin() {
+    let mut string_table = StringTable::new();
+    let input = spanned_pieces_input(&["# @#bad/name\r", "\nNext"], &mut string_table);
+    let lines = super::split_formatter_input_into_lines(input, &string_table);
+
+    assert_eq!(lines.len(), 2);
+    assert_eq!(
+        lines[1]
+            .atoms
+            .iter()
+            .filter_map(|atom| match atom {
+                MarkdownInlineAtom::Char(ch) => Some(*ch),
+                MarkdownInlineAtom::Opaque(_) => None,
+            })
+            .collect::<String>(),
+        "Next"
+    );
+
+    let line = &lines[0];
+    assert_eq!(line.atoms.len(), 12);
+    assert!(matches!(
+        line.atoms.last(),
+        Some(MarkdownInlineAtom::Char('e'))
+    ));
+
+    let origin = line
+        .marker_origins
+        .first()
+        .expect("the split marker should keep its authored origin");
+    assert_eq!(origin.atom_index, 2);
+    assert_eq!(origin.byte_offset, 2);
+    assert_eq!(origin.atom_end, line.atoms.len());
+
+    let span = MarkdownAtomsRef::whole(line)
+        .source_span_for_atoms(2, 6)
+        .expect("the marker origin should resolve");
+    let range = span
+        .local()
+        .inline_range()
+        .expect("test marker spans should use inline encoding");
+    assert_eq!((range.start(), range.end()), (2, 8));
+}
+
+#[test]
 fn single_newline_before_dynamic_anchor_does_not_use_child_rule() {
     let rendered = markdown_formatter_output_from_text_and_anchors(&[
         (Some("hello\n"), None),
@@ -925,7 +986,44 @@ fn marker_consumes_lf_crlf_and_cr_as_one_separator() {
             "<p id=\"intro\">Hello world</p>",
             "separator before marker {separator:?}"
         );
+
+        for horizontal in [" ", "\t"] {
+            assert_eq!(
+                to_markdown(&format!("@#intro{horizontal}{separator}Hello"), "p"),
+                "<p id=\"intro\">Hello</p>",
+                "horizontal whitespace before block-start separator {horizontal:?} {separator:?}"
+            );
+            assert_eq!(
+                to_markdown(&format!("Hello @#intro{horizontal}{separator}world"), "p"),
+                "<p id=\"intro\">Hello world</p>",
+                "horizontal whitespace before separator {horizontal:?} {separator:?}"
+            );
+        }
     }
+
+    assert_eq!(
+        to_markdown("@#intro  Hello", "p"),
+        "<p id=\"intro\">Hello</p>"
+    );
+    assert_eq!(
+        to_markdown("Hello @#intro  world", "p"),
+        "<p id=\"intro\">Hello  world</p>"
+    );
+    assert_eq!(
+        to_markdown("Hello @#intro  ", "p"),
+        "<p id=\"intro\">Hello</p>"
+    );
+}
+
+#[test]
+fn marker_at_block_start_consumes_separators_before_an_opaque_anchor() {
+    let rendered = markdown_formatter_output_from_text_and_anchors(&[
+        (Some("@#intro \t "), None),
+        (None, Some(child_anchor(7))),
+        (Some(" tail"), None),
+    ]);
+
+    assert_eq!(rendered, "<p id=\"intro\">{child:7} tail</p>");
 }
 
 #[test]
