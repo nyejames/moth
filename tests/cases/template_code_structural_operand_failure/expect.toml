@@ -1,0 +1,18 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0021"]
+message_contains = [
+    "Invalid argument for template directive 'code'",
+    "Unsupported `$code` language",
+]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+reason = "invalid_template_directive.invalid_argument"
+path = "input/@entry.moth"
+line = 7
+column = 15
+count = 1

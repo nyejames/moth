@@ -90,7 +90,7 @@ Reject source dependency clauses before path resolution, authored file-value pat
 
 Config-local helpers do not become declarations visible to project modules. Only specialised build interfaces publish folded settings. Synthetic single-file operations use explicit synthetic configuration without inventing source directives or implicit input providers.
 
-`docs/roadmap/plans/general-directives-plan.md` is the accepted directive and config plan. Named `project` and active-builder records plus `$config` input contracts are the only config architecture specified here. There are no `$project`, `$builder` or `$html_builder` directives.
+`docs/docs/directives/directives.mtf` owns the two directive attachment locations and the one-operand grammar; `docs/docs/project-structure/build-inputs.mtf` owns the `$config` input contract. Named `project` and active-builder records plus `$config` input contracts are the only config architecture specified here. There are no `$project`, `$builder` or `$html_builder` directives.
 
 ### Project record
 

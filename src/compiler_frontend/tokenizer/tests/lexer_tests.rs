@@ -3,7 +3,7 @@ use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::ReservedNameCollisionView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
-    InvalidStyleDirectiveView, UnescapedImplicitTemplateCloseView,
+    UnescapedImplicitTemplateCloseView, UnknownDirectiveView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     self, CommonSyntaxMistakeCode, InvalidCharacterView, InvalidNumberLiteralView,
@@ -28,6 +28,7 @@ use crate::compiler_frontend::source::line_index::{LineIndex, line_start_offsets
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
 };
+use crate::compiler_frontend::style_directives::DirectiveOccurrence;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -148,14 +149,19 @@ fn assert_invalid_character_after_dollar(source: &str, character: char) {
     );
 }
 
-fn assert_unknown_directive(source: &str, expected_name: &str) {
+fn assert_unknown_directive(
+    source: &str,
+    expected_name: &str,
+    expected_occurrence: DirectiveOccurrence,
+) {
     let (diagnostic, string_table) = tokenize_source_error(source);
     let diagnostic = first_diagnostic_view(&diagnostic);
     assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0010");
     let facts = diagnostic
-        .family_view::<InvalidStyleDirectiveView>()
-        .expect("the diagnostic is an invalid style directive");
+        .family_view::<UnknownDirectiveView>()
+        .expect("the diagnostic is an unknown directive");
     assert_eq!(string_table.resolve(facts.directive_name), expected_name);
+    assert_eq!(facts.occurrence, expected_occurrence);
 }
 
 fn tokenize_source_with_registry(
@@ -1680,10 +1686,11 @@ fn rejects_legacy_reset_style_directive_name() {
     let diagnostic = first_diagnostic_view(&error);
     assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0010");
     let facts = diagnostic
-        .family_view::<InvalidStyleDirectiveView>()
-        .expect("the diagnostic is an invalid style directive");
+        .family_view::<UnknownDirectiveView>()
+        .expect("the diagnostic is an unknown directive");
     assert_eq!(string_table.resolve(facts.directive_name), "reset");
-    let supported = style_directives.supported_directives_for_diagnostic();
+    let supported =
+        style_directives.supported_directives_for_diagnostic(DirectiveOccurrence::TemplateHead);
     assert_eq!(
         string_table.resolve(facts.supported_directives),
         supported.as_str()
@@ -1703,16 +1710,39 @@ fn rejects_unknown_style_directive_name() {
     let diagnostic = first_diagnostic_view(&error);
     assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0010");
     let facts = diagnostic
-        .family_view::<InvalidStyleDirectiveView>()
-        .expect("the diagnostic is an invalid style directive");
+        .family_view::<UnknownDirectiveView>()
+        .expect("the diagnostic is an unknown directive");
     assert_eq!(
         string_table.resolve(facts.directive_name),
         "unknown_formatter"
     );
-    let supported = StyleDirectiveRegistry::built_ins().supported_directives_for_diagnostic();
+    let supported = StyleDirectiveRegistry::built_ins()
+        .supported_directives_for_diagnostic(DirectiveOccurrence::TemplateHead);
     assert_eq!(
         string_table.resolve(facts.supported_directives),
         supported.as_str()
+    );
+}
+
+#[test]
+fn rejects_unknown_source_directive_with_source_suggestions() {
+    let (error, string_table) = tokenize_source_error("$does_not_exist\nvalue #I32 = 1\n");
+
+    let diagnostic = first_diagnostic_view(&error);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0010");
+    let facts = diagnostic
+        .family_view::<UnknownDirectiveView>()
+        .expect("the diagnostic is an unknown directive");
+    assert_eq!(string_table.resolve(facts.directive_name), "does_not_exist");
+    assert_eq!(
+        facts.occurrence,
+        DirectiveOccurrence::Source,
+        "a directive outside a template head is a source-position occurrence"
+    );
+    assert_eq!(
+        string_table.resolve(facts.supported_directives),
+        "'$config'",
+        "source suggestions must not include template-only directives"
     );
 }
 
@@ -1789,7 +1819,7 @@ fn rejects_removed_reactive_binding_spellings_as_unknown_directives() {
         "value $String = \"name\"\n",
         "read_name |value $String| -> String:\n;\n",
     ] {
-        assert_unknown_directive(source, "String");
+        assert_unknown_directive(source, "String", DirectiveOccurrence::Source);
     }
 }
 
@@ -1875,10 +1905,11 @@ fn unknown_style_directives_fail_under_strict_registry() {
     let diagnostic = first_diagnostic_view(&error);
     assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0010");
     let facts = diagnostic
-        .family_view::<InvalidStyleDirectiveView>()
-        .expect("the diagnostic is an invalid style directive");
+        .family_view::<UnknownDirectiveView>()
+        .expect("the diagnostic is an unknown directive");
     assert_eq!(string_table.resolve(facts.directive_name), "unknown");
-    let supported = style_directives.supported_directives_for_diagnostic();
+    let supported =
+        style_directives.supported_directives_for_diagnostic(DirectiveOccurrence::TemplateHead);
     assert_eq!(
         string_table.resolve(facts.supported_directives),
         supported.as_str()

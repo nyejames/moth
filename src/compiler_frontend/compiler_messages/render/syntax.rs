@@ -16,7 +16,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::generics
     InvalidParameterContractView, InvalidThisUsageView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::InvalidTypeAnnotationView;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::InvalidStyleDirectiveView;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::UnknownDirectiveView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::ExpectedTokenView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::InvalidNumberLiteralView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
@@ -31,6 +31,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidTypeAnnotationReason, MissingWhitespace, OperatorOperandPosition, ParameterContractKind,
     SymbolicSpacingConstruct, SymbolicSpacingError,
 };
+use crate::compiler_frontend::style_directives::DirectiveOccurrence;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
@@ -279,28 +280,40 @@ fn fixed_scalar_inclusive_range(scalar: FixedScalar) -> Option<String> {
     scalar.unsigned_max().map(|max| format!("0 to {max}"))
 }
 
-pub(crate) fn invalid_style_directive_message(
+/// WHAT: names the directive the author wrote and the directives that are valid at that position.
+/// WHY: a source file accepts only source modifiers, so suggesting template-only names there
+///      would send the reader to syntax that cannot appear in that file.
+pub(crate) fn unknown_directive_message(
     directive_name: StringId,
     supported_directives: StringId,
+    occurrence: DirectiveOccurrence,
     string_table: &dyn StringTableResolver,
 ) -> String {
     let name = string_table.resolve(directive_name);
     let supported = string_table.resolve(supported_directives);
 
-    format!("Style directive '${name}' is unsupported here. Registered directives are {supported}.")
+    match occurrence {
+        DirectiveOccurrence::TemplateHead => {
+            format!("'${name}' is not a template directive. Template directives are {supported}.")
+        }
+        DirectiveOccurrence::Source => {
+            format!("'${name}' is not a directive. Source directives are {supported}.")
+        }
+    }
 }
 
-/// WHAT: renders a style-directive diagnostic from its compact fact view.
-/// WHY: the row stores both string ids needed by the existing message helper.
-pub(crate) fn render_invalid_style_directive(
+/// WHAT: renders an unknown-directive diagnostic from its compact fact view.
+/// WHY: the row stores both string ids and the occurrence needed by the message helper.
+pub(crate) fn render_unknown_directive(
     _diagnostic: &DiagnosticView<'_>,
-    facts: &InvalidStyleDirectiveView,
+    facts: &UnknownDirectiveView,
     context: DiagnosticRenderContext<'_>,
 ) -> RenderedPayload {
     RenderedPayload {
-        message: invalid_style_directive_message(
+        message: unknown_directive_message(
             facts.directive_name,
             facts.supported_directives,
+            facts.occurrence,
             context.string_table,
         ),
         guidance: Vec::new(),

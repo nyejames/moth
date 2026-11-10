@@ -5,8 +5,25 @@ fn supported_directives_for_diagnostic_uses_stable_registry_order() {
     let registry = StyleDirectiveRegistry::built_ins();
 
     assert_eq!(
-        registry.supported_directives_for_diagnostic(),
-        "'$before', '$after', '$fresh', '$slot', '$in', '$note', '$todo', '$doc', '$raw', '$md', '$html', '$css', '$escape_html', '$code', '$config'"
+        registry.supported_directives_for_diagnostic(DirectiveOccurrence::TemplateHead),
+        "'$before', '$after', '$fresh', '$slot', '$in', '$note', '$todo', '$doc', '$raw', '$md', '$html', '$css', '$escape_html', '$code'"
+    );
+}
+
+#[test]
+fn diagnostic_suggestions_are_limited_to_the_occurrence() {
+    let registry = StyleDirectiveRegistry::built_ins();
+
+    assert_eq!(
+        registry.supported_directives_for_diagnostic(DirectiveOccurrence::Source),
+        "'$config'",
+        "a source position must not suggest template-only directives"
+    );
+    assert!(
+        !registry
+            .supported_directives_for_diagnostic(DirectiveOccurrence::TemplateHead)
+            .contains("$config"),
+        "a template head must not suggest the source modifier"
     );
 }
 

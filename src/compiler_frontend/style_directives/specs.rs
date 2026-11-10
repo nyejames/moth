@@ -71,6 +71,21 @@ impl StyleDirectiveContexts {
     }
 }
 
+/// Which source position owns a directive name.
+///
+/// WHAT:
+/// - `TemplateHead` prefixes a template and modifies that template.
+/// - `Source` is every other position, including the inside of a code template body.
+///
+/// WHY:
+/// - An unknown directive token and the names that could appear in its place depend on the
+///   position, so the tokenizer needs the occurrence to choose accurate diagnostic wording.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DirectiveOccurrence {
+    TemplateHead,
+    Source,
+}
+
 /// Eligible target of one source-modifier directive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceModifierTarget {

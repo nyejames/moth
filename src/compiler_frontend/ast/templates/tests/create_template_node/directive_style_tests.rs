@@ -989,12 +989,35 @@ fn whitespace_separated_parenthesised_operand_is_not_a_call() {
 
 #[test]
 fn second_operand_is_rejected() {
-    // A second bare value is not a directive argument list: ordinary expression parsing stops at
-    // the unfinished juxtaposition and reports the operator it expected.
-    let error = template_parse_error("[$code \"a\" \"b\": body]");
+    // A second bare value is not a directive argument list: the operand parser stops before it and
+    // the directive boundary names the malformed directive at the extra value.
+    let diagnostic = parse_optional_expression_source("[$code \"a\" \"b\"]")
+        .expect_err("a second operand must be rejected");
+
+    assert_invalid_template_directive(
+        &diagnostic,
+        InvalidTemplateDirectiveCode::UnexpectedArguments,
+    );
+    let facts = diagnostic
+        .first()
+        .expect("extra-operand diagnostic should compact to one record");
     assert!(
-        error.contains("Expected an operator"),
-        "unexpected extra-operand diagnostic: {error}"
+        matches!(facts.primary_site, DirectiveStyleTestSite::Local(_)),
+        "the extra operand must be cited at its authored span, found {:?}",
+        facts.primary_site
+    );
+}
+
+#[test]
+fn second_operand_after_a_template_operand_is_rejected() {
+    // A template operand ends the directive's one operand just like a literal does, including
+    // past discarded comment templates, so the boundary still reports the extra value.
+    let diagnostic = parse_optional_expression_source("[$code [:prefix] \"moth\"]")
+        .expect_err("a value after a template operand must be rejected");
+
+    assert_invalid_template_directive(
+        &diagnostic,
+        InvalidTemplateDirectiveCode::UnexpectedArguments,
     );
 }
 
@@ -1635,7 +1658,7 @@ fn code_call_shape_is_rejected() {
     let error = template_parse_error("[$code(): body]");
 
     assert!(
-        error.contains("takes exactly one bare language operand"),
+        error.contains("`$code` takes at most one bare language operand."),
         "unexpected error message: {error}"
     );
 }
@@ -1652,8 +1675,12 @@ fn code_rejects_multiple_language_arguments() {
     let error = template_parse_error("[$code \"moth\" \"js\": body]");
 
     assert!(
-        error.contains("Expected an operator"),
-        "unexpected error message: {error}"
+        error.contains("`$code` takes at most one bare language operand."),
+        "unexpected extra-operand diagnostic: {error}"
+    );
+    assert!(
+        !error.contains("Expected an operator"),
+        "an extra directive operand must not surface as an expression operator error: {error}"
     );
 }
 

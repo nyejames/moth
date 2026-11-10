@@ -17,9 +17,10 @@ use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
 };
 use crate::compiler_frontend::compiler_messages::render::{
-    render_invalid_style_directive, render_invalid_template_directive,
-    render_invalid_template_slot, render_invalid_template_structure, render_malformed_css_template,
+    render_invalid_template_directive, render_invalid_template_slot,
+    render_invalid_template_structure, render_malformed_css_template,
     render_malformed_html_template, render_unescaped_implicit_template_close,
+    render_unknown_directive,
 };
 use crate::compiler_frontend::compiler_messages::{
     CssTemplateWarning, DiagnosticSeverity, HtmlTemplateWarning, InvalidTemplateDirectiveReason,
@@ -29,7 +30,15 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::style_directives::DirectiveOccurrence;
 use crate::compiler_frontend::symbols::string_interning::StringId;
+
+unit_code! {
+    impl DirectiveOccurrence {
+        TemplateHead = 1,
+        Source = 2,
+    }
+}
 
 unit_code! {
     impl SourceFileKind {
@@ -643,21 +652,23 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    INVALID_STYLE_DIRECTIVE {
+    UNKNOWN_DIRECTIVE {
         internal: 1010,
         stable: "MOTH-SYNTAX-0010",
         category: DiagnosticCategory::Syntax,
         severity: DiagnosticSeverity::Error,
-        title: "Invalid style directive",
+        title: "Unknown directive",
         facts: [
             directive_name: StringFact,
             supported_directives: StringFact,
+            occurrence: UnitFact<DirectiveOccurrence>,
         ],
         labels: [],
         extra: None,
-        ctor: generated invalid_style_directive,
-        view: InvalidStyleDirectiveView,
-        render: render_invalid_style_directive,
+        ctor: generated unknown_directive,
+        reason_key: occurrence,
+        view: UnknownDirectiveView,
+        render: render_unknown_directive,
     }
 }
 
@@ -871,7 +882,7 @@ pub(crate) fn builder_root_slot_not_registered(
 pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     MALFORMED_CSS_TEMPLATE,
     MALFORMED_HTML_TEMPLATE,
-    INVALID_STYLE_DIRECTIVE,
+    UNKNOWN_DIRECTIVE,
     INVALID_TEMPLATE_DIRECTIVE,
     INVALID_TEMPLATE_STRUCTURE,
     UNESCAPED_IMPLICIT_TEMPLATE_CLOSE,

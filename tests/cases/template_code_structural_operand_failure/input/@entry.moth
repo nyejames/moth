@@ -1,0 +1,11 @@
+-- A structural template value is not a language name. The formatter must reject it
+-- with the directive's own invalid-argument diagnostic rather than a generic error.
+banner #= [$html:
+loop x
+]
+
+out #= [$code banner:
+loop x
+]
+
+[out]

@@ -38,6 +38,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
     CommonSyntaxMistakeCode, InvalidStringEscapeCode, NumberLiteralCode,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::IncompatibleChoiceComparisonCode;
+use crate::compiler_frontend::style_directives::DirectiveOccurrence;
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 
 pub(crate) trait StableReasonKey {
@@ -418,6 +419,10 @@ define_stable_reason_keys! {
 
     InvalidTemplateDirectiveReason => {
         @delegate(reason => InvalidTemplateDirectiveCode::of(reason).stable_reason_key());
+    },
+    DirectiveOccurrence => {
+        &DirectiveOccurrence::TemplateHead => "unknown_directive.template_head",
+        &DirectiveOccurrence::Source => "unknown_directive.source",
     },
     InvalidTemplateDirectiveCode => {
         &InvalidTemplateDirectiveCode::UnknownDirective => "invalid_template_directive.unknown_directive",

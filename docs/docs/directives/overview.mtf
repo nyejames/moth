@@ -13,7 +13,7 @@ This index routes contributors to the canonical directive contract and its compi
 
 - `docs/compiler-design-overview.md` owns Stage 1 tokenization, Stage 2 header syntax, Stage 4 semantics and entry metadata. Directive recognition must retain a known name and precise authored span before context validation.
 - `docs/build-system-design.md` owns selected configuration, root-role facts and builder entry selection.
-- `docs/roadmap/plans/general-directives-plan.md` records the general directive implementation. `$config` and frontend ownership of the template formatters are delivered. Source modifiers have contiguous next-construct attachment; template directives use the containing template. Fixed root roles own `@entry.moth` eligibility and entry selection.
+- Source modifiers have contiguous next-construct attachment; template directives use the containing template. Fixed root roles own `@entry.moth` eligibility and entry selection.
 - Placement errors must distinguish known invalid contexts, unknown names, deferred features, invalid operands, duplicate modifiers and attachment broken by an empty physical line. Use existing compiler diagnostic owners and avoid a second lexer/header grammar.
 
 ## Status

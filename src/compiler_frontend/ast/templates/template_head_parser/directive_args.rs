@@ -16,7 +16,7 @@
 //! - **The head expression owner** parses the operand expression itself.
 //! - **Slot modules** own slot schema and composition; they do not parse tokens.
 
-use super::head_parser::parse_head_expression;
+use super::head_parser::parse_directive_operand_expression;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
@@ -120,21 +120,20 @@ pub(crate) fn parse_optional_directive_operand(
     }
 
     token_stream.advance();
-    let expression = parse_head_expression(
+    let expression = parse_directive_operand_expression(
         token_stream,
         context,
         type_interner,
         expression_builder,
         const_values,
         &ValueMode::ImmutableOwned,
-        false,
         string_table,
         path_fork,
     )?;
 
-    // A directive owns at most one operand: a second value or a directive-owned argument list is
-    // a malformed operand, not another head item. A successful operand parse leaves the cursor on
-    // the boundary token, so the check reads the current tag.
+    // A directive owns at most one operand. The operand parser stops before a second operand so
+    // this boundary reports the extra value with the directive's name and span; ordinary
+    // expression positions keep the shared missing-operator diagnostic for the same tokens.
     let following_tag = token_stream.current_tag();
     if !directive_operand_ends_at(following_tag) {
         return Err(with_current_token_span(

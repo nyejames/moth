@@ -1226,9 +1226,73 @@ pub(super) fn parse_head_expression(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<OwnedExpr, ExpressionParseError> {
+    parse_head_expression_with_boundary(
+        token_stream,
+        context,
+        type_interner,
+        expression_builder,
+        const_values,
+        value_mode,
+        consume_closing_parenthesis,
+        false,
+        string_table,
+        path_fork,
+    )
+}
+
+/// Parses the single optional operand that follows a directive name.
+///
+/// WHAT: the ordinary head expression grammar, stopped before a second operand.
+/// WHY: the directive owns its operand boundary, so it alone can report an extra operand with the
+///      directive's name and span. Ordinary expression positions keep the shared missing-operator
+///      diagnostic for the same token sequence.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "directive operands share the head expression parser's borrowed resources"
+)]
+pub(super) fn parse_directive_operand_expression(
+    token_stream: &mut AstCursor<'_>,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    value_mode: &ValueMode,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> Result<OwnedExpr, ExpressionParseError> {
+    parse_head_expression_with_boundary(
+        token_stream,
+        context,
+        type_interner,
+        expression_builder,
+        const_values,
+        value_mode,
+        false,
+        true,
+        string_table,
+        path_fork,
+    )
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the shared entry keeps value mode, closing-parenthesis and operand-boundary policy beside the parser borrows"
+)]
+fn parse_head_expression_with_boundary(
+    token_stream: &mut AstCursor<'_>,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    value_mode: &ValueMode,
+    consume_closing_parenthesis: bool,
+    stop_at_adjacent_operand: bool,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> Result<OwnedExpr, ExpressionParseError> {
     let mut inferred = ExpectedType::Infer;
     let mut cast_target_context = CastTargetContext::None;
-    parse_head_expression_with_resources(
+    parse_head_expression_with_resources_and_boundary(
         ExpressionParseResources {
             token_stream,
             scope_context: context,
@@ -1242,6 +1306,7 @@ pub(super) fn parse_head_expression(
             path_fork,
         },
         consume_closing_parenthesis,
+        stop_at_adjacent_operand,
     )
 }
 
@@ -1249,6 +1314,14 @@ pub(super) fn parse_head_expression(
 pub(super) fn parse_head_expression_with_resources(
     resources: ExpressionParseResources<'_, '_, '_>,
     consume_closing_parenthesis: bool,
+) -> Result<OwnedExpr, ExpressionParseError> {
+    parse_head_expression_with_resources_and_boundary(resources, consume_closing_parenthesis, false)
+}
+
+fn parse_head_expression_with_resources_and_boundary(
+    resources: ExpressionParseResources<'_, '_, '_>,
+    consume_closing_parenthesis: bool,
+    stop_at_adjacent_operand: bool,
 ) -> Result<OwnedExpr, ExpressionParseError> {
     let ExpressionParseResources {
         token_stream,
@@ -1262,7 +1335,7 @@ pub(super) fn parse_head_expression_with_resources(
         string_table,
         path_fork,
     } = resources;
-    let input = ExpressionParseInput::ordinary(
+    let mut input = ExpressionParseInput::ordinary(
         ExpressionParseResources {
             token_stream,
             scope_context: context,
@@ -1278,6 +1351,7 @@ pub(super) fn parse_head_expression_with_resources(
         consume_closing_parenthesis,
     )
     .with_numeric_deferral_owner();
+    input.stop_at_adjacent_operand = stop_at_adjacent_operand;
 
     let expression = create_expression_with_trailing_newline_policy(input)?;
     // WHY: an explicit String `#` constant interpolated into a template reads as its value, like an

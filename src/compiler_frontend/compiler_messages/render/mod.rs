@@ -461,10 +461,10 @@ pub(crate) fn invalid_template_directive_message(
                 "`$after` takes exactly one bare compile-time operand.\n                 Write `$after [: </tr> ]`, not `$after = ...`.".to_owned()
             }
             "code" => {
-                "`$code` takes exactly one bare language operand.\n                 Write `$code \"rust\": ...`, not `$code(\"rust\")`.".to_owned()
+                "`$code` takes at most one bare language operand.\n                 Write `$code \"rust\": ...`, never `$code(\"rust\")` or a second value.".to_owned()
             }
             "css" => {
-                "`$css` takes at most one bare mode operand.\n                 Write `$css \"inline\": ...`, not `$css(\"inline\")`.".to_owned()
+                "`$css` takes at most one bare mode operand.\n                 Write `$css \"inline\": ...`, never `$css(\"inline\")` or a second value.".to_owned()
             }
             _ => format!("`${name}` takes no operand. Remove the value or parentheses after it."),
         },

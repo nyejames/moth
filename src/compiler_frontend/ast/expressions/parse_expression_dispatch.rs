@@ -128,6 +128,8 @@ pub(super) struct ExpressionDispatchState<'a> {
     pub(super) route_argument_context: Option<RouteArgumentContext>,
     /// Semantic context for a final-result type mismatch at this expression boundary.
     pub(super) mismatch_context: TypeMismatchContext,
+    /// Whether this parse stops before a second operand instead of reporting a missing operator.
+    pub(super) stop_at_adjacent_operand: bool,
 }
 
 impl ExpressionDispatchState<'_> {
@@ -253,6 +255,9 @@ fn reject_second_operand_after_value_template(
         )?;
 
         if next_template.is_some() {
+            if state.stop_at_adjacent_operand {
+                return Ok(());
+            }
             return Err(token_lexical::invalid_expression(
                 InvalidExpressionReason::ExpectedOperatorBeforeExpression,
                 next_template_start,
@@ -262,6 +267,9 @@ fn reject_second_operand_after_value_template(
     }
 
     if token_stream.current_tag().is_operand_start() {
+        if state.stop_at_adjacent_operand {
+            return Ok(());
+        }
         return Err(token_lexical::invalid_expression(
             InvalidExpressionReason::ExpectedOperatorBeforeExpression,
             Some(token_stream.current_span()),

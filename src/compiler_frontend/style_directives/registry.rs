@@ -4,7 +4,7 @@
 //! errors show a deterministic directive list.
 
 use crate::compiler_frontend::style_directives::builtins::frontend_built_in_directives;
-use crate::compiler_frontend::style_directives::specs::StyleDirectiveSpec;
+use crate::compiler_frontend::style_directives::specs::{DirectiveOccurrence, StyleDirectiveSpec};
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 use std::fmt::Write as _;
 use std::sync::{Arc, LazyLock};
@@ -45,10 +45,19 @@ impl StyleDirectiveRegistry {
         self.find(name).map(|spec| spec.body_mode)
     }
 
-    /// Render a deterministic directive list for user-facing diagnostics.
-    pub fn supported_directives_for_diagnostic(&self) -> String {
+    /// Render the deterministic directive list that may appear at `occurrence`.
+    ///
+    /// WHAT: filters by the spec's declared attachment contexts, so a source-position diagnostic
+    ///       never suggests a name that only a template head accepts and the reverse.
+    /// WHY: the full registry is one ordered list, but a suggestion is only useful when the named
+    ///       directive could actually be written at the failing position.
+    pub fn supported_directives_for_diagnostic(&self, occurrence: DirectiveOccurrence) -> String {
         let mut rendered = String::new();
-        for (index, spec) in self.ordered.iter().enumerate() {
+        let allowed = self.ordered.iter().filter(|spec| match occurrence {
+            DirectiveOccurrence::TemplateHead => spec.contexts.allows_template_head(),
+            DirectiveOccurrence::Source => spec.contexts.allows_source_modifier(),
+        });
+        for (index, spec) in allowed.enumerate() {
             if index > 0 {
                 rendered.push_str(", ");
             }

@@ -1,0 +1,22 @@
+-- The `$code` language operand accepts any compile-time String. These three forms
+-- must all reach the formatter with their real language: a declared constant, a
+-- field projected from a constant record, and a second constant referring to the
+-- first. Each body highlights something only its own language marks.
+language #String = "rust"
+settings #= (language = "moth")
+fallback #String = language
+
+first #= [$code language:
+// rust comment
+]
+second #= [$code settings.language:
+$slot
+]
+third #= [$code fallback:
+let mut
+]
+
+#[: [first]
+[second]
+[third]
+]

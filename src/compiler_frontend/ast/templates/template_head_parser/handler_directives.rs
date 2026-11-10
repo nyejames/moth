@@ -83,7 +83,7 @@ pub(super) fn apply_handler_style_directive(
             TemplateError::from(with_argument_span(diagnostic, parsed_argument.error_span))
         })?;
 
-        build_state.style.formatter = Some(formatter.clone());
+        build_state.style.formatter = Some(formatter);
     }
 
     // The head parser must not skip a separator when the directive already consumed its operand.

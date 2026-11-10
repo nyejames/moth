@@ -22,6 +22,7 @@ use crate::compiler_frontend::paths::const_paths::parse_file_path;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan, SpanCapacityError,
 };
+use crate::compiler_frontend::style_directives::DirectiveOccurrence;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -1622,13 +1623,21 @@ fn tokenize_style_directive(
 
     let directive = string_table.intern(&directive_text);
     let Some(body_mode) = style_directives.body_mode_for(&directive_text) else {
-        // Intern the supported-directives list for the error diagnostic payload.
+        // Only a template head owns template directives; every other position, including a code
+        // template body, is a source position.
+        let occurrence = if stream.mode == TokenizeMode::TemplateHead {
+            DirectiveOccurrence::TemplateHead
+        } else {
+            DirectiveOccurrence::Source
+        };
+        // Intern the occurrence-filtered directive list for the error diagnostic payload.
         // This is diagnostic-only string-table mutation.
         let supported =
-            string_table.intern(&style_directives.supported_directives_for_diagnostic());
-        return Err(templates::invalid_style_directive(
+            string_table.intern(&style_directives.supported_directives_for_diagnostic(occurrence));
+        return Err(templates::unknown_directive(
             directive,
             supported,
+            occurrence,
             Some(current_source_span(stream)?),
         )
         .into());
