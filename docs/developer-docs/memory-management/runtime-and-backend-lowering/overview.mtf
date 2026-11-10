@@ -12,7 +12,7 @@ Physical memory strategies and the collector-free release guarantee.
 
 ## Planning order
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     validated HIR
         -> borrow and last-use analysis
         -> local allocation-family and retained-edge constraints

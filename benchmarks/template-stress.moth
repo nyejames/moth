@@ -64,20 +64,20 @@ footer_insert #= [$in footer:
 ]
 
 -- Before/after wrapper chains
-wrapper_1 #= [$before = [:<div class="w1">], $after = [:</div>]:
+wrapper_1 #= [$before [:<div class="w1">], $after [:</div>]:
     <section class="section-1">[$slot]</section>
 ]
-wrapper_2 #= [$before = [:<span class="w2">], $after = [:</span>]:
+wrapper_2 #= [$before [:<span class="w2">], $after [:</span>]:
     <div class="section-2">[$slot]</div>
 ]
-wrapper_3 #= [$before = [:<em class="w3">], $after = [:</em>]:
+wrapper_3 #= [$before [:<em class="w3">], $after [:</em>]:
     <article class="section-3">[$slot]</article>
 ]
 
 -- Nested before/after wrappers
-nested_wrapper #= [$before = [:<div class="outer-wrap">], $after = [:</div>]:
-    [$before = [:<div class="inner-wrap">], $after = [:</div>]:
-        [$before = [:<span class="core-wrap">], $after = [:</span>]:
+nested_wrapper #= [$before [:<div class="outer-wrap">], $after [:</div>]:
+    [$before [:<div class="inner-wrap">], $after [:</div>]:
+        [$before [:<span class="core-wrap">], $after [:</span>]:
             <div class="deepest">[$slot]</div>
         ]
     ]
@@ -138,7 +138,7 @@ escape_block #= [$escape_html:
 ]
 
 -- $fresh opt-out patterns
-fresh_parent #= [$before = [:<li class="wrapped">], $after = [:</li>]:
+fresh_parent #= [$before [:<li class="wrapped">], $after [:</li>]:
     <ul class="fresh-test">[$slot]</ul>
 ]
 

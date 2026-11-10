@@ -3,7 +3,7 @@ are not yet executable in the Alpha compiler.
 
 An anonymous record groups local values without declaring a named type:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     show_window ||:
         window ~= (
             title = "Strategy",

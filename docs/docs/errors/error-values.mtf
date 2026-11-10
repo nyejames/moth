@@ -5,7 +5,7 @@ Its public fields:
 - `message String`
 - `code U32 = 0`
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     missing = Error("Missing value")
     coded = Error(message = "Missing value", code = 200)
     large = Error("Quota exceeded", code = 3_000_000_000)

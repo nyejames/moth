@@ -2,7 +2,7 @@ Bind Moth template content with normal extensionless dependency clauses.
 
 ### Bind and use
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @docs/intro content as intro
 
     [: [intro] ]

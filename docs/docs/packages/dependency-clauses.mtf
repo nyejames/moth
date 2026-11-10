@@ -2,7 +2,7 @@ Direct-selection and namespace dependency clauses provide compact syntax for bin
 
 ### Direct symbol dependencies
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math sin, cos, PI
 
     @components render as render_component, Button as UiButton, Card
@@ -15,21 +15,21 @@ Each direct selection binds one symbol into the file. `as` creates a file-local 
 The path and the first direct selection must start on the same physical line. A comma explicitly
 continues the list across a following newline:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math sin, -- the comma keeps the clause open
         cos
 ]
 
 Without a comma, a newline ends the dependency clause:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math sin
     next_value = build_value()
 ]
 
 The comma always promises another selection, so a trailing comma is invalid:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Error
     @core/math sin, cos,
 ]
@@ -38,7 +38,7 @@ The same activation, comma-continuation and no-trailing-comma rules apply inside
 
 ### Namespace dependencies
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math
 
     angle = math.PI
@@ -49,7 +49,7 @@ A bare namespace clause brings the whole surface as a field-access-only namespac
 
 ### Namespace alias
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math as math
 
     @vendor/drawing.js as drawing
@@ -59,7 +59,7 @@ A clause-level `as` gives the namespace a local name. This is the standard form 
 
 ### Entry aliases
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math sin as sine, PI as pi
 ]
 
@@ -107,7 +107,7 @@ Dependency bindings are file-local and visible throughout the file independent o
 
 Explicit-extension paths select a registered provider:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @drawing.js draw
     @drawing.js as drawing
 ]

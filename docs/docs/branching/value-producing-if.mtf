@@ -2,7 +2,7 @@ A value-producing `if` sends values to an immediate receiving site.
 
 ### Inline form
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     label = if ready then "ready" else "waiting"
 ]
 
@@ -12,14 +12,14 @@ The inline `then` and `else` form stays on one logical line.
 
 The inline form also supports option-present capture and choice-variant predicates:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     label = if maybe_name is |name| then name else "guest"
     score = if status is Ready then 1 else 0
 ]
 
 ### Block form
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     label = if ready:
         then "ready"
     else
@@ -35,7 +35,7 @@ The block form with `then` is supported at the same closed receiving sites as th
 
 The block form also supports option-present capture and choice-variant predicates:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     label = if maybe_name is |name|:
         then name
     else
@@ -94,7 +94,7 @@ A value-producing block is invalid directly inside:
 A standalone Never call may complete a block-form branch because that branch
 diverges rather than producing a value:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     fatal |message String| -> !:
         assert(false, message)
     ;
@@ -109,7 +109,7 @@ diverges rather than producing a value:
 The Never call does not produce `String` and no coercion occurs. The inline
 form is invalid because it places the call in a value slot:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Invalid: Never call in an inline value slot
     name = if ready then "Priya" else fatal("name unavailable")
 ]
@@ -121,7 +121,7 @@ An all-diverging producer keeps the existing no-producing-path diagnostic.
 
 Both branches must satisfy normal completeness, receiving arity and type rules first. A known Bool then selects one validated branch, so no runtime branch or hidden merge value is needed. Runtime conditions retain the existing value-producing behavior.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     label = if enabled:
         then "on"
     else

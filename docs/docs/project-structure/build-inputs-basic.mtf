@@ -1,10 +1,10 @@
 Build configuration values let a project or source module receive typed primitive values before its modules are compiled.
 
-CLI numeric spelling stays raw until the exact contract selects its type. Declaration-owned `#Config of T` inputs use these exact numeric rules. **Separate directive migration.** `$config` prefixes and explicit-only providers stay queued. See @../progress (Progress) for implementation status.
+CLI numeric spelling stays raw until the exact contract selects its type. `$config` inputs use these exact numeric rules. See @../progress (Progress) for implementation status.
 
-### Accepted `$config`
+### `$config` declarations
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     $config
     analytics #Bool = false
 
@@ -13,21 +13,13 @@ CLI numeric spelling stays raw until the exact contract selects its type. Declar
     ;
 ]
 
-The name is the input name, the type is the contract and `=` is the fallback. A required non-optional input may omit the initializer. Ordinary constants still need one.
+The name is the input name, the type is the contract and `=` is the fallback. A required non-optional input may omit the initializer and then reports a missing-input diagnostic when no value is supplied. An optional input with no initializer or with `= none` resolves to absence. Ordinary constants still need one.
 
 Only `$config` declarations create explicit-only contracts. A `project` record field named `version` does not supply a source input named `version`.
 
-### Current `#Config`
-
-Declaration-owned `#Config of T` is current; the `$config` prefix and explicit-only providers remain queued:
-
-[codeblock, $code("moth"):
-    analytics #Config of Bool = false
-]
-
 ### Command examples
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     moth build . --input enabled=true
     moth build . --input retries=4
     moth build . --input api_url=https://example.com

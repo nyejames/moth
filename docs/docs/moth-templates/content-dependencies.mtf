@@ -2,7 +2,7 @@ Moth template content is bound with normal extensionless source dependency claus
 
 ### Dependency syntax
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @docs/intro
 
     [: [intro.content] ]
@@ -10,7 +10,7 @@ Moth template content is bound with normal extensionless source dependency claus
 
 A bare namespace clause exposes `content` as a field. A direct selection binds it directly:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @docs/intro content as intro_content
 
     [: [intro_content] ]
@@ -28,7 +28,7 @@ The bound `content` is a `#String` compile-time constant. It has already folded 
 
 Insert the bound content into a template body:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @docs/intro content as intro
 
     [: [intro] ]
@@ -38,7 +38,7 @@ The caller decides where to insert it. Bound content does not become a page frag
 
 ### Explicit extensions are rejected for source content
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @docs/intro.mtf content
 ]
 
@@ -48,7 +48,7 @@ This is rejected with `MOTH-IMPORT-0024`. Use `@docs/intro` without the `.mtf` e
 
 The explicit-extension spelling that a clause rejects is valid in expression position, where it evaluates to the same `content` string:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     intro #= @docs/intro.mtf
 ]
 
@@ -70,7 +70,7 @@ Binding a `.mtf` file and inserting its content into a template does not create 
 
 A `.mtf` file's `content` is subject to the same module visibility rules as other declarations. Cross-module dependency clauses can only access `content` if the module root's `export:` block re-exports it.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     export:
         @intro content as intro
     ;

@@ -12,23 +12,19 @@ use crate::compiler_frontend::ast::templates::template_head_parser::core_directi
     parse_in_target, parse_slot_declaration,
 };
 use crate::compiler_frontend::ast::templates::template_head_parser::directive_args::{
-    parse_optional_parenthesized_expression, reject_unexpected_directive_arguments,
+    parse_optional_directive_operand, reject_directive_operand,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::{
-    InvalidCallShapeCode, InvalidCallShapeView,
-};
+use crate::compiler_frontend::compiler_messages::DiagnosticBag;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::calls_data::InvalidCallShapeView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::MalformedCssTemplateView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
     InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView,
 };
-use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
-    UnexpectedTokenShape, UnexpectedTokenView,
-};
+use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::UnexpectedTokenView;
 use crate::compiler_frontend::compiler_messages::diagnostics::foreign::SiteRef;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::CompactDiagnosticBagForTest;
 use crate::compiler_frontend::compiler_messages::diagnostics::test_support::compact_bag_for_test;
-use crate::compiler_frontend::compiler_messages::{DiagnosticBag, DiagnosticToken};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::folded_value::resolve_const_string_value;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
@@ -67,8 +63,8 @@ enum DirectiveStyleTestDiagnosticKind {
         reason: InvalidTemplateDirectiveCode,
         detail: Option<StringId>,
     },
-    UnexpectedToken(Option<DiagnosticToken>),
-    InvalidCallShape(InvalidCallShapeCode),
+    UnexpectedToken,
+    InvalidCallShape,
     Other,
 }
 
@@ -93,14 +89,10 @@ fn summarize_diagnostics(diagnostics: CompactDiagnosticBagForTest) -> DirectiveS
                         reason: facts.reason,
                         detail: facts.detail,
                     }
-                } else if let Some(facts) = view.family_view::<UnexpectedTokenView>() {
-                    let found = match facts.shape {
-                        UnexpectedTokenShape::Token(found) => Some(found),
-                        UnexpectedTokenShape::MultiBind { .. } => None,
-                    };
-                    DirectiveStyleTestDiagnosticKind::UnexpectedToken(found)
-                } else if let Some(facts) = view.family_view::<InvalidCallShapeView>() {
-                    DirectiveStyleTestDiagnosticKind::InvalidCallShape(facts.reason)
+                } else if view.family_view::<UnexpectedTokenView>().is_some() {
+                    DirectiveStyleTestDiagnosticKind::UnexpectedToken
+                } else if view.family_view::<InvalidCallShapeView>().is_some() {
+                    DirectiveStyleTestDiagnosticKind::InvalidCallShape
                 } else {
                     DirectiveStyleTestDiagnosticKind::Other
                 };
@@ -131,18 +123,6 @@ fn assert_invalid_template_directive(
             assert_eq!(*reason, expected);
         }
         other => panic!("expected invalid-template-directive facts, found {other:?}"),
-    }
-}
-
-fn assert_unexpected_token(diagnostic: &DirectiveStyleTestError, expected: DiagnosticToken) {
-    let facts = diagnostic
-        .first()
-        .expect("unexpected-token diagnostic should compact to one record");
-    match &facts.kind {
-        DirectiveStyleTestDiagnosticKind::UnexpectedToken(Some(found)) => {
-            assert_eq!(*found, expected);
-        }
-        other => panic!("expected unexpected-token facts, found {other:?}"),
     }
 }
 
@@ -249,7 +229,7 @@ fn parse_in_target_for_test(
     parse_in_target(directive_name, tokens, string_table).map_err(directive_diagnostic)
 }
 
-fn parse_optional_parenthesized_expression_for_test(
+fn parse_optional_directive_operand_for_test(
     tokens: &mut AstCursor,
     context: &ScopeContext,
     expression_builder: &mut AstExpressionBuilder,
@@ -261,7 +241,7 @@ fn parse_optional_parenthesized_expression_for_test(
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
     let directive_name = string_table.intern("test_directive");
-    parse_optional_parenthesized_expression(
+    parse_optional_directive_operand(
         directive_name,
         tokens,
         context,
@@ -292,7 +272,7 @@ fn parse_optional_expression_source(source: &str) -> DirectiveStyleTestResult<Op
     cursor
         .set_position(file_tokens.opener_index + 1)
         .expect("test token stream position must remain in canonical range");
-    parse_optional_parenthesized_expression_for_test(
+    parse_optional_directive_operand_for_test(
         &mut cursor,
         &context,
         &mut expression_builder,
@@ -303,11 +283,11 @@ fn parse_optional_expression_source(source: &str) -> DirectiveStyleTestResult<Op
 }
 
 // ------------------------------------------------------------------------
-// reject_unexpected_directive_arguments
+// reject_directive_operand
 // ------------------------------------------------------------------------
 
 #[test]
-fn reject_arguments_succeeds_when_no_parens() {
+fn reject_operand_succeeds_when_directive_is_bare() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -327,12 +307,12 @@ fn reject_arguments_succeeds_when_no_parens() {
     cursor
         .set_position(file_tokens.opener_index + 1)
         .expect("test token stream position must remain in canonical range");
-    let result = reject_unexpected_directive_arguments(directive_name, &cursor);
+    let result = reject_directive_operand(directive_name, &cursor);
     assert!(result.is_ok());
 }
 
 #[test]
-fn reject_arguments_fails_when_parens_present() {
+fn reject_operand_fails_when_value_present() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -352,7 +332,7 @@ fn reject_arguments_fails_when_parens_present() {
     cursor
         .set_position(file_tokens.opener_index + 1)
         .expect("test token stream position must remain in canonical range");
-    let result = reject_unexpected_directive_arguments(directive_name, &cursor);
+    let result = reject_directive_operand(directive_name, &cursor);
     assert!(result.is_err());
     let diagnostic = directive_diagnostic(result.unwrap_err());
     assert_invalid_template_directive(
@@ -542,6 +522,51 @@ fn slot_declaration_invalid_string_target_retains_exact_multibyte_span() {
         "\"π\""
     );
     assert_eq!(first.label_count, 0);
+}
+
+#[test]
+fn slot_default_rejects_a_second_operand_at_its_own_span() {
+    let source = "[$slot title = \"a\" \"b\"]";
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let file_tokens =
+        directive_tokens(source, &mut string_table, &mut span_builder, &mut path_fork);
+    let directive_name = string_table.intern("slot");
+    let canonical_owner = file_tokens.canonical_owner();
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let diagnostic = parse_slot_declaration_for_test(
+        directive_name,
+        &mut cursor,
+        file_tokens.source_path,
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("a slot default takes one value");
+    let first = diagnostic
+        .first()
+        .expect("extra-operand diagnostic should compact to one record");
+    let DirectiveStyleTestDiagnosticKind::InvalidTemplateDirective { reason, .. } = &first.kind
+    else {
+        panic!("extra-operand rejection should retain directive facts");
+    };
+    assert_eq!(*reason, InvalidTemplateDirectiveCode::UnexpectedArguments);
+    let DirectiveStyleTestSite::Local(primary_span) = first.primary_site else {
+        panic!("extra-operand rejection should keep its local authored span");
+    };
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!(
+        &source[range.start() as usize..range.end() as usize],
+        "\"b\"",
+        "the diagnostic must anchor at the second operand"
+    );
 }
 
 #[test]
@@ -902,27 +927,25 @@ fn in_target_old_parenthesized_form_rejected() {
     );
 }
 
+// ------------------------------------------------------------------------
+// parse_optional_directive_operand
+// ------------------------------------------------------------------------
+
 #[test]
-fn optional_string_literal_not_a_string_errors() {
-    // Argument type validation lives in normalize_provided_style_argument_value (called by
-    // apply_handler_style_directive), not in parse_optional_parenthesized_expression.
-    let error = template_parse_error("[$code(42): body]");
-    assert!(!error.is_empty());
+fn bare_directive_has_no_operand() {
+    let result = parse_optional_expression_source("[$css]").expect("a bare directive must parse");
+    assert!(result.is_none());
 }
 
-// ------------------------------------------------------------------------
-// parse_optional_parenthesized_expression
-// ------------------------------------------------------------------------
-
 #[test]
-fn optional_expression_no_parens_returns_none() {
+fn operand_value_is_parsed_and_cursor_stops_at_boundary() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let file_tokens = directive_tokens(
-        "[$css]",
+        "[$code \"wrap\"]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -937,41 +960,7 @@ fn optional_expression_no_parens_returns_none() {
     cursor
         .set_position(file_tokens.opener_index + 1)
         .expect("test token stream position must remain in canonical range");
-    let result = parse_optional_parenthesized_expression_for_test(
-        &mut cursor,
-        &context,
-        &mut expression_builder,
-        &mut const_values,
-        &mut string_table,
-        &mut path_fork,
-    );
-    assert!(matches!(result, Ok(None)));
-}
-
-#[test]
-fn optional_expression_with_parens_and_one_trailing_comma_returns_some() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let mut expression_builder = AstExpressionBuilder::new().unwrap();
-    let mut const_values = ConstValueStore::default();
-    let file_tokens = directive_tokens(
-        "[$code(\n\"wrap\"\n,)]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let context = test_context(file_tokens.source_path, &path_fork);
-    let canonical_owner = file_tokens.canonical_owner();
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    cursor
-        .set_position(file_tokens.opener_index + 1)
-        .expect("test token stream position must remain in canonical range");
-    let result = parse_optional_parenthesized_expression_for_test(
+    let result = parse_optional_directive_operand_for_test(
         &mut cursor,
         &context,
         &mut expression_builder,
@@ -983,152 +972,21 @@ fn optional_expression_with_parens_and_one_trailing_comma_returns_some() {
     assert_eq!(
         cursor.current_tag(),
         TokenTag::TEMPLATE_CLOSE,
-        "shared directive parser must leave the cursor after its closing parenthesis",
+        "the operand parser must leave the cursor on the head boundary",
     );
 }
 
 #[test]
-fn optional_expression_empty_parens_errors() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let mut expression_builder = AstExpressionBuilder::new().unwrap();
-    let mut const_values = ConstValueStore::default();
-    let file_tokens = directive_tokens(
-        "[$code()]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let context = test_context(file_tokens.source_path, &path_fork);
-    let canonical_owner = file_tokens.canonical_owner();
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    cursor
-        .set_position(file_tokens.opener_index + 1)
-        .expect("test token stream position must remain in canonical range");
-    let result = parse_optional_parenthesized_expression_for_test(
-        &mut cursor,
-        &context,
-        &mut expression_builder,
-        &mut const_values,
-        &mut string_table,
-        &mut path_fork,
-    );
-    assert!(result.is_err());
-}
-
-#[test]
-fn optional_expression_whitespace_only_parens_use_generic_empty_arguments() {
-    // A whitespace-only argument stays on the generic empty-arguments owner
-    // rather than any decorator-specific reason.
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let mut expression_builder = AstExpressionBuilder::new().unwrap();
-    let mut const_values = ConstValueStore::default();
-    let file_tokens = directive_tokens(
-        "[$code(\n)]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let context = test_context(file_tokens.source_path, &path_fork);
-    let canonical_owner = file_tokens.canonical_owner();
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    cursor
-        .set_position(file_tokens.opener_index + 1)
-        .expect("test token stream position must remain in canonical range");
-    let result = parse_optional_parenthesized_expression_for_test(
-        &mut cursor,
-        &context,
-        &mut expression_builder,
-        &mut const_values,
-        &mut string_table,
-        &mut path_fork,
-    );
-    let diagnostic = result.expect_err("whitespace-only directive argument should error");
-    assert_invalid_template_directive(&diagnostic, InvalidTemplateDirectiveCode::EmptyArguments);
-}
-
-#[test]
-fn optional_expression_extra_comma_errors() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let mut expression_builder = AstExpressionBuilder::new().unwrap();
-    let mut const_values = ConstValueStore::default();
-    let source = "[$code(\"a\", \"b\")]";
-    let file_tokens =
-        directive_tokens(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let context = test_context(file_tokens.source_path, &path_fork);
-    let canonical_owner = file_tokens.canonical_owner();
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    cursor
-        .set_position(file_tokens.opener_index + 1)
-        .expect("test token stream position must remain in canonical range");
-    let result = parse_optional_parenthesized_expression_for_test(
-        &mut cursor,
-        &context,
-        &mut expression_builder,
-        &mut const_values,
-        &mut string_table,
-        &mut path_fork,
-    );
-    assert!(result.is_err());
-    let diagnostic = result.unwrap_err();
-    assert_unexpected_token(
-        &diagnostic,
-        DiagnosticToken::from_static_tag(TokenTag::COMMA),
-    );
-    let first = diagnostic
-        .first()
-        .expect("extra-argument diagnostic should compact to one record");
-    let DirectiveStyleTestSite::Local(primary_span) = first.primary_site else {
-        panic!("extra-argument diagnostic should retain its local offending-comma span");
-    };
-    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
-    assert_eq!((range.start(), range.end()), (10, 11));
-    assert_eq!(&source[range.start() as usize..range.end() as usize], ",");
-}
-
-#[test]
-fn optional_expression_named_argument_is_rejected() {
-    let diagnostic = parse_optional_expression_source("[$code(value = 1)]")
-        .expect_err("directive expressions must reject named arguments");
+fn call_shaped_directive_is_rejected() {
+    let diagnostic = parse_optional_expression_source("[$code(\"rust\")]")
+        .expect_err("the removed call spelling must be rejected");
 
     let facts = diagnostic
         .first()
-        .expect("named-argument diagnostic should compact to one record");
-    assert!(matches!(
-        &facts.kind,
-        DirectiveStyleTestDiagnosticKind::InvalidCallShape(reason)
-            if *reason == InvalidCallShapeCode::NamedArgumentsNotSupported
-    ));
-}
-
-#[test]
-fn optional_expression_mutable_argument_is_rejected() {
-    let diagnostic = parse_optional_expression_source("[$code(~1)]")
-        .expect_err("directive expressions must reject mutable arguments");
-
-    let facts = diagnostic
-        .first()
-        .expect("mutable argument diagnostic should compact to one record");
+        .expect("call-shape diagnostic should compact to one record");
     match &facts.kind {
         DirectiveStyleTestDiagnosticKind::InvalidTemplateDirective { reason, detail } => {
-            assert_eq!(*reason, InvalidTemplateDirectiveCode::InvalidArgument);
+            assert_eq!(*reason, InvalidTemplateDirectiveCode::UnexpectedArguments);
             assert_eq!(*detail, None);
         }
         other => panic!("expected invalid-template-directive facts, found {other:?}"),
@@ -1136,26 +994,94 @@ fn optional_expression_mutable_argument_is_rejected() {
 }
 
 #[test]
-fn optional_expression_double_comma_errors() {
-    let diagnostic = parse_optional_expression_source("[$code(\"a\",,)]")
-        .expect_err("directive expressions must reject double commas");
-
-    assert_unexpected_token(
+fn call_shaped_directive_with_empty_parentheses_is_rejected() {
+    // Empty parentheses are the same call-shape mistake, not a separate arity diagnostic.
+    let diagnostic = parse_optional_expression_source("[$code()]")
+        .expect_err("empty parentheses must be rejected");
+    assert_invalid_template_directive(
         &diagnostic,
-        DiagnosticToken::from_static_tag(TokenTag::COMMA),
+        InvalidTemplateDirectiveCode::UnexpectedArguments,
     );
 }
 
 #[test]
-fn optional_expression_missing_close_paren_errors() {
-    let diagnostic = parse_optional_expression_source("[$code(\"a\"]")
-        .expect_err("directive expressions must require a closing parenthesis");
+fn operand_on_a_directive_that_takes_none_is_rejected() {
+    // The directive shape is the problem, so the diagnostic must not degrade into an ordinary
+    // unknown-name failure for the operand expression.
+    let error = template_parse_error("[$md markdown: body]");
 
-    assert_unexpected_token(
-        &diagnostic,
-        DiagnosticToken::from_static_tag(TokenTag::TEMPLATE_CLOSE),
+    assert!(
+        error.contains("`$md` takes no operand"),
+        "unexpected no-operand diagnostic: {error}"
     );
 }
+
+#[test]
+fn whitespace_separated_parenthesised_operand_is_not_a_call() {
+    // Only an attached `(` is the removed call spelling. A spaced parenthesised value stays an
+    // ordinary operand, so the failure is the operand type rather than the call shape.
+    let error = template_parse_error("[$code (42): body]");
+
+    assert!(
+        error.contains("Invalid argument for template directive 'code'"),
+        "unexpected spaced-operand diagnostic: {error}"
+    );
+    assert!(
+        !error.contains("takes exactly one bare language operand"),
+        "a spaced parenthesised value must not be reported as a call: {error}"
+    );
+}
+
+#[test]
+fn second_operand_is_rejected() {
+    // A second bare value is not a directive argument list: the operand parser stops before it and
+    // the directive boundary names the malformed directive at the extra value.
+    let diagnostic = parse_optional_expression_source("[$code \"a\" \"b\"]")
+        .expect_err("a second operand must be rejected");
+
+    assert_invalid_template_directive(
+        &diagnostic,
+        InvalidTemplateDirectiveCode::UnexpectedArguments,
+    );
+    let facts = diagnostic
+        .first()
+        .expect("extra-operand diagnostic should compact to one record");
+    assert!(
+        matches!(facts.primary_site, DirectiveStyleTestSite::Local(_)),
+        "the extra operand must be cited at its authored span, found {:?}",
+        facts.primary_site
+    );
+}
+
+#[test]
+fn second_operand_after_a_template_operand_is_rejected() {
+    // A template operand ends the directive's one operand just like a literal does, including
+    // past discarded comment templates, so the boundary still reports the extra value.
+    let diagnostic = parse_optional_expression_source("[$code [:prefix] \"moth\"]")
+        .expect_err("a value after a template operand must be rejected");
+
+    assert_invalid_template_directive(
+        &diagnostic,
+        InvalidTemplateDirectiveCode::UnexpectedArguments,
+    );
+}
+
+#[test]
+fn mutable_operand_is_rejected() {
+    // The ordinary mutable-value rule owns this rejection, and it cites the operand itself.
+    let error = template_parse_error("[$code ~1: body]");
+    assert!(
+        error.contains("`~` is not an ordinary value operator"),
+        "unexpected mutable-operand diagnostic: {error}"
+    );
+}
+
+#[test]
+fn wrong_operand_type_is_rejected() {
+    let error = template_parse_error("[$code 42: body]");
+    assert!(!error.is_empty());
+}
+
 #[test]
 fn note_and_todo_templates_do_not_render_content() {
     let note_rendered = folded_template_output("[:before[$note:ignored]after]");
@@ -1304,15 +1230,15 @@ fn duplicate_insert_directives_are_rejected_in_one_head() {
 }
 
 #[test]
-fn project_owned_formatter_directives_are_exclusive_per_template_head() {
-    let style_directives = html_project_test_style_directives();
+fn frontend_formatter_directives_are_exclusive_per_template_head() {
+    let style_directives = frontend_test_style_directives();
     let error =
         template_parse_error_with_style_directives("[$html, $css: body]", &style_directives);
     assert!(
         error.contains(
             "`$html` and `$css` cannot be combined because both control template body formatting. Choose one formatter."
         ),
-        "unexpected project formatter-conflict reason: {error}"
+        "unexpected formatter-conflict reason: {error}"
     );
 }
 
@@ -1532,7 +1458,7 @@ fn doc_brackets_remain_literal_text() {
 
 #[test]
 fn css_without_argument_uses_css_formatter() {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -1576,14 +1502,14 @@ fn css_without_argument_uses_css_formatter() {
 
 #[test]
 fn css_inline_argument_parses_correctly() {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source_with_style_directives(
-        "[$css(\"inline\"):\ncolor: blue;\n]",
+        "[$css \"inline\":\ncolor: blue;\n]",
         &style_directives,
         &mut string_table,
         &mut span_builder,
@@ -1620,9 +1546,9 @@ fn css_inline_argument_parses_correctly() {
 
 #[test]
 fn css_inline_argument_must_be_quoted_string_literal() {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let error = template_parse_error_with_style_directives(
-        "[$css(inline): color: blue;]",
+        "[$css inline: color: blue;]",
         &style_directives,
     );
     assert!(
@@ -1637,9 +1563,9 @@ fn css_inline_argument_must_be_quoted_string_literal() {
 
 #[test]
 fn css_rejects_unknown_arguments() {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let error = template_parse_error_with_style_directives(
-        "[$css(\"scoped\"): color: blue;]",
+        "[$css \"scoped\": color: blue;]",
         &style_directives,
     );
     assert!(!error.is_empty());
@@ -1647,7 +1573,7 @@ fn css_rejects_unknown_arguments() {
 
 #[test]
 fn const_css_template_emits_malformed_css_warnings() {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let warnings = template_warnings_with_style_directives(
         "[$css:\n.button { color red; }\n]",
         false,
@@ -1670,7 +1596,7 @@ fn const_css_template_emits_malformed_css_warnings() {
 
 #[test]
 fn css_validation_warnings_keep_authored_spans() {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let warnings = template_warnings_with_style_directives(
         "[$css:\n.button { color red; }\n.button { color blue }\n]",
         false,
@@ -1699,9 +1625,9 @@ fn css_validation_warnings_keep_authored_spans() {
 
 #[test]
 fn inline_css_warns_when_blocks_are_used() {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let warnings = template_warnings_with_style_directives(
-        "[$css(\"inline\"):\n.button { color: red; }\n]",
+        "[$css \"inline\":\n.button { color: red; }\n]",
         false,
         &style_directives,
     );
@@ -1716,7 +1642,7 @@ fn inline_css_warns_when_blocks_are_used() {
 
 #[test]
 fn runtime_css_templates_emit_warnings_for_static_body_segments() {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let warnings = template_warnings_with_style_directives(
         "[value, $css:\n.button { color red; }\n]",
         true,
@@ -1742,7 +1668,7 @@ fn code_without_argument_uses_generic_highlighting() {
 
 #[test]
 fn code_moth_argument_highlights_moth_rules() {
-    let rendered = folded_template_output("[$code(\"moth\"):\nloop x\n-- hi\n]");
+    let rendered = folded_template_output("[$code \"moth\":\nloop x\n-- hi\n]");
 
     assert!(rendered.contains("<span class='moth-code-keyword'>loop</span>"));
     assert!(rendered.contains("<span class='moth-code-comment'>-- hi</span>"));
@@ -1750,7 +1676,7 @@ fn code_moth_argument_highlights_moth_rules() {
 
 #[test]
 fn code_javascript_argument_highlights_js_comments() {
-    let rendered = folded_template_output("[$code(\"js\"):\nconst x = 1\n// hi\n]");
+    let rendered = folded_template_output("[$code \"js\":\nconst x = 1\n// hi\n]");
 
     assert!(rendered.contains("<span class='moth-code-keyword'>const</span>"));
     assert!(rendered.contains("<span class='moth-code-comment'>// hi</span>"));
@@ -1758,7 +1684,7 @@ fn code_javascript_argument_highlights_js_comments() {
 
 #[test]
 fn code_python_argument_highlights_python_comments() {
-    let rendered = folded_template_output("[$code(\"py\"):\ndef run():\n# hi\n]");
+    let rendered = folded_template_output("[$code \"py\":\ndef run():\n# hi\n]");
 
     assert!(rendered.contains("<span class='moth-code-keyword'>def</span>"));
     assert!(rendered.contains("<span class='moth-code-comment'># hi</span>"));
@@ -1766,36 +1692,40 @@ fn code_python_argument_highlights_python_comments() {
 
 #[test]
 fn code_typescript_argument_highlights_typescript_types() {
-    let rendered = folded_template_output("[$code(\"ts\"):\ntype Name = string\n]");
+    let rendered = folded_template_output("[$code \"ts\":\ntype Name = string\n]");
 
     assert!(rendered.contains("<span class='moth-code-keyword'>type</span>"));
     assert!(rendered.contains("<span class='moth-code-type'>string</span>"));
 }
 
 #[test]
-fn code_empty_parentheses_error_cleanly() {
+fn code_call_shape_is_rejected() {
     let error = template_parse_error("[$code(): body]");
 
     assert!(
-        error.contains("empty parentheses") || error.contains("EmptyArguments"),
+        error.contains("`$code` takes at most one bare language operand."),
         "unexpected error message: {error}"
     );
 }
 
 #[test]
 fn code_rejects_unknown_language_aliases() {
-    let error = template_parse_error("[$code(\"unknown\"): body]");
+    let error = template_parse_error("[$code \"unknown\": body]");
 
     assert!(!error.is_empty());
 }
 
 #[test]
 fn code_rejects_multiple_language_arguments() {
-    let error = template_parse_error("[$code(\"moth\", \"js\"): body]");
+    let error = template_parse_error("[$code \"moth\" \"js\": body]");
 
     assert!(
-        error.contains("Unexpected token `,`."),
-        "unexpected error message: {error}"
+        error.contains("`$code` takes at most one bare language operand."),
+        "unexpected extra-operand diagnostic: {error}"
+    );
+    assert!(
+        !error.contains("Expected an operator"),
+        "an extra directive operand must not surface as an expression operator error: {error}"
     );
 }
 
@@ -1807,7 +1737,7 @@ fn runtime_templates_with_code_format_only_static_body_strings() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
-        "[value, $code(\"moth\"):\nloop x\n]",
+        "[value, $code \"moth\":\nloop x\n]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -1872,7 +1802,7 @@ fn runtime_templates_with_code_format_only_static_body_strings() {
 #[test]
 fn code_templates_keep_nested_square_brackets_as_literal_body_text() {
     let rendered = folded_template_output(
-        "[$code(\"moth\"):\nconcatenated_strings = [string_slice, a_mutable_string]\n]",
+        "[$code \"moth\":\nconcatenated_strings = [string_slice, a_mutable_string]\n]",
     );
 
     assert!(rendered.contains("<code class='codeblock'>"));

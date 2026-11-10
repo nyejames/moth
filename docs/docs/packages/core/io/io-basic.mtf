@@ -4,7 +4,7 @@
 
 Console helpers take one string and write it to the output surface.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     io.print("loading...")
     io.line("Hello")
     io.debug("debug details")
@@ -18,7 +18,7 @@ Console helpers take one string and write it to the output surface.
 
 Console helpers accept strings only. Use a template to interpolate values into text before output.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     name = "Priya"
     io.line([: Hello, [name]])
 
@@ -30,7 +30,7 @@ Console helpers accept strings only. Use a template to interpolate values into t
 
 Input polling lives under `io.input.*`. Create an input handle, update it each time your program runs, such as once per tick of an update loop, then close it when done.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     input ~= io.input.new()!
 
     io.input.update(~input)
@@ -52,7 +52,7 @@ The handle records input between updates, but recording input doesn't run your p
 
 Pointer helpers report button state and coordinates.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if io.input.pointer_down(input, "left"):
         x = io.input.pointer_x(input)
         y = io.input.pointer_y(input)

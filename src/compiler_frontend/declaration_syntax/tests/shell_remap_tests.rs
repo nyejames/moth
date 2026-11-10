@@ -101,7 +101,7 @@ fn declaration_syntax_remaps_all_fields() {
             name: type_name,
             span: None,
         },
-        config_qualifier: None,
+        config_contract: None,
         initializer_range: None,
         initializer_references: vec![InitializerReference {
             name: ref_name,

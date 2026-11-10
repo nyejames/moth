@@ -2,7 +2,7 @@ Existing values use shared read-only access by default.
 
 Binding an existing value to another name doesn't silently copy it.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     items ~= {"a", "b"}
     shared_items = items
 ]
@@ -24,7 +24,7 @@ it can proceed.
 
 A later use of a shared alias can prevent overlapping mutation:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     items ~= {"a", "b"}
     shared_items = items
 

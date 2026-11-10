@@ -1,6 +1,6 @@
 Use `assert` for a condition that must already be true.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     assert(index < items.length())
     assert(index < items.length(), "index must be in bounds")
 ]

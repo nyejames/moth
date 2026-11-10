@@ -162,7 +162,7 @@ fn css_template_warning_message(
             format!("Malformed template: Unclosed '{opening}' in CSS template body.")
         }
         CssTemplateWarning::InlineSelectorBlock => {
-            "Malformed template: Inline '$css(\"inline\")' templates only allow declarations and cannot contain selector blocks.".to_owned()
+            "Malformed template: Inline '$css \"inline\"' templates only allow declarations and cannot contain selector blocks.".to_owned()
         }
         CssTemplateWarning::MissingSelectorOrAtRulePrelude => {
             "Malformed template: CSS block is missing a selector or at-rule prelude before '{'."
@@ -449,16 +449,25 @@ pub(crate) fn invalid_template_directive_message(
         }
         InvalidTemplateDirectiveReason::UnexpectedArguments => match name {
             "slot" => {
-                "`$slot` uses a bare name or positive position, not parentheses.\n                 Use `$slot`, `$slot title`, or `$slot 1`.".to_owned()
+                "`$slot` takes one name or position and at most one compile-time default.\n                 Use `$slot`, `$slot title`, `$slot title = \"Untitled\"`, or `$slot 1`; remove parentheses or a second value.".to_owned()
             }
             "in" => {
-                "`$in` uses a bare slot name, not parentheses.\n                 Use `$in title: ...`.".to_owned()
+                "`$in` takes one bare slot name and no other value.\n                 Use `$in title: ...`; remove parentheses or an extra value.".to_owned()
             }
-            _ => format!("`${name}` does not take arguments. Write `${name}:` instead."),
+            "before" => {
+                "`$before` takes exactly one bare compile-time operand.\n                 Write `$before [: <tr> ]`; remove parentheses or a second value.".to_owned()
+            }
+            "after" => {
+                "`$after` takes exactly one bare compile-time operand.\n                 Write `$after [: </tr> ]`; remove parentheses or a second value.".to_owned()
+            }
+            "code" => {
+                "`$code` takes at most one bare language operand.\n                 Write `$code \"rust\": ...`, never `$code(\"rust\")` or a second value.".to_owned()
+            }
+            "css" => {
+                "`$css` takes at most one bare mode operand.\n                 Write `$css \"inline\": ...`, never `$css(\"inline\")` or a second value.".to_owned()
+            }
+            _ => format!("`${name}` takes no operand. Remove the value or parentheses after it."),
         },
-        InvalidTemplateDirectiveReason::EmptyArguments => {
-            format!("`${name}()` has empty parentheses. Remove the parentheses or provide an argument.")
-        }
         InvalidTemplateDirectiveReason::InvalidSlotTarget => {
             "`$slot` accepts no target, a name, or a positive whole-number position.\n                 Use `$slot`, `$slot title`, or `$slot 1`.".to_owned()
         }
@@ -470,14 +479,35 @@ pub(crate) fn invalid_template_directive_message(
         }
         InvalidTemplateDirectiveReason::InvalidChildDecoratorValue => match name {
             "before" => {
-                "`$before` requires `= <compile-time String or constant template wrapper>`.\n                 Example: `$before = [: <tr> ]`.".to_owned()
+                "`$before` requires one bare compile-time `String` or constant template wrapper.\n                 Example: `$before [: <tr> ]`.".to_owned()
             }
             "after" => {
-                "`$after` requires `= <compile-time String or constant template wrapper>`.\n                 Example: `$after = [: </tr> ]`.".to_owned()
+                "`$after` requires one bare compile-time `String` or constant template wrapper.\n                 Example: `$after [: </tr> ]`.".to_owned()
             }
             _ => format!(
-                "`${name}` requires `= <compile-time String or constant template wrapper>`."
+                "`${name}` requires one bare compile-time `String` or constant template wrapper."
             ),
+        },
+        InvalidTemplateDirectiveReason::WrongContext => match name {
+            "config" => {
+                "`$config` is a source modifier and cannot appear in a template head.".to_owned()
+            }
+            _ => format!(
+                "Template directive '{name}' can only appear in a template head, not in source code."
+            ),
+        },
+        InvalidTemplateDirectiveReason::DuplicateModifier => {
+            format!("`${name}` is already applied to this declaration.")
+        }
+        InvalidTemplateDirectiveReason::DanglingModifier => format!(
+            "`${name}` must immediately precede an eligible declaration.\n                 Add a declaration on the following line, or remove the directive."
+        ),
+        InvalidTemplateDirectiveReason::WrongTarget => match name {
+            "config" => {
+                "`$config` must modify one explicitly typed top-level compile-time `#` binding."
+                    .to_owned()
+            }
+            _ => format!("`${name}` cannot modify this declaration."),
         },
     }
 }
@@ -494,7 +524,7 @@ pub(crate) fn render_invalid_template_directive(
     let reason = facts.reason.to_reason(facts.detail);
     let guidance = if facts.reason == InvalidTemplateDirectiveCode::UnknownDirective {
         vec![
-            "Known template directives include `$md`, `$raw`, `$before`, `$after`, `$slot`, `$in`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, and `$doc`.".to_owned(),
+            "Known template directives include `$md`, `$raw`, `$before`, `$after`, `$slot`, `$in`, `$fresh`, `$html`, `$css`, `$escape_html`, `$code`, `$note`, `$todo`, `$doc`, and the `$config` source modifier.".to_owned(),
         ]
     } else {
         Vec::new()

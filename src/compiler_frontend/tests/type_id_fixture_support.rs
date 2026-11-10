@@ -67,7 +67,7 @@ pub(crate) fn loop_binding_with_type_id(name: PathId, type_id: TypeId) -> Declar
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     }
 }
 

@@ -2558,7 +2558,7 @@ fn declare_loop_binding(
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span,
-        config_qualifier: None,
+        config_contract: None,
     };
     let binding_span = declaration.binding_span;
     parser

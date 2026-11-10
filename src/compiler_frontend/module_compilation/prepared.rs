@@ -59,7 +59,7 @@ pub(crate) struct PreparedModuleInput {
     /// `StableModuleOriginIdentity`. It is remap-free by construction and is retained through an
     /// `Arc` so each prepared module shares the one boundary allocation rather than cloning rows.
     pub(crate) source_module_origins: Arc<SourceModuleOriginTable>,
-    /// Provider-independent retained header syntax, including normalized source `#Config`
+    /// Provider-independent retained header syntax, including normalized source `$config`
     /// contract shells. The shells remain outside provider binding and are available to the later
     /// project-wide resolution barrier through this payload.
     pub(crate) prepared_header_syntax: PreparedHeaderSyntax,
@@ -204,7 +204,7 @@ impl PreparedModuleInput {
         self.entry_root_source().is_some()
     }
 
-    /// Borrow normalized source `#Config` shells retained during header preparation.
+    /// Borrow normalized source `$config` shells retained during header preparation.
     ///
     /// The accessor exposes retained source contracts to the project-wide build-config barrier
     /// without exposing provider-bound or mutable resolution state through `PreparedModuleInput`.

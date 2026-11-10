@@ -12,7 +12,7 @@ The spelling and provider rules are shared, but the roles never convert into eac
 
 A `PATH` token followed by exactly one `SYMBOL` token on the same physical line forms one expression primary:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     name = @settings site_name
     color = @settings palette.background
     value = @math square(12)
@@ -22,7 +22,7 @@ A newline ends the selection. Spaces and tabs may separate the two tokens, a new
 
 The same form works inside template heads in `.moth` templates and inside the synthetic `.mtf` body:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     # Welcome to [@settings site_name]
 ]
 

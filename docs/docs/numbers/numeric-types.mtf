@@ -70,7 +70,7 @@ compiler's checked storage policy, not source count arithmetic.
 
 `Byte` names one octet and remains distinct from `U8`, `I8` and `Char`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     raw Byte = 255
 ]
 
@@ -87,7 +87,7 @@ compiler's checked storage policy, not source count arithmetic.
 the type identity, so `Dec2` and `Dec4` remain different types. `Dec01` and
 scales above `256` are invalid.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     large Dec = 1000000000000000000000
     money Dec2 = 12.34
 ]

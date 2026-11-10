@@ -194,7 +194,7 @@ belongs to the future plan.
 Builder identity is not physical target identity. The replacement is builder
 capability surfaces, target-contract validation, external/builder packages and
 backend-owned lowering and artefact policy. Excluded regions will not resolve
-contained builder directives against the active surface, but they still need a
+contained directives against the active surface, but they still need a
 sound structural boundary. Directive-controlled template lexing must be
 addressed before arbitrary unknown syntax can be skipped.
 

@@ -1150,7 +1150,7 @@ fn bind_catch_error(
                     value_mode: ValueMode::ImmutableOwned,
                     value: DeclarationValue::Absent,
                     binding_span: error.span,
-                    config_qualifier: None,
+                    config_contract: None,
                 },
                 error.span,
                 path_fork,

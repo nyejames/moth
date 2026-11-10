@@ -330,7 +330,7 @@ fn top_level_const_template_tokens_keep_close_and_eof_for_ast_parser() {
 #[test]
 fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
     let long_fragment_name = "fragment_".to_owned() + &"x".repeat(1300);
-    let source = format!("value #Config of I32 = 1\n#[{long_fragment_name}]\n");
+    let source = format!("$config\nvalue #I32 = 1\n#[{long_fragment_name}]\n");
     let mut source_context = TestSourceContext::new("src/@entry.moth");
     let mut path_fork = PathInternerFork::empty();
     let source_id = source_context.source_id();
@@ -415,8 +415,8 @@ fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
         assert_eq!(contract.span.source(), SourceId::COMPILATION_ROOT);
         assert_eq!(
             source.get(contract_range.start() as usize..contract_range.end() as usize),
-            Some("#"),
-            "source config contract span should use the qualifier anchor"
+            Some("$config"),
+            "source config contract span should use the authored `$config` marker"
         );
 
         count

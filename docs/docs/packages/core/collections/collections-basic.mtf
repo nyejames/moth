@@ -4,7 +4,7 @@ Collections hold ordered groups of values. You create them with literals and wor
 
 Growable collections use `{T}`. Fixed collections use `{N T}` with a compile-time maximum length.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     values ~= {1, 2, 3}
     empty_values ~{I32} = {}
     fixed_values ~{2 I32} = {}
@@ -18,7 +18,7 @@ Collection methods use receiver syntax. `get`, `set` and `remove` take the falli
 
 `push` depends on the collection. A growable `{T}` grows to make room, so its `push` is infallible. A fixed `{N T}` can be full, so its `push` is fallible.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     values ~= {1, 2, 3}
 
     ~values.push(4)
@@ -33,7 +33,7 @@ Collection methods use receiver syntax. `get`, `set` and `remove` take the falli
     count = values.length()
 ]
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     fixed_values ~{2 I32} = {1}
 
     ~fixed_values.push(2) catch:

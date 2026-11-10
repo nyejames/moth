@@ -4,7 +4,7 @@ Match patterns describe the values an arm accepts.
 
 A literal pattern must be compatible with the scrutinee type.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if value is:
         1 => io.line("one")
         2 => io.line("two")
@@ -18,7 +18,7 @@ literal patterns.
 
 ### Choice variants
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if status is:
         Ready => io.line("ready")
         Status::Waiting => io.line("waiting")
@@ -27,7 +27,7 @@ literal patterns.
 
 ### Choice payload captures
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if response is:
         Success => io.line("done")
         Err(message) => io.line(message)
@@ -50,7 +50,7 @@ An option match may omit `else =>` only when it has both:
 - an unguarded `none` arm
 - an unguarded `|name|` present-value capture
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if maybe_name is:
         none => io.line("missing")
         |name| => io.line(name)
@@ -62,7 +62,7 @@ capture when `else =>` is omitted.
 
 ### Relational patterns
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     < value
     <= value
     > value
@@ -79,7 +79,7 @@ type. A `Dec` pattern must be exactly representable at the subject's scale.
 pattern position is treated as an unknown or invalid variant. A bare name in
 other full-match pattern positions is invalid syntax.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if value is:
         0 => io.line("zero")
         else => io.line("other")

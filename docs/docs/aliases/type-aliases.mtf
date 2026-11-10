@@ -2,7 +2,7 @@ A type alias is a compile-time name for an existing type. It introduces no runti
 
 ### Type alias syntax
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     UserId as I32
     Names as {String}
     MaybeName as String?
@@ -38,7 +38,7 @@ Concrete generic aliases are supported. Parameterized aliases and partial generi
 
 ### Transparency
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     UserId as I32
 
     id UserId = 42
@@ -49,7 +49,7 @@ Because `UserId` is transparent, assigning a `UserId` value to an `I32` binding 
 
 ### Contrast with a struct
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     UserId as I32
 
     User = |
@@ -78,7 +78,7 @@ compiler still rejects aliases to external opaque types. See @../progress
 
 An alias can provide the explicit element type needed by an empty collection or map literal.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Names as {String}
 
     names Names = {}
@@ -88,7 +88,7 @@ An alias can provide the explicit element type needed by an empty collection or 
 
 Aliases may chain through other aliases. The chain remains transparent and resolves to the final target type.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Name as String
     Names as {Name}
 
@@ -105,7 +105,7 @@ An alias does not create a new constructor. The alias name is not callable even 
 
 For struct aliases, only the struct's canonical name constructs:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Person = |
         name String,
     |
@@ -121,7 +121,7 @@ For struct aliases, only the struct's canonical name constructs:
 
 For choice aliases, only the choice's canonical name constructs variants:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Status ::
         Ready,
         Failed | message String |,

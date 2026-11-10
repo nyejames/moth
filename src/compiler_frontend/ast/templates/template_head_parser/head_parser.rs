@@ -14,7 +14,6 @@ use super::core_directives::{
     mark_template_body_whitespace_style_controlled, maybe_parse_structural_helper_directive,
     parse_core_style_directive,
 };
-use super::directive_args::directive_has_arguments;
 use super::handler_directives::apply_handler_style_directive;
 use super::head_expressions::{
     TemplateHeadExpressionContext, handle_template_value_in_template_head,
@@ -961,7 +960,7 @@ pub fn parse_template_head(
                 );
             }
 
-            // Style and setting directives
+            // Template-head directives
             TokenTag::STYLE_DIRECTIVE => {
                 let directive = token_stream
                     .current_string_id_in(string_table)?
@@ -971,8 +970,9 @@ pub fn parse_template_head(
                             "template-head directive token had no string payload",
                         )
                     })?;
-                // Template directives share the `$name` token shape with style directives.
-                // Parse `$slot` / `$in` first, then fall back to style handling.
+                // Every template-head directive shares the `$name` token shape. `$slot`, `$in`,
+                // `$before` and `$after` parse their structural targets first; every other spec
+                // dispatches through the generic style handler.
                 let directive_span = token_stream.current_span();
                 head_state.has_explicit_template_directive = true;
                 let directive_name = string_table.resolve(directive).to_owned();
@@ -987,6 +987,19 @@ pub fn parse_template_head(
                     )
                     .into());
                 };
+                // Recognition happens by name first; only then does the directive's declared
+                // context decide whether this head may use it.
+                if !spec.contexts.allows_template_head() {
+                    return Err(with_current_token_span(
+                        token_stream,
+                        templates::invalid_template_directive(
+                            Some(directive),
+                            InvalidTemplateDirectiveReason::WrongContext,
+                            Some(directive_span),
+                        ),
+                    )
+                    .into());
+                }
                 enforce_head_compatibility(
                     &head_state,
                     &spec.head_compatibility,
@@ -1144,15 +1157,17 @@ fn parse_style_directive_from_spec(
     string_table: &mut StringTable,
     path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
 ) -> TemplateHeadResult<bool> {
-    let had_arguments = directive_has_arguments(token_stream);
-    let directive_result = match &spec.kind {
-        StyleDirectiveKind::Core(kind) => parse_core_style_directive(
-            token_stream,
-            build_state,
-            directive_name,
-            *kind,
-            string_table,
-        ),
+    let operand_consumed = match &spec.kind {
+        StyleDirectiveKind::Core(kind) => {
+            parse_core_style_directive(
+                token_stream,
+                build_state,
+                directive_name,
+                *kind,
+                string_table,
+            )?;
+            false
+        }
         StyleDirectiveKind::Handler(handler_spec) => apply_handler_style_directive(
             token_stream,
             context,
@@ -1164,19 +1179,29 @@ fn parse_style_directive_from_spec(
             handler_spec,
             string_table,
             path_fork,
-        ),
+        )?,
+        // The head parser rejects a source-only directive before dispatch; this arm keeps the
+        // match exhaustive without inventing template behavior for a wrong-context name.
+        StyleDirectiveKind::SourceModifier(_) => {
+            let directive_id = string_table.intern(directive_name);
+            return Err(with_current_token_span(
+                token_stream,
+                templates::invalid_template_directive(
+                    Some(directive_id),
+                    InvalidTemplateDirectiveReason::WrongContext,
+                    Some(token_stream.current_span()),
+                ),
+            )
+            .into());
+        }
     };
 
-    if directive_result.is_ok() {
-        // Any explicit style directive switches the template into style-controlled
-        // whitespace mode. Individual formatters can opt into shared whitespace
-        // passes explicitly via `Formatter` pre/post pass profiles.
-        mark_template_body_whitespace_style_controlled(build_state);
-    }
+    // Any explicit style directive switches the template into style-controlled whitespace mode.
+    // Individual formatters can opt into shared whitespace passes explicitly via `Formatter`
+    // pre/post pass profiles.
+    mark_template_body_whitespace_style_controlled(build_state);
 
-    directive_result?;
-
-    Ok(had_arguments)
+    Ok(operand_consumed)
 }
 
 /// Parses one template-head expression as the owner of its complete fragment.
@@ -1201,9 +1226,73 @@ pub(super) fn parse_head_expression(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<OwnedExpr, ExpressionParseError> {
+    parse_head_expression_with_boundary(
+        token_stream,
+        context,
+        type_interner,
+        expression_builder,
+        const_values,
+        value_mode,
+        consume_closing_parenthesis,
+        false,
+        string_table,
+        path_fork,
+    )
+}
+
+/// Parses the single optional operand that follows a directive name.
+///
+/// WHAT: the ordinary head expression grammar, stopped before a second operand.
+/// WHY: the directive owns its operand boundary, so it alone can report an extra operand with the
+///      directive's name and span. Ordinary expression positions keep the shared missing-operator
+///      diagnostic for the same token sequence.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "directive operands share the head expression parser's borrowed resources"
+)]
+pub(super) fn parse_directive_operand_expression(
+    token_stream: &mut AstCursor<'_>,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    value_mode: &ValueMode,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> Result<OwnedExpr, ExpressionParseError> {
+    parse_head_expression_with_boundary(
+        token_stream,
+        context,
+        type_interner,
+        expression_builder,
+        const_values,
+        value_mode,
+        false,
+        true,
+        string_table,
+        path_fork,
+    )
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the shared entry keeps value mode, closing-parenthesis and operand-boundary policy beside the parser borrows"
+)]
+fn parse_head_expression_with_boundary(
+    token_stream: &mut AstCursor<'_>,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    value_mode: &ValueMode,
+    consume_closing_parenthesis: bool,
+    stop_at_adjacent_operand: bool,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> Result<OwnedExpr, ExpressionParseError> {
     let mut inferred = ExpectedType::Infer;
     let mut cast_target_context = CastTargetContext::None;
-    parse_head_expression_with_resources(
+    parse_head_expression_with_resources_and_boundary(
         ExpressionParseResources {
             token_stream,
             scope_context: context,
@@ -1217,13 +1306,25 @@ pub(super) fn parse_head_expression(
             path_fork,
         },
         consume_closing_parenthesis,
+        stop_at_adjacent_operand,
     )
 }
 
-/// Parses a head expression with the caller's receiving context, if any.
-pub(super) fn parse_head_expression_with_resources(
+/// Parses the single operand of a structural directive from prepared resources.
+///
+/// WHY: a `$slot` default keeps its explicit receiving `String` and immutable value mode, so the
+///      caller's own resources reach the shared head expression parser unchanged while the
+///      directive's one-operand boundary still applies.
+pub(super) fn parse_directive_operand_expression_with_resources(
+    resources: ExpressionParseResources<'_, '_, '_>,
+) -> Result<OwnedExpr, ExpressionParseError> {
+    parse_head_expression_with_resources_and_boundary(resources, false, true)
+}
+
+fn parse_head_expression_with_resources_and_boundary(
     resources: ExpressionParseResources<'_, '_, '_>,
     consume_closing_parenthesis: bool,
+    stop_at_adjacent_operand: bool,
 ) -> Result<OwnedExpr, ExpressionParseError> {
     let ExpressionParseResources {
         token_stream,
@@ -1237,7 +1338,7 @@ pub(super) fn parse_head_expression_with_resources(
         string_table,
         path_fork,
     } = resources;
-    let input = ExpressionParseInput::ordinary(
+    let mut input = ExpressionParseInput::ordinary(
         ExpressionParseResources {
             token_stream,
             scope_context: context,
@@ -1253,6 +1354,7 @@ pub(super) fn parse_head_expression_with_resources(
         consume_closing_parenthesis,
     )
     .with_numeric_deferral_owner();
+    input.stop_at_adjacent_operand = stop_at_adjacent_operand;
 
     let expression = create_expression_with_trailing_newline_policy(input)?;
     // WHY: an explicit String `#` constant interpolated into a template reads as its value, like an

@@ -38,12 +38,11 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::{
 };
 use crate::compiler_frontend::compiler_messages::prepared_batch::PreparedDiagnosticBatch;
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, DiagnosticBag, DiagnosticDraft, InvalidConfigReason,
-    PreparedFailure, SourceSpanCapacityResource,
+    DiagnosticBag, DiagnosticDraft, InvalidConfigReason, PreparedFailure,
+    SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::NominalTypeId;
-use crate::compiler_frontend::declaration_syntax::build_config_contract::find_invalid_config_qualifier_spacing_in_cursor;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     FoldedValueGenericParameterResolver, FoldedValueProjectionContext, PublicFoldedValue,
@@ -814,34 +813,6 @@ fn prepare_config_file(
     let owner = SourceTokenOwner::new(lexed.tokens);
     let path_syntax = lexed.path_syntax;
 
-    let marker_span = {
-        let canonical = owner.tokens_ref();
-        let full_range = canonical.full_range().unwrap_or_else(|error| {
-            crate::compiler_bug!(
-                CompilerStage::Tokenization,
-                "config qualifier scan range is invalid: {error:?}"
-            )
-        });
-        let cursor = canonical.cursor(full_range).unwrap_or_else(|error| {
-            crate::compiler_bug!(
-                CompilerStage::Tokenization,
-                "config qualifier scan cursor is invalid: {error:?}"
-            )
-        });
-        find_invalid_config_qualifier_spacing_in_cursor(cursor, string_table, span_builder)
-    };
-    if let Some(marker_span) = marker_span {
-        let diagnostic = token_lexical::common_syntax_mistake(
-            CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
-            Some(marker_span),
-        );
-        validate_preparation_draft_spans(&diagnostic, request.file_id)
-            .map_err(PreparedFailure::from)?;
-        return Err(capture_config_diagnostics(
-            DiagnosticBag::from(diagnostic),
-            string_table,
-        ));
-    }
     let output = match prepare_file_from_tokens(
         owner,
         authored_scope,

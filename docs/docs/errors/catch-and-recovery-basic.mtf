@@ -1,13 +1,13 @@
 Use `catch` when a local fallback makes sense:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count = parse_number(text) catch then 0
 ]
 
 The handler covers the complete selected expression, including arithmetic,
 receivers, call arguments, nested calls and cast operands:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     total = left * right + offset catch then 0
     amount = load_amount(left * right) catch then 0
 ]
@@ -15,14 +15,14 @@ receivers, call arguments, nested calls and cast operands:
 Authored arithmetic or a valid cast can qualify for a safety catch even when
 the operation cannot fail. Two calls in the same expression also qualify:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     chained = source.first().second() catch then fallback
     pair = left() is right() catch then false
 ]
 
 Calls inside an argument do not add to the enclosing call count:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- INVALID safety catch when both calls are infallible
     value = outer(inner()) catch then fallback
 ]

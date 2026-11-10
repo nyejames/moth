@@ -1,10 +1,10 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-SYNTAX-0007"]
+diagnostic_codes = ["MOTH-SYNTAX-0010"]
 
 [[backends.html.diagnostic_assertions]]
-code = "MOTH-SYNTAX-0007"
+code = "MOTH-SYNTAX-0010"
 path = "input/@entry.moth"
 line = 1
 column = 7

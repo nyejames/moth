@@ -6,62 +6,11 @@ use super::*;
 use crate::build_system::build::build_project;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_messages::DiagnosticDiscoveryStops;
-use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terse};
-use crate::compiler_frontend::compiler_messages::{DiagnosticCategory, DiagnosticSeverity};
 use std::fs;
 use std::path::PathBuf;
 
 #[test]
-fn html_project_directives_fail_when_builder_does_not_register_them() {
-    let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-
-    for (directive_name, source) in [
-        ("html", "[$html:\n<div>Hello</div>\n]"),
-        ("css", "[$css:\n.button { color: red; }\n]"),
-        ("escape_html", "[$escape_html:\n<b>Hello</b>\n]"),
-    ] {
-        let entry_file = root.join(format!("{directive_name}.moth"));
-        fs::write(&entry_file, source).expect("should write source file");
-
-        let builder = NoDirectiveBuilder;
-        let result = build_project(
-            &builder,
-            entry_file
-                .to_str()
-                .expect("temp file path should be valid UTF-8 for this test"),
-            &[],
-            &BuildConfigInputSet::new(),
-            &mut discovery_stops,
-        )
-        .unwrap_or_else(|never| match never {});
-        let messages = diagnosed_reports(&result);
-        let (report, view) = messages
-            .iter_severity(DiagnosticSeverity::Error)
-            .next()
-            .expect("unsupported directive should have an error report");
-        assert_eq!(view.category(), DiagnosticCategory::Syntax);
-        assert_eq!(view.descriptor().code, "MOTH-SYNTAX-0010");
-        let rendered =
-            terse::format_terse_diagnostic_view(view, DiagnosticRenderContext::for_report(report));
-        let message = rendered
-            .split('|')
-            .nth(4)
-            .expect("terse diagnostic should include its message field");
-        let (directive_message, _) = message
-            .split_once(" Registered directives are ")
-            .expect("unsupported style directive message should list registered directives");
-        assert_eq!(
-            directive_message,
-            format!("Style directive '${directive_name}' is unsupported here."),
-            "expected unsupported directive error for '${directive_name}', got: {message}"
-        );
-    }
-}
-
-#[test]
-fn frontend_builtin_directives_work_without_builder_registered_project_directives() {
+fn frontend_builtin_directives_work_with_a_minimal_builder() {
     let mut discovery_stops = DiagnosticDiscoveryStops::NONE;
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
@@ -69,11 +18,11 @@ fn frontend_builtin_directives_work_without_builder_registered_project_directive
     let entry_file = root.join("builtins.moth");
     fs::write(
         &entry_file,
-        "[$before = [:<li>], $after = [:</li>]:\n<ul>\n  [$md:\n# Docs\n]\n  [$raw:\n  keep\n]\n  [$fresh:\n    [: plain ]\n  ]\n</ul>\n]",
+        "[$before [:<li>], $after [:</li]:\n<ul>\n  [$md:\n# Docs\n]\n  [$raw:\n  keep\n]\n  [$fresh:\n    [: plain ]\n  ]\n</ul>\n]\n[$code \"moth\":\n    loop value\n]\n[$html:\n    <p>Hello</p>\n]",
     )
     .expect("should write source file");
 
-    let builder = NoDirectiveBuilder;
+    let builder = MinimalBuilder;
     let result = successful_compilation_value(
         build_project(
             &builder,
@@ -91,5 +40,20 @@ fn frontend_builtin_directives_work_without_builder_registered_project_directive
     assert_eq!(
         result.project.output_files[0].relative_output_path(),
         PathBuf::from("index.html")
+    );
+    let FileKind::Html(rendered) = result.project.output_files[0].file_kind() else {
+        panic!("the minimal builder should emit HTML");
+    };
+    assert!(
+        rendered.contains("<span class='moth-code-keyword'>loop</span>"),
+        "`$code` must format under a minimal builder, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("<p>Hello</p>"),
+        "`$html` must format under a minimal builder, got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("\n    <p>Hello</p>"),
+        "`$html` formatting must remove template-body indentation, got: {rendered}"
     );
 }

@@ -1,0 +1,22 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "<span class='moth-code-comment'>// rust comment</span>",
+    "<span class='moth-code-directive'>$slot</span>",
+    "<span class='moth-code-keyword'>let</span>",
+    "<span class='moth-code-keyword'>mut</span>",
+]
+must_not_contain = [
+    "class='moth-code-error'",
+]
+must_contain_exactly_once = [
+    "<span class='moth-code-comment'>// rust comment</span>",
+    "<span class='moth-code-directive'>$slot</span>",
+]

@@ -1,7 +1,7 @@
 panel = [:
     <section>
         <div class="plain">[$slot item]</div>
-        [$before = [:<strong>], $after = [:</strong>]:
+        [$before [:<strong>], $after [:</strong>]:
             <div class="wrapped">[$slot item]</div>
         ]
         [$slot]

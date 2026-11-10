@@ -111,7 +111,7 @@ impl SyntheticInterfaceProvenance {
         Self { members: sorted }
     }
 
-    /// Borrow source `#Config` member names in canonical provenance order.
+    /// Borrow source `$config` member names in canonical provenance order.
     pub(crate) fn source_config_member_names(&self) -> impl Iterator<Item = &str> {
         self.members
             .iter()

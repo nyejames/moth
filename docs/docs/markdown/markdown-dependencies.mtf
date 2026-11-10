@@ -2,7 +2,7 @@ Plain Markdown content is bound with the same extensionless source dependency cl
 
 ### Dependency syntax
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @docs/intro
 
     [: [intro.content] ]
@@ -10,7 +10,7 @@ Plain Markdown content is bound with the same extensionless source dependency cl
 
 A bare namespace clause exposes `content` as a field. A direct selection binds it directly:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @docs/intro content as intro_html
 
     [: [intro_html] ]
@@ -34,7 +34,7 @@ Binding a `.md` file and inserting its content into a template does not create a
 
 ### Explicit extensions are rejected for source content
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @docs/intro.md content
 ]
 
@@ -44,7 +44,7 @@ This is rejected with `MOTH-IMPORT-0024`. Use `@docs/intro` without the `.md` ex
 
 The explicit-extension spelling that a clause rejects is valid in expression position, where it evaluates to the same rendered `content` string:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     license #= @legal/license.md
 ]
 

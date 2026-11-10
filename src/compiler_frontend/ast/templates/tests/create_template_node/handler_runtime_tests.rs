@@ -10,7 +10,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
 fn handler_directive_argument_preserves_infrastructure_failure() {
-    assert_stale_template_directive_argument_is_infrastructure("[$code(stale_template): body]");
+    assert_stale_template_directive_argument_is_infrastructure("[$code stale_template: body]");
 }
 
 #[test]
@@ -1104,7 +1104,7 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         },
         None,
         &path_fork,
@@ -1173,7 +1173,7 @@ fn const_required_template_loop_reports_non_const_collection_source() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         },
         None,
         &path_fork,
@@ -1288,7 +1288,7 @@ fn const_required_template_loop_reports_non_const_body() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         },
         None,
         &path_fork,
@@ -1730,7 +1730,7 @@ fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic()
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
     context.add_var(declaration, None, &path_fork);
 
@@ -1791,7 +1791,7 @@ fn const_required_template_if_rejects_runtime_local_condition() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         },
         None,
         &path_fork,

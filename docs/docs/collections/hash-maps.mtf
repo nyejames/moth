@@ -2,7 +2,7 @@ Hash maps form insertion-ordered key/value groups.
 
 ### Types and literals
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     scores ~= {"Priya" = 10, "Rob" = 12}
     empty_scores ~{String = I32} = {=}
 ]
@@ -75,7 +75,7 @@ the numeric inference contract.
 Check duplicate literal keys after materialising them at the selected exact key
 type.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     accept_scores |scores {U64 = U64}|:
     ;
 
@@ -135,7 +135,7 @@ Insertion order follows these rules:
 - returns `I32`
 - cannot be assigned
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     score = scores.get("Priya") catch:
         then 0
     ;
@@ -215,7 +215,7 @@ error:
 
 Consider a map whose key and value point to the same allocation family:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     text = [: large value]
     values ~{String = String} = {=}
 

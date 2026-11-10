@@ -9,7 +9,7 @@ validation and lifetime validation.
 
 ### Construction
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Size = |
         width I32,
         height I32,
@@ -59,7 +59,7 @@ Anonymous parents may contain anonymous children directly or through an
 already bound local. They may also contain ordinary supported values, including
 explicitly constructed nominal structs and choices.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     show_state ||:
         child = (count = 3)
         state = (

@@ -329,7 +329,7 @@ fn absent_local_declaration_allocates_metadata_without_initializer_work() {
         value_mode: ValueMode::MutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
 
     builder

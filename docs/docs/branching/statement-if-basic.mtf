@@ -1,6 +1,6 @@
 Use `if` when code should run only under one condition.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if ready:
         io.line("Ready!")
     ;
@@ -8,7 +8,7 @@ Use `if` when code should run only under one condition.
 
 Add `else` for the other path:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if ready:
         io.line("Ready!")
     else
@@ -20,5 +20,5 @@ One semicolon closes the whole structure.
 
 Moth does not have an `else if` chain. Nest another `if` inside `else`, or use pattern matching when several cases belong to one value.
 
-A `#Config of Bool` value can specialise this same ordinary `if` before HIR; both branches remain
-valid source. `#Config if` is not a Moth form.
+A `$config`-marked Bool input can specialise this same ordinary `if` before HIR; both branches remain
+valid source. `$config if` is not a Moth form.

@@ -103,6 +103,8 @@ mod parse_file_headers_span_tests;
 mod parse_file_headers_trait_tests;
 #[path = "parse_file_headers_type_span_tests.rs"]
 mod parse_file_headers_type_span_tests;
+#[path = "source_directives_tests.rs"]
+mod source_directives_tests;
 
 struct HeaderTestDiagnostics {
     diagnostics: CompactDiagnosticBagForTest,
@@ -869,7 +871,7 @@ fn prepare_source_contract_syntax(source: &str) -> Result<PreparedHeaderSyntax, 
 #[test]
 fn malformed_nested_decorator_wrapper_constant_initializer_reports_eof_delimiter_error() {
     let result = parse_single_file_headers_with_entry(
-        "broken #= [$before = [:<tr>]:\n<table>\n    [$before = [:<td>]:[$slot]]\n</table>\n",
+        "broken #= [$before [:<tr>]:\n<table>\n    [$before [:<td>]:[$slot]]\n</table>\n",
         "src/@entry.moth",
         "src/@entry.moth",
     );

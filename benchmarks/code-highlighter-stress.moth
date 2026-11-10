@@ -1,10 +1,10 @@
 -- code-highlighter-stress.moth
--- Dedicated $code("moth") formatter workload.
+-- Dedicated $code "moth" formatter workload.
 -- The balanced directive body below is representative Moth source-like text so
 -- the compile-time HTML formatter scans a realistic mix of words, operators,
 -- strings, numbers, comments, directives, paths and plain identifiers.
 
-code_snippet #= [$code("moth"):
+code_snippet #= [$code "moth":
 -- module documentation
 @core/io print, line, debug
 @core/math sin, cos, tan, PI, TAU, E
@@ -240,11 +240,11 @@ markdown_block #= [$md:
     Paragraph with **emphasis** and @./other-page (a link).
 ]
 
-code_block #= [$code("moth"):
+code_block #= [$code "moth":
     value = 42
 ]
 
-page_wrapper #= [$before = [:<div class="card">], $after = [:</div>]:
+page_wrapper #= [$before [:<div class="card">], $after [:</div>]:
     <article>[$slot]</article>
 ]
 
@@ -594,11 +594,11 @@ icon #= [: <span class="icon">[$slot]</span> ]
 badge #= [: <span class="badge">[$slot]</span> ]
 
 -- layout templates
-sidebar_layout #= [$before = [:<aside>], $after = [:</aside>]:
+sidebar_layout #= [$before [:<aside>], $after [:</aside>]:
     <div class="sidebar">[$slot]</div>
 ]
 
-main_layout #= [$before = [:<main>], $after = [:</main>]:
+main_layout #= [$before [:<main>], $after [:</main>]:
     <article>[$slot]</article>
 ]
 
@@ -1323,15 +1323,15 @@ counter_state ~= 0
 ~counter_state += 1
 
 -- Example: template components
-component_button #= [$before = [:<button class="btn">], $after = [:</button>]:
+component_button #= [$before [:<button class="btn">], $after [:</button>]:
     <span class="label">[$slot]</span>
 ]
 
-component_input #= [$before = [:<label>], $after = [:</label>]:
+component_input #= [$before [:<label>], $after [:</label>]:
     <input type="text" placeholder="[$slot]">
 ]
 
-component_badge #= [$before = [:<span class="badge">], $after = [:</span>]:
+component_badge #= [$before [:<span class="badge">], $after [:</span>]:
     <em>[$slot]</em>
 ]
 

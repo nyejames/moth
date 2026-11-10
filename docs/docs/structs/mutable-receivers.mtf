@@ -1,6 +1,6 @@
 A mutable receiver method declares `this ~Type`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Vector2 = |
         x F64,
         y F64,

@@ -4,7 +4,7 @@ and numeric ranges.
 A conditional loop evaluates a `Bool` condition before each iteration and runs
 its body while that condition remains `true`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count ~= 0
 
     loop count < 3:

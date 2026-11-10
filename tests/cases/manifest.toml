@@ -14093,6 +14093,27 @@ contract = "language.templates.head_formatter_conflict_rejected"
 role = "primary"
 
 [[case]]
+id = "template_code_constant_language_operand"
+path = "template_code_constant_language_operand"
+tags = ["integration", "templates", "directives", "formatters"]
+contract = "language.templates.directive_code_constant_language_operand"
+role = "primary"
+
+[[case]]
+id = "template_code_extra_operand_failure"
+path = "template_code_extra_operand_failure"
+tags = ["integration", "templates", "directives", "diagnostics"]
+contract = "language.templates.directive_code_extra_operand_rejected"
+role = "primary"
+
+[[case]]
+id = "template_code_structural_operand_failure"
+path = "template_code_structural_operand_failure"
+tags = ["integration", "templates", "directives", "diagnostics"]
+contract = "language.templates.directive_code_structural_operand_rejected"
+role = "primary"
+
+[[case]]
 id = "template_directive_raw_unexpected_arguments"
 path = "template_directive_raw_unexpected_arguments"
 tags = ["integration", "templates", "directives", "diagnostics"]
@@ -14121,31 +14142,10 @@ contract = "language.templates.directive_slot_non_integer_rejected"
 role = "primary"
 
 [[case]]
-id = "template_directive_insert_empty_parens"
-path = "template_directive_insert_empty_parens"
-tags = ["integration", "templates", "directives", "diagnostics"]
-contract = "language.templates.directive_insert_empty_parens_rejected"
-role = "primary"
-
-[[case]]
 id = "template_directive_insert_integer"
 path = "template_directive_insert_integer"
 tags = ["integration", "templates", "directives", "diagnostics"]
 contract = "language.templates.directive_insert_integer_rejected"
-role = "primary"
-
-[[case]]
-id = "template_directive_children_empty_parens"
-path = "template_directive_children_empty_parens"
-tags = ["integration", "templates", "directives", "diagnostics"]
-contract = "language.templates.directive_children_empty_parens_rejected"
-role = "primary"
-
-[[case]]
-id = "template_directive_children_truncated_argument"
-path = "template_directive_children_truncated_argument"
-tags = ["integration", "templates", "directives", "diagnostics"]
-contract = "language.templates.directive_children_truncated_argument_rejected"
 role = "primary"
 
 [[case]]
@@ -19513,3 +19513,9 @@ tags = ["integration", "language", "dependencies", "diagnostics", "expression-qu
 contract = "language.dependencies.cross_module_qualified_cycle_is_rejected"
 role = "primary"
 
+[[case]]
+id = "directive_in_collection_entry_failure"
+path = "directive_in_collection_entry_failure"
+tags = ["integration", "directives", "diagnostics", "collections"]
+contract = "language.directives.directive_in_a_collection_entry_is_a_wrong_target"
+role = "primary"

@@ -6,12 +6,12 @@
 //! Rendered HTML fragments remain opaque during assembly so the shell never rewrites
 //! whitespace-sensitive content such as code blocks, scripts, import maps, or head markup.
 
+use crate::compiler_frontend::ast::templates::styles::escape_html::push_escaped_html_text;
 use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::projects::html_project::document_config::HtmlDocumentConfig;
 use crate::projects::html_project::html_slot_plan::HtmlSlotPlan;
 use crate::projects::html_project::output_plan::CanonicalPageRoute;
-use crate::projects::html_project::styles::escape_html::push_escaped_html_text;
 use crate::timed_stage;
 use std::ffi::OsStr;
 const CORE_CSS: &str = include_str!("moth-css-core.css");

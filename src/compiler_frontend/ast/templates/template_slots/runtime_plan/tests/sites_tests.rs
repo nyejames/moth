@@ -65,9 +65,7 @@ fn assert_authority_error(
                 error.message,
             );
         }
-        TemplateError::Diagnostic(_)
-        | TemplateError::EmptyArguments(_)
-        | TemplateError::NonConstantReferenceInConstant(_) => {
+        TemplateError::Diagnostic(_) | TemplateError::NonConstantReferenceInConstant(_) => {
             panic!("{context} must be an infrastructure error, not a user diagnostic",);
         }
     }
@@ -407,9 +405,7 @@ fn missing_structural_authority_propagates_through_runtime_slot_site_planner() {
         TemplateError::Infrastructure(error) => {
             assert_eq!(error.primary.kind, InfrastructureFailureKind::Internal);
         }
-        TemplateError::Diagnostic(_)
-        | TemplateError::EmptyArguments(_)
-        | TemplateError::NonConstantReferenceInConstant(_) => {
+        TemplateError::Diagnostic(_) | TemplateError::NonConstantReferenceInConstant(_) => {
             panic!("missing structural authority must not become a user diagnostic");
         }
     }

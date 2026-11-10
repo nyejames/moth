@@ -1073,7 +1073,6 @@ impl From<TemplateError> for TemplateNormalizationError {
     fn from(error: TemplateError) -> Self {
         match error {
             TemplateError::Diagnostic(diagnostic)
-            | TemplateError::EmptyArguments(diagnostic)
             | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
                 TemplateNormalizationError::Diagnostic(diagnostic)
             }

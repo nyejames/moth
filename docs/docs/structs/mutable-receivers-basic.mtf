@@ -1,6 +1,6 @@
 A method that changes its receiver uses `this ~Type`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     reset |this ~Vector2|:
         ~this.x = 0.0
         ~this.y = 0.0
@@ -9,7 +9,7 @@ A method that changes its receiver uses `this ~Type`.
 
 The value must be stored in a mutable binding:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     vector ~= Vector2(3.0, 4.0)
     ~vector.reset()
 ]

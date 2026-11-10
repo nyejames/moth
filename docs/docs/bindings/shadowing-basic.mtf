@@ -1,6 +1,6 @@
 A visible name can't be declared again.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     score = 10
 
     if score > 0:
@@ -11,7 +11,7 @@ A visible name can't be declared again.
 
 Choose a different name instead:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     score = 10
 
     if score > 0:

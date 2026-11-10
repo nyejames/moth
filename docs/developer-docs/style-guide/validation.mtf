@@ -107,7 +107,7 @@ infrastructure or auditing the complete gate policy.
 Use an up-to-date release build of the compiler when one is available. The
 `moth` command in PATH is the usual direct form:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     moth check docs --terse
     moth build docs --release
 ]
@@ -115,7 +115,7 @@ Use an up-to-date release build of the compiler when one is available. The
 If a suitable release build is not available, run the same operations through
 Cargo from the repository root:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     cargo run --quiet -p moth-cli --bin moth -- check docs --terse
     cargo run --quiet -p moth-cli --bin moth -- build docs --release
 ]
@@ -147,7 +147,7 @@ Rayon intentionally keeps its host-selected default unless the caller sets
 Cargo options remain available. For example, bound all three forms of concurrency
 on a smaller host:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1 just validate
 ]
 
@@ -265,14 +265,14 @@ exact `.node-version` release.
 Run the probe directly to diagnose `PATH` or version-manager mistakes before a
 full gate:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     node -p 'process.execPath + " " + process.version + " " + typeof Math.f16round'
 ]
 
 Use `Fast iteration commands` for small feature-branch slices. At an important
 branch boundary, the routine correctness gate is:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     just validate
 ]
 
@@ -415,7 +415,7 @@ unneeded by a later configuration.
 For deliberate eviction, stop editor and agent builds sharing this target,
 preview the selected files and then apply package-scoped Cargo cleaning:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     just cache-evict-preview
     just cache-evict
 ]
@@ -435,7 +435,7 @@ until those helpers have a separately verified artifact-path change.
 
 The campaign that hardened this suite is owned by one command:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     just test-honesty-audit
 ]
 
@@ -467,7 +467,7 @@ inventory name the roots scanned by the run.
 The tracked durable copy under `docs/roadmap/evidence/` is refreshed by the same owner, never by
 hand:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     just test-honesty-evidence
 ]
 
@@ -502,7 +502,7 @@ An architecture ban whose scope is "no file anywhere may contain this" is not a 
 and a unit test that reads one file's text and asserts on it is not behaviour evidence. Those bans
 have one owner:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     just source-audit
 ]
 
@@ -522,7 +522,7 @@ that evidence, and stops applying the moment the code moves.
 
 The first-party package promise has one focused owner:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     just first-party-deps
 ]
 
@@ -575,7 +575,7 @@ The same dependency-kind and canonical-name checks keep `moth` independent of
 `just validate` runs one standard feature configuration. The standard lanes run all standard
 configurations:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     just test-feature-matrix
 ]
 
@@ -742,7 +742,7 @@ release build using a current compiler.
 
 The direct release-binary form is:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     moth build docs --release
 ]
 
@@ -956,7 +956,7 @@ Do not edit files under `docs/_release/**` directly.
 
 The documentation release build is:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     moth build docs --release
 ]
 

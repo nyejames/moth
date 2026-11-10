@@ -2,7 +2,7 @@
 
 `none` is the only special absent value.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     name String? = none
     fallback String? = "guest"
 ]
@@ -20,13 +20,13 @@ Optional values are not automatically unwrapped.
 
 Inline inspection:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     display_name = if maybe_name is |name| then name else "guest"
 ]
 
 Block inspection:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     display_name = if maybe_name is |name|:
         then name
     else
@@ -36,7 +36,7 @@ Block inspection:
 
 Statement inspection:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if maybe_name is none:
         io.line("missing")
     ;
@@ -44,7 +44,7 @@ Statement inspection:
 
 Full option match:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     label = if maybe_name is:
         "Priya" => then "Hi Priya"
         |name| => then name
@@ -70,7 +70,7 @@ Direct fallback syntax such as `maybe_name else then "guest"` is invalid.
 
 Statement `if` can test for absence:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if maybe_name is none:
         io.line("missing")
     ;
@@ -80,7 +80,7 @@ Statement `if` can test for absence:
 
 Options support equality comparisons:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     present = maybe_name is "Priya"
     absent = maybe_name is none
     same = a is b
@@ -98,7 +98,7 @@ Ordering operators such as `<` on optional values are not supported.
 Postfix `?` unwraps a present value or returns `none` from the enclosing
 function.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     get_display_name |id String| -> String?:
         user = find_user(id)?
         return user.name

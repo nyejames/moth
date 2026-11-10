@@ -1,7 +1,7 @@
 `$before` and `$after` add a prefix and suffix around each direct child template.
 
-[codeblock, $code("moth"):
-    list #= [$before = [:<li>], $after = [:</li>]:
+[codeblock, $code "moth":
+    list #= [$before [:<li>], $after [:</li>]:
         <ul>
             [$slot]
         </ul>
@@ -31,9 +31,9 @@ pieces, which survive composition and resolve in the output context. A constant
 template wrapper may contain named slots, which the enclosing application fills.
 Its unresolved slot identity and structural resource pieces survive composition.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     row #= [$html:<tr style="[$slot row_style]">]
-    rows #= [$before = row, $after = [$html:</tr>]:[$slot]]
+    rows #= [$before row, $after [$html:</tr>]:[$slot]]
 
     [rows:
         [$in row_style:background: red;]
@@ -48,8 +48,8 @@ and fills the wrapper's named slot. It is not routed to either child.
 An occurrence can own a default in the wrapper value. The default applies only
 when no contribution reaches that occurrence:
 
-[codeblock, $code("moth"):
-    rows #= [$before = [$html:<tr style="[$slot row_style = "background: white;"]">], $after = [$html:</tr>]:[$slot]]
+[codeblock, $code "moth":
+    rows #= [$before [$html:<tr style="[$slot row_style = "background: white;"]">], $after [$html:</tr>]:[$slot]]
 ]
 
 Only named slots may appear in a `$before` or `$after` value. An explicit
@@ -90,7 +90,7 @@ re-exports.
 
 `$fresh` opts one child out of the immediate parent wrapper.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     [list:
         [: one]
         [$fresh: [: two]]

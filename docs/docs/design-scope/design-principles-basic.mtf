@@ -6,7 +6,7 @@ The language prefers one clear mechanism over many specialised syntax forms.
 When a problem can be solved with an existing feature, the language doesn't
 add a second way to do it.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Templates handle text composition
     greeting = [: Hello, [name]]
 

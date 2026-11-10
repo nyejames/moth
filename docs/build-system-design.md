@@ -6,7 +6,7 @@ The build system selects commands/capabilities, bootstraps configuration, discov
 
 `docs/compiler-design-overview.md` owns semantic identities, compiler stages, artefact contents, generated semantics, fingerprint domains and validation. Its authority rules and companion references apply here. This document owns orchestration and build policy, not another definition of compiler facts.
 
-Accepted plans resolve design gaps and explicit supersession. Implementation behaviour never overrides them. Preserve unique accepted contracts in permanent owners before retiring a plan. Exact public directive signatures belong in the canonical project-structure references, with architecture and consequential validation rules retained here.
+Accepted plans resolve design gaps and explicit supersession. Implementation behaviour never overrides them. Preserve unique accepted contracts in permanent owners before retiring a plan. Exact public configuration-directive signatures belong in the canonical project-structure references; directive grammar and extension limits belong in `docs/docs/directives/directives.mtf`; architecture and consequential validation rules stay here.
 
 ## Task-reading guide
 
@@ -53,7 +53,7 @@ Bootstrap starts with a command selecting the artefact builder, build profile, t
 
 The selected builder does not supply or propagate a semantic numeric profile. It supplies its capability surface and exact typed primitive globals; compiler language policy owns the `I32`/`F64` literal defaults, while each source/input contract names an exact type. The build profile controls optimisation/planning effort, instrumentation and physical representation policy, not numeric semantics or mandatory access/lifetime legality. `docs/compiler-design-overview.md` > `Exact numeric identities and physical representation` owns numeric values and compatibility.
 
-The capability surface contains registered directive signatures/contexts, source-backed Core/Builder packages, binding-backed packages, template directives, import providers, runtime requirements, supported source kinds, primitive build globals and target-affinity/capability metadata.
+The capability surface contains source-backed Core/Builder packages, binding-backed packages, import providers, runtime requirements, supported source kinds, primitive build globals and target-affinity/capability metadata. Directives are not part of it: the compiler defines every directive and every builder sees the same set.
 
 Template constant scope is not a configurable capability. The compiler authority's Stage 2 source-kind section owns the fixed `@html` prelude and the rule that a builder enabling `.mtf` must register the official `packages/html` source package. A builder cannot opt arbitrary source packages into `.mtf` scope.
 
@@ -68,7 +68,7 @@ Tooling overlays inspect the selected environment rather than owning another
 runtime. The [Wasm optimisation authority](developer-docs/wasm-optimisation/overview.mtf)
 owns optimisation goals and the separate Moth-profile/native-strategy choices.
 
-Frontend names and builtins remain authoritative. Registration rejects duplicates and overrides. Unknown directives, wrong-context uses and recognised unavailable capabilities receive distinct diagnostics rather than silent acceptance. Registries grant constrained powers, not arbitrary semantic callbacks.
+Frontend names and builtins remain authoritative, and a builder supplies no directive names. Unknown directives, wrong-context uses and recognised unavailable capabilities receive distinct diagnostics rather than silent acceptance. Registries grant constrained powers, not arbitrary semantic callbacks.
 
 Builder globals express stable semantic configuration. They never reveal a physical target, backend, OS or architecture through `$config`. Command target intent stays outside source-visible configuration. Tooling overlays extend analysis without becoming competing artefact builders.
 
@@ -90,7 +90,7 @@ Reject source dependency clauses before path resolution, authored file-value pat
 
 Config-local helpers do not become declarations visible to project modules. Only specialised build interfaces publish folded settings. Synthetic single-file operations use explicit synthetic configuration without inventing source directives or implicit input providers.
 
-`docs/roadmap/plans/general-directives-plan.md` is the accepted directive and config plan. Named `project` and active-builder records plus `$config` input contracts are the only config architecture specified here. There are no `$project`, `$builder` or `$html_builder` directives.
+`docs/docs/directives/directives.mtf` owns the two directive attachment locations and the one-operand grammar; `docs/docs/project-structure/build-inputs.mtf` owns the `$config` input contract. Named `project` and active-builder records plus `$config` input contracts are the only config architecture specified here. There are no `$project`, `$builder` or `$html_builder` directives.
 
 ### Project record
 
@@ -106,7 +106,7 @@ There is no `entry_root`: the selected directory is both the build root and the 
 
 ### Bootstrap `$config` declarations
 
-`$config` takes no arguments and modifies exactly one following explicitly typed top-level compile-time `#` binding. Its name is the input name, its type is the contract and its initialiser is the fallback. Whitespace/comments may separate modifier and declaration, but another source item or block boundary may not. Duplicate or dangling modifiers are errors.
+`$config` takes no operand and modifies exactly one following explicitly typed top-level compile-time `#` binding. Its name is the input name, its type is the contract and its initialiser is the fallback; only a marked binding may omit an initialiser. The modifier occupies its own line, and comment-only lines may separate it from the declaration, but a blank physical line, another source item or a block boundary may not. Duplicate or dangling modifiers are errors.
 
 The domain is `String`, `Bool`, `Char`, `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F16`, `F32`, `F64` and one optional layer around a supported primitive. `Byte`, `Dec`, aliases, inferred types, collections and records are excluded. Runtime/mutable bindings, parameters, fields, locals and multi-bind targets are ineligible. Ordinary constants still require initialisers.
 
@@ -182,7 +182,7 @@ AST receives an ordinary folded constant. A Bool input uses ordinary `if`, with 
 
 ### Active builder configuration record
 
-An authored HTML directory config contains the named `html` record. An empty record uses defaults and the record stays required even when every field takes its default. The command already selected the builder, so this record never chooses a backend or runtime platform.
+An authored HTML directory config may contain the named `html` record. An empty or omitted record uses defaults. The command already selected the builder, so this record never chooses a backend or runtime platform.
 
 The canonical project-config reference owns the field set and defaults. Shared record validation fills defaults once. The typed HTML settings owner checks domains such as URL style, origin path, non-empty language/present favicon and output-root containment/profile conflicts.
 

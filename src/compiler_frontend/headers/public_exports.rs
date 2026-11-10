@@ -120,7 +120,7 @@ fn intern_public_surface_path(
 /// Whether a header is a public authored module-root export.
 ///
 /// WHAT: only declarations marked public by a strict module-root file `export:` block become
-///       public export entries. The shared declaration gate also excludes source `#Config`
+///       public export entries. The shared declaration gate also excludes source `$config`
 ///       contract shells, which are resolved before ordinary declarations exist.
 /// WHY: the stage-local file-role and export-mode policy remains here while declaration-kind and
 ///       contract-shell eligibility stay centralized on `HeaderKind`.

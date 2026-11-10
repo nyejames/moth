@@ -93,9 +93,9 @@ pub(crate) struct ConstantResolutionSessionInput {
     pub style_directives: StyleDirectiveRegistry,
     /// Compiler-owned config resolution services for grouped-project fields.
     pub config_resolution: Option<Rc<ConfigResolutionServices>>,
-    /// Immutable project/package source `#Config` values for source-header materialization.
+    /// Immutable project/package source `$config` values for source-header materialization.
     pub build_config_values: Arc<ResolvedBuildConfigMap>,
-    /// Names of source `#Config` contracts declared by this module.
+    /// Names of source `$config` contracts declared by this module.
     pub source_build_config_contract_names: Arc<FxHashSet<BuildInputName>>,
     pub template_ir_store: Rc<RefCell<TemplateIrStore>>,
     /// Stage 0 file-reference outcomes and module-local structural resource identity.
@@ -247,7 +247,7 @@ impl ConstantResolutionSession {
                         .id(),
                 ),
                 binding_span: None,
-                config_qualifier: declaration.config_qualifier.clone(),
+                config_contract: declaration.config_contract,
             },
             Some(SyntheticContentPayload::MothTemplate { markdown_directive }) => {
                 let owner = file_owner.ok_or_else(|| {
@@ -375,7 +375,7 @@ impl ConstantResolutionSession {
                     value_mode: expression_builder.view_owned(value)?.value_mode(),
                     value: DeclarationValue::Initializer(value.id()),
                     binding_span: None,
-                    config_qualifier: declaration.config_qualifier.clone(),
+                    config_contract: declaration.config_contract,
                 }
             }
             None => {

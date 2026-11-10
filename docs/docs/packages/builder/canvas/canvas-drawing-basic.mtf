@@ -8,7 +8,7 @@ library mature.
 
 Bind the functions you need with a direct-selection clause.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @web/canvas get_canvas, context_2d, set_fill_style, fill_rect
 
     canvas = get_canvas("my-canvas")!
@@ -39,7 +39,7 @@ You obtain them through functions.
 Functions that change the canvas need mutable access with `~`. Query functions
 use shared access. The `~` goes before the value you're mutating.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- mutating: needs ~ on the argument
     fill_rect(~ctx, 0.0, 0.0, 100.0, 100.0)
 

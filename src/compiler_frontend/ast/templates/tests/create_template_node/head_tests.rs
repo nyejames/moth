@@ -52,10 +52,6 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::source::SourceDatabase;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
-use crate::compiler_frontend::style_directives::{
-    StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
-    TemplateHeadCompatibility, TemplateHeadTag,
-};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;

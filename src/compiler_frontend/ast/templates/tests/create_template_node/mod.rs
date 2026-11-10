@@ -33,18 +33,16 @@ use crate::compiler_frontend::compiler_messages::render::{
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan};
-use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tests::ast_fixture_support::make_test_variable;
 use crate::compiler_frontend::tokenizer::lexer::{LexedSource, TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{
-    SourceTokens, TemplateBodyMode, TestSourceTokensBuilder, TokenIndex, TokenTag,
-    TokenizerEntryMode,
+    SourceTokens, TestSourceTokensBuilder, TokenIndex, TokenTag, TokenizerEntryMode,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
-use crate::projects::html_project::style_directives::html_project_style_directives;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -88,11 +86,6 @@ fn publish_template_source(mut lexed: LexedSource) -> TemplateSourceFixture {
     }
 }
 
-fn html_project_test_style_directives() -> StyleDirectiveRegistry {
-    StyleDirectiveRegistry::merged(&html_project_style_directives())
-        .expect("html project style directives should merge with core directives")
-}
-
 fn template_tokens_from_source(
     source: &str,
     string_table: &mut StringTable,
@@ -130,24 +123,6 @@ fn template_tokens_from_source_with_style_directives(
     )
     .expect("tokenization should succeed");
     publish_template_source(lexed)
-}
-
-fn template_tokens_from_source_with_directives(
-    source: &str,
-    directives: &[StyleDirectiveSpec],
-    string_table: &mut StringTable,
-    span_builder: &mut ExtendedSpanBuilder,
-    path_fork: &mut PathInternerFork,
-) -> TemplateSourceFixture {
-    let registry = StyleDirectiveRegistry::merged(directives)
-        .expect("test style directives should merge with core directives");
-    template_tokens_from_source_with_style_directives(
-        source,
-        &registry,
-        string_table,
-        span_builder,
-        path_fork,
-    )
 }
 
 fn with_test_path_context(
@@ -495,7 +470,6 @@ fn compact_template_diagnostic(diagnostic: DiagnosticDraft) -> CompactDiagnostic
 fn expect_template_diagnostic(error: TemplateError) -> CompactDiagnosticBagForTest {
     match error {
         TemplateError::Diagnostic(diagnostic)
-        | TemplateError::EmptyArguments(diagnostic)
         | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
             compact_template_diagnostic(diagnostic)
         }
@@ -682,7 +656,6 @@ fn is_default_error_span(span: Option<crate::compiler_frontend::source::SourceSp
     span.is_none()
 }
 
-mod builder_tests;
 mod child_decorator_tests;
 mod directive_built_in_tests;
 mod directive_style_tests;

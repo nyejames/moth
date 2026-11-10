@@ -326,7 +326,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             ),
                         }),
                         binding_span: None,
-                        config_qualifier: None,
+                        config_contract: None,
                     },
                     self.path_fork,
                 )
@@ -525,7 +525,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 value_mode: ValueMode::ImmutableReference,
                 value: default_value,
                 binding_span: None,
-                config_qualifier: None,
+                config_contract: None,
             });
         }
 

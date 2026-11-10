@@ -499,7 +499,7 @@ fn const_loop_iteration_bindings_preserve_source_provenance() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
     let bindings = LoopBindings {
         item: Some(declaration(item_path)),

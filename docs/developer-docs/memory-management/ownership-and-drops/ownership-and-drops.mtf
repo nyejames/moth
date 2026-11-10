@@ -23,7 +23,7 @@ The compiler may transfer cleanup responsibility only where static analysis prov
 
 Bit 0 of a full-control allocation-family handle records affine cleanup responsibility. It does not prove uniqueness, identify the final observer, establish lifetime legality or create dynamic shared ownership.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     borrowed
         The runtime path must not destroy the value.
 
@@ -35,12 +35,12 @@ Bit 0 of a full-control allocation-family handle records affine cleanup responsi
 
 Cleanup responsibility and physical representation are independent dimensions of a full-control handle. Bit 0 is per-handle affine cleanup responsibility. Bit 1 describes the target allocation family's physical representation. Neither bit determines the other.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     bit 0: affine cleanup responsibility
     bit 1: REC representation
 ]
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     00: uncounted borrowed
     01: uncounted affine-owned
     10: REC-managed borrowed or counted persistent edge
@@ -74,7 +74,7 @@ This section is the terminology authority for these four cleanup terms:
 
 A discharged obligation is gone from this path. It does not by itself mean that the allocation family is destroyed. The selected physical strategy determines what happens after the obligation is discharged:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     uncounted individually releasable family:
         discharge may destroy immediately
 
@@ -203,7 +203,7 @@ Aggregates may contain shared and independently owned children.
 
 Accepted effect categories:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     MayConsume
     NeverConsumes
     AlwaysConsumes

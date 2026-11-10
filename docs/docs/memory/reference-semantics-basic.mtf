@@ -2,7 +2,7 @@ Moth shares existing values by default. Here's what that means in practice.
 
 When you assign one variable to another, both read the same data:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     original = "hello"
     view = original
 ]
@@ -14,7 +14,7 @@ No copy happens here. `view` reads the same value as `original`.
 A shared alias prevents mutation of the same data while it is still in use.
 Once the alias is no longer needed, mutation becomes valid again.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     items ~= {1, 2, 3}
     view = items
     -- ~items.push(4)  -- would fail: view is still live

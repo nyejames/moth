@@ -8,7 +8,7 @@ declarations as visible to other modules.
 
 ### Syntax
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     private_helper || -> String:
         return "private"
     ;
@@ -67,7 +67,7 @@ Legacy inline `export` syntax without the `:` block delimiter is rejected with
 
 The export block can re-export direct selections from other files:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     export:
         @components/card CardData as Card, render_card
 

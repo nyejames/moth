@@ -176,6 +176,7 @@ fn hash_in_expression_position_rejected() {
         group_frames: &mut group_frames,
         route_argument_context: None,
         mismatch_context: crate::compiler_frontend::compiler_messages::TypeMismatchContext::General,
+        stop_at_adjacent_operand: false,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -246,6 +247,7 @@ fn hash_before_template_head_allowed() {
         group_frames: &mut group_frames,
         route_argument_context: None,
         mismatch_context: crate::compiler_frontend::compiler_messages::TypeMismatchContext::General,
+        stop_at_adjacent_operand: false,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -306,6 +308,7 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
         group_frames: &mut group_frames,
         route_argument_context: None,
         mismatch_context: crate::compiler_frontend::compiler_messages::TypeMismatchContext::General,
+        stop_at_adjacent_operand: false,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -486,7 +489,7 @@ fn constant_identifier_uses_module_store_tir() {
                 value_mode: ValueMode::ImmutableOwned,
                 value: DeclarationValue::Initializer(template_expression.id()),
                 binding_span: None,
-                config_qualifier: None,
+                config_contract: None,
             }],
             &path_fork,
             &string_table,

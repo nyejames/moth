@@ -5,7 +5,7 @@
 //!       ([`BuildInputType`]), typed primitive values ([`PrimitiveBuildValue`]), source and
 //!       command locations, resolution origins, and the deterministic duplicate-free
 //!       [`BuildConfigInputSet`] map that command parsing fills.
-//! WHY:  CLI parsing, programmatic commands and later `#Config` resolution must share one
+//! WHY:  CLI parsing, programmatic commands and later `$config` resolution must share one
 //!       typed vocabulary instead of reparsing text or carrying string-backed fallback values.
 //!       These carriers are semantic input facts owned by the frontend: they never carry target
 //!       or platform identity and never depend on build-system or project settings, so build
@@ -21,7 +21,7 @@
 //! `moth_lexical` numeric helpers, so no intermediate width or precision exists. Typed values must
 //! match the contract's exact primitive type.
 //!
-//! Exclusions: no `--input` argument parser or `#Config` grammar lives here. Command layers
+//! Exclusions: no `--input` argument parser or `$config` grammar lives here. Command layers
 //! split each argument at the first `=`, validate names and insert the resulting entries.
 //! Optional absence is represented by omitting an input, never by a value in this vocabulary.
 //! Resolution records that keep a typed value together with its origin arrive with the
@@ -157,7 +157,7 @@ impl BuilderConfigGlobalSet {
     ///
     /// Backend and platform identity belong to builder capability resolution, not Moth source
     /// configuration. Rejecting these names at the carrier boundary prevents a builder surface
-    /// from smuggling target selection through `#Config`.
+    /// from smuggling target selection through `$config`.
     #[allow(dead_code)]
     pub(crate) fn insert(
         &mut self,
@@ -398,7 +398,7 @@ impl DeferredNumericLiteral {
 
 /// One exact typed build-config value.
 ///
-/// WHAT: the only resolved value vocabulary build inputs and `#Config` resolution transport. Every
+/// WHAT: the only resolved value vocabulary build inputs and `$config` resolution transport. Every
 ///       numeric value is one exact fixed scalar, never an untyped or widened carrier.
 /// WHY:  there is deliberately no raw, untyped or `none` variant. Optional absence is an omitted
 ///       input resolved through project and default rules, never a value. Authored String and Char
@@ -632,7 +632,7 @@ fn parse_ordinary_quoted_literal(
     }
 }
 
-/// One accepted `#Config` contract type: a primitive or the matching optional primitive.
+/// One accepted `$config` contract type: a primitive or the matching optional primitive.
 ///
 /// WHAT: the complete contract-type vocabulary for build configuration. `Optional` wraps the
 ///       same primitive, so `String?` is `Optional(String)` and not a separate aggregate type.
@@ -719,7 +719,7 @@ pub enum BuildInputNameError {
 
 /// A validated lower_snake_case build-config name.
 ///
-/// WHAT: owns the exact validated spelling of a `#Config` name or explicit input name as
+/// WHAT: owns the exact validated spelling of a `$config` name or explicit input name as
 ///       stable owned text. Validation composes the canonical identifier policy helpers, so
 ///       build names cannot drift from source identifier rules.
 /// WHY:  input names match source contract names by exact spelling, so one validated owner
@@ -796,7 +796,7 @@ impl BuildCommandLocation {
 
 /// How a resolved build-config value was produced.
 ///
-/// WHAT: the resolution-origin provenance later `#Config` resolution records next to a typed
+/// WHAT: the resolution-origin provenance later `$config` resolution records next to a typed
 ///       value and its location, covering both accepted resolution orders: fixed grouped-project
 ///       fields and project-wide source contracts.
 /// WHY: resolved values retain their origin so diagnostics can explain explicit inputs, builder
@@ -911,7 +911,7 @@ pub(crate) struct ConfigResolutionRecord {
     pub(crate) value: Option<PrimitiveBuildValue>,
     pub(crate) origin: BuildConfigValueOrigin,
     pub(crate) fingerprint: BuildConfigFingerprint,
-    pub(crate) qualifier_span: Option<SourceSpan>,
+    pub(crate) marker_span: Option<SourceSpan>,
     pub(crate) value_location: Option<BuildConfigValueLocation>,
 }
 
@@ -995,7 +995,7 @@ impl ConfigResolutionServices {
                     Some(BuildConfigValueLocation::Source(span)) => Some(*span),
                     Some(BuildConfigValueLocation::Command(_)) | None => None,
                 };
-                (record.origin, provider_span.or(record.qualifier_span))
+                (record.origin, provider_span.or(record.marker_span))
             })
     }
 

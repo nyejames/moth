@@ -16,9 +16,13 @@ pub(super) enum HeaderFileItem {
     Dependency,
     Export,
     ExportBlock,
-    Hash { at_statement_boundary: bool },
+    Hash {
+        at_statement_boundary: bool,
+    },
     RuntimeTemplate,
     ReservedTraitSyntax,
+    /// A registered `$name` directive token on its own top-level line.
+    StyleDirective(StringId),
     Eof,
     StartBodyToken,
 }
@@ -75,6 +79,13 @@ pub(super) fn classify_tagged_item(
     if current_tag == TokenTag::TEMPLATE_HEAD {
         if at_statement_boundary {
             return HeaderFileItem::RuntimeTemplate;
+        }
+        return HeaderFileItem::StartBodyToken;
+    }
+
+    if current_tag == TokenTag::STYLE_DIRECTIVE {
+        if at_statement_boundary && let Some(name_id) = current_symbol {
+            return HeaderFileItem::StyleDirective(name_id);
         }
         return HeaderFileItem::StartBodyToken;
     }

@@ -1,6 +1,6 @@
 A function with an explicit typed error path marks one return slot with `!`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     parse_number |text String| -> I32, Error!:
         if text is "":
             return! Error("Missing number", 200)
@@ -36,7 +36,7 @@ error type can be used when the function contract requires it.
 
 A function may declare only an error slot:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     validate |ready Bool| -> Error!:
         if not ready:
             return! Error("not ready")
@@ -50,7 +50,7 @@ A function may declare only an error slot:
 - A nested block may use `return!` too. The statement leaves through the
   enclosing error-only function's error channel and terminates that path.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Failure = |
         message String,
     |
@@ -80,7 +80,7 @@ Current compiler support remains documented by @../progress (Progress).
 
 Map implicit failure into a custom error with `catch` and `return!`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     GeometryError ::
         InvalidDimensions,
     ;

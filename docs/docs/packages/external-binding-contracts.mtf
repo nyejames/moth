@@ -4,13 +4,13 @@ External binding packages expose typed functions, constants and opaque types imp
 
 The HTML builder supports annotated single-file `.js` dependency clauses through `@moth.opaque`, `@moth.sig` and `@moth.const`. `@moth.sig` declares each exposed function and `@moth.const` declares each literal-backed constant. `@moth.opaque` is required only when signatures use foreign opaque handle types. A function-only module may use `@moth.sig` without `@moth.opaque` and a constant-only module may use `@moth.const` on its own. JavaScript export names are runtime implementation details. Moth names come from annotations.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @vendor/drawing.js as drawing
 ]
 
 #### Annotated JavaScript example
 
-[codeblock, $code("js"):
+[codeblock, $code "js":
     /**
      * @moth.sig emphasize |text String| -> String
      */
@@ -29,7 +29,7 @@ The HTML builder supports annotated single-file `.js` dependency clauses through
 
 The Moth dependency clause uses the annotation names, not the JavaScript export names:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @vendor/drawing.js emphasize, join_label
 ]
 
@@ -53,7 +53,7 @@ annotation belongs to `emphasize`, which lacks `export`. The compiler reports
 the missing keyword and the line to add it on, rather than binding the
 annotation to some later export:
 
-[codeblock, $code("js"):
+[codeblock, $code "js":
     /**
      * @moth.sig emphasize |text String| -> String
      */
@@ -95,7 +95,7 @@ function is Never. Moth does not inspect the foreign body. Calls follow the
 standalone-statement rule. Host Never imports are rejected on Wasm at target
 validation.
 
-[codeblock, $code("js"):
+[codeblock, $code "js":
     /**
      * @moth.sig halt |message String| -> !
      */
@@ -108,7 +108,7 @@ validation.
 
 `@moth.const` exposes a flat Moth name and the fixed `U32` type. The JavaScript export name may differ:
 
-[codeblock, $code("js"):
+[codeblock, $code "js":
     /** @moth.const primitive_triangles U32 */
     export const TRIANGLES = 4;
 ]

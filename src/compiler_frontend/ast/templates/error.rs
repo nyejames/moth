@@ -16,7 +16,6 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticD
 #[derive(Debug)]
 pub(crate) enum TemplateError {
     Diagnostic(DiagnosticDraft),
-    EmptyArguments(DiagnosticDraft),
     NonConstantReferenceInConstant(DiagnosticDraft),
     Infrastructure(Box<InfrastructureErrors>),
 }
@@ -30,7 +29,6 @@ impl TemplateError {
     ) -> Self {
         match self {
             Self::Diagnostic(diagnostic) => Self::Diagnostic(map(diagnostic)),
-            Self::EmptyArguments(diagnostic) => Self::EmptyArguments(map(diagnostic)),
             Self::NonConstantReferenceInConstant(diagnostic) => {
                 Self::NonConstantReferenceInConstant(map(diagnostic))
             }
@@ -63,9 +61,6 @@ impl From<ExpressionParseError> for TemplateError {
     fn from(error: ExpressionParseError) -> Self {
         match error {
             ExpressionParseError::Diagnostic(diagnostic) => TemplateError::Diagnostic(diagnostic),
-            ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic) => {
-                TemplateError::EmptyArguments(diagnostic)
-            }
             ExpressionParseError::NonConstantReferenceInConstant(diagnostic) => {
                 TemplateError::NonConstantReferenceInConstant(diagnostic)
             }

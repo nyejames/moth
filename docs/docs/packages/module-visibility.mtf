@@ -6,7 +6,7 @@ Files within the same module can bind each other's declarations directly through
 
 Given this topology:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     @entry.moth
     components/
     ├── @mod.moth
@@ -17,7 +17,7 @@ Given this topology:
 
 Internal helper:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- components/utils.moth
     internal_value #= 42
 
@@ -28,7 +28,7 @@ Internal helper:
 
 Child root:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- components/@mod.moth
     @utils internal_value, internal_fn
 
@@ -56,7 +56,7 @@ Helper declarations remain shared, prepared once with one origin. Each root bind
 
 A different module can only access declarations marked public by the applicable facade. Cross-module dependency clauses cannot bypass the public API.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- @entry.moth
     @components internal_value
 ]

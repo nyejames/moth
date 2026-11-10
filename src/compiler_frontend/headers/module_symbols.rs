@@ -512,7 +512,7 @@ fn declaration_from_header(header: &Header) -> Option<Declaration> {
             value_mode: ValueMode::ImmutableReference,
             value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
             binding_span: header.name_span,
-            config_qualifier: None,
+            config_contract: None,
         }),
         HeaderKind::Constant { declaration, .. } => Some(constant_declaration_placeholder(
             &header.declaration_path,
@@ -526,7 +526,7 @@ fn declaration_from_header(header: &Header) -> Option<Declaration> {
             value_mode: ValueMode::ImmutableReference,
             value: DeclarationValue::Shell(DeclarationShell::Struct),
             binding_span: header.name_span,
-            config_qualifier: None,
+            config_contract: None,
         }),
         HeaderKind::Choice { .. } => Some(Declaration {
             id: header.declaration_path,
@@ -535,7 +535,7 @@ fn declaration_from_header(header: &Header) -> Option<Declaration> {
             value_mode: ValueMode::ImmutableReference,
             value: DeclarationValue::Shell(DeclarationShell::Choice),
             binding_span: header.name_span,
-            config_qualifier: None,
+            config_contract: None,
         }),
         HeaderKind::StartFunction => {
             // The implicit entry is a typed AST node and a HIR-owned function, never a source
@@ -572,7 +572,7 @@ fn constant_declaration_placeholder(
         value_mode: declaration.value_mode(),
         value: DeclarationValue::PendingConstant,
         binding_span: name_span,
-        config_qualifier: None,
+        config_contract: None,
     }
 }
 

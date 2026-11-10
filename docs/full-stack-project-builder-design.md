@@ -336,7 +336,6 @@ The public builder boundary should eventually make it practical to:
 - declare a builder capability surface
 - register builder-owned source and binding packages
 - register supported compiler-known source kinds
-- register constrained builder directives
 - register external import providers
 - describe builder configuration
 - compile a project through the canonical graph and compiler services

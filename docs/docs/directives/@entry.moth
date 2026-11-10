@@ -9,7 +9,7 @@
     init_docs_sidebar
 
 #[$in title:["Directives"]]
-#[$in description:["General compiler and builder directives in Moth, including configuration, builder slots and shared argument rules."]]
+#[$in description:["General compiler directives in Moth, including the template-head form, the source-modifier form, configuration, builder slots and shared operand rules."]]
 #[$in head:[language_theme_head]]
 
 #[navbar]
@@ -23,10 +23,10 @@ init_docs_sidebar()!
     modifiers such as `$config` and later compiler-owned forms. HTML document
     metadata uses direct const inserts in `@entry.moth` through builder slots.
 
-    Template directives are implemented. General source modifiers are accepted
-    design and are not yet available in the Alpha compiler. No root-purpose
-    directive exists: `@entry.moth` owns entry eligibility, and `$entry` and
-    `$page` are not source syntax.
+    Template directives are implemented. The `$config` source modifier is
+    delivered for typed build inputs; later compiler-owned source forms remain
+    accepted design. No root-purpose directive exists: `@entry.moth` owns entry
+    eligibility, and `$entry` and `$page` are not source syntax.
 ]
 
 #[section:

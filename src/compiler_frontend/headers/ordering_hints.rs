@@ -51,11 +51,11 @@ pub(super) fn collect_constant_type_hints(
     hints: &mut HashSet<LocalDeclarationOrderingHint>,
     capacity_references: &mut Vec<InitializerReference>,
 ) -> Result<(), HeaderParseFailure> {
-    // A `#Config of T` type belongs to the provider-independent contract shell, not to the
+    // A `$config` contract type belongs to the provider-independent contract shell, not to the
     // ordinary declaration type graph. The resolution barrier will materialize the declaration
     // after provider binding, so retaining this as a local ordering edge would leak contract
     // vocabulary into header topology.
-    if declaration_syntax.config_qualifier.is_some() {
+    if declaration_syntax.config_contract.is_some() {
         return Ok(());
     }
     let mut selection_error = None;

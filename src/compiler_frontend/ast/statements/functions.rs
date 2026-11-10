@@ -210,7 +210,7 @@ impl FunctionParameter {
                 None => DeclarationValue::Absent,
             },
             binding_span: self.binding_span,
-            config_qualifier: None,
+            config_contract: None,
         }
     }
 }
@@ -478,7 +478,7 @@ pub(crate) fn signature_member_to_declaration(
         value_mode: member.value_mode,
         value,
         binding_span: member_span,
-        config_qualifier: None,
+        config_contract: None,
     })
 }
 
@@ -652,9 +652,6 @@ fn signature_member_error_with_span(
     match error {
         ExpressionParseError::Diagnostic(diagnostic) => {
             ExpressionParseError::Diagnostic(attach_member_span(diagnostic))
-        }
-        ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic) => {
-            ExpressionParseError::TemplateDirectiveEmptyArguments(attach_member_span(diagnostic))
         }
         ExpressionParseError::NonConstantReferenceInConstant(diagnostic) => {
             ExpressionParseError::NonConstantReferenceInConstant(attach_member_span(diagnostic))

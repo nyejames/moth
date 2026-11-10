@@ -32,7 +32,6 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOwnerId;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
-use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
@@ -61,7 +60,6 @@ use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, ResourceDiagnosticSite, ResourceUrlContext, display_origin,
 };
 use crate::projects::html_project::structural_url_renderer::StructuralUrlRenderer;
-use crate::projects::html_project::style_directives::html_project_style_directives;
 use crate::projects::html_project::wasm::artifacts::{
     CompiledHtmlWasmModule, compile_html_module_wasm,
 };
@@ -403,10 +401,6 @@ impl BackendBuilder for HtmlProjectBuilder {
         parse_html_document_config(config, diagnostic_strings)?;
 
         Ok(())
-    }
-
-    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
-        html_project_style_directives()
     }
 
     fn frontend_surface(&self) -> BuilderSurface {

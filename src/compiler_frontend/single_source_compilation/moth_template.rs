@@ -77,10 +77,10 @@ pub(crate) struct MothTemplateCompilationRequest<'a> {
     pub(crate) source_path: &'a Path,
     /// Optional direct-request text. Bundle-bearing requests use retained database text.
     pub(crate) source_code: Option<String>,
-    /// The calling project's style directives, already merged.
+    /// The frontend-owned style directive registry the template folds against.
     ///
-    /// WHY: which directives a template may use is project vocabulary, so the caller owns the
-    ///      registry and the service never assembles one from a project.
+    /// WHY: which directives a template may use is compiler vocabulary, so the calling service
+    ///      owns the immutable registry and this request never assembles one from a project.
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     /// Prepared Stage 0 file-value inputs, present when the source names file values.
     pub(crate) file_value_resolution: Option<MothTemplateFileValueBundle>,

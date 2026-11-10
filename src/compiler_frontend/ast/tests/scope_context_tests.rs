@@ -93,7 +93,7 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
     context.add_var(declaration, None, &path_fork);
 
@@ -144,7 +144,7 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
     context.add_compile_time_var(declaration, None, &path_fork);
 
@@ -438,7 +438,7 @@ fn parent_frame_lookup_finds_ancestor_declaration() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         },
         None,
         &path_fork,
@@ -493,7 +493,7 @@ fn child_frame_declaration_is_not_visible_to_parent() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         },
         None,
         &path_fork,
@@ -551,7 +551,7 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         },
         None,
         &path_fork,
@@ -564,7 +564,7 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         },
         None,
         &path_fork,
@@ -616,7 +616,7 @@ fn no_shadowing_across_ancestor_frames() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         },
         None,
         &path_fork,
@@ -707,7 +707,7 @@ fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
 
     let mut child = context
@@ -806,7 +806,7 @@ fn cloned_context_does_not_share_current_frame() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         },
         None,
         &path_fork,
@@ -854,7 +854,7 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         },
         None,
         &path_fork,
@@ -875,7 +875,7 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         },
         None,
         &path_fork,
@@ -1056,7 +1056,7 @@ fn pending_numeric_binding_upgrades_in_place_and_keeps_its_name() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
 
     let upgraded = context
@@ -1124,7 +1124,7 @@ fn explicit_constant_lookup_uses_content_owner_and_authored_binding_role() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         };
         if is_constant {
             context.add_compile_time_var(declaration, None, &paths);

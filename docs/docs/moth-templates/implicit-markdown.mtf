@@ -18,7 +18,7 @@ Moth template files escape HTML characters in Markdown text. Raw HTML tags such 
 
 ### Not supported
 
-- Fenced code blocks (triple backtick blocks) are not rendered as `<pre><code>`. They appear as literal text. Use a `codeblock` helper with a `$code(...)` directive instead.
+- Fenced code blocks (triple backtick blocks) are not rendered as `<pre><code>`. They appear as literal text. Use a `codeblock` helper with a `$code "lang"` operand instead.
 - Markdown pipe tables are not rendered as `<table>`. They appear as literal text. Use a structured list or a page-owned table component instead.
 - Full CommonMark is not claimed. Moth's `$md` is a small, deliberate subset.
 
@@ -42,7 +42,7 @@ Backslashes in the template body follow formatter behaviour. They are not escape
 
 ### Code examples
 
-Use `codeblock` and `$code(...)` where the helper is available through the content environment. See @#template-scope (Template scope) for what is visible inside a `.mtf` file.
+Use `codeblock` and `$code "lang"` where the helper is available through the content environment. See @#template-scope (Template scope) for what is visible inside a `.mtf` file.
 
 ### Concepts related to implicit Markdown
 

@@ -4,7 +4,7 @@ Dependency aliases rename something you bind so it fits better in the current fi
 
 Suppose two packages both export a function named `render`. You cannot bind both as `render` because names must not collide.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @blog render as render_blog
     @docs render as render_docs
 
@@ -16,7 +16,7 @@ Suppose two packages both export a function named `render`. You cannot bind both
 
 You can also rename a whole namespace.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math as math
 
     value = math.sin(1.0)

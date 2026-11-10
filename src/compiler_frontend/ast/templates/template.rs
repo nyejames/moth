@@ -188,8 +188,9 @@ pub enum TemplateSegmentOrigin {
 
 /// Trait for directive-owned output formatters (e.g. `$md`).
 ///
-/// Formatters are stored in style directive registries, which are shared read-only across parallel
-/// tokenization/header parsing workers.
+/// Formatter factories are stored in the frontend style directive registry, which is shared
+/// read-only across parallel tokenization/header parsing workers. A factory's produced
+/// `Formatter` is stored on the parsed template's `Style`.
 pub(crate) trait TemplateFormatter: Send + Sync {
     fn format(
         &self,

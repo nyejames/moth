@@ -61,6 +61,7 @@ use crate::compiler_frontend::datatypes::ids::{NominalTypeId, builtin_type_ids};
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityContext, FrozenIdentityHandle, SourceDatabase, SourceId,
 };
+use crate::compiler_frontend::style_directives::DirectiveOccurrence;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
@@ -671,6 +672,7 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
     let fixed_signed_literal = string_table.intern("-129");
     let style_directive = string_table.intern("unknown");
     let supported_directives = string_table.intern("'$html', '$css'");
+    let source_directives = string_table.intern("'$config'");
     let declaration_name = string_table.intern("Card");
     let template_directive = string_table.intern("insert");
     let namespace_name = string_table.intern("card");
@@ -717,9 +719,24 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
             "NegativeUnsignedLiteral",
         ),
         (
-            templates::invalid_style_directive(style_directive, supported_directives, None),
-            "Style directive '$unknown' is unsupported here",
-            "InvalidStyleDirective",
+            templates::unknown_directive(
+                style_directive,
+                supported_directives,
+                DirectiveOccurrence::TemplateHead,
+                None,
+            ),
+            "'$unknown' is not a template directive. Template directives are '$html', '$css'.",
+            "UnknownDirective",
+        ),
+        (
+            templates::unknown_directive(
+                style_directive,
+                source_directives,
+                DirectiveOccurrence::Source,
+                None,
+            ),
+            "'$unknown' is not a directive. Source directives are '$config'.",
+            "UnknownDirective",
         ),
         (
             names_declarations::invalid_type_annotation(

@@ -132,6 +132,15 @@ pub(crate) struct ExpressionParseInput<'a, 'env, 'tokens> {
     /// Stop a named-only value before an adjacent `name = value` entry so the shared list owner
     /// can report its missing comma.
     pub(crate) stop_at_named_entry: bool,
+    /// Stop before a second adjacent operand so the directive boundary can name the malformed
+    /// directive instead of reporting a missing operator.
+    ///
+    /// WHAT: only a directive operand sets this. The parse ends at the first token that would start
+    ///       another operand while an operand already exists.
+    /// WHY: juxtaposition inside an ordinary expression is an operator mistake, but juxtaposition
+    ///      after a directive name is an extra directive operand, and only the directive parser
+    ///      can report it with the directive's name and span.
+    pub(crate) stop_at_adjacent_operand: bool,
     /// Whether this entry owns a numeric deferral for its complete fragment.
     ///
     /// WHAT: true when the caller can retain the position's whole ordered syntax (statement
@@ -184,6 +193,7 @@ impl<'a, 'env, 'tokens> ExpressionParseInput<'a, 'env, 'tokens> {
             value_mode: resources.value_mode,
             trailing_policy,
             stop_at_named_entry: false,
+            stop_at_adjacent_operand: false,
             numeric_deferral_owner: false,
             retain_pending_numeric_fragment: false,
             route_argument_context: None,

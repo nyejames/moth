@@ -47,12 +47,12 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::{
-    choices_control_flow, names_declarations,
+    choices_control_flow, names_declarations, templates,
 };
 use crate::compiler_frontend::compiler_messages::{
     DeferredFeatureReason, DiagnosticBag, InvalidAssignmentTargetReason,
     InvalidControlFlowStatementReason, InvalidFallibleHandlingReason, InvalidMatchArmReason,
-    InvalidStandaloneStatementReason, ReservedNameOwner,
+    InvalidStandaloneStatementReason, InvalidTemplateDirectiveReason, ReservedNameOwner,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy;
@@ -112,6 +112,32 @@ impl ParsedBody {
 
 fn statement_dispatch_error(diagnostic: DiagnosticDraft) -> ExpressionParseError {
     diagnostic.into()
+}
+
+/// Builds the typed wrong-target diagnostic for a source directive in a nested position.
+///
+/// WHAT: a known `$config` token is never a statement or block-value entry, so every statement
+///       and block-value start routes here instead of the generic unexpected-token path.
+/// WHY: one helper keeps the directive named and the span authored across body dispatch and
+///      curly-brace value parsing.
+pub(crate) fn source_directive_wrong_target_error(
+    token_stream: &AstCursor,
+    string_table: &mut StringTable,
+) -> Result<ExpressionParseError, ExpressionParseError> {
+    let directive = token_stream
+        .current_string_id_in(string_table)?
+        .ok_or_else(|| {
+            InfrastructureFailure::internal(
+                CompilerStage::AstConstruction,
+                "statement directive token had no string payload",
+            )
+        })?;
+    Ok(templates::invalid_template_directive(
+        Some(directive),
+        InvalidTemplateDirectiveReason::WrongTarget,
+        Some(token_stream.current_span()),
+    )
+    .into())
 }
 
 fn reserved_keyword_as_name_error(keyword: StringId, span: Option<SourceSpan>) -> DiagnosticDraft {
@@ -699,6 +725,16 @@ pub(crate) fn parse_function_body_statements(
                     string_table,
                     path_fork,
                 )?;
+            }
+
+            // A directive is never a statement. Known source modifiers and template directives
+            // both reach this arm, so the diagnostic names the authored directive instead of
+            // collapsing into the generic unexpected-token path.
+            TokenTag::STYLE_DIRECTIVE => {
+                return Err(source_directive_wrong_target_error(
+                    token_stream,
+                    string_table,
+                )?);
             }
 
             // Unrecognized tokens

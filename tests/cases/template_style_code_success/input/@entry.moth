@@ -1,4 +1,4 @@
-[$code("moth"):
+[$code "moth":
 concatenated = [string_slice, a_mutable_string]
 [else]
 [break]

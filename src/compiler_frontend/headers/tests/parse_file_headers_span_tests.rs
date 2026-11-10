@@ -431,7 +431,7 @@ fn declaration_initializer_reference_member_return_and_variant_spans_retain_orig
 
 #[test]
 fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
-    let source = "release_version #Config of I32 = 1\n#[if show_banner: Hello]\n";
+    let source = "$config\nrelease_version #I32 = 1\n#[if show_banner: Hello]\n";
     let canonical = PathBuf::from("src/@entry.moth");
     let mut strings = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -484,41 +484,30 @@ fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
             _ => None,
         })
         .expect("const-template condition reference span");
-    let (original_qualifier_span, original_declaration_type_span, original_qualifier_type_span) =
-        prepared
-            .headers
-            .iter()
-            .find_map(|header| match &header.kind {
-                HeaderKind::Constant { declaration } => {
-                    let qualifier = declaration.config_qualifier.as_ref()?;
-                    let qualifier_type_span = match &qualifier.type_annotation {
-                        ParsedTypeRef::BuiltinFixedScalar {
-                            scalar: FixedScalar::I32,
-                            span: Some(span),
-                        } => *span,
-                        _ => panic!("config qualifier should retain its parsed I32 span"),
-                    };
-                    let declaration_type_span = match &declaration.type_annotation {
-                        ParsedTypeRef::BuiltinFixedScalar {
-                            scalar: FixedScalar::I32,
-                            span: Some(span),
-                        } => *span,
-                        _ => panic!("declaration should retain its parsed I32 span"),
-                    };
-                    Some((
-                        qualifier.qualifier_span.expect("config qualifier span"),
-                        declaration_type_span,
-                        qualifier_type_span,
-                    ))
-                }
-                _ => None,
-            })
-            .expect("source config declaration");
+    let (original_marker_span, original_declaration_type_span) = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Constant { declaration } => {
+                let declaration_type_span = match &declaration.type_annotation {
+                    ParsedTypeRef::BuiltinFixedScalar {
+                        scalar: FixedScalar::I32,
+                        span: Some(span),
+                    } => *span,
+                    _ => panic!("declaration should retain its parsed I32 span"),
+                };
+                Some((
+                    declaration.config_contract.as_ref()?.marker_span,
+                    declaration_type_span,
+                ))
+            }
+            _ => None,
+        })
+        .expect("source config declaration");
     for span in [
         original_condition_span,
-        original_qualifier_span,
+        original_marker_span,
         original_declaration_type_span,
-        original_qualifier_type_span,
     ] {
         assert_eq!(span.source(), source_id, "span should begin provisional");
     }
@@ -574,7 +563,6 @@ fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
         .iter()
         .find_map(|header| match &header.kind {
             HeaderKind::Constant { declaration } => {
-                let qualifier = declaration.config_qualifier.as_ref()?;
                 let declaration_type_span = match &declaration.type_annotation {
                     ParsedTypeRef::BuiltinFixedScalar {
                         scalar: FixedScalar::I32,
@@ -582,17 +570,9 @@ fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
                     } => *span,
                     _ => panic!("declaration should retain its parsed I32 span"),
                 };
-                let qualifier_type_span = match &qualifier.type_annotation {
-                    ParsedTypeRef::BuiltinFixedScalar {
-                        scalar: FixedScalar::I32,
-                        span: Some(span),
-                    } => *span,
-                    _ => panic!("config qualifier should retain its parsed I32 span"),
-                };
                 Some((
-                    qualifier.qualifier_span.expect("rebound qualifier span"),
+                    declaration.config_contract.as_ref()?.marker_span,
                     declaration_type_span,
-                    qualifier_type_span,
                 ))
             }
             _ => None,
@@ -604,9 +584,8 @@ fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
         original_condition_span.local()
     );
     for (rebound, original) in [
-        (rebound_config_spans.0, original_qualifier_span),
+        (rebound_config_spans.0, original_marker_span),
         (rebound_config_spans.1, original_declaration_type_span),
-        (rebound_config_spans.2, original_qualifier_type_span),
     ] {
         assert_eq!(rebound.source(), final_id);
         assert_eq!(rebound.local(), original.local());
@@ -633,9 +612,8 @@ fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
         &source[range.start() as usize..range.end() as usize]
     };
     assert_eq!(resolve(rebound_condition_span), "show_banner");
-    assert_eq!(resolve(rebound_config_spans.0), "#");
+    assert_eq!(resolve(rebound_config_spans.0), "$config");
     assert_eq!(resolve(rebound_config_spans.1), "I32");
-    assert_eq!(resolve(rebound_config_spans.2), "I32");
 }
 
 #[test]

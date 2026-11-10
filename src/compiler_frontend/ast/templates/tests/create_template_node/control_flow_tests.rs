@@ -59,7 +59,7 @@ fn template_option_capture_binding_is_scoped_to_selected_body() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
     context.add_var(declaration, None, &path_fork);
 

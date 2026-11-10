@@ -38,6 +38,7 @@ use crate::compiler_frontend::compiler_messages::diagnostics::families::token_le
     CommonSyntaxMistakeCode, InvalidStringEscapeCode, NumberLiteralCode,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::types_borrows_targets::IncompatibleChoiceComparisonCode;
+use crate::compiler_frontend::style_directives::DirectiveOccurrence;
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 
 pub(crate) trait StableReasonKey {
@@ -419,17 +420,24 @@ define_stable_reason_keys! {
     InvalidTemplateDirectiveReason => {
         @delegate(reason => InvalidTemplateDirectiveCode::of(reason).stable_reason_key());
     },
+    DirectiveOccurrence => {
+        &DirectiveOccurrence::TemplateHead => "unknown_directive.template_head",
+        &DirectiveOccurrence::Source => "unknown_directive.source",
+    },
     InvalidTemplateDirectiveCode => {
         &InvalidTemplateDirectiveCode::UnknownDirective => "invalid_template_directive.unknown_directive",
         &InvalidTemplateDirectiveCode::MissingArgument => "invalid_template_directive.missing_argument",
         &InvalidTemplateDirectiveCode::InvalidArgument => "invalid_template_directive.invalid_argument",
         &InvalidTemplateDirectiveCode::DirectiveNotAllowedHere => "invalid_template_directive.directive_not_allowed_here",
         &InvalidTemplateDirectiveCode::UnexpectedArguments => "invalid_template_directive.unexpected_arguments",
-        &InvalidTemplateDirectiveCode::EmptyArguments => "invalid_template_directive.empty_arguments",
         &InvalidTemplateDirectiveCode::InvalidSlotTarget => "invalid_template_directive.invalid_slot_target",
         &InvalidTemplateDirectiveCode::InvalidSlotDefault => "invalid_template_directive.invalid_slot_default",
         &InvalidTemplateDirectiveCode::InvalidInsertTarget => "invalid_template_directive.invalid_insert_target",
         &InvalidTemplateDirectiveCode::InvalidChildDecoratorValue => "invalid_template_directive.invalid_child_decorator_value",
+        &InvalidTemplateDirectiveCode::WrongContext => "invalid_template_directive.wrong_context",
+        &InvalidTemplateDirectiveCode::DuplicateModifier => "invalid_template_directive.duplicate_modifier",
+        &InvalidTemplateDirectiveCode::DanglingModifier => "invalid_template_directive.dangling_modifier",
+        &InvalidTemplateDirectiveCode::WrongTarget => "invalid_template_directive.wrong_target",
     },
     CssTemplateWarning => {
         @delegate(reason => CssTemplateWarningCode::of(reason).stable_reason_key());
@@ -1069,7 +1077,6 @@ define_stable_reason_keys! {
     &CommonSyntaxMistakeCode::SignatureParenthesisDelimiter => "common_syntax_mistake.signature_parenthesis_delimiter",
     &CommonSyntaxMistakeCode::SignatureAsKeyword => "common_syntax_mistake.signature_as_keyword",
     &CommonSyntaxMistakeCode::InvalidCompileTimeBindingSpacing => "common_syntax_mistake.invalid_compile_time_binding_spacing",
-    &CommonSyntaxMistakeCode::InvalidConfigQualifierSpacing => "common_syntax_mistake.invalid_config_qualifier_spacing",
     &CommonSyntaxMistakeCode::InvalidMutableBindingSpacing => "common_syntax_mistake.invalid_mutable_binding_spacing",
     &CommonSyntaxMistakeCode::InvalidSymbolicSpacing => "common_syntax_mistake.invalid_symbolic_spacing",
     &CommonSyntaxMistakeCode::InvalidChoiceVariantSpacing => "common_syntax_mistake.invalid_choice_variant_spacing",

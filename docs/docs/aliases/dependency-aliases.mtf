@@ -4,13 +4,13 @@ Dependency aliases rename a bound symbol for local use inside one file. They are
 
 A clause-level namespace alias changes the local name of a bound namespace:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math as math
 ]
 
 An entry alias changes the local name of one bound symbol:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math sin as sine, PI as CIRCLE_PI
 ]
 
@@ -39,7 +39,7 @@ Dependency aliases must not collide with any visible name in the same file, incl
 
 Aliases do not shadow an existing visible name. A collision is a compile error.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     render || -> String:
         return "local"
     ;
@@ -50,7 +50,7 @@ Aliases do not shadow an existing visible name. A collision is a compile error.
 
 Resolve the collision by renaming the dependency.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @other render as render_other
 ]
 
@@ -58,7 +58,7 @@ Resolve the collision by renaming the dependency.
 
 An alias whose leading case differs from the bound symbol's leading case produces a warning. The warning is intentionally simple: it catches obvious type-versus-value naming drift without trying to classify every naming convention.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Warning
     @core/math sin as Sine
 
@@ -70,7 +70,7 @@ An alias whose leading case differs from the bound symbol's leading case produce
 
 Use a clause-level namespace alias when the bound path would be awkward to repeat or when two bound namespaces share a basename.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math as math
     @core/text as text
 
@@ -82,7 +82,7 @@ Use a clause-level namespace alias when the bound path would be awkward to repea
 
 Use entry aliases when two packages expose the same name.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @blog render as render_blog
     @docs render as render_docs
 
@@ -92,7 +92,7 @@ Use entry aliases when two packages expose the same name.
 
 A clause cannot use a single alias for a direct-selection list. Clause-level `as` and direct selections are mutually exclusive.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Error
     @components as Ui Button, Card
 
@@ -104,7 +104,7 @@ A clause cannot use a single alias for a direct-selection list. Clause-level `as
 
 An ordinary dependency alias is private to the file that declares it. A public name chosen in a module root's export surface is a different operation. Cross-module visibility is controlled by the module root's explicit `export:` surface. The normal module-root filename itself has no semantic role. The current export syntax is owned by @../project-structure (Project Structure) and @../packages (Packages). Do not treat a local dependency alias as a public API rename.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Ordinary local dependency alias
     @models User as ModelUser
 ]
@@ -115,7 +115,7 @@ The local `ModelUser` is visible only in this file. A public rename belongs insi
 
 A type alias may target a bound type alias.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @models User as ExternalUser
 
     CurrentUser as ExternalUser

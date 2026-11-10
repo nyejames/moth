@@ -1,6 +1,6 @@
 Use `T?` when a value may be missing and that absence is normal.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     nickname String? = none
 ]
 
@@ -8,13 +8,13 @@ A normal `String` can be used where `String?` is expected.
 
 Inspect a present value with `is |name|`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     display_name = if nickname is |name| then name else "guest"
 ]
 
 Use postfix `?` inside a function that also returns an optional value:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     get_display_name |id String| -> String?:
         user = find_user(id)?
         return user.name

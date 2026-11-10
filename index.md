@@ -114,7 +114,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 - [external_packages](src/compiler_frontend/external_packages/): virtual package registry, external IDs. kw: @core, @web, opaque.
 - [builtins](src/compiler_frontend/builtins/): compiler-owned types/ops/casts/runtime error metadata.
     - [member_rules.rs](src/compiler_frontend/builtins/member_rules.rs): shared allocation-free collection/map argument, success-slot and fallibility rules for AST construction and HIR validation.
-- [style_directives](src/compiler_frontend/style_directives/): frontend+builder template directive registry.
+- [style_directives](src/compiler_frontend/style_directives/): frontend-owned template directive registry and operand grammar.
 - [datatypes](src/compiler_frontend/datatypes/): TypeEnvironment/TypeId semantic identity; authored type syntax lives in [parsed.rs](src/compiler_frontend/datatypes/parsed.rs).
     - [callable_returns.rs](src/compiler_frontend/datatypes/callable_returns.rs): `Returns | Never` callable return contract shared by AST signatures, function types, trait requirements and HIR. Ordinary `Returns` keeps allocation-free zero/one success slots plus the independent error channel. `Never` is a whole contract, not a `TypeId` or empty slot list.
     - [number.rs](src/compiler_frontend/datatypes/number.rs): immutable `NumberValue` Dec coefficients, exact receiving materialisation, arbitrary-precision arithmetic and integer/rescale conversion. Shared scale and allocation-free decimal text facts live in `moth-lexical`.
@@ -178,7 +178,8 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
     - [template_head_parser](src/compiler_frontend/ast/templates/template_head_parser/): directives, expression heads, suffix control flow.
     - [template_control_flow](src/compiler_frontend/ast/templates/template_control_flow/): const eval/folding/validation/remap.
     - [template_slots](src/compiler_frontend/ast/templates/template_slots/): slot schema, contributions, runtime plan construction.
-    - [styles](src/compiler_frontend/ast/templates/styles/): directive-owned formatters (markdown, raw, whitespace).
+    - [styles](src/compiler_frontend/ast/templates/styles/): compiler-owned formatters (markdown, raw, whitespace, `$html`, `$css`, `$escape_html`, `$code`).
+        - [code.rs](src/compiler_frontend/ast/templates/styles/code.rs): the `$code` scanner shell, role vocabulary and span emission, with [moth_scanner.rs](src/compiler_frontend/ast/templates/styles/moth_scanner.rs) owning the Moth contextual state machines and [language_profiles.rs](src/compiler_frontend/ast/templates/styles/language_profiles.rs) the profile registry and non-Moth word tables.
     - [template_types.rs](src/compiler_frontend/ast/templates/template.rs), [template_folding.rs](src/compiler_frontend/ast/templates/template_folding.rs).
     - [template_render_units.rs](src/compiler_frontend/ast/templates/template_render_units.rs), [template_renderability.rs](src/compiler_frontend/ast/templates/template_renderability.rs).
     - [create_template_node.rs](src/compiler_frontend/ast/templates/create_template_node.rs), [top_level_templates.rs](src/compiler_frontend/ast/templates/top_level_templates.rs), [doc_fragments.rs](src/compiler_frontend/ast/templates/doc_fragments.rs), [error.rs](src/compiler_frontend/ast/templates/error.rs).
@@ -258,9 +259,7 @@ Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_syste
 
 - [BackendBuilder implementation](src/projects/html_project/html_project_builder.rs)
 - [HTML document assembly](src/projects/html_project/output_plan.rs), [root-slot interpretation](src/projects/html_project/html_slot_plan.rs), [document_shell.rs](src/projects/html_project/document_shell.rs), [document_config.rs](src/projects/html_project/document_config.rs)
-- [compile_input.rs](src/projects/html_project/compile_input.rs), [diagnostics.rs](src/projects/html_project/diagnostics.rs), [js_path.rs](src/projects/html_project/js_path.rs), [path_policy.rs](src/projects/html_project/path_policy.rs), [style_directives.rs](src/projects/html_project/style_directives.rs): build inputs/policy.
-- [styles](src/projects/html_project/styles/): $html/$css/$escape_html/$code validation/rendering.
-    - [code.rs](src/projects/html_project/styles/code.rs): the `$code` scanner shell, role vocabulary and span emission, with [moth_scanner.rs](src/projects/html_project/styles/moth_scanner.rs) owning the Moth contextual state machines and [language_profiles.rs](src/projects/html_project/styles/language_profiles.rs) the profile registry and non-Moth word tables.
+- [compile_input.rs](src/projects/html_project/compile_input.rs), [diagnostics.rs](src/projects/html_project/diagnostics.rs), [js_path.rs](src/projects/html_project/js_path.rs), [path_policy.rs](src/projects/html_project/path_policy.rs): build inputs/policy.
 - [external_js](src/projects/html_project/external_js/): provider-backed JS imports, runtime modules/assets/glue.
     - [parser](src/projects/html_project/external_js/parser/mod.rs): annotation extraction, JS export/import scanning and binding orchestration.
         - [binding.rs](src/projects/html_project/external_js/parser/binding.rs): annotation/export matching, signature and type validation, U32 literal materialisation and runtime-import deduplication.

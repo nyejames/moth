@@ -44,15 +44,15 @@ row_template #= [:
 ]
 
 -- Wrapper chains.
-wrap_emphasis #= [$before = [:<em class="emphasis">], $after = [:</em>]:
+wrap_emphasis #= [$before [:<em class="emphasis">], $after [:</em>]:
     [$slot]
 ]
 
-wrap_strong #= [$before = [:<strong class="strong">], $after = [:</strong>]:
+wrap_strong #= [$before [:<strong class="strong">], $after [:</strong>]:
     [$slot]
 ]
 
-wrap_code #= [$before = [:<code class="code">], $after = [:</code>]:
+wrap_code #= [$before [:<code class="code">], $after [:</code>]:
     [$slot]
 ]
 

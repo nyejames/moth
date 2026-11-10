@@ -22,7 +22,7 @@ source-language obligations.
 
     [td:
         [: Compile-time generation]
-        [: Templates, constants and compiler- or builder-owned directives]
+        [: Templates, constants and compiler-owned directives]
     ]
 
     [td:
@@ -111,11 +111,12 @@ intentional outside-scope policy, not merely deferred syntax.
 
 Compiler-known general directives are an accepted direction for language and
 structural semantics. Arbitrary user macros and builder directives that
-transform AST are excluded; constrained builder directives may provide
-templates, metadata and configuration without rewriting language semantics.
+transform AST are excluded; constrained builder capabilities may provide
+schemas, packages, source capabilities and output policies without rewriting
+language semantics or adding directive names.
 
-Excluded source regions will not resolve their contained builder directives
-against the active directive surface. They still need a sound structural
+Excluded source regions will not resolve their contained directives against
+the active directive surface. They still need a sound structural
 boundary. A future plan must address directive-controlled template lexing
 before arbitrary unknown syntax can be skipped.
 

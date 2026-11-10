@@ -35,7 +35,7 @@ pub enum UnknownFieldPolicy {
 /// Whether a field of the grouped `project` record accepts declaration-owned input values.
 ///
 /// Structural fields that affect project identity or source discovery stay fixed-only. Fields
-/// marked configurable accept values folded from earlier explicitly typed top-level `#Config of T`
+/// marked configurable accept values folded from earlier explicitly typed top-level `$config`
 /// declarations through the declaration-boundary resolution path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ProjectFieldConfigPolicy {
@@ -627,7 +627,7 @@ impl ConfigSchemaField {
         Self::leaf(name, ConfigFieldShape::Optional(Box::new(inner)))
     }
 
-    /// Allows a declaration-owned `#Config of T` value to supply this grouped-project field.
+    /// Allows a `$config` input value to supply this grouped-project field.
     pub fn configurable(mut self) -> Self {
         self.config_policy = ProjectFieldConfigPolicy::Configurable;
         self

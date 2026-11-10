@@ -1,7 +1,7 @@
 `@web/site` builds static links at compile time. Import it explicitly in a
 `.moth` file to use the site root and add site-relative paths.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @web/site
 
     home #= site.root

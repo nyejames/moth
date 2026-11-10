@@ -2,7 +2,7 @@ Collections form ordered, zero-indexed, homogeneous groups.
 
 Collection types and literals use braces.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     values ~= {1, 2, 3}
     names {String} = {"Priya", "Rob"}
 ]
@@ -15,7 +15,7 @@ Collection types and literals use braces.
 - Every already typed item must match one exact element type. Arithmetic promotion does not search for a collection storage type. Convert differently typed items explicitly.
 - Element type and fixed capacity remain stable through mutation.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     accept_u64_values |items {U64}|:
     ;
 
@@ -40,7 +40,7 @@ family selection and defaults.
 An empty literal needs an explicit collection type at its declaration or field
 default site.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     values ~{I32} = {}
 ]
 

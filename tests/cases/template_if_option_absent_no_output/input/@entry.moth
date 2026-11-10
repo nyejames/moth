@@ -3,7 +3,7 @@ inactive_branch || -> String, Error!:
 ;
 
 card #= [:<section class="option-wrapper">[$slot]</section>]
-list #= [$before = [:<li class="option-child-wrapper">], $after = [:</li>]:<ul>[$slot]</ul>]
+list #= [$before [:<li class="option-child-wrapper">], $after [:</li>]:<ul>[$slot]</ul>]
 
 render |maybe_name String?| -> String, Error!:
     return [list:

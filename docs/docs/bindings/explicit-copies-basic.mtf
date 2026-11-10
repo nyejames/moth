@@ -1,6 +1,6 @@
 Use `copy` when two stored values need to change independently.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     names ~= {"Priya", "Rob"}
     copied_names ~= copy names
 
@@ -11,7 +11,7 @@ Changing `names` does not add `"Stella"` to `copied_names`.
 
 This is different from a normal assignment:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     shared_names = names
 ]
 
@@ -20,7 +20,7 @@ value.
 
 `copy` works on a stored name or field:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     copied_title = copy page.title
 ]
 

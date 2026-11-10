@@ -13,7 +13,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
 fn html_directive_rejects_arguments() {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let error = template_parse_error_with_style_directives(
         "[$html(\"inline\"):\n<div>Hello</div>\n]",
         &style_directives,
@@ -25,7 +25,7 @@ fn html_directive_rejects_arguments() {
 fn html_directive_sets_formatter_via_handler_behavior() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
@@ -70,7 +70,7 @@ fn html_directive_sets_formatter_via_handler_behavior() {
 fn css_directive_sets_style_and_formatter_identity() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
@@ -198,7 +198,7 @@ fn code_directive_sets_style_and_formatter_identity() {
 fn escape_html_directive_sets_style_and_formatter_identity() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
@@ -241,7 +241,7 @@ fn escape_html_directive_sets_style_and_formatter_identity() {
 
 #[test]
 fn const_html_template_emits_sanitation_warnings() {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let warnings = template_warnings_with_style_directives(
         "[$html:\n<script>alert(1)</script>\n<div onclick=\"run()\"></div>\n<a href=\"javascript:alert(1)\">x</a>\n]",
         false,
@@ -312,7 +312,7 @@ fn html_warning_spans(warnings: &CompactDiagnosticBagForTest) -> Vec<SourceSpan>
 
 #[test]
 fn html_validation_warnings_keep_authored_spans() {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let source = "[$html:\n<script>alert(1)</script>\n<a href=\"javascript:bad()\">x</a>\n<div onclick=\"run()\"></div>\n]";
     let warnings = template_warnings_with_style_directives(source, false, &style_directives);
     let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
@@ -338,7 +338,7 @@ fn html_validation_warnings_keep_authored_spans() {
 
 #[test]
 fn html_warning_spans_survive_multiline_and_repeated_markup() {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let source = "[$html:\n    <div>safe</div>\n    <script>one()</script>\n    <p>middle</p>\n    <script>two()</script>\n    <div onclick=\"run()\"></div>\n]";
     let warnings = template_warnings_with_style_directives(source, false, &style_directives);
     let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
@@ -360,7 +360,7 @@ fn html_warning_spans_survive_multiline_and_repeated_markup() {
 
 #[test]
 fn html_warning_spans_measure_bytes_in_non_ascii_templates() {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let source = "[$html:\n    <p>caf\u{e9} \u{1f600}</p>\n    <a href=\"javascript:bad()\">na\u{ef}ve</a>\n    <div onclick=\"run()\">\u{1f980}</div>\n]";
     let warnings = template_warnings_with_style_directives(source, false, &style_directives);
     let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
@@ -385,7 +385,7 @@ fn html_warning_spans_measure_bytes_in_non_ascii_templates() {
 
 #[test]
 fn html_warning_spans_survive_composed_templates() {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let source = "[$md:\n# before\n[$html:\n<div>start</div>\n[$md: **bold**]\n<script>alert(1)</script>\n]\n]";
     let warnings = template_warnings_with_style_directives(source, false, &style_directives);
     let warnings = compact_bag_for_test(DiagnosticBag::from_diagnostics(warnings), None);
@@ -405,7 +405,7 @@ fn html_warning_spans_survive_composed_templates() {
 
 #[test]
 fn runtime_html_templates_emit_warnings_for_static_body_segments() {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let warnings = template_warnings_with_style_directives(
         "[value, $html:\n<script>alert(1)</script>\n]",
         true,

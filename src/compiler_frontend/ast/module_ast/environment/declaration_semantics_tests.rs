@@ -53,7 +53,7 @@ fn declaration_semantics_preserves_missing_template_authority() {
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Initializer(value),
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         }
     };
     let table = TopLevelDeclarationTable::new(vec![declaration], &path_fork);

@@ -219,7 +219,7 @@ fn callable_shell_type_lookup_rejects_bare_and_qualified_annotations() {
             value_mode: ValueMode::ImmutableReference,
             value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
             binding_span: None,
-            config_qualifier: None,
+            config_contract: None,
         }],
         &path_fork,
     ));
@@ -722,7 +722,7 @@ fn unknown_type_name_does_not_suggest_invisible_local_types() {
                 value_mode: ValueMode::ImmutableReference,
                 value: DeclarationValue::Shell(DeclarationShell::Struct),
                 binding_span: None,
-                config_qualifier: None,
+                config_contract: None,
             },
             Declaration {
                 id: visible_path,
@@ -731,7 +731,7 @@ fn unknown_type_name_does_not_suggest_invisible_local_types() {
                 value_mode: ValueMode::ImmutableReference,
                 value: DeclarationValue::Shell(DeclarationShell::Struct),
                 binding_span: None,
-                config_qualifier: None,
+                config_contract: None,
             },
         ],
         &path_fork,
@@ -858,7 +858,7 @@ fn constant_capacity_resolves_to_fixed_collection() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Default(value_id),
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
     let mut scope_context = ScopeContext::new_for_tests(
         ContextKind::Function,
@@ -1066,7 +1066,7 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Default(wrapper_id),
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(
         vec![wrapper_declaration],
@@ -1109,7 +1109,7 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
         value_mode: ValueMode::ImmutableReference,
         value: DeclarationValue::Default(field_id),
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
 
     let mut resolution_context = TypeResolutionContext::from_declaration_table(
@@ -1190,7 +1190,7 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Default(constant_id),
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(vec![constant], &path_fork));
     let _collection_type_id =
@@ -1259,7 +1259,7 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Default(collection_default),
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
 
     let resolved_fields = resolve_struct_field_types(
@@ -1855,7 +1855,7 @@ fn struct_field_default_folds_above_i32_range_under_int64() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Default(limit_default),
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(
         vec![limit_declaration],
@@ -1920,7 +1920,7 @@ fn struct_field_default_folds_above_i32_range_under_int64() {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Default(sum_default),
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
 
     let mut resolution_context = TypeResolutionContext::from_declaration_table(

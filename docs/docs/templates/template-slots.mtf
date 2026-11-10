@@ -2,7 +2,7 @@ Slots let one template receive content from another.
 
 ### Declaration and insert forms
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     card #= [:
         <h1>[$slot title = "Untitled"]</h1>
         <section>[$slot]</section>
@@ -16,7 +16,7 @@ Slots let one template receive content from another.
 
 The declaration and insert forms are:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     [$slot]                     -- default slot
     [$slot = "Fallback"]        -- default slot with a default
     [$slot name]                -- named slot
@@ -40,7 +40,7 @@ named slot and can appear once per head.
 An occurrence can hold a compile-time `String` default, including a literal, a
 constant binding, a cast or a structural resource path:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     fallback #= "Draft"
 
     card #= [:
@@ -62,7 +62,7 @@ that occurrence's default. An occurrence with no default and no routed
 contribution renders empty. Repeated named occurrences consume the same routed
 contributions but may fall back independently:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     card #= [:
         first=[$slot title = "First fallback"]
         second=[$slot title = "Second fallback"]
@@ -88,7 +88,7 @@ belong to their own enclosing composition.
 Positive integer slots receive loose head contributions. The number is a
 declaration target, not an insert target:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     image = [:
         <img src="[$slot 1]" alt="[$slot]">
     ]
@@ -138,7 +138,7 @@ remains unsettled.
 Named inserts can be prepared in a binding and passed as loose contributions
 through an immediate parent:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     card = [:
         <h1>[$slot title]</h1>
         [$slot]
@@ -173,7 +173,7 @@ structure.
 uniqueness is excluded, and const function syntax is not implemented. The
 proposed forms are not accepted by the current parser:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     [$slot title, $required]   -- not implemented
     [$slot styles, $unique]    -- not implemented
 ]

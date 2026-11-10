@@ -1623,7 +1623,7 @@ fn applies_direct_project_config_global_through_validation() {
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
-            source_code: "version #Config of String\nproject #= (\n    name = \"docs\",\n    version = version,\n)\n",
+            source_code: "$config\nversion #String\nproject #= (\n    name = \"docs\",\n    version = version,\n)\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
             build_config_inputs: &inputs,
@@ -1659,7 +1659,7 @@ fn applies_optional_direct_project_config_absence_and_retains_resolution_provena
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
-            source_code: "author #Config of String?\nproject #= (\n    name = \"docs\",\n    author = author,\n)\n",
+            source_code: "$config\nauthor #String?\nproject #= (\n    name = \"docs\",\n    author = author,\n)\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
             build_config_inputs: &inputs,
@@ -2005,14 +2005,14 @@ fn diagnostic_limits_invalid_values() {
         InvalidConfigCode::InvalidConfigValueShape
     );
 
-    // Both settings stay fixed-only, so `#Config` dependence is rejected before validation.
+    // Both settings stay fixed-only, so `$config` dependence is rejected before validation.
     let outcome = compile_authored_config_source(
-        "module_limit #Config of I32? = 7\nproject #= (\n    name = \"docs\",\n    max_errors_per_module = module_limit,\n)\n",
+        "$config\nmodule_limit #I32? = 7\nproject #= (\n    name = \"docs\",\n    max_errors_per_module = module_limit,\n)\n",
         &surface,
         &mut string_table,
     );
     let failure = match outcome.result {
-        Ok(_) => panic!("fixed-only project fields must reject `#Config` dependence"),
+        Ok(_) => panic!("fixed-only project fields must reject `$config` dependence"),
         Err(failure) => failure,
     };
     assert!(

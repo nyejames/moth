@@ -422,7 +422,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         if let Some(services) = &self.context.file_value_resolution {
             context = context.with_file_value_resolution(Rc::clone(services));
         }
-        // Body expression evaluation reports source-`#Config` provenance for numeric failures,
+        // Body expression evaluation reports source-`$config` provenance for numeric failures,
         // so the resolved map and the bootstrap services travel with the scope the same way
         // they travel with constant-header scopes. Only the two provenance owners are attached;
         // contract names stay a constant-header concern and cost nothing here.
@@ -1068,7 +1068,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 ));
             }
             Err(ExpressionParseError::Diagnostic(diagnostic))
-            | Err(ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic))
             | Err(ExpressionParseError::NonConstantReferenceInConstant(diagnostic)) => {
                 let diagnostic = with_generic_instantiation_context(
                     diagnostic,
@@ -1719,7 +1718,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     ) -> PreparedFailure {
         match error {
             TemplateError::Diagnostic(diagnostic)
-            | TemplateError::EmptyArguments(diagnostic)
             | TemplateError::NonConstantReferenceInConstant(diagnostic) => {
                 self.diagnostic_messages(diagnostic, string_table)
             }
@@ -1741,7 +1739,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             }
             Err(
                 ExpressionParseError::Diagnostic(_)
-                | ExpressionParseError::TemplateDirectiveEmptyArguments(_)
                 | ExpressionParseError::NonConstantReferenceInConstant(_)
                 | ExpressionParseError::NumericDeferral(_),
             ) => crate::compiler_bug!(

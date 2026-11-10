@@ -11,7 +11,7 @@ types. See @../../#external-binding-contracts (External binding contracts).
 
 Bind individual symbols or the whole namespace:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @web/canvas get_canvas, context_2d, fill_rect
 
     @web/canvas

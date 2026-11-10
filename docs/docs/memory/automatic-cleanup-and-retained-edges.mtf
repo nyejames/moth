@@ -28,7 +28,7 @@ owns its own outgoing references.
 
 Take a collection of `Holder` values, where each `Holder` refers to a `Blob`:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     collection -> Holder -> Blob
 ]
 
@@ -77,7 +77,7 @@ last-use analysis is what keeps that number as small as it can be.
 
 Use a region when a whole retention domain can end at one known frontier:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     blob = load_blob()!
 
     loop names |name|:
@@ -99,7 +99,7 @@ family alive, so `clear()` does not promise immediate reclamation on its own.
 Use a count only when stored edges disappear independently and a single region
 would keep too much storage alive:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     loop keys_to_remove |key|:
         ~index.remove(key) catch:
         ;

@@ -2,7 +2,7 @@ The compiler owns cast evidence. A nominal type can add source evidence for
 one of the supported target families by defining the required method and
 declaring explicit conformance:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Label = |
         text String,
     |

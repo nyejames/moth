@@ -1,6 +1,6 @@
 Create a struct by calling its type name.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Player = |
         name String,
         score I32 = 0,
@@ -13,7 +13,7 @@ The constructor uses the default score.
 
 Named fields make larger constructors easier to read:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     player = Player(
         name = "Priya",
         score = 10
@@ -22,13 +22,13 @@ Named fields make larger constructors easier to read:
 
 Read fields with a dot:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     name = player.name
 ]
 
 To change a field, the struct binding must be mutable:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     player ~= Player("Priya")
     ~player.score = 10
 ]

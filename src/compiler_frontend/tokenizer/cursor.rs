@@ -627,29 +627,6 @@ impl<'a> TokenCursor<'a> {
         }
     }
 
-    /// Whether the next token starts a later segmented range with omitted source bytes.
-    ///
-    /// Contiguous cursors always return `false`. Adjacent ranges are still one logical token
-    /// stream; only a real source gap must prevent consumers from comparing the two tokens as an
-    /// authored pair.
-    pub(crate) fn is_at_segment_start(self) -> bool {
-        let TokenCursorBounds::Segmented(view) = self.bounds else {
-            return false;
-        };
-        let Some(current) = view.range_at(self.segment_index).ok() else {
-            return false;
-        };
-        if self.next != current.start() {
-            return false;
-        }
-        let Some(previous_index) = self.previous_segment_index else {
-            return false;
-        };
-        view.range_at(previous_index)
-            .ok()
-            .is_some_and(|previous| previous.end() != current.start())
-    }
-
     fn current_range(self) -> Option<TokenRange> {
         match self.bounds {
             TokenCursorBounds::Contiguous(range) => Some(range),

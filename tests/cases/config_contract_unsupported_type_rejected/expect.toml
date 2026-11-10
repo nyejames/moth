@@ -9,5 +9,5 @@ diagnostic_codes = ["MOTH-CONFIG-0001"]
 code = "MOTH-CONFIG-0001"
 reason = "invalid_config.config_qualifier_unsupported_type"
 path = "input/@entry.moth"
-line = 1
-column = 18
+line = 2
+column = 8

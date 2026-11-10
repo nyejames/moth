@@ -4,7 +4,7 @@
 
 Bind the symbols you need with a direct-selection clause.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math PI, sin, clamp
 
     wave = sin(PI / 2.0)
@@ -15,7 +15,7 @@ Bind the symbols you need with a direct-selection clause.
 
 You can also bind the whole namespace and access members through field access.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math
 
     angle = math.PI / 2.0

@@ -1,6 +1,6 @@
 Moth can usually work out a value's type from its initializer.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     enabled = true
     count = 42
     ratio = 0.5
@@ -11,7 +11,7 @@ Moth can usually work out a value's type from its initializer.
 You can write a type when it helps the reader or gives the compiler needed
 context:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count I32 = 42
     ratio F64 = 0.5
     name String = "Moth"

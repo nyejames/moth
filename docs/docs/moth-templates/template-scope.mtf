@@ -4,12 +4,12 @@ A `.mtf` file has a small compile-time scope. It sees the fixed HTML prelude and
 
 An ordinary `.moth` helper declaration is reachable from a `.mtf` file in the same module through a qualified reference:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- docs/settings.moth
     site_name #= "Moth"
 ]
 
-[codeblock, $code("md"):
+[codeblock, $code "md":
     -- docs/intro.mtf
     # Welcome to [@settings site_name]
 ]
@@ -22,14 +22,14 @@ A qualified reference introduces no local binding. It therefore never shadows a 
 
 Declarations authored directly in `@mod.moth`, `@package.moth` or `@entry.moth` belong to that root file only. A `.mtf` file cannot read them, even when the facade exports the declaration:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- docs/@mod.moth
     export:
         site_name #= "Moth"
     ;
 ]
 
-[codeblock, $code("md"):
+[codeblock, $code "md":
     -- docs/intro.mtf
     # Welcome to [site_name]
 ]
@@ -42,11 +42,11 @@ Move the shared value into an ordinary helper file when a template needs it. A h
 
 Exported compile-time constants from `@html` are visible flat inside every `.mtf` body. This includes helpers such as `p`, `codeblock` and other HTML constants.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     -- docs/intro.mtf
     [p: This paragraph uses the @html p helper.]
 
-    [codeblock, $code("moth"): value = 42]
+    [codeblock, $code "moth": value = 42]
 ]
 
 The prelude is fixed compiler policy. It always resolves to the official `packages/html/@mod.moth` source package with its Builder origin and MothSource backing intact. A builder that enables `.mtf` sources must register that official package set. `@html` is reserved for it. Source packages that contain `.mtf` files order after `@html`.
@@ -59,12 +59,12 @@ A real local binding that matches a prelude name fails with an ordinary visible-
 
 A qualified selection creates no local binding, so it cannot collide merely because the selected name matches a prelude constant:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- docs/home_constants.moth
     p #= "local p"
 ]
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     -- docs/intro.mtf
     [p][@home_constants p]
 ]
@@ -75,7 +75,7 @@ The first `p` comes from the prelude and the second from the helper. Both render
 
 Nested templates inside a `.mtf` body are valid. A nested template with no explicit directive defaults to `$md`. Any explicit directive (such as `$raw`, `$fresh`, `$html`, `$code`, `$css` or `$escape_html`) overrides the moth template Markdown default for that nested template.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     [$raw: <div>Raw HTML output</div>]
 ]
 
@@ -103,7 +103,7 @@ Child templates are opaque barriers to the parent formatter. A child template's 
 
 To output literal template delimiters, use string insertion:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     ["["]
     ["]"]
     ["[literal]"]

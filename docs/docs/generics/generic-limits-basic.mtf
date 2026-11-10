@@ -2,7 +2,7 @@ Generic code can move an unknown type around, but it needs a bound before callin
 
 ### Moving values around
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     identity type A |value A| -> A:
         return value
     ;
@@ -12,7 +12,7 @@ Generic code can move an unknown type around, but it needs a bound before callin
 
 ### Needing a bound
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     DISPLAY_TEXT must:
         display |This| -> String
     ;

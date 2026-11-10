@@ -734,7 +734,7 @@ impl GenericTemplateArtefact {
                     value_mode: ValueMode::ImmutableReference,
                     value: DeclarationValue::Initializer(value.id()),
                     binding_span: span,
-                    config_qualifier: None,
+                    config_contract: None,
                 };
                 let lookups = Rc::get_mut(&mut environment.lookups)
                     .expect("AST environment lookups are uniquely owned before materialisation");
@@ -819,7 +819,7 @@ impl GenericTemplateArtefact {
                     receiver: Some(receiver.clone()),
                 }),
                 binding_span: None,
-                config_qualifier: None,
+                config_contract: None,
             };
             let lookups = Rc::get_mut(&mut environment.lookups)
                 .expect("AST environment lookups are uniquely owned before materialisation");
@@ -1188,7 +1188,7 @@ impl GenericTemplateArtefact {
                         value_mode: ValueMode::ImmutableReference,
                         value: DeclarationValue::Shell(DeclarationShell::Function { receiver }),
                         binding_span: None,
-                        config_qualifier: None,
+                        config_contract: None,
                     },
                     path_fork,
                 )?;
@@ -1647,7 +1647,7 @@ impl super::stable_types::StableCallableBinding {
                     value_mode: ValueMode::ImmutableReference,
                     value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
                     binding_span: None,
-                    config_qualifier: None,
+                    config_contract: None,
                 },
                 path_fork,
             )?;

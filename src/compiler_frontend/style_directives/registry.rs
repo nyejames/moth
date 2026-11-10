@@ -1,96 +1,39 @@
-//! Merged style directive registry used by tokenizer and AST template parsing.
+//! Frontend style directive registry used by tokenizer and AST template parsing.
 //!
 //! Registry order is stable and intentionally used for diagnostics, so unsupported-directive
 //! errors show a deterministic directive list.
 
-use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
-use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::style_directives::builtins::frontend_built_in_directives;
-use crate::compiler_frontend::style_directives::specs::StyleDirectiveSpec;
+use crate::compiler_frontend::style_directives::specs::{DirectiveOccurrence, StyleDirectiveSpec};
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 use std::fmt::Write as _;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+
+/// Immutable frontend directive set shared by every registry clone.
+///
+/// WHAT: the ordered specs behind `StyleDirectiveRegistry::built_ins`.
+/// WHY: header parsing, tokenization and template parsing all need the same directive facts; one
+///      cached owner keeps every registry instance on the same `Arc` instead of rebuilding the
+///      spec vector per call or per scope.
+static BUILT_IN_SPECS: LazyLock<Arc<[StyleDirectiveSpec]>> =
+    LazyLock::new(|| frontend_built_in_directives().into());
 
 /// Ordered registry used by tokenizer and AST template parsing.
 ///
 /// The directive list is immutable once built, so it is held behind an `Arc` and cloning the
 /// registry is a refcount bump. Every environment-time `ScopeContext` clones one into its
 /// `ScopeShared`, so a `Vec` here deep-cloned every directive spec per scope.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct StyleDirectiveRegistry {
     ordered: Arc<[StyleDirectiveSpec]>,
 }
 
 impl StyleDirectiveRegistry {
-    /// Frontend-owned directives that are always available.
+    /// Frontend-owned directives available under every builder.
     pub fn built_ins() -> Self {
         Self {
-            ordered: frontend_built_in_directives().into(),
+            ordered: Arc::clone(&BUILT_IN_SPECS),
         }
-    }
-
-    /// Merge project-builder directives over frontend-owned directives.
-    ///
-    /// Rules:
-    /// - Frontend-owned directive names cannot be overridden by project builders.
-    /// - Project builders may only provide `StyleDirectiveKind::Handler`.
-    /// - For project-owned names, later entries replace earlier entries by exact name.
-    /// - A spec whose compatibility tags can reject another item must declare a
-    ///   `conflict_reason`.
-    pub fn merged(builder_specs: &[StyleDirectiveSpec]) -> Result<Self, InfrastructureFailure> {
-        let frontend_owned = frontend_built_in_directives();
-        let mut merged = frontend_owned.clone();
-
-        for builder_spec in builder_specs {
-            if builder_spec.is_core() {
-                return Err(InfrastructureFailure::internal(
-                    CompilerStage::AstConstruction,
-                    format!(
-                        "Project builder style directive '${}' cannot be registered as a core directive.",
-                        builder_spec.name
-                    ),
-                ));
-            }
-
-            if let Some(frontend_conflict) = frontend_owned
-                .iter()
-                .find(|spec| spec.name == builder_spec.name)
-            {
-                return Err(InfrastructureFailure::internal(
-                    CompilerStage::AstConstruction,
-                    format!(
-                        "Project builder style directive '${}' cannot override frontend-owned directive '${}'.",
-                        builder_spec.name, frontend_conflict.name
-                    ),
-                ));
-            }
-
-            let compatibility = builder_spec.head_compatibility;
-            let can_reject = !compatibility.blocks_future_tags.is_empty()
-                || !compatibility.required_absent_tags.is_empty();
-            if can_reject && compatibility.conflict_reason.is_none() {
-                return Err(InfrastructureFailure::internal(
-                    CompilerStage::AstConstruction,
-                    format!(
-                        "Project builder style directive '${}' declares a head compatibility rule that can reject another item but has no conflict reason.",
-                        builder_spec.name
-                    ),
-                ));
-            }
-
-            if let Some(existing) = merged
-                .iter_mut()
-                .find(|spec| spec.name == builder_spec.name)
-            {
-                *existing = builder_spec.clone();
-            } else {
-                merged.push(builder_spec.clone());
-            }
-        }
-
-        Ok(Self {
-            ordered: merged.into(),
-        })
     }
 
     pub fn find(&self, name: &str) -> Option<&StyleDirectiveSpec> {
@@ -102,10 +45,19 @@ impl StyleDirectiveRegistry {
         self.find(name).map(|spec| spec.body_mode)
     }
 
-    /// Render a deterministic directive list for user-facing diagnostics.
-    pub fn supported_directives_for_diagnostic(&self) -> String {
+    /// Render the deterministic directive list that may appear at `occurrence`.
+    ///
+    /// WHAT: filters by the spec's declared attachment contexts, so a source-position diagnostic
+    ///       never suggests a name that only a template head accepts and the reverse.
+    /// WHY: the full registry is one ordered list, but a suggestion is only useful when the named
+    ///       directive could actually be written at the failing position.
+    pub fn supported_directives_for_diagnostic(&self, occurrence: DirectiveOccurrence) -> String {
         let mut rendered = String::new();
-        for (index, spec) in self.ordered.iter().enumerate() {
+        let allowed = self.ordered.iter().filter(|spec| match occurrence {
+            DirectiveOccurrence::TemplateHead => spec.contexts.allows_template_head(),
+            DirectiveOccurrence::Source => spec.contexts.allows_source_modifier(),
+        });
+        for (index, spec) in allowed.enumerate() {
             if index > 0 {
                 rendered.push_str(", ");
             }

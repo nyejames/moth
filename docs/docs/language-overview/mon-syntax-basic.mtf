@@ -6,7 +6,7 @@ MON means Moth Object Notation. MON syntax gives supplied arguments and record
 values a common notation. Pipes declare fields or parameters. Parentheses supply
 values or group an expression.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Size = |
         width I32,
         height I32,

@@ -748,16 +748,6 @@ fn body_local_prelude_malformed_host_statement_keeps_missing_parenthesis_diagnos
     );
 }
 
-#[test]
-fn rejects_unconsumed_source_config_qualifier_at_declaration_boundary() {
-    let failure = parse_single_file_ast_diagnostic("analytics #Config of Bool = false\n");
-    assert_ast_diagnostic(
-        &failure,
-        "MOTH-CONFIG-0001",
-        Some("invalid_config.config_qualifier_invalid_placement"),
-    );
-}
-
 //  Type mismatch diagnostics
 // --------------------------
 
@@ -1000,7 +990,6 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
         ("I32 = 1", "I32"),
         ("~= 1", "~"),
         ("#= 1", "#"),
-        ("#Config of I32 = 1", "#"),
         (long_target.as_str(), long_type.as_str()),
     ] {
         let source = format!("padding #= \"{padding}\"\nvalue {target}\n");
@@ -1058,9 +1047,14 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
                 crate::compiler_frontend::declaration_syntax::DeclarationCursor::new(
                     canonical_cursor,
                 );
-            let declaration =
-                parse_declaration_syntax(&mut declaration_cursor, name, &mut strings, &mut builder)
-                    .expect("the authored declaration must produce its shell");
+            let declaration = parse_declaration_syntax(
+                &mut declaration_cursor,
+                name,
+                &mut strings,
+                &mut builder,
+                None,
+            )
+            .expect("the authored declaration must produce its shell");
             let declaration_position = declaration_cursor.position();
             (declaration, declaration_position)
         };

@@ -4,17 +4,15 @@
 //! WHY: avoids duplicating small utility functions in every test module.
 
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use crate::projects::html_project::style_directives::html_project_style_directives;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime};
 
-/// Includes the HTML project builder directives in the test directives
+/// Includes the frontend's built-in directives, including all template formatters.
 pub fn frontend_test_style_directives() -> StyleDirectiveRegistry {
-    StyleDirectiveRegistry::merged(&html_project_style_directives())
-        .expect("HTML style directives should merge with core.")
+    StyleDirectiveRegistry::built_ins()
 }
 
 /// Returns a unique uncreated temporary path for test isolation.

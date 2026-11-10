@@ -799,7 +799,7 @@ fn build_const_collection_loop_template(
         value_mode: ValueMode::ImmutableReference,
         value: DeclarationValue::Absent,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
     let step = step.map(|(scalar, value)| {
         expressions

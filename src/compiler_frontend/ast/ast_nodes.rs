@@ -22,7 +22,7 @@ use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
-use crate::compiler_frontend::declaration_syntax::build_config_contract::BuildConfigQualifierSyntax;
+use crate::compiler_frontend::declaration_syntax::build_config_contract::BuildConfigContractSyntax;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
@@ -44,9 +44,9 @@ pub struct Declaration {
     /// WHY: HIR lowering must attribute locals to their binding site without guessing
     /// from initializer value spans; synthetic/materialised declarations use `None`.
     pub binding_span: Option<SourceSpan>,
-    /// Declaration-owned `#Config of T` syntax metadata, consumed by config resolution when
-    /// applicable and otherwise retained for source-contract header consumers.
-    pub(crate) config_qualifier: Option<BuildConfigQualifierSyntax>,
+    /// Contract syntax retained for an attached `$config` source modifier, consumed by config
+    /// resolution when applicable and otherwise retained for source-contract header consumers.
+    pub(crate) config_contract: Option<BuildConfigContractSyntax>,
 }
 
 /// Declaration state is distinct from a value-producing expression.

@@ -1,4 +1,4 @@
-//! HTML-project-owned HTML text escaping.
+//! Frontend-owned HTML text escaping.
 //!
 //! WHAT:
 //! - `push_escaped_html_text` is the single allocation-free writer for the five
@@ -8,9 +8,9 @@
 //! - Preserves opaque child anchors so frontend composition semantics remain unchanged.
 //!
 //! WHY:
-//! - HTML escaping is output-policy behavior owned by the HTML project builder, not a core
-//!   language directive. One writer keeps `$code` and `$escape_html` from duplicating the
-//!   same five-byte escape loop.
+//! - The frontend registers and executes `$escape_html` under every builder, so it owns the
+//!   escaping writer. One writer keeps `$code`, `$escape_html` and the document shell from
+//!   duplicating the same five-byte escape loop.
 
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::formatter_contract::{

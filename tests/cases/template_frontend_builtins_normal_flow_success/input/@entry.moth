@@ -1,4 +1,4 @@
-wrapper #= [$before = [:<li>W], $after = [:Z</li>]:
+wrapper #= [$before [:<li>W], $after [:Z</li>]:
 <ul>
 [$slot]
 </ul>
@@ -8,7 +8,7 @@ md #= [$md:
 # Docs
 ]
 
-code_block #= [$code("moth"):
+code_block #= [$code "moth":
 loop x
 ]
 

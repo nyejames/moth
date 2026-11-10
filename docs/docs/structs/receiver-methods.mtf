@@ -1,7 +1,7 @@
 A receiver method is a top-level function whose first parameter is named
 `this`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Vector2 = |
         x F64,
         y F64,

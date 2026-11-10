@@ -4,13 +4,13 @@ Construct choice values through the choice name and variant name.
 
 A unit variant is a value without a constructor call.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     current = Status::Ready
 ]
 
 This form is invalid:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- INVALID: unit variants are not constructor calls
     current = Status::Ready()
 ]
@@ -19,7 +19,7 @@ This form is invalid:
 
 A payload variant requires constructor parentheses.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     failed = Status::Failed("network")
     named = Status::Failed(message = "network")
 ]

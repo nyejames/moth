@@ -1,6 +1,6 @@
 A function gives a reusable block of code a name.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     greet |name String|:
         io.line([: Hello, [name]])
     ;
@@ -10,7 +10,7 @@ The function name comes first. Parameters live inside `|...|`.
 
 Use `||` when there are no parameters:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     say_hello ||:
         io.line("Hello")
     ;
@@ -18,7 +18,7 @@ Use `||` when there are no parameters:
 
 Add an arrow when the function returns a value:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     double |value I32| -> I32:
         return value * 2
     ;
@@ -26,7 +26,7 @@ Add an arrow when the function returns a value:
 
 Write `-> !` when the function never returns:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     fatal |message String| -> !:
         assert(false, message)
     ;

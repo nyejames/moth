@@ -118,7 +118,7 @@ Neither analysis depends on a collector. A GC backend must receive the same vali
 
 The accepted memory pipeline reads from one owner at each stage:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     access and copy rules
         -> borrow and last-use facts
         -> lifetime topology and retained-edge summaries
@@ -149,7 +149,7 @@ The selection changes memory quality, not source legality or observable behaviou
 
 Moth infers cleanup-responsibility transfer only at a proven final use. If analysis cannot prove transfer on every relevant path, the operation remains a borrow and the statically proven region retains responsibility.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     unproven transfer
         -> borrow remains
         -> statically proven region retains responsibility

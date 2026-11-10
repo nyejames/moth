@@ -261,6 +261,27 @@ impl<'a> TokenStream<'a> {
         self.emit_payload(tag, 0, 0)
     }
 
+    /// Emit one line-break token and record whether its whitespace run contains a blank line.
+    pub(crate) fn emit_newline(&mut self, blank_line: bool) -> Result<TokenTag, TokenEmitError> {
+        self.emit_payload(
+            TokenTag::NEWLINE,
+            TokenShape::newline_blank_line_flags(blank_line),
+            0,
+        )
+    }
+
+    /// Emit `(` while recording whether it attaches to the preceding token.
+    pub(crate) fn emit_open_parenthesis(
+        &mut self,
+        attached: bool,
+    ) -> Result<TokenTag, TokenEmitError> {
+        self.emit_payload(
+            TokenTag::OPEN_PARENTHESIS,
+            TokenShape::open_parenthesis_attached_flags(attached),
+            0,
+        )
+    }
+
     pub(crate) fn emit_double_colon(
         &mut self,
         qualifier_attached: bool,

@@ -9,8 +9,8 @@
 //!   control flow belongs in one dedicated module.
 
 use super::child_decorators::{ChildDecoratorEdge, parse_child_decorator_directive};
-use super::directive_args::reject_unexpected_directive_arguments;
-use super::head_parser::parse_head_expression_with_resources;
+use super::directive_args::{reject_directive_operand, reject_extra_directive_operand};
+use super::head_parser::parse_directive_operand_expression_with_resources;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::store::{
     ConstValueId, ConstValuePayload, ConstValueStore,
@@ -35,8 +35,8 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerStage, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::style_directives::{
-    AFTER_DIRECTIVE_NAME, BEFORE_DIRECTIVE_NAME, CoreStyleDirectiveKind, DOC_DIRECTIVE_NAME,
-    INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME, StyleDirectiveKind,
+    AFTER_DIRECTIVE_NAME, BEFORE_DIRECTIVE_NAME, CoreStyleDirectiveKind, INSERT_DIRECTIVE_NAME,
+    SLOT_DIRECTIVE_NAME, StyleDirectiveKind,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -307,8 +307,10 @@ fn parse_slot_default(
     }
 
     let fallback_span = token_stream.current_span();
-    let expression = match parse_head_expression_with_resources(
-        ExpressionParseResources {
+    // A slot default is the directive's one operand. The parse keeps the caller's explicit
+    // receiving type and stops before a second operand so this boundary owns that diagnostic.
+    let expression =
+        match parse_directive_operand_expression_with_resources(ExpressionParseResources {
             token_stream,
             scope_context,
             type_interner,
@@ -319,22 +321,21 @@ fn parse_slot_default(
             value_mode,
             string_table,
             path_fork,
-        },
-        false,
-    ) {
-        Ok(expression) => expression,
-        // A slot default must be fully known here, so a body-root numeric
-        // deferral is an invalid default rather than a retainable fragment.
-        Err(ExpressionParseError::NumericDeferral(deferral)) => {
-            return Err(templates::invalid_template_directive(
-                Some(directive_name),
-                InvalidTemplateDirectiveReason::InvalidSlotDefault,
-                Some(deferral.span.unwrap_or(fallback_span)),
-            )
-            .into());
-        }
-        Err(error) => return Err(error.into()),
-    };
+        }) {
+            Ok(expression) => expression,
+            // A slot default must be fully known here, so a body-root numeric
+            // deferral is an invalid default rather than a retainable fragment.
+            Err(ExpressionParseError::NumericDeferral(deferral)) => {
+                return Err(templates::invalid_template_directive(
+                    Some(directive_name),
+                    InvalidTemplateDirectiveReason::InvalidSlotDefault,
+                    Some(deferral.span.unwrap_or(fallback_span)),
+                )
+                .into());
+            }
+            Err(error) => return Err(error.into()),
+        };
+    reject_extra_directive_operand(directive_name, token_stream)?;
 
     let expression = expression_builder.view_owned(expression)?;
     let span = expression.span().or(Some(fallback_span));
@@ -455,36 +456,35 @@ pub(super) fn parse_core_style_directive(
     kind: CoreStyleDirectiveKind,
     string_table: &mut StringTable,
 ) -> CoreDirectiveResult<()> {
+    // The registry owns the name; reuse its interned id instead of re-interning literals.
+    let directive_name_id = string_table.intern(directive_name);
     match kind {
         CoreStyleDirectiveKind::Raw => {
-            let raw_name = string_table.intern("raw");
-            reject_unexpected_directive_arguments(raw_name, token_stream)?;
+            reject_directive_operand(directive_name_id, token_stream)?;
             configure_raw_style(build_state);
         }
 
         CoreStyleDirectiveKind::Fresh => {
+            reject_directive_operand(directive_name_id, token_stream)?;
             // `$fresh` opts this template out of parent-applied direct-child
             // wrappers while still allowing local directives/wrappers in the same head.
             build_state.style.skip_parent_child_wrappers = true;
         }
 
         CoreStyleDirectiveKind::Note => {
-            let note_name = string_table.intern("note");
-            reject_unexpected_directive_arguments(note_name, token_stream)?;
+            reject_directive_operand(directive_name_id, token_stream)?;
             build_state.kind = TemplateType::Comment(CommentDirectiveKind::Note);
             build_state.style = Style::default();
         }
 
         CoreStyleDirectiveKind::Todo => {
-            let todo_name = string_table.intern("todo");
-            reject_unexpected_directive_arguments(todo_name, token_stream)?;
+            reject_directive_operand(directive_name_id, token_stream)?;
             build_state.kind = TemplateType::Comment(CommentDirectiveKind::Todo);
             build_state.style = Style::default();
         }
 
         CoreStyleDirectiveKind::Doc => {
-            let doc_name = string_table.intern(DOC_DIRECTIVE_NAME);
-            reject_unexpected_directive_arguments(doc_name, token_stream)?;
+            reject_directive_operand(directive_name_id, token_stream)?;
             apply_doc_comment_defaults(build_state);
         }
 

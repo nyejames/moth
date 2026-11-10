@@ -4,7 +4,7 @@ Moth defaults to reference semantics. Reading, binding, passing, returning or st
 
 Existing values use shared, read-only access. Multiple shared aliases may coexist. A shared alias doesn't imply ownership or implicit copy.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     original = load_items()
     view = original
 
@@ -18,7 +18,7 @@ Existing values use shared, read-only access. Multiple shared aliases may coexis
 
 Alias activity is non-lexical and control-flow-sensitive. A shared alias blocks overlapping mutation only until its last potential use on the relevant path. An unused shared alias doesn't block later mutation.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     items ~= load_items()
     view = items       -- shared alias
     inspect(view)      -- last use of view

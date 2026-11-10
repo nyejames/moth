@@ -54,7 +54,7 @@ Hosts preserve the content and order of every call. A stream-oriented host such 
 
 The output boundary accepts `String` values only. Templates produce `String` values, so template interpolation provides the way to format non-string content for output.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     io.print("loading...")
     io.line("Hello")
     io.debug("debug details")
@@ -78,7 +78,7 @@ The host owns the listeners that observe keyboard and pointer events and records
 
 `io.input.new()` returns `Input, Error!` because input support can be unavailable. A host without the facilities input polling needs returns builtin error code 1, `Unsupported`, through `Error!`. `update` and `close` require mutable access through `~`. Polling reads use shared access.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     input ~= io.input.new()!
 
     io.input.update(~input)
@@ -241,7 +241,7 @@ Teardown is explicit. Host garbage collection doesn't define when a handle stops
 **Accepted queued design.** `io.set_title(text)` takes one ordinary shared
 `String`, returns no source-visible value and has no recoverable error channel.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     #[$in title:Initial title]
 
     io.set_title("Loaded")

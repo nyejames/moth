@@ -130,13 +130,13 @@ For the initial direct-handle implementation, an element commonly contributes ze
 
 Consider a collection of `Holder` values where each `Holder` refers to a `Blob`.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     collection -> Holder family -> Blob family
 ]
 
 If `Holder` is a separately allocated family, the direct family-edge graph is:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     collection -> Holder
     Holder     -> Blob
 ]
@@ -145,7 +145,7 @@ Inserting a `Holder` adds one direct obligation into the `Holder` family. It doe
 
 If layout refinement instead places `Holder` inline in the collection's backing storage and that inline representation contains a `Blob` handle, the direct graph becomes:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     collection storage -> Blob
 ]
 
@@ -217,7 +217,7 @@ Consider a map whose key and value point to the same allocation family:
 
 Source `{=}` is accepted empty-map syntax but is not implemented yet; see @../../../docs/progress (Progress matrix) for current support.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     text = [: large value]
     values ~{String = String} = {=}
 
@@ -227,7 +227,7 @@ Source `{=}` is accepted empty-map syntax but is not implemented yet; see @../..
 
 The new-key insertion creates two direct persistent obligations to the same allocation family, one from the stored key and one from the stored value. Because this was the final use of `text`, its affine root can be reclassified into exactly one of those two edges. The second edge is a genuinely new obligation.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     fresh text root:
         affine root = 1
         persistent edges = 0
@@ -251,7 +251,7 @@ The lookup string passed to `remove` is a temporary borrowed alias. It is not an
 
 The compiler does not recognise user methods by name. A user abstraction earns an equivalent summary by composing builtin effects, and only when analysis proves every relevant edge is killed on every path.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     clear |this ~UserIndex|:
         ~this.values.clear()
         ~this.count = 0
@@ -266,7 +266,7 @@ Future collection APIs must preserve narrow, analysable destruction effects.
 
 `remove` returns a detached stored result. It is neither a fresh result nor an ordinary alias return. The existing allocation survives while the collection stops retaining it.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     before:  collection  ->  stored value
 
     after:   collection  -X-> stored value
@@ -297,7 +297,7 @@ The selected representation remains fixed for the allocation family. An uncounte
 
 The cleanup-frontier case is the most common elision:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     populate(~index)
     use(index)
     ~index.clear()
@@ -317,7 +317,7 @@ A final cleanup frontier for family `A` requires proof that:
 
 A long-lived collection may therefore create several inferred epochs, while the collection object and its backing capacity outlive each retained-value epoch.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     R_index_epoch_0
         population 0
         -> first clear
@@ -333,7 +333,7 @@ Individual `remove`, `set` or partial cleanup does not establish a frontier by i
 
 Full-memory-control backends use a two-bit tagged allocation-family handle for heap values that participate in ownership-aware lowering.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     bit 0: OWNED
     bit 1: REC
 ]
@@ -369,7 +369,7 @@ The REC bit identifies the target allocation family's physical layout. It does n
 
 A backend masks both bits before recovering the allocation-family base.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     family_base = handle & !TAG_MASK
 ]
 
@@ -393,7 +393,7 @@ The planner selects the layout before code generation. An uncounted allocation i
 
 Only REC-selected allocation families carry a counter. There is no global side table and no universal header on affine, inferred-region or declared-region allocations.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     +-----------------------+
     | REC count word        |
     +-----------------------+
@@ -409,7 +409,7 @@ Only REC-selected allocation families carry a counter. There is no global side t
 
 REC is selected because unresolved runtime-many persistent retained edges disappear independently. That selection reason is distinct from the complete physical counter invariant. For one REC-selected allocation family `F`, the counter carries both the counted persistent-edge obligations and at most one affine-root obligation:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     REC count(F) =
         live counted persistent-edge obligations(F)
         + optional affine-root obligation(F)
@@ -427,7 +427,7 @@ For each REC-selected family, the compiler-owned memory planner converts those f
 
 This equation is the normative per-family contract:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     delta_count =
         created_persistent_edges
         - removed_persistent_edges
@@ -442,14 +442,14 @@ For one family `F`, the terms mean:
 - `affine_root_before` is `1` when an owned affine root for `F` exists on the incoming path, otherwise `0`.
 - `affine_root_after` is `1` when an owned affine root for `F` exists on the outgoing path, otherwise `0`.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     affine_root_before in {0, 1}
     affine_root_after  in {0, 1}
 ]
 
 The conceptual planner handoff has this shape:
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     pub struct PlannedObligationTransition {
         pub family: PhysicalAllocationFamilyId,
         pub removed_persistent_edges: u32,
@@ -465,7 +465,7 @@ The exact Rust names remain open. The ownership boundary does not. Backend REC l
 
 A replacement that removes one direct persistent edge and creates another direct persistent edge into the same family has a net-zero transition:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     same-family replacement:
         removed_persistent_edges = 1
         created_persistent_edges = 1
@@ -479,7 +479,7 @@ The planner fuses the remove and add at the semantic commit. The backend must ne
 
 When a final-use affine root is stored as one direct persistent edge, the planner reclassifies that root into the edge:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     final-use insertion of one direct edge:
         before:
             created_persistent_edges = 0
@@ -500,7 +500,7 @@ This one-edge reclassification may have zero net counter traffic. One affine roo
 
 When a detached stored result turns one removed direct persistent edge into an affine result root, the planner reclassifies the edge into the result:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     detached result of one direct edge:
         before:
             created_persistent_edges = 0
@@ -521,7 +521,7 @@ This one-edge reclassification may have zero net counter traffic. At most one re
 
 Fresh construction into a hidden destination that is known to become one direct persistent edge may start directly with that obligation:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     fresh hidden-destination construction:
         created_persistent_edges = 1
         affine_root_before = 0
@@ -537,7 +537,7 @@ An affine transfer moves an existing root obligation between paths. The root rem
 
 A semantic storage mutation commits its complete obligation delta atomically for each target family. The planner must normalise every effect before lowering and must not model an overwrite as a decrement, a possible destruction and then an increment when the semantic operation replaces one obligation with another obligation to the same family.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     same target family F:
 
     old edge removed  -1
@@ -641,14 +641,14 @@ This table is a shorthand for the planner's normalised per-family transitions. `
 
 The one-edge fast path stays cheap and remains the common case:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     N = 1 final-use insertion -> 0
     N = 1 extraction to root  -> 0
 ]
 
 These `0` results are scoped to `N = 1`. There is no unconditional general rule that final-use insertion or extraction to an affine root leaves the count unchanged.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     blob = load_blob()!
 
     ~index.set("a", blob)!
@@ -656,7 +656,7 @@ These `0` results are scoped to `N = 1`. There is no unconditional general rule 
     ~index.set("b", blob)! -- final use of blob
 ]
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     start:
         root
         count 1
@@ -687,7 +687,7 @@ Keep these terms distinct:
 
 For an REC family, `discharge_if_owned` discharges the affine-root obligation. It destroys the family only when that discharge makes the count zero.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     discharge owned REC root
         -> remove one affine-root obligation
         -> decrement count by one
@@ -705,7 +705,7 @@ Discharging an owned REC root therefore does not necessarily destroy or free the
 
 Declared-region ownership affects the target allocation, not every edge whose source happens to live inside a declared region.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     Declared region G -> declared-region-owned F
         count-free
 
@@ -719,7 +719,7 @@ A `clear()` on declared-region-owned storage releases the outgoing REC boundary 
 
 Declared-region exit runs both steps in order:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     release outgoing REC boundary obligations
     -> bulk reclaim declared-region-owned storage
 ]

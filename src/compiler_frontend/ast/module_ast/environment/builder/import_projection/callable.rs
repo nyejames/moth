@@ -75,7 +75,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 value_mode: ValueMode::ImmutableReference,
                 value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
                 binding_span: None,
-                config_qualifier: None,
+                config_contract: None,
             };
             Self::unique_declaration_table_mut(&mut self.declaration_table)?
                 .append_for_construction(declaration, self.path_fork)

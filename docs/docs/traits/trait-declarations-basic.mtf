@@ -2,7 +2,7 @@ A trait names a behaviour that a type can promise to provide.
 
 ### A trait with one requirement
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     DISPLAY_TEXT must:
         display |This| -> String
     ;
@@ -12,7 +12,7 @@ This says: any type that claims to be `DISPLAY_TEXT` must provide a `display` me
 
 ### A marker trait
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     SERIALIZABLE must:
     ;
 ]

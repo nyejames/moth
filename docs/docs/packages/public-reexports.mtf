@@ -2,7 +2,7 @@ The `export:` block can re-export selected dependency bindings from other files,
 
 ### Direct-selection re-export
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     export:
         @components/card CardData as Card, render_card
 
@@ -17,7 +17,7 @@ The `export:` block can re-export selected dependency bindings from other files,
 The path and the first selected name must start on the same physical line. A comma explicitly
 continues the selection list across a following newline:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     export:
         @components/card CardData,
             render_card
@@ -27,7 +27,7 @@ continues the selection list across a following newline:
 Without a comma, a newline ends the re-export clause. A trailing comma is invalid because a comma
 always promises another selected name.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     export:
         -- Error
         @components/card CardData, render_card,

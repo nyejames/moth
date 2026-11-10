@@ -36,6 +36,7 @@ use crate::compiler_frontend::ast::numeric_known_shape::{
     KnownShape, KnownShapeId, fragment_shape, materialise_known_shape, register_shape_witness,
     shape_has_forward_leaf, shapes_join_refused, union_shape_classes,
 };
+use crate::compiler_frontend::ast::statements::body_dispatch::source_directive_wrong_target_error;
 use crate::compiler_frontend::ast::statements::fallible_handling::apply_completed_handling_suffix;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::validate_map_key_type;
@@ -522,6 +523,16 @@ fn parse_curly_entry(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> CollectionParseResult<DeferredLiteralValue> {
+    // A directive is never a value, so it can never begin a curly-literal entry. Route it to the
+    // shared typed wrong-target diagnostic instead of the generic expression unexpected-token
+    // path; the authored span is the directive token regardless of the preceding comma or newline.
+    if token_stream.current_tag() == TokenTag::STYLE_DIRECTIVE {
+        return Err(source_directive_wrong_target_error(
+            token_stream,
+            string_table,
+        )?);
+    }
+
     let mut entry_context = context.new_child_expression(expectation.expected_types.clone());
     // Propagate the parent context kind so that constant-context restrictions apply to entries.
     entry_context.kind = context.kind.clone();

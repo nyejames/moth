@@ -114,7 +114,7 @@ fn constant_kind() -> HeaderKind {
             span: None,
             binding_mode: BindingMode::default(),
             type_annotation: ParsedTypeRef::Inferred,
-            config_qualifier: None,
+            config_contract: None,
             initializer_range: None,
             initializer_references: Vec::new(),
         },
@@ -172,7 +172,7 @@ fn constant_declaration(type_id: TypeId, decl_path: PathId) -> Declaration {
         value_mode: ValueMode::default(),
         value: DeclarationValue::PendingConstant,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     }
 }
 

@@ -1,6 +1,6 @@
 Most bindings should stay immutable. Add `~` when the value needs to change.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count ~= 0
     ~count = 1
     ~count += 1
@@ -10,7 +10,7 @@ Prefix the whole target with `~` when writing to an existing mutable place.
 
 Collections also need a mutable binding before they can change:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     names ~{String} = {}
 
     ~names.push("Priya")

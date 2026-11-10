@@ -44,7 +44,7 @@ GC is a permitted runtime representation for a statically legal lifetime topolog
 Semantic type, ordinary linear-memory storage and computation carrier are three
 separate facts. For the ordinary Wasm scalar layout:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     I8/U8/Byte   1 byte   i32
     I16/U16      2 bytes  i32
     I32/U32      4 bytes  i32
@@ -90,7 +90,7 @@ cleanup, count, ownership and coalescing decision remain with the
 
 Physical memory strategy is chosen after target assignment, not before it.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     validated HIR
         -> borrow and last-use analysis
         -> local allocation-family and retained-edge constraints
@@ -131,7 +131,7 @@ A `ValidatedMemoryPlan` belongs to one target/build-profile physical-variant sco
 
 Its conceptual contents are:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     ValidatedMemoryPlan
         physical variant identity and capability inputs
         post-refinement allocation-family graph
@@ -150,7 +150,7 @@ Its conceptual contents are:
 
 The accepted family strategy outcomes are:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     Stack
     Inline
     Affine

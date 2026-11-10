@@ -988,7 +988,7 @@ fn style_before_wrapper_no_children_records_formatted_tir_phase() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let (template, _store) = parse_template(
-        "[$md, $before = [:<b>]: body text]",
+        "[$md, $before [:<b>]: body text]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -1002,7 +1002,7 @@ fn style_before_wrapper_no_children_records_formatted_tir_phase() {
         TemplateTirPhase::Formatted,
         "setup: style-wrapper markdown template must have a Formatted TIR reference"
     );
-    let rendered = folded_template_output("[$md, $before = [:<b>]: body text]");
+    let rendered = folded_template_output("[$md, $before [:<b>]: body text]");
     assert_eq!(
         rendered, "<p> body text</p>",
         "style child-template wrappers with no body children must not change formatted output"
@@ -1576,7 +1576,7 @@ fn positional_default_slot_before_wrappers_preserve_separator_whitespace() {
         .expect("test path fits");
 
     let wrapper_file_tokens = template_tokens_from_source(
-        "[:\n    [$before = [:H: ]:[$slot 1]]\n    [$before = [:R: ]:[$slot]]\n]",
+        "[:\n    [$before [:H: ]:[$slot 1]]\n    [$before [:R: ]:[$slot]]\n]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -1664,7 +1664,7 @@ fn formatter_before_after_wrapper_composition_keeps_formatted_reference() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let (template, _store) = parse_template(
-        "[$md, $before = [:<b>], $after = [:</b>]: hello [:child] ]",
+        "[$md, $before [:<b>], $after [:</b>]: hello [:child] ]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -1684,7 +1684,7 @@ fn formatter_before_after_wrapper_composition_keeps_formatted_reference() {
         "child-wrapper composition should preserve Formatted phase when it consumes formatted output"
     );
     assert_eq!(
-        folded_template_output("[$md, $before = [:<b>], $after = [:</b>]: hello [:child] ]"),
+        folded_template_output("[$md, $before [:<b>], $after [:</b>]: hello [:child] ]"),
         "<p> hello <b>child</b> </p>",
         "direct-child wrappers should continue to apply only to the child-template anchor"
     );
@@ -1883,7 +1883,7 @@ fn no_formatter_before_after_wrapper_reaches_formatted_phase_through_tir() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let (template, _store) = parse_template(
-        "[$before = [:<b>], $after = [:</b>]: hello [:child] ]",
+        "[$before [:<b>], $after [:</b>]: hello [:child] ]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -1898,7 +1898,7 @@ fn no_formatter_before_after_wrapper_reaches_formatted_phase_through_tir() {
         "no-formatter child-template roots with TIR-normalized wrappers should reach Formatted through the TIR formatter view"
     );
     assert_eq!(
-        folded_template_output("[$before = [:<b>], $after = [:</b>]: hello [:child] ]"),
+        folded_template_output("[$before [:<b>], $after [:</b>]: hello [:child] ]"),
         " hello <b>child</b> ",
         "no-formatter direct-child wrappers should preserve existing folded output shape"
     );
@@ -2422,7 +2422,7 @@ fn parser_tir_skips_conditional_child_wrappers_for_fresh_control_flow_child() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
     let (parent, store) = parse_template(
-        "[$before = [:wrap]: [$fresh, if true: body]]",
+        "[$before [:wrap]: [$fresh, if true: body]]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,

@@ -2,7 +2,7 @@ Collections use five compiler-owned member operations, with `clear` accepted as 
 
 ### `get`
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     value = items.get(index) catch:
         then fallback
     ;
@@ -15,7 +15,7 @@ Collections use five compiler-owned member operations, with `clear` accepted as 
 
 ### `set`
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     ~items.set(index, value) catch:
     ;
 ]
@@ -33,7 +33,7 @@ One source spelling resolves statically to two contracts, chosen by the receiver
 
 #### Growable `push`
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     ~items.push(value)
 ]
 
@@ -48,7 +48,7 @@ One source spelling resolves statically to two contracts, chosen by the receiver
 
 #### Fixed `push`
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     ~items.push(value) catch:
     ;
 ]
@@ -64,7 +64,7 @@ One source spelling resolves statically to two contracts, chosen by the receiver
 
 ### `remove`
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     removed = ~items.remove(index) catch:
         then fallback
     ;
@@ -79,7 +79,7 @@ One source spelling resolves statically to two contracts, chosen by the receiver
 
 ### `length`
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count = items.length()
 ]
 
@@ -93,7 +93,7 @@ One source spelling resolves statically to two contracts, chosen by the receiver
 
 Accepted design with implementation deferred. Maps already expose `clear()`; fixed and growable collections do not yet.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     ~items.clear()
 ]
 

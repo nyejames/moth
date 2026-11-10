@@ -38,10 +38,6 @@ impl TemplateHeadTag {
     pub const fn intersects(self, other: Self) -> bool {
         (self.0 & other.0) != 0
     }
-
-    pub const fn is_empty(self) -> bool {
-        self.0 == 0
-    }
 }
 
 // Per-tag conflict slots index by bit position, so every declared tag must sit below the
@@ -104,15 +100,6 @@ impl TemplateHeadCompatibility {
             required_absent_tags: TemplateHeadTag::empty(),
             blocks_future_tags: TemplateHeadTag::empty(),
             conflict_reason: None,
-        }
-    }
-
-    pub fn exclusive_meaningful(conflict_reason: TemplateHeadConflictReason) -> Self {
-        Self {
-            presence_tags: TemplateHeadTag::MEANINGFUL_ITEM,
-            required_absent_tags: TemplateHeadTag::MEANINGFUL_ITEM,
-            blocks_future_tags: TemplateHeadTag::MEANINGFUL_ITEM,
-            conflict_reason: Some(conflict_reason),
         }
     }
 

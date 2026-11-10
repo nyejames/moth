@@ -35,7 +35,6 @@ use crate::projects::html_project::moth_template::{
     CompiledMothTemplateDocument, MothTemplateCompileOutput, MothTemplateInput, MothTemplateSource,
     compile_moth_template,
 };
-use crate::projects::html_project::style_directives::html_project_style_directives;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -709,8 +708,7 @@ fn content_source_identities_follow_canonical_logical_order_not_reference_order(
         .expect("the template unit should collect");
     assert_eq!(units.len(), 1);
 
-    let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
-        .expect("style directives should merge");
+    let style_directives = StyleDirectiveRegistry::built_ins();
     let mut resource_inputs = ResourceInputRegistry::new();
     let bundle = prepare_file_value_bundle(
         &mut units[0],
@@ -758,8 +756,7 @@ fn content_source_preparation_failures_name_the_logical_source() {
         .collect_sources(&mut string_table, &mut path_fork)
         .expect("the template unit should collect");
 
-    let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
-        .expect("style directives should merge");
+    let style_directives = StyleDirectiveRegistry::built_ins();
     let mut resource_inputs = ResourceInputRegistry::new();
     let Err(bundle_failure) = prepare_file_value_bundle(
         &mut units[0],
@@ -813,8 +810,7 @@ fn retained_resolution_diagnostics_name_the_final_logical_source() {
         .collect_sources(&mut string_table, &mut path_fork)
         .expect("the template unit should collect");
 
-    let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
-        .expect("style directives should merge");
+    let style_directives = StyleDirectiveRegistry::built_ins();
     let mut resource_inputs = ResourceInputRegistry::new();
     let bundle = prepare_file_value_bundle(
         &mut units[0],
@@ -1081,8 +1077,7 @@ fn template_bundle_source_and_header_paths_survive_success_finalization() {
         .collect_sources(&mut string_table, &mut path_fork)
         .expect("the template unit should collect");
     let source_path = units[0].source_path.clone();
-    let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
-        .expect("style directives should merge");
+    let style_directives = StyleDirectiveRegistry::built_ins();
     let mut resource_inputs = ResourceInputRegistry::new();
     let bundle = prepare_file_value_bundle(
         &mut units[0],

@@ -30,7 +30,7 @@ Every runtime allocation has exactly one semantic lifetime owner. Multiple bindi
 
 An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     R_value >= R_container
 ]
 
@@ -61,7 +61,7 @@ Siblings don't form one ordered chain. Independently ending lifetime domains can
 
 A fresh result root has a new root allocation but may retain legal references to older allocations. Fresh results include literals, templates, constructor calls and computed aggregates.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     name = "Priya"                    -- fresh string slice
     greeting = [: Hello, [name]]      -- fresh owned template
     items = {1, 2, 3}                 -- fresh collection
@@ -73,7 +73,7 @@ A fresh result root may retain parameters or other pre-existing values only when
 
 An alias result reuses an existing root or projection. Shared bindings, field access and shared function returns produce alias results. An alias result stays tied to its existing lifetime owner and cannot become new declared-region-owned storage through `into`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     original = load_items()
     view = original                   -- alias result
     first = original.get(0) catch:    -- alias result (shared access)
@@ -91,7 +91,7 @@ Interior projection detachment means moving a projected field out of its contain
 
 Every returned value enters a fresh caller binding slot. Binding-slot freshness and allocation freshness are separate facts: a fresh slot may contain a value that aliases an older allocation. Rebinding that slot replaces its current value provenance; it does not rebind or mutate another binding that still observes the older allocation.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     original ~= Point(1)
     returned ~= identity(original) -- fresh caller slot, aliased allocation
 

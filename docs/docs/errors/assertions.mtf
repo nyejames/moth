@@ -3,7 +3,7 @@
 The accepted end-state contract uses one required condition and one optional
 message:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     assert |condition Bool, message String? = none|
 ]
 
@@ -11,7 +11,7 @@ This is compiler-owned metadata, not an importable or shadowable Moth
 function. These rules describe the accepted contract. The Progress matrix owns
 current compiler and backend support: @../progress (Progress).
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     assert(index < items.length())
     assert(index < items.length(), "index must be in bounds")
     assert(false, "unimplemented backend path")
@@ -19,7 +19,7 @@ current compiler and backend support: @../progress (Progress).
 
 ### Accepted forms
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     assert(ready)
     assert(ready, "must be ready")
     assert(condition = ready)

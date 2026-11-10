@@ -2,7 +2,7 @@ Moth says no to many features that other languages include. Here is why.
 
 ### No general macros
 
-Arbitrary macros and builder directives that transform AST create a second
+Arbitrary macros and directive systems that transform AST create a second
 language inside your code. Compiler-known directives may provide constrained
 structure, templates or metadata, but they are not a user-extensible macro
 system.

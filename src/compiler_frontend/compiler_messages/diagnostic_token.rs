@@ -38,6 +38,7 @@ impl DiagnosticToken {
     fn string_token(tag: TokenTag, value: StringId) -> Self {
         Self::new(tag, 0, value.index())
     }
+    #[cfg(test)]
     pub(crate) fn from_string_tag(tag: TokenTag, value: StringId) -> Self {
         debug_assert!(matches!(
             tag.descriptor().payload(),

@@ -5,10 +5,10 @@
 #[$in description:["Current implementation status, coverage and feature progress for the Moth compiler."]]
 #[$in head:[theme_head]]
 
-red #= [$css("inline"): background-color: rgb(239, 112, 112); color: black;]
-pink #= [$css("inline"): background-color: rgb(231, 133, 218); color: black;]
-orange #= [$css("inline"): background-color: rgb(223, 162, 100); color: black;]
-green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
+red #= [$css "inline": background-color: rgb(239, 112, 112); color: black;]
+pink #= [$css "inline": background-color: rgb(231, 133, 218); color: black;]
+orange #= [$css "inline": background-color: rgb(223, 162, 100); color: black;]
+green #= [$css "inline": background-color: rgb(109, 232, 138); color: black;]
 
 #[navbar]
 #[sidebar]
@@ -211,7 +211,7 @@ init_docs_sidebar()!
             [: Supported]
             [: Broad template parsing, directive, slot, const/runtime fragment, template control-flow, markdown inline-code and link-separator, heading section-link, diagnostics and JS/HTML integration coverage. Focused literal [$html:<code>$doc</code>] and [$html:<code>$code</code>] preservation, single-arm Bool and option inclusion, lazy loops, structural no-output, empty-string and whitespace slot replay, per-occurrence named defaults, named-slot wrapper composition, dependent const-loop headers over enclosing iteration and option-capture bindings, and normal-grammar rejection of removed template markers. Const and runtime template loops share the signed-step contract, including actual collection source indices, visited-iteration limits and const zero, no-progress and non-constant step diagnostics.]
             [: HTML / JS]
-            [: Main Alpha surface. Supported shapes include const and runtime templates, symbol-named slots with per-occurrence compile-time defaults, [$html:<code>$in name</code>] inserts, [$html:<code>$before</code>] / [$html:<code>$after</code>] / [$html:<code>$fresh</code>] routing, markdown/code/raw/html/css/escape directives, single-arm template Bool and option-present inclusion, template loops, runtime slot applications, dependency namespace member access in template heads and const expansion guards. Template [$html:<code>&#91;else&#93;</code>], [$html:<code>&#91;else if ...&#93;</code>], [$html:<code>&#91;break&#93;</code>] and [$html:<code>&#91;continue&#93;</code>] are removed and rejected by the ordinary grammar. Removed [$html:<code>$slot(...)</code>], [$html:<code>$insert(...)</code>] and [$html:<code>$children(...)</code>] forms have no alias. False or absent conditions and zero-output loops suppress dependent wrappers. Structural output remains distinct from emitted empty strings, and slot replay preserves authored whitespace. Static [$html:<code>$md</code>] headings and implicit [$html:<code>$md</code>] in [$html:<code>.mtf</code>] files render automatic fragment IDs from their visible labels, with opaque labels omitting IDs, and plain [$html:<code>.md</code>] files keep their separate renderer with no automatic IDs. Post-TIR performance follow-ups remain accepted deferred implementation tracked below and in the roadmap. [$html:<code>$code("moth")</code>] uses compiler-owned current word classification, lexical token roles and shared code presentation classes, and performs no semantic symbol resolution. Former dollar binding/parameter forms and [$html:<code>$(source)</code>] interpolation receive [$html:<code>MOTH-SYNTAX-0007</code>] at the dollar marker, with lexer and source-case coverage. Recognised template directives remain supported. Presentation-only roles cover final-design [$html:<code>into</code>] placement and canonical [$html:<code>Dec</code>] scale names without reserving them, and a shared error role marks Moth [$html:<code>!</code>] alongside JS/TS [$html:<code>throw</code>]/[$html:<code>catch</code>] and Python [$html:<code>raise</code>]/[$html:<code>except</code>]. Template bodies stay plain authored text around highlighted heads and interpolations.]
+            [: Main Alpha surface. Supported shapes include const and runtime templates, symbol-named slots with per-occurrence compile-time defaults, [$html:<code>$in name</code>] inserts, [$html:<code>$before</code>] / [$html:<code>$after</code>] / [$html:<code>$fresh</code>] routing, [$html:<code>$md</code>], [$html:<code>$code</code>], [$html:<code>$raw</code>], [$html:<code>$html</code>], [$html:<code>$css</code>] and [$html:<code>$escape_html</code>] formatters owned by the frontend and available under every builder, single-arm template Bool and option-present inclusion, template loops, runtime slot applications, dependency namespace member access in template heads and const expansion guards. Template [$html:<code>&#91;else&#93;</code>], [$html:<code>&#91;else if ...&#93;</code>], [$html:<code>&#91;break&#93;</code>] and [$html:<code>&#91;continue&#93;</code>] are removed and rejected by the ordinary grammar. Removed [$html:<code>$slot(...)</code>], [$html:<code>$insert(...)</code>] and [$html:<code>$children(...)</code>] forms have no alias. The call spellings [$html:<code>$code(...)</code>] and [$html:<code>$css(...)</code>], and the [$html:<code>$before =</code>] / [$html:<code>$after =</code>] assignment spellings, are rejected in favour of one bare operand. False or absent conditions and zero-output loops suppress dependent wrappers. Structural output remains distinct from emitted empty strings, and slot replay preserves authored whitespace. Static [$html:<code>$md</code>] headings and implicit [$html:<code>$md</code>] in [$html:<code>.mtf</code>] files render automatic fragment IDs from their visible labels, with opaque labels omitting IDs, and plain [$html:<code>.md</code>] files keep their separate renderer with no automatic IDs. Post-TIR performance follow-ups remain accepted deferred implementation tracked below and in the roadmap. [$html:<code>$code "moth"</code>] uses compiler-owned current word classification, lexical token roles and shared code presentation classes, and performs no semantic symbol resolution. Former dollar binding/parameter forms and [$html:<code>$(source)</code>] interpolation receive [$html:<code>MOTH-SYNTAX-0007</code>] at the dollar marker, with lexer and source-case coverage. Recognised template directives remain supported. Presentation-only roles cover final-design [$html:<code>into</code>] placement and canonical [$html:<code>Dec</code>] scale names without reserving them, and a shared error role marks Moth [$html:<code>!</code>] alongside JS/TS [$html:<code>throw</code>]/[$html:<code>catch</code>] and Python [$html:<code>raise</code>]/[$html:<code>except</code>]. Template bodies stay plain authored text around highlighted heads and interpolations.]
         ]
 
         [data:
@@ -555,7 +555,7 @@ init_docs_sidebar()!
             [: Supported]
             [$md: Targeted grouped-record, builder-schema, input, static-specialisation, provenance and boundary coverage. Builder sections retain independent same-named values, defaults and authored spans. Surface validation accepts plain or singly optional String/Bool section fields and rejects unstorable shapes, nested optionals and duplicate output-root owners before config compilation. @https://github.com/nyejames/moth/tree/main/tests/cases/config_contract_u32_success (config_contract_u32_success) covers a source U32 contract. @https://github.com/nyejames/moth/blob/main/src/compiler_frontend/tests/build_config_tests.rs (build config tests) covers receiving-width materialisation, deferred range failures and direct F16/F32 midpoint rounding.]
             [: Frontend / build system]
-            [: Grouped project and active builder records remain the implemented config surface. Declaration-owned [$html:<code>#Config of T</code>] inputs accept every fixed integer and binary-float contract. Command numbers retain literal spelling until the exact receiving contract materialises them. Typed inputs preserve their exact identity. Build, check and dev share input handling, immutable [$html:<code>@project</code>] fields, provenance and semantic fingerprints. Ordinary static if consumes folded Bool values before HIR. The queued directive design remains separately deferred below.]
+            [: Grouped project and active builder records remain the implemented config surface. [$html:<code>$config</code>] inputs accept every fixed integer and binary-float contract. Command numbers retain literal spelling until the exact receiving contract materialises them. Typed inputs preserve their exact identity. Build, check and dev share input handling, immutable [$html:<code>@project</code>] fields, provenance and semantic fingerprints. Ordinary static if consumes folded Bool values before HIR.]
         ]
 
         [data:
@@ -567,19 +567,19 @@ init_docs_sidebar()!
         ]
 
         [data:
-            [: General non-template directives]
-            [: Deferred]
-            [: None]
+            [: Source directives]
+            [: Supported]
+            [$md: Targeted [$html:<code>$config</code>] source-attachment, duplicate, dangling, wrong-target and typed-contract coverage.]
             [: Frontend]
-            [$md: Accepted queued design. [$html:<code>$</code>] is the general marker. Source modifiers use contiguous next-construct attachment and at most one optional compile-time operand, with no call-style argument list. Template directives remain implemented. See @../directives (Directives).]
+            [$md: [$html:<code>$</code>] is the general marker. Directives are compiler-owned: builders provide schemas, packages, source capabilities and output policies but do not register, name or parse directives. Directives occur only in a template head or on their own source line before the next eligible declaration; a blank physical line breaks attachment while comment-only lines do not. A directive takes at most one optional compile-time operand, written as a bare value or one named [$html:<code>key = value</code>] where its contract allows; an operand starts on the directive line and may continue while balanced, and the call spelling [$html:<code>$name(...)</code>] is rejected. [$html:<code>$config</code>] is the only source modifier, accepts no operand and replaces the retired input qualifier, which no longer parses. [$html:<code>$project</code>], [$html:<code>$builder</code>], [$html:<code>$html_builder</code>] and [$html:<code>$page</code>] are not directives. Later compiler-owned source forms remain accepted design. See @../directives (Directives).]
         ]
 
         [data:
             [: [$html:<code>$config</code>] contracts]
-            [: Deferred]
-            [: None]
+            [: Supported]
+            [$md: Targeted explicit input, fallback and absence, exact-type, numeric-materialisation, duplicate and boundary coverage.]
             [: Frontend / build system]
-            [: Accepted queued design. Prefix on one typed top-level [$html:<code>#</code>] binding. Explicit-only providers; project fields never implicitly supply inputs. Current [$html:<code>#Config</code>] remains the implemented spelling.]
+            [: [$html:<code>$config</code>] marks one explicitly typed top-level [$html:<code>#</code>] binding in [$html:<code>config.moth</code>] or a selected source module. The binding name is the input key, the declared type is the contract and the initializer is the fallback. Only marked bindings may omit an initializer. Explicit-only providers; project fields never implicitly supply inputs.]
         ]
 
         [data:
@@ -620,6 +620,14 @@ init_docs_sidebar()!
             [: None]
             [: Frontend]
             [: Future compiler-owned blocks use [$html:<code>$async:</code>] and [$html:<code>$checked:</code>]. Recognition of those names is not semantic implementation. Checked deep-proof algorithms remain an open proposal, not accepted Alpha work.]
+        ]
+
+        [data:
+            [: Numeric constraint directives]
+            [: Deferred]
+            [: None]
+            [: Frontend]
+            [: [$html:<code>$fast_math</code>], [$html:<code>$safe_math</code>] and [$html:<code>$infallible</code>] are unimplemented compiler-owned numeric constraints. Ordinary arithmetic remains checked; their exact contracts remain queued design.]
         ]
     ]
 ]
@@ -767,7 +775,7 @@ init_docs_sidebar()!
             [: Post-TIR template performance follow-ups]
             [: Deferred]
             [: Not part of the current Alpha surface.]
-            [: Deferred items are source-span-backed template body text, a per-template parse cache, a formatter-output cache, dev-mode source-hash keyed template reuse, dependency-aware invalidation for imported consts/directives, formatter algorithm rewrites if profiling justifies them, incremental module/template compilation after module-boundary incremental builds exist and parallel nested-template folding after a separate profiling-backed plan.]
+            [: Deferred items are source-span-backed template body text, a per-template parse cache, a formatter-output cache, dev-mode source-hash keyed template reuse, dependency-aware invalidation for imported consts, formatter algorithm rewrites if profiling justifies them, incremental module/template compilation after module-boundary incremental builds exist and parallel nested-template folding after a separate profiling-backed plan.]
         ]
 
         [data:

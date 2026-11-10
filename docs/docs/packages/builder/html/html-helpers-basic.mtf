@@ -5,11 +5,11 @@ strings during compilation and produce no runtime code.
 
 `.mtf` files see `@html` constants without a dependency clause. This fixed prelude always comes from the official `packages/html` package set. You can use the helpers directly:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     -- docs/intro.mtf
     [p: A paragraph.]
 
-    [codeblock, $code("moth"): value = 42]
+    [codeblock, $code "moth": value = 42]
 ]
 
 The prelude supplies HTML helpers only. Your own values need a qualified reference to a helper file. A template head names the helper path and one selected value, for example `@settings` then `site_name`. Root files never expose their declarations to a template.
@@ -18,7 +18,7 @@ The prelude supplies HTML helpers only. Your own values need a qualified referen
 
 `.moth` files need an explicit dependency clause to use `@html` symbols.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @html table, th, td
 ]
 
@@ -33,12 +33,12 @@ The prelude supplies HTML helpers only. Your own values need a qualified referen
 
 ### `$code` code blocks
 
-`$code` highlights a balanced template body as a code block. The HTML builder
-registers it as a style directive, executed through the frontend formatter
-registry.
+`$code` highlights a balanced template body as a code block. The compiler owns
+the directive and its formatter, so it works under every builder, not only the
+HTML one.
 
-[codeblock, $code("moth"):
-    [codeblock, $code("moth"): value = 42]
+[codeblock, $code "moth":
+    [codeblock, $code "moth": value = 42]
 ]
 
 Supported aliases: `text`/`txt`, `html`, `markdown`/`md`, `toml`, `json`,
@@ -53,7 +53,7 @@ profiles share the same palette.
 
 `@html` wraps `@web/canvas` drawing into a `Canvas` struct with methods.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @html Canvas, get_canvas
 
     canvas ~= get_canvas("my-canvas")!

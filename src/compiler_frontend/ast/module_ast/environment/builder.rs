@@ -1127,7 +1127,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     value_mode: ValueMode::ImmutableReference,
                     value: DeclarationValue::Shell(DeclarationShell::Struct),
                     binding_span: None,
-                    config_qualifier: None,
+                    config_contract: None,
                 },
             )?;
         }
@@ -1307,7 +1307,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 PreparedFailure::Infrastructure(errors)
             }
             Err(ExpressionParseError::Diagnostic(_))
-            | Err(ExpressionParseError::TemplateDirectiveEmptyArguments(_))
             | Err(ExpressionParseError::NonConstantReferenceInConstant(_))
             | Err(ExpressionParseError::NumericDeferral(_)) => {
                 crate::compiler_bug!(

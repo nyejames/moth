@@ -14,7 +14,7 @@ People often shrink that chain to a slogan: "the compiler turns code into machin
 
 The project tree enters as authored text:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
 compiler_walkthrough/
 ├── config.moth
 ├── @entry.moth

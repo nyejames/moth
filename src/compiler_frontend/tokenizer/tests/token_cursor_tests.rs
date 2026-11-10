@@ -190,7 +190,7 @@ fn segmented_cursor_matches_contiguous_and_respects_segment_boundaries() {
 }
 
 #[test]
-fn segmented_cursor_marks_only_the_first_token_after_a_source_gap() {
+fn segmented_cursor_maps_tokens_across_a_source_gap() {
     let source = SourceId::COMPILATION_ROOT;
     let mut builder = TestSourceTokensBuilder::new(source);
     builder
@@ -225,29 +225,13 @@ fn segmented_cursor_marks_only_the_first_token_after_a_source_gap() {
         .token_sequence(sequence)
         .expect("registered sequence should resolve");
     let mut cursor = view.cursor().expect("segmented cursor should construct");
-    assert!(
-        !cursor.is_at_segment_start(),
-        "the first range has no preceding range"
-    );
     assert_eq!(cursor.advance().unwrap().index().raw(), 0);
-    assert!(!cursor.is_at_segment_start());
     assert_eq!(cursor.advance().unwrap().index().raw(), 1);
     assert_eq!(cursor.position().raw(), 3);
-    assert!(
-        cursor.is_at_segment_start(),
-        "a gapped range should mark its first token"
-    );
     assert_eq!(cursor.advance().unwrap().index().raw(), 3);
-    assert!(
-        !cursor.is_at_segment_start(),
-        "the marker must clear after advancing within a gapped range"
-    );
     assert_eq!(cursor.advance().unwrap().index().raw(), 4);
-    assert!(
-        !cursor.is_at_segment_start(),
-        "later tokens in a gapped range are ordinary adjacent tokens"
-    );
 }
+
 #[test]
 fn segmented_cursor_many_gaps_matches_flattened_reference() {
     let source = SourceId::COMPILATION_ROOT;

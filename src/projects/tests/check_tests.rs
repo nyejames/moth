@@ -244,7 +244,7 @@ fn check_reports_missing_config_input_from_unselected_source() {
     fs::write(source_root.join("@entry.moth"), "value = 1\n").expect("should write page source");
     fs::write(
         source_root.join("orphan.moth"),
-        "required_value #Config of Bool\n",
+        "$config\nrequired_value #Bool\n",
     )
     .expect("should write unselected config source");
 

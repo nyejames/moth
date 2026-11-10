@@ -44,7 +44,7 @@ fn raw_directive_preserves_authored_whitespace() {
 
 #[test]
 fn escape_html_escapes_body_html_sensitive_characters() {
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let rendered = folded_template_output_with_style_directives(
         "[$escape_html:\n    <b>Hello & \"World\" 'x'</b>\n]",
         &style_directives,
@@ -58,7 +58,7 @@ fn escape_html_escapes_body_html_sensitive_characters() {
 fn escape_html_preserves_runtime_head_references() {
     let mut expression_builder = AstExpressionBuilder::new().unwrap();
     let mut const_values = ConstValueStore::default();
-    let style_directives = html_project_test_style_directives();
+    let style_directives = frontend_test_style_directives();
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();

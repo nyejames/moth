@@ -39,7 +39,7 @@ One structural predicate is shared deliberately. `Place::overlap` in `problem/pl
 
 The oracle owns one dynamic generation identity space and three state types:
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     struct DynamicOriginId(u32);
 
     enum RuntimePlaceState {
@@ -750,7 +750,7 @@ Repetition compares the whole dynamic state, so the cycle reason is reported onl
 
 The outcome vocabulary, kept from the plan:
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     enum OracleOutcome {
         CompleteSafe {
             executions: usize,
@@ -854,7 +854,7 @@ oracle boundary too.
 
 Use this command against a real Moth source file:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     cargo run --features boracle -- boracle ./tmp/example.moth --dump differential
 ]
 
@@ -874,7 +874,7 @@ The CLI prints it to stdout. No report file is written to a final path.
 
 The generator declares its shape space with these constants:
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     const DIGIT_COUNT: u32 = 11;
     const DIGIT_RADIX: u32 = 2;
     pub(crate) const GENERATED_SHAPE_COUNT: u32 = 1_u32 << DIGIT_COUNT;
@@ -908,7 +908,7 @@ rather than masquerading as new default shapes.
 
 The reducer runs `ReductionPass::ALL` in this declared order:
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     ReductionPass::RemoveUnreachableBlocks,
     ReductionPass::RemoveEvents,
     ReductionPass::RemoveUsesAndLoans,
@@ -934,7 +934,7 @@ must match exactly:
 
 Those three fields have these types:
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     comparison_classes: Box<[OracleComparisonClass]>,
     static_accepts: Box<[bool]>,
     oracle_outcome: OracleOutcomeIdentity,
@@ -961,7 +961,7 @@ identity gate.
 `reduce_problem` rejects a zero bound at entry through `validate_bounds`, before it filters or
 executes candidates. The returned `InfrastructureFailure` uses the exact message for the zero component:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     Boracle reducer requires max_executions to be greater than zero
     Boracle reducer requires max_executed_events to be greater than zero
     Boracle reducer requires max_block_entries to be greater than zero
@@ -1015,7 +1015,7 @@ yet. A disagreement remains the only thing that would.
 The campaign runs about 61 seconds, which is far longer than the whole default gate, so it lives
 in its own opt-in lane behind the `boracle_campaign` feature:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     just boracle-campaign
 ]
 
@@ -1034,7 +1034,7 @@ The campaign stays out of it deliberately, and the feature-lane registry owns th
 
 The module layout is:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     src/compiler_frontend/analysis/borrow_checker/boracle/
     |-- differential.rs
     |-- reducer.rs

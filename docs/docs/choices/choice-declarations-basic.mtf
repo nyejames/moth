@@ -1,6 +1,6 @@
 A choice defines a value that can take one of several named forms.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Status ::
         Ready,
         Waiting,

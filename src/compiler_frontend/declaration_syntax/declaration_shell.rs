@@ -18,10 +18,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
-use crate::compiler_frontend::declaration_syntax::build_config_contract::{
-    BuildConfigQualifierSyntax, parse_build_config_qualifier,
-    starts_build_config_qualifier_at_cursor,
-};
+use crate::compiler_frontend::declaration_syntax::build_config_contract::BuildConfigContractSyntax;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     TypeAnnotationContext, parse_type_annotation_cursor, token_can_start_type_specification,
 };
@@ -51,8 +48,8 @@ type DeclarationShellResult<T> = Result<T, HeaderParseFailure>;
 pub struct DeclarationSyntax {
     pub binding_mode: BindingMode,
     pub type_annotation: ParsedTypeRef,
-    /// Syntax-only `#Config of T` metadata retained for header consumers and AST resolution.
-    pub(crate) config_qualifier: Option<BuildConfigQualifierSyntax>,
+    /// Contract syntax retained for an attached `$config` source modifier.
+    pub(crate) config_contract: Option<BuildConfigContractSyntax>,
     /// Canonical source-owned initializer range. `None` means the declaration has no initializer.
     pub initializer_range: Option<TokenRange>,
     pub initializer_references: Vec<InitializerReference>,
@@ -107,9 +104,6 @@ impl DeclarationSyntax {
     /// Source-qualified ranges are identity independent and therefore remain unchanged.
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
         self.type_annotation.remap_string_ids(remap);
-        if let Some(qualifier) = &mut self.config_qualifier {
-            qualifier.remap_string_ids(remap);
-        }
         for reference in &mut self.initializer_references {
             reference.remap_string_ids(remap);
         }
@@ -121,50 +115,18 @@ pub fn parse_declaration_syntax(
     name: StringId,
     string_table: &mut StringTable,
     span_builder: &mut crate::compiler_frontend::source::ExtendedSpanBuilder,
+    config_input_span: Option<SourceSpan>,
 ) -> DeclarationShellResult<DeclarationSyntax> {
-    let target_span = current_source_span(token_stream);
-    let config_qualifier = if starts_build_config_qualifier_at_cursor(token_stream, string_table)
-        .map_err(HeaderParseFailure::Infrastructure)?
-    {
-        Some(parse_build_config_qualifier(
-            token_stream,
-            string_table,
-            Some(span_builder),
-        )?)
-    } else {
-        None
-    };
+    let target = parse_binding_target_syntax(name, token_stream, string_table, span_builder)?;
+    // The marker lets its target omit an initializer. Only an explicitly typed compile-time
+    // binding becomes a contract; any other marked shape is a wrong-target attachment that the
+    // header walk reports after this shell is parsed.
+    let config_contract_target = config_input_span.filter(|_| {
+        target.binding_mode == BindingMode::CompileTimeConstant
+            && !matches!(&target.type_annotation, ParsedTypeRef::Inferred)
+    });
 
-    let target = if let Some(qualifier) = &config_qualifier {
-        BindingTargetSyntax {
-            name,
-            binding_mode: BindingMode::CompileTimeConstant,
-            type_annotation: qualifier.type_annotation.clone(),
-            span: qualifier.qualifier_span.or(target_span),
-        }
-    } else {
-        parse_binding_target_syntax(name, token_stream, string_table, span_builder)?
-    };
-
-    // A source `#Config` declaration may omit its initializer so a later provider-independent
-    // resolution barrier can supply the required input.
-    if config_qualifier.is_some()
-        && matches!(
-            token_stream.current_tag(),
-            TokenTag::COMMA | TokenTag::EOF | TokenTag::NEWLINE
-        )
-    {
-        return Ok(DeclarationSyntax {
-            binding_mode: target.binding_mode,
-            type_annotation: target.type_annotation,
-            config_qualifier,
-            initializer_range: None,
-            initializer_references: Vec::new(),
-            span: target.span,
-        });
-    }
-
-    match token_stream.current_tag() {
+    let (initializer_range, initializer_references) = match token_stream.current_tag() {
         TokenTag::ASSIGN => {
             if let Some(diagnostic) = separator_equality_mistake(
                 token_stream.current_token_ref(),
@@ -174,6 +136,35 @@ pub fn parse_declaration_syntax(
                 return Err(diagnostic.into());
             }
             token_stream.advance();
+            let result = {
+                let canonical_cursor = token_stream.canonical_cursor_mut();
+                let result = collect_declaration_initializer_range(canonical_cursor, string_table);
+                token_stream.refresh();
+                result
+            };
+            let (range, references) = result.map_err(|failure| match failure {
+                TokenScanFailure::Diagnostic(diagnostic) => {
+                    HeaderParseFailure::Diagnostic(diagnostic)
+                }
+                TokenScanFailure::Infrastructure(error) => {
+                    HeaderParseFailure::Infrastructure(error)
+                }
+            })?;
+            if range.is_empty() {
+                return Err(HeaderParseFailure::Diagnostic(
+                    names_declarations::invalid_declaration(
+                        InvalidDeclarationReason::MissingInitializerExpression,
+                        Some(name),
+                        current_source_span(token_stream),
+                    ),
+                ));
+            }
+            (Some(range), references)
+        }
+        // A `$config`-marked binding may omit its initializer: contract resolution supplies either
+        // the external input or the declared absence.
+        TokenTag::COMMA | TokenTag::EOF | TokenTag::NEWLINE if config_input_span.is_some() => {
+            (None, Vec::new())
         }
         TokenTag::COMMA | TokenTag::EOF | TokenTag::NEWLINE => {
             return Err(HeaderParseFailure::Diagnostic(
@@ -206,33 +197,16 @@ pub fn parse_declaration_syntax(
                 ),
             ));
         }
-    }
-
-    let (initializer_range, initializer_references) = {
-        let canonical_cursor = token_stream.canonical_cursor_mut();
-        let result = collect_declaration_initializer_range(canonical_cursor, string_table);
-        token_stream.refresh();
-        result.map_err(|failure| match failure {
-            TokenScanFailure::Diagnostic(diagnostic) => HeaderParseFailure::Diagnostic(diagnostic),
-            TokenScanFailure::Infrastructure(error) => HeaderParseFailure::Infrastructure(error),
-        })?
     };
 
-    if initializer_range.is_empty() {
-        return Err(HeaderParseFailure::Diagnostic(
-            names_declarations::invalid_declaration(
-                InvalidDeclarationReason::MissingInitializerExpression,
-                Some(name),
-                current_source_span(token_stream),
-            ),
-        ));
-    }
+    let config_contract =
+        config_contract_target.map(|marker_span| BuildConfigContractSyntax { marker_span });
 
     Ok(DeclarationSyntax {
         binding_mode: target.binding_mode,
         type_annotation: target.type_annotation,
-        config_qualifier,
-        initializer_range: Some(initializer_range),
+        config_contract,
+        initializer_range,
         initializer_references,
         span: target.span,
     })

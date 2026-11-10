@@ -1,6 +1,6 @@
 Patterns can match exact values, ranges, choice variants or option shapes.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if status is:
         Ready => io.line("ready")
         Waiting => io.line("waiting")
@@ -11,7 +11,7 @@ A choice match does not need `else =>` when every variant is covered.
 
 Payload variants expose their fields through captures:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if response is:
         Success => io.line("done")
         Err(message) => io.line(message)
@@ -22,13 +22,13 @@ The capture name must match the field name.
 
 Use `as` when the local name should be different:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Err(message as error_text) => io.line(error_text)
 ]
 
 Options have two complete shapes: absent and present.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if maybe_name is:
         none => io.line("missing")
         |name| => io.line(name)

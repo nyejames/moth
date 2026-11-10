@@ -1,17 +1,25 @@
-//! Template style formatter/validator modules.
+//! Frontend-owned template style formatter/validator modules.
 //!
 //! WHAT:
-//! - Groups frontend-owned formatter implementations used by core and generic built-in directives.
+//! - Groups the compiler frontend's formatter implementations, including the `$html`, `$css`,
+//!   `$escape_html` and `$code` formatters registered as built-in directives.
 //!
 //! WHY:
-//! - Keeps frontend style logic modular and separate from generic template parsing.
+//! - The frontend owns every template formatter and makes them available under every builder.
+//!   Keeping the implementations here separates formatter logic from generic template parsing
+//!   while giving one owner for directive ownership and execution.
 
 // -------------------------
 //  Public Modules
 // -------------------------
 
+pub(crate) mod code;
+pub(crate) mod css;
+pub(crate) mod escape_html;
+pub(crate) mod html;
 pub(crate) mod markdown;
 pub(crate) mod raw;
+pub(crate) mod validation;
 pub(crate) mod whitespace;
 
 #[cfg(test)]

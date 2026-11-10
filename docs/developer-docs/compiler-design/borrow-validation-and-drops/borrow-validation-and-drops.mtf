@@ -119,7 +119,7 @@ A candidate is valid only when the proof also preserves any dependent temporary 
 
 Optional inferred transfer follows one conservative path:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     unproven transfer
         -> borrow remains
         -> statically proven region retains responsibility
@@ -228,7 +228,7 @@ The alpha checker may expose advisory drop candidates to the current Wasm scaffo
 
 The final lowering path consumes explicit validated artefacts. Borrow facts remain validated context:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     borrow and last-use facts
         -> validated lifetime topology
         -> backend-neutral memory requirements

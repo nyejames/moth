@@ -20,12 +20,12 @@ support.
 A complete document contains exactly one record. Its outer parentheses may be
 omitted. These forms have the same record meaning:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     title = "Strategy",
     window = (width = 1280, height = 720),
 ]
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     (
         title = "Strategy",
         window = (width = 1280, height = 720),
@@ -95,7 +95,7 @@ The empty forms never change kind:
 - A map schema rejects `{}` and a collection schema rejects `{=}`. Schema
   context never changes a container's kind.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     scores = {"Priya" = 10, "Rob" = 12},
     empty_scores = {=},
     empty_items = {},
@@ -210,7 +210,7 @@ receivers. Source expression context never permits MON arithmetic.
 
 Both nested record forms are accepted:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     size = (width = 1280, height = 720),
     size = Size(width = 1280, height = 720),
 ]
@@ -231,7 +231,7 @@ payload shapes do not make unrelated nominal types interchangeable.
 Choice data uses Moth-shaped variants rather than an invented tagged-record
 mapping:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     widgets = {
         ::Text("Gold"),
         Widget::Progress(value = 0.4),

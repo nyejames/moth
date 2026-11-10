@@ -6,7 +6,7 @@ spelling and direction; proof-tier semantics and implementation remain open.
 A checked proof-budget block would let the compiler spend much more time trying
 to prove difficult code safe:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     $checked:
         -- code that needs unusually deep analysis
     ;

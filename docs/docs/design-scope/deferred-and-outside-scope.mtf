@@ -126,8 +126,9 @@ primitive-backed nominal wrapper enters the language.
 
 Compiler-known general directives are an accepted direction. Arbitrary user
 macros and builder directives that transform AST remain outside scope.
-Constrained builder directives may provide templates, metadata and
-configuration, but cannot rewrite language semantics.
+Constrained builder capabilities may provide schemas, packages, source
+capabilities and output policies, but cannot add directive names or rewrite
+language semantics.
 
 Ordinary `$config` values and static `if` cannot remove declarations or
 dependencies. Future `$feature` may select source structure before graph and
@@ -138,7 +139,7 @@ config-declaration grammar belongs to the future plan.
 
 Physical backend, target, OS and architecture queries remain outside scope.
 Builder identity is not physical target identity. Excluded regions will not
-resolve contained builder directives against the active surface, but still need
+resolve contained directives against the active surface, but still need
 a sound structural boundary. Directive-controlled template lexing must be
 addressed before arbitrary unknown syntax can be skipped.
 

@@ -3,7 +3,7 @@ same file.
 
 Its first parameter is named `this`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Vector2 = |
         x F64,
         y F64,

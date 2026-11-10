@@ -2,7 +2,7 @@
 
 Suppose the page mistypes the dependency selection:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
 @greeting great
 ]
 

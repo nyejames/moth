@@ -455,7 +455,7 @@ pub struct ScopeShared {
     pub(crate) known_infallible_functions: Option<Rc<RefCell<FxHashSet<PathId>>>>,
     pub(crate) source_file_scope: Option<PathId>,
     pub(crate) source_build_config_values: Option<Arc<ResolvedBuildConfigMap>>,
-    /// Names of source `#Config` contracts declared by this module.
+    /// Names of source `$config` contracts declared by this module.
     pub(crate) source_build_config_contract_names: Option<Arc<FxHashSet<BuildInputName>>>,
     /// Optional compiler-owned grouped-project config resolver for constant-header folding.
     pub(crate) config_resolution: Option<Rc<ConfigResolutionServices>>,

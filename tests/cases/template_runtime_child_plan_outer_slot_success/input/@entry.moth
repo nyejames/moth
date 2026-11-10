@@ -9,7 +9,7 @@ identity |value String| -> String:
     return value
 ;
 
-inner #= [$before = [$html:<b style="[$slot tone]">], $after = [$html:</b>]:[$slot]]
+inner #= [$before [$html:<b style="[$slot tone]">], $after [$html:</b>]:[$slot]]
 
 rows = [:$html:<div data-label="[$slot label]">[inner:[$in tone:inner-red][:[identity("body")]]]</div>[$slot]]
 

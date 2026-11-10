@@ -21,7 +21,7 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Ongoing in parallel 
 
-- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md). Partially complete and underway. **ACTIVE IN PARALLEL.**
+- [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md). Partially complete and underway. **PAUSED**
 
 - [Boracle research](./plans/boracle-next-research-plans) and [production borrow checker development](./plans/production-borrow-checker.md): Research precision and migration wait for the merged typed-expression/native-result capabilities and explicit activation. Current status, accepted implementation decisions and borrow/Boracle issues live in the production companion. **ONGOING, RESEARCH RESTART PAUSED**
 
@@ -29,7 +29,7 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Sequenced work
 
-- [General compiler directives](./plans/general-directives-plan.md) **NEXT**
+- todo plan: `$export` directive to replace current `export:` block.
 
 - [Const functions and shared compile-time evaluation](./plans/const-functions-plan.md) - explicit `#|...|` compile-time-only callable contracts, a unified constant/function dependency graph, bounded shared function evaluation, cross-module const body publication, release-only ordinary function folding and low-priority budget suggestions. The first active slice is the Stage 4 ownership and early-HIR feasibility gate.
 
@@ -41,9 +41,11 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 - TODO plan: Struct layout directives. Consume the delivered numeric scalar sizes, natural alignment and element strides. Define compiler-owned $layout contracts, permitted field types, aggregate alignment/padding, target validation and semantic/interface fingerprints before physical memory-layout decisions and Wasm struct lowering consume them. The nominal type model stays unchanged.
 
-- Collector free memory implementation (see below for notes). Should have its initial implementation here before Wasm backend implementation.
+- [Memory management implementation](../developer-docs/memory-management) - Collector free memory implementation (see below for more notes). Should have its initial implementation here before Wasm backend implementation.
 
-- [HTML mixed JavaScript and Wasm backend](./plans/html_project_backend_wasm_final_implementation_plan.md)
+- Large review and tidy up of the core documentation. Reduction of bloat, repetition and redundant or verbose terminology to tighten them up. This is sequenced here due to a large number of features having been implemented that are close to the final feature set for Moth, and its worth trimming the compiler design and build system design docs down particularly around that hardened design state. The Cheatsheet and advanced user facing language docs also need attention.
+
+- [HTML mixed JavaScript and Wasm backend](./plans/html_project_backend_wasm_final_implementation_plan.md) **Plan needs major review before activation** - it is very stale and old compared to current compiler state and a full review of the wasm backend implementation and final direction needs to be done before this activates. 
 
 - TODO plan: Structural feature selection and config-only feature declarations. Add pre-graph $feature source selection, declared feature names, builder identity predicates and selection-aware graph/interface/cache validation. Promote this to a hard prerequisite before enabling multi-builder projects.
 
@@ -163,7 +165,7 @@ SQL profiles on one shared role palette. The current baseline includes:
 - plain Moth template bodies around highlighted heads and interpolations
 
 Future formats should extend the single `CodeLanguage` owner in
-`src/projects/html_project/styles/code.rs`, including its aliases, comment syntax,
+`src/compiler_frontend/ast/templates/styles/code.rs`, including its aliases, comment syntax,
 keyword/type rules, supported-values diagnostic and focused formatter tests.
 
 Suggested extension order:
@@ -196,15 +198,6 @@ performs semantic symbol resolution or syntax diagnostics.
 - private const and config follow-ups: temporary-local reduction and constant propagation
 - `moth new` follow-ups: non-interactive `--default`, template selection, project type aliases, richer scaffold presets and optional package or dev tooling setup
 - benchmarking and profiling deferred tooling: CI performance gates, public dashboards, source-backed package HIR caching, ownership, drop and ABI specialisation, JS minification and tree shaking, package-manager caching, broad Criterion benchmark suites, tracing and allocation profiler integrations, and tracked-summary counter expansion
-
-## Directive follow-ups
-
-- `$async:` is the accepted future compiler-owned async block spelling. Semantics remain on the public Async draft and Wiring channel contract, not this TODO list.
-- `$checked:` is the accepted future compiler-owned proof-budget block spelling. Proof-tier algorithms remain an open proposal under Design Scope and the checked-proof-budget research pages.
-- `$export` block support is undecided. The queued export-directive TODO owns the later choice of prefix-only versus optional block form. Keep one final visibility syntax.
-- A possible separate custom-metadata directive remains open design. `$project` stays a closed predefined-field signature in the meantime.
-
-Permanent owners: `docs/docs/directives/directives.mtf`, `docs/docs/design-scope/`, `docs/docs/async/@entry.moth`, and the checked-proof-budget references. Do not treat these bullets as implementation-plan files.
 
 ## Wiring follow-ups
 
@@ -287,8 +280,8 @@ This work remains deferred and does not reactivate paused programmes.
 
 ## Possible additional constraints
 
-The constraints foundation deliberately implements only `$fast_math`, `$safe_math` and
-`$infallible`. It need not grow into a general effects system. Future restrictions require
+The constraints foundation will implement only `$fast_math`, `$safe_math` and
+`$infallible`; none is implemented yet. It need not grow into a general effects system. Future restrictions require
 their own design and cost justification, not reserved syntax or speculative compiler machinery.
 
 Explore `$pure`, `$no_io` and possibly `$no_wrap` later. A no-wrap restriction could allow fast

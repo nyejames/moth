@@ -1,4 +1,4 @@
-list #= [$before = [:<span class="once">], $after = [:</span>]:
+list #= [$before [:<span class="once">], $after [:</span>]:
     [$slot]
 ]
 

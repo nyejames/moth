@@ -12,7 +12,7 @@ AST owns that static work.
 
 `greeting_prefix` begins as source:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
 greeting_prefix #= "Hello"
 ]
 
@@ -20,13 +20,13 @@ After checking and folding, it becomes a **backend-neutral compile-time value**.
 
 Constants are compile-time declarations and metadata, not runtime top-level statements. Const records may group fully folded struct or anonymous-record constants as field-access-only compile-time data. They are not runtime values to pass around.
 
-Current typed build configuration values and source `#Config` primitives (the Alpha spelling) enter as ordinary folded constants. Accepted `$config` contracts resolve into the same backend-neutral constant lane; they create no runtime wrapper type and no special HIR node category.
+`$config` build-input declarations enter as ordinary folded constants. They resolve into the backend-neutral constant lane; they create no runtime wrapper type and no special HIR node category.
 
 ## Static Bool control flow
 
 Stage 4 owns the boundary:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
 fully checked authored AST
 -> constant evaluation
 -> known Bool branch selection

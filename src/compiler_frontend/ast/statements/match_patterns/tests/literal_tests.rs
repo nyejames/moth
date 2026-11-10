@@ -417,7 +417,6 @@ fn assert_invalid_number_literal_reason(
 ) {
     let diagnostic = match error {
         ExpressionParseError::Diagnostic(diagnostic)
-        | ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic)
         | ExpressionParseError::NonConstantReferenceInConstant(diagnostic) => diagnostic,
         ExpressionParseError::Infrastructure(error) => {
             panic!("literal pattern infrastructure failure is not a source diagnostic: {error:?}")
@@ -443,7 +442,6 @@ fn assert_invalid_number_literal_reason(
 fn assert_match_pattern_type_mismatch(error: ExpressionParseError) {
     let diagnostic = match error {
         ExpressionParseError::Diagnostic(diagnostic)
-        | ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic)
         | ExpressionParseError::NonConstantReferenceInConstant(diagnostic) => diagnostic,
         ExpressionParseError::Infrastructure(error) => {
             panic!("literal pattern mismatch must be a source diagnostic: {error:?}")

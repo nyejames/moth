@@ -4,7 +4,7 @@ shows the accepted shape: named fields, a nested record, a map, an explicit
 or decimal scales explicitly and retains lossless Integer and Decimal data.
 MON has no source inference or unconstrained numeric default.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     format_version = 1,
     title = "Strategy",
     window = (width = 1280, height = 720),
@@ -21,7 +21,7 @@ reference.
 
 Strictness is the point. These inputs fail:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     -- INVALID: MON never evaluates expressions, including foldable ones
     width = 1280 + 0,
 

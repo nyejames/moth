@@ -6,18 +6,18 @@
 
 Exported compile-time constants from `@html` are visible flat inside `.mtf` files without an explicit dependency clause. This is the standard HTML template prelude.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- docs/intro.mtf
     [p: A paragraph built from the @html p helper.]
 
-    [codeblock, $code("moth"): value = 42]
+    [codeblock, $code "moth": value = 42]
 ]
 
 The prelude is compiler policy, not builder configuration. A builder that enables `.mtf` sources must register the official `@html` package set at its built-in package root. `@html` is reserved for that package set, so a custom source package cannot take the name or substitute different constants. Source packages that contain `.mtf` files order after `@html`.
 
 A `.moth` file that needs specific `@html` symbols binds them explicitly:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @html table, th, td
 ]
 
@@ -180,9 +180,8 @@ These constants produce CSS property values for style slots.
 ### The `$code` directive
 
 `$code` renders a balanced template body as an HTML code block with lexical
-highlighting. The HTML builder registers it as a style directive; the frontend
-formatter registry executes the hook, so it is available in HTML-builder
-projects.
+highlighting. The compiler owns the directive and its formatter, so it is
+available under every builder, not only the HTML one.
 
 Supported aliases:
 
@@ -202,8 +201,8 @@ Supported aliases:
 - `rust` / `rs`
 - `bash` / `sh` / `shell`
 
-[codeblock, $code("moth"):
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
+[codeblock, $code "moth":
     render |name String| -> String:
         return ["Hello, ", name]
     ;
@@ -248,7 +247,7 @@ nested templates. A body is not re-highlighted by the directive that will format
 
 The `Canvas` struct provides receiver methods for drawing: `set_fill_style`, `fill_rect`, `clear_rect` and `stroke_rect`. Each takes `~Canvas` (mutable receiver) and delegates to the underlying `@web/canvas` free functions.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @html Canvas, get_canvas
 
     canvas ~= get_canvas("my-canvas")!

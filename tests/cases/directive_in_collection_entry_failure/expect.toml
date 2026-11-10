@@ -1,0 +1,22 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0021", "MOTH-SYNTAX-0021"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+occurrence = 1
+reason = "invalid_template_directive.wrong_target"
+path = "input/@entry.moth"
+line = 2
+column = 16
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0021"
+occurrence = 2
+reason = "invalid_template_directive.wrong_target"
+path = "input/@entry.moth"
+line = 7
+column = 9

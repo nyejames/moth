@@ -4,7 +4,7 @@ Copies in Moth are always explicit. Ordinary assignment doesn't clone data.
 
 Use `copy` when you need a separate version of a value:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     original ~= {1, 2, 3}
     independent ~= copy original
 
@@ -15,7 +15,7 @@ Use `copy` when you need a separate version of a value:
 Without `copy`, names can refer to the same collection. A mutable declaration
 from an eligible mutable place creates a write-through alias:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     original ~= 10
     writer ~= original
     ~writer = 20  -- also changes original
@@ -25,7 +25,7 @@ from an eligible mutable place creates a write-through alias:
 
 To change an existing value, use `~` before the value name:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     items ~= {1, 2, 3}
     ~items.push(4)
 ]
@@ -37,7 +37,7 @@ The `~` tells the compiler you want exclusive access to mutate the value.
 Pass a fresh value or an independent copy to a mutable parameter without `~`.
 An existing mutable place needs the marker, including in a named argument:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     update(~items)
     update(value = ~items)
     update(copy items)

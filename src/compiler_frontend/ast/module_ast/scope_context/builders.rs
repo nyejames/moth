@@ -221,7 +221,7 @@ impl ScopeContext {
         Rc::make_mut(&mut self.shared).frozen_identity_handle = frozen_identity_handle;
         self
     }
-    /// Attach immutable source `#Config` values for constant-header materialization.
+    /// Attach immutable source `$config` values for constant-header materialization.
     pub(crate) fn with_source_build_config_values(
         mut self,
         values: Arc<ResolvedBuildConfigMap>,
@@ -229,7 +229,7 @@ impl ScopeContext {
         Rc::make_mut(&mut self.shared).source_build_config_values = Some(values);
         self
     }
-    /// Attach this module's own source `#Config` contract names.
+    /// Attach this module's own source `$config` contract names.
     pub(crate) fn with_source_build_config_contract_names(
         mut self,
         names: Arc<FxHashSet<BuildInputName>>,

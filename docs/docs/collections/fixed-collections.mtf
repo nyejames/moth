@@ -1,6 +1,6 @@
 `{N T}` is a fixed collection of `T` with maximum length `N`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     values {3 I32} = {10, 20}
 
     capacity #I32 = 4
@@ -13,7 +13,7 @@ Fixed capacity is semantic type identity.
 
 These are distinct incompatible types:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     {I32}
     {4 I32}
     {8 I32}
@@ -41,7 +41,7 @@ nested expressions are invalid there.
 
 Name the calculation first:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     base #I32 = 4
     larger_capacity #I32 = base + 2
     values ~{larger_capacity String} = {}
@@ -52,7 +52,7 @@ Name the calculation first:
 A binding declaration with an immediate non-empty literal may infer the element
 type:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     capacity #I32 = 4
     labels {capacity} = {"alpha", "beta"}
 ]
@@ -86,7 +86,7 @@ Fixed `push` appends after the last stored item. When the collection has a
 free slot, the push succeeds and returns no value. When the collection is
 full, the push fails, so a fixed push needs `catch` or postfix `!`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     values ~{3 I32} = {10, 20}
 
     ~values.push(30) catch:

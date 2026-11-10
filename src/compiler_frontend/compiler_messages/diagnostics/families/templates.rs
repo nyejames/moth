@@ -17,9 +17,10 @@ use crate::compiler_frontend::compiler_messages::diagnostics::schema::{
     FamilyRow, diagnostic_family,
 };
 use crate::compiler_frontend::compiler_messages::render::{
-    render_invalid_style_directive, render_invalid_template_directive,
-    render_invalid_template_slot, render_invalid_template_structure, render_malformed_css_template,
+    render_invalid_template_directive, render_invalid_template_slot,
+    render_invalid_template_structure, render_malformed_css_template,
     render_malformed_html_template, render_unescaped_implicit_template_close,
+    render_unknown_directive,
 };
 use crate::compiler_frontend::compiler_messages::{
     CssTemplateWarning, DiagnosticSeverity, HtmlTemplateWarning, InvalidTemplateDirectiveReason,
@@ -29,7 +30,15 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::style_directives::DirectiveOccurrence;
 use crate::compiler_frontend::symbols::string_interning::StringId;
+
+unit_code! {
+    impl DirectiveOccurrence {
+        TemplateHead = 1,
+        Source = 2,
+    }
+}
 
 unit_code! {
     impl SourceFileKind {
@@ -61,11 +70,14 @@ unit_code! {
         InvalidArgument = 3,
         DirectiveNotAllowedHere = 4,
         UnexpectedArguments = 5,
-        EmptyArguments = 6,
         InvalidSlotTarget = 7,
         InvalidInsertTarget = 8,
         InvalidChildDecoratorValue = 9,
         InvalidSlotDefault = 10,
+        WrongContext = 11,
+        DuplicateModifier = 12,
+        DanglingModifier = 13,
+        WrongTarget = 14,
     }
 }
 
@@ -87,7 +99,6 @@ impl InvalidTemplateDirectiveCode {
             InvalidTemplateDirectiveReason::UnexpectedArguments => {
                 (Self::UnexpectedArguments, None)
             }
-            InvalidTemplateDirectiveReason::EmptyArguments => (Self::EmptyArguments, None),
             InvalidTemplateDirectiveReason::InvalidSlotTarget => (Self::InvalidSlotTarget, None),
             InvalidTemplateDirectiveReason::InvalidSlotDefault => (Self::InvalidSlotDefault, None),
             InvalidTemplateDirectiveReason::InvalidInsertTarget => {
@@ -96,6 +107,10 @@ impl InvalidTemplateDirectiveCode {
             InvalidTemplateDirectiveReason::InvalidChildDecoratorValue => {
                 (Self::InvalidChildDecoratorValue, None)
             }
+            InvalidTemplateDirectiveReason::WrongContext => (Self::WrongContext, None),
+            InvalidTemplateDirectiveReason::DuplicateModifier => (Self::DuplicateModifier, None),
+            InvalidTemplateDirectiveReason::DanglingModifier => (Self::DanglingModifier, None),
+            InvalidTemplateDirectiveReason::WrongTarget => (Self::WrongTarget, None),
         }
     }
 
@@ -108,13 +123,16 @@ impl InvalidTemplateDirectiveCode {
                 InvalidTemplateDirectiveReason::DirectiveNotAllowedHere
             }
             Self::UnexpectedArguments => InvalidTemplateDirectiveReason::UnexpectedArguments,
-            Self::EmptyArguments => InvalidTemplateDirectiveReason::EmptyArguments,
             Self::InvalidSlotTarget => InvalidTemplateDirectiveReason::InvalidSlotTarget,
             Self::InvalidSlotDefault => InvalidTemplateDirectiveReason::InvalidSlotDefault,
             Self::InvalidInsertTarget => InvalidTemplateDirectiveReason::InvalidInsertTarget,
             Self::InvalidChildDecoratorValue => {
                 InvalidTemplateDirectiveReason::InvalidChildDecoratorValue
             }
+            Self::WrongContext => InvalidTemplateDirectiveReason::WrongContext,
+            Self::DuplicateModifier => InvalidTemplateDirectiveReason::DuplicateModifier,
+            Self::DanglingModifier => InvalidTemplateDirectiveReason::DanglingModifier,
+            Self::WrongTarget => InvalidTemplateDirectiveReason::WrongTarget,
         }
     }
 }
@@ -634,21 +652,23 @@ diagnostic_family! {
 }
 
 diagnostic_family! {
-    INVALID_STYLE_DIRECTIVE {
+    UNKNOWN_DIRECTIVE {
         internal: 1010,
         stable: "MOTH-SYNTAX-0010",
         category: DiagnosticCategory::Syntax,
         severity: DiagnosticSeverity::Error,
-        title: "Invalid style directive",
+        title: "Unknown directive",
         facts: [
             directive_name: StringFact,
             supported_directives: StringFact,
+            occurrence: UnitFact<DirectiveOccurrence>,
         ],
         labels: [],
         extra: None,
-        ctor: generated invalid_style_directive,
-        view: InvalidStyleDirectiveView,
-        render: render_invalid_style_directive,
+        ctor: generated unknown_directive,
+        reason_key: occurrence,
+        view: UnknownDirectiveView,
+        render: render_unknown_directive,
     }
 }
 
@@ -664,7 +684,7 @@ diagnostic_family! {
             reason: UnitFact<InvalidTemplateDirectiveCode>,
             detail: OptStringFact,
         ],
-        labels: [],
+        labels: [LabelMessageCode::EARLIER_DIRECTIVE],
         extra: None,
         ctor: manual,
         reason_key: reason,
@@ -862,7 +882,7 @@ pub(crate) fn builder_root_slot_not_registered(
 pub(in crate::compiler_frontend::compiler_messages::diagnostics) const FAMILIES: &[FamilyRow] = &[
     MALFORMED_CSS_TEMPLATE,
     MALFORMED_HTML_TEMPLATE,
-    INVALID_STYLE_DIRECTIVE,
+    UNKNOWN_DIRECTIVE,
     INVALID_TEMPLATE_DIRECTIVE,
     INVALID_TEMPLATE_STRUCTURE,
     UNESCAPED_IMPLICIT_TEMPLATE_CLOSE,

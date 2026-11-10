@@ -10,17 +10,18 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::diagnostics::draft::DiagnosticDraft;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
+use crate::compiler_frontend::compiler_messages::diagnostics::labels::LabelDraftMessage;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{CapacityResource, CompilerStage};
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, ExportOutsideModuleRootReason, InvalidConfigReason,
-    InvalidDeclarationReason, InvalidReceiverDeclarationReason,
+    ExportOutsideModuleRootReason, InvalidDeclarationReason, InvalidReceiverDeclarationReason,
+    InvalidTemplateDirectiveReason,
 };
-use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker_in_cursor;
+use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::headers::file_dependency_clauses::{
     parse_and_record_private_dependency, parse_and_record_public_dependency,
 };
@@ -30,7 +31,6 @@ use crate::compiler_frontend::headers::header_dispatch::{
     HeaderDeclarationMetadata, create_header,
 };
 use crate::compiler_frontend::headers::ordering_hints::collect_content_source_ordering_hints;
-use crate::compiler_frontend::headers::parse_file_headers::find_config_qualifier_marker_in_declaration_defaults;
 use crate::compiler_frontend::headers::qualified_references::{
     collect_qualified_references, push_header_expression_ranges,
 };
@@ -38,6 +38,7 @@ use crate::compiler_frontend::headers::start_capture::capture_runtime_template_r
 use crate::compiler_frontend::headers::symbol_collection::is_receiver_method_candidate;
 use crate::compiler_frontend::headers::top_level_classifier::{
     HeaderFileItem, classify_current_item_ref, classify_export_block_item_ref,
+    classify_symbol_statement_start_at_source,
     starts_duplicate_top_level_header_declaration_at_source,
     starts_specialized_generic_conformance_declaration_at_source,
     starts_trait_declaration_after_must_at_source, statement_boundary_at_source,
@@ -51,6 +52,7 @@ use crate::compiler_frontend::paths::file_references::classify_prepared_file_ref
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::source_packages::root_file::file_name_is_config_file;
+use crate::compiler_frontend::style_directives::SourceModifierTarget;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -106,6 +108,79 @@ fn record_start_body_token_from_source(
 // Top-level declarations are same-module-visible by default; cross-module public visibility
 // comes only from the root `export:` block. Non-declaration statements are collected into the
 // compiler-owned entry header for that file.
+
+/// One source modifier that has been read and is waiting for its eligible declaration.
+///
+/// WHAT: the directive's name, its authored span and the eligible target its spec declares.
+/// WHY: a source modifier occupies its own line, so the header walk must retain the pending
+///      attachment across line-break tokens while it looks for the next top-level declaration.
+#[derive(Clone, Copy)]
+struct PendingSourceModifier {
+    name_id: StringId,
+    span: SourceSpan,
+    target: SourceModifierTarget,
+}
+
+/// Build the diagnostic for a source modifier that never reached an eligible declaration.
+fn dangling_source_modifier(name_id: StringId, span: SourceSpan) -> DiagnosticDraft {
+    templates::invalid_template_directive(
+        Some(name_id),
+        InvalidTemplateDirectiveReason::DanglingModifier,
+        Some(span),
+    )
+}
+
+/// Resolve one recognised directive token to its source-modifier target.
+///
+/// WHY: the lexer only emits registered names, and the header walk resolves the name's declared
+///      context before parsing attachment. A known template-only name stays a typed
+///      wrong-context error instead of falling into unknown-name or generic syntax diagnostics.
+fn source_modifier_target_for(
+    context: &HeaderParseContext<'_>,
+    name_id: StringId,
+    span: SourceSpan,
+) -> FileParserResult<SourceModifierTarget> {
+    let directive_name = context.string_table.resolve(name_id);
+    let Some(spec) = context.style_directives.find(directive_name) else {
+        return Err(diagnostic_failure(templates::invalid_template_directive(
+            Some(name_id),
+            InvalidTemplateDirectiveReason::UnknownDirective,
+            Some(span),
+        )));
+    };
+
+    match spec.kind {
+        crate::compiler_frontend::style_directives::StyleDirectiveKind::SourceModifier(target)
+            if spec.contexts.allows_source_modifier() =>
+        {
+            Ok(target)
+        }
+        _ => Err(diagnostic_failure(templates::invalid_template_directive(
+            Some(name_id),
+            InvalidTemplateDirectiveReason::WrongContext,
+            Some(span),
+        ))),
+    }
+}
+
+/// Whether one declaration header accepts the source modifier's declared target.
+///
+/// WHAT: compares the built declaration kind against the spec's eligible-target contract.
+/// WHY: attachment is a syntactic fact, but recording the modifier on an ineligible declaration
+///      would hand a later stage a target its contract cannot accept.
+fn header_accepts_source_modifier(kind: &HeaderKind, target: SourceModifierTarget) -> bool {
+    match target {
+        SourceModifierTarget::ExplicitTypedCompileTimeBinding => {
+            matches!(
+                kind,
+                HeaderKind::Constant { declaration }
+                    if declaration.binding_mode.is_compile_time()
+                        && !matches!(declaration.type_annotation, ParsedTypeRef::Inferred)
+            )
+        }
+    }
+}
+
 pub(super) fn parse_headers_in_file(
     cursor: &mut TokenCursor<'_>,
     file_id: SourceId,
@@ -145,6 +220,8 @@ fn parse_headers_in_file_inner(
     // Declaration handlers consume their own balanced regions. Track only runtime tokens left
     // to this walk, where a physical newline inside an expression is not a file boundary.
     let mut runtime_nesting = NestingDepth::default();
+    // One source-modifier run awaiting the next eligible top-level declaration.
+    let mut pending_source_modifier: Option<PendingSourceModifier> = None;
     loop {
         let current_index = cursor.position();
         let current = cursor.current().ok_or_else(|| {
@@ -188,6 +265,46 @@ fn parse_headers_in_file_inner(
         let at_boundary = statement_boundary_at_source(canonical, current_index.index());
         let current_span = current.source_span();
         let item = classify_current_item_ref(current, follower, at_boundary);
+
+        if let Some(pending) = pending_source_modifier {
+            if current_tag == TokenTag::NEWLINE {
+                // A blank physical line ends the modifier's run; indentation and comment-only
+                // lines keep it because comments produce no token and do not add a line break
+                // to this token's run.
+                if current.shape().newline_has_blank_line() {
+                    return Err(diagnostic_failure(dangling_source_modifier(
+                        pending.name_id,
+                        pending.span,
+                    )));
+                }
+                cursor.advance();
+                continue;
+            }
+
+            match &item {
+                // The next directive is handled by its own arm so a repeated modifier can cite
+                // both authored spans.
+                HeaderFileItem::StyleDirective(_) => {}
+                HeaderFileItem::Symbol(_) => {
+                    if !classify_symbol_statement_start_at_source(canonical, follower_index)
+                        .starts_header_declaration()
+                    {
+                        return Err(diagnostic_failure(dangling_source_modifier(
+                            pending.name_id,
+                            pending.span,
+                        )));
+                    }
+                }
+                HeaderFileItem::BuiltinTypeConformanceTarget(_) => {}
+                _ => {
+                    return Err(diagnostic_failure(dangling_source_modifier(
+                        pending.name_id,
+                        pending.span,
+                    )));
+                }
+            }
+        }
+
         cursor.advance();
         match item {
             HeaderFileItem::Symbol(name_id) => {
@@ -201,6 +318,7 @@ fn parse_headers_in_file_inner(
                         name_id,
                         current_span,
                         current_index,
+                        source_modifier: pending_source_modifier.take(),
                     },
                 )?;
             }
@@ -217,6 +335,7 @@ fn parse_headers_in_file_inner(
                         name_id,
                         current_span,
                         current_index,
+                        source_modifier: pending_source_modifier.take(),
                     },
                 )?;
             }
@@ -256,6 +375,49 @@ fn parse_headers_in_file_inner(
 
             HeaderFileItem::RuntimeTemplate => {
                 handle_runtime_template_item(cursor, file_id, state, context)?;
+            }
+
+            HeaderFileItem::StyleDirective(name_id) => {
+                // Resolve the incoming name before comparing it with a pending modifier. A
+                // template-only directive that follows `$config` is a wrong-context use, not a
+                // duplicate of the pending source modifier.
+                let target = source_modifier_target_for(context, name_id, current_span)?;
+
+                if let Some(previous) = pending_source_modifier {
+                    return Err(diagnostic_failure(
+                        templates::invalid_template_directive(
+                            Some(name_id),
+                            InvalidTemplateDirectiveReason::DuplicateModifier,
+                            Some(current_span),
+                        )
+                        .with_label(
+                            Some(previous.span),
+                            Some(LabelDraftMessage::EarlierDirective),
+                        ),
+                    ));
+                }
+
+                // A source modifier owns its line. Any token before the line break is an operand
+                // or the removed call spelling, which every current source modifier rejects.
+                let following = cursor.current().ok_or_else(|| {
+                    HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
+                        CompilerStage::HeaderParsing,
+                        "source-directive cursor exceeded its source token owner",
+                    ))
+                })?;
+                if !matches!(following.tag(), TokenTag::NEWLINE | TokenTag::EOF) {
+                    return Err(diagnostic_failure(templates::invalid_template_directive(
+                        Some(name_id),
+                        InvalidTemplateDirectiveReason::UnexpectedArguments,
+                        Some(following.source_span()),
+                    )));
+                }
+
+                pending_source_modifier = Some(PendingSourceModifier {
+                    name_id,
+                    span: current_span,
+                    target,
+                });
             }
 
             HeaderFileItem::Eof => {
@@ -510,6 +672,7 @@ fn parse_export_block_item(
                 name_id,
                 current_span,
                 current_index,
+                source_modifier: None,
             },
         ),
 
@@ -525,6 +688,7 @@ fn parse_export_block_item(
                     name_id,
                     current_span,
                     current_index,
+                    source_modifier: None,
                 },
             )
         }
@@ -558,6 +722,14 @@ fn parse_export_block_item(
             ))
         }
 
+        HeaderFileItem::StyleDirective(name_id) => {
+            Err(diagnostic_failure(templates::invalid_template_directive(
+                Some(name_id),
+                InvalidTemplateDirectiveReason::DirectiveNotAllowedHere,
+                Some(current_span),
+            )))
+        }
+
         HeaderFileItem::ReservedTraitSyntax => {
             if let Some(keyword) = reserved_trait_keyword_for_tag(current_tag) {
                 return Err(diagnostic_failure(reserved_trait_keyword_error(
@@ -583,6 +755,8 @@ struct SymbolItemRequest {
     name_id: StringId,
     current_span: SourceSpan,
     current_index: TokenIndex,
+    /// A pending source modifier that attaches to this declaration.
+    source_modifier: Option<PendingSourceModifier>,
 }
 
 fn handle_symbol_item(
@@ -598,6 +772,7 @@ fn handle_symbol_item(
         name_id,
         current_span,
         current_index,
+        source_modifier,
     } = symbol;
     let Some(follower_index) = TokenIndex::try_from_index(cursor.position().index()) else {
         crate::compiler_bug!(
@@ -687,10 +862,21 @@ fn handle_symbol_item(
             declaration_span: current_span,
             declaration_order: current_index.index(),
             export_mode,
+            config_input_span: source_modifier.map(|modifier| modifier.span),
         },
         &mut build_context,
         context.span_builder,
     )?;
+
+    if let Some(modifier) = source_modifier
+        && !header_accepts_source_modifier(&header.kind, modifier.target)
+    {
+        return Err(diagnostic_failure(templates::invalid_template_directive(
+            Some(modifier.name_id),
+            InvalidTemplateDirectiveReason::WrongTarget,
+            Some(modifier.span),
+        )));
+    }
 
     if export_mode.is_public()
         && matches!(
@@ -814,83 +1000,14 @@ fn handle_runtime_template_item(
     Ok(())
 }
 
-/// Scan the captured start-body ranges of a reached foreign root for a misplaced `#Config`
-/// marker.
-///
-/// A reached foreign facade keeps its declaration surface and rejects its top-level body, so
-/// no later AST stage can report a config marker authored there. Preparation scans the rejected
-/// ranges first so the specific config diagnostic wins over the generic root-runtime rejection.
-fn find_config_marker_in_start_ranges(
-    state: &HeaderFileParseState,
-    canonical: &SourceTokens,
-    file_id: SourceId,
-    string_table: &StringTable,
-    span_builder: &crate::compiler_frontend::source::ExtendedSpanBuilder,
-) -> Result<Option<(SourceSpan, bool)>, InfrastructureFailure> {
-    if canonical.source() != file_id {
-        return Err(InfrastructureFailure::internal(
-            CompilerStage::HeaderParsing,
-            "start-body config scan source token owner does not match its file identity",
-        ));
-    }
-    for range in &state.start_body_ranges {
-        if range.source() != file_id {
-            return Err(InfrastructureFailure::internal(
-                CompilerStage::HeaderParsing,
-                "start-body config scan encountered a foreign source range",
-            ));
-        }
-        let cursor = canonical.cursor(*range).map_err(|error| {
-            InfrastructureFailure::internal(
-                CompilerStage::HeaderParsing,
-                format!("start-body config scan exceeded source token bounds: {error:?}"),
-            )
-        })?;
-        if let Some(marker) =
-            find_config_qualifier_marker_in_cursor(cursor, string_table, span_builder)
-        {
-            return Ok(Some(marker));
-        }
-    }
-    Ok(None)
-}
 pub(super) fn finish_file_output(
     owner: SourceTokenOwner,
     source_file: crate::compiler_frontend::symbols::path_interner::PathId,
     path_syntax: Arc<PathSyntaxTable>,
-    file_id: SourceId,
     end_index: TokenIndex,
     context: &mut HeaderParseContext<'_>,
     state: HeaderFileParseState,
 ) -> Result<FileFrontendPrepareOutput, FileFrontendPrepareFailure> {
-    let canonical = owner.tokens_ref();
-    if matches!(context.file_role, FileRole::ReachedApiFacadeRoot(_))
-        && let Some((marker_span, adjacent)) = find_config_marker_in_start_ranges(
-            &state,
-            canonical,
-            file_id,
-            context.string_table,
-            context.span_builder,
-        )
-        .map_err(FileFrontendPrepareFailure::Infrastructure)?
-    {
-        let diagnostic = if adjacent {
-            project_config::invalid_config_reason(
-                None,
-                InvalidConfigReason::ConfigQualifierInvalidPlacement,
-                Some(marker_span),
-            )
-        } else {
-            token_lexical::common_syntax_mistake(
-                CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
-                Some(marker_span),
-            )
-        };
-        return Err(FileFrontendPrepareFailure::Diagnosed(
-            state.into_error(diagnostic),
-        ));
-    }
-
     if let Some(diagnostic) = dependency_generic_parameter_collision(
         &state.headers,
         &state.file_dependency_clauses,
@@ -960,7 +1077,7 @@ pub(super) fn finish_file_output(
 ///       declaration shell that folds before body emission.
 /// WHY: classification is the single graph-activity fact source, and the content ordering edges
 ///       must come from the same prepared rows at token level rather than an expression parse.
-///       Source `#Config` initializers are excluded until their primitive-only contract validation
+///       Source `$config` initializers are excluded until their primitive-only contract validation
 ///       succeeds, so an invalid default cannot affect Stage 0 source discovery.
 fn attach_structural_file_facts(
     output: &mut FileFrontendPrepareOutput,
@@ -1021,50 +1138,17 @@ fn attach_structural_file_facts(
             )
             .into());
         }
-        let declaration_owned_marker = matches!(
-            &header.kind,
-            HeaderKind::Constant { declaration } if declaration.config_qualifier.is_some()
-        );
-        let body_cursor =
-            if let Some(sequence) = header.token_sequence {
-                let view = canonical.token_sequence(sequence).map_err(|error| {
-                    InfrastructureFailure::internal(
-                        CompilerStage::HeaderParsing,
-                        format!("retained header token sequence could not be resolved: {error:?}"),
-                    )
-                })?;
-                Some(view.cursor().map_err(|error| {
-                InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
-                    "retained header token sequence cursor could not be constructed: {error:?}"
-                ))
-            })?)
-            } else if header.tokens.is_empty() {
-                None
-            } else {
-                Some(canonical.cursor(header.tokens).map_err(|error| {
-                    InfrastructureFailure::internal(
-                        CompilerStage::HeaderParsing,
-                        format!("retained header token range could not be resolved: {error:?}"),
-                    )
-                })?)
-            };
-        let body_has_config_marker = body_cursor
-            .is_some_and(|cursor| source_cursor_contains_config_marker(cursor, string_table));
-        let declaration_has_config_marker = if declaration_owned_marker {
-            false
-        } else {
-            find_config_qualifier_marker_in_declaration_defaults(header, canonical, string_table)?
-                .is_some()
-        };
         if is_config_file {
             // Config syntax paths are values, not qualified-reference occurrences.
             continue;
         }
-        let config_owned =
-            declaration_owned_marker || body_has_config_marker || declaration_has_config_marker;
+        let config_owned = matches!(
+            &header.kind,
+            HeaderKind::Constant { declaration } if declaration.config_contract.is_some()
+        );
         if !config_owned {
             // Ordinary expression context: recognize `PATH SYMBOL` occurrences in this header's
-            // body, initializer and defaults. Configuration-qualified bodies stay out of scope.
+            // body, initializer and defaults.
             push_header_expression_ranges(
                 header,
                 header_index,
@@ -1074,9 +1158,10 @@ fn attach_structural_file_facts(
             continue;
         }
 
-        // Config-qualified shells are not expression syntax, but their path rows are still
-        // consumed so the file-reference classifier never treats them as file values. Reuse the
-        // same range collection the expression lane uses instead of repeating its header match.
+        // A contract's declared type is contract vocabulary, but its initializer and body path
+        // rows are still consumed so the file-reference classifier never treats them as file
+        // values. Reuse the same range collection the expression lane uses instead of repeating
+        // its header match.
         let mut config_owned_ranges = Vec::new();
         push_header_expression_ranges(header, header_index, canonical, &mut config_owned_ranges)?;
         for expression_range in config_owned_ranges {
@@ -1128,39 +1213,6 @@ fn attach_structural_file_facts(
         path_fork,
     )
     .map_err(HeaderParseFailure::Infrastructure)
-}
-
-/// Scan one retained source-owned range for a `#Config` marker without materializing it.
-///
-/// The structural fact pass only needs marker presence; placement and adjacency diagnostics
-/// remain on the span-aware `find_config_qualifier_marker_in_cursor` header paths.
-fn source_cursor_contains_config_marker(
-    mut cursor: TokenCursor<'_>,
-    string_table: &StringTable,
-) -> bool {
-    let Some(mut previous) = cursor.advance() else {
-        return false;
-    };
-    loop {
-        let crosses_segment = cursor.is_at_segment_start();
-        let Some(current) = cursor.advance() else {
-            break;
-        };
-        if !crosses_segment
-            && previous.tag() == crate::compiler_frontend::tokenizer::tokens::TokenTag::HASH
-            && current.tag() == crate::compiler_frontend::tokenizer::tokens::TokenTag::SYMBOL
-            && current
-                .string_id()
-                .is_some_and(|name| string_table.resolve(name) == "Config")
-        {
-            return true;
-        }
-        if current.is_eof() {
-            break;
-        }
-        previous = current;
-    }
-    false
 }
 
 /// Validate generic parameter names against every dependency binding retained by this file.

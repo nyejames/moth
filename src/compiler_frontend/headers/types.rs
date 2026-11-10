@@ -30,6 +30,7 @@ use crate::compiler_frontend::paths::file_references::PreparedFileReferenceTable
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::semantic_identity::{ModuleRootFiles, ModuleRootRole};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencySelectionId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
@@ -160,7 +161,7 @@ pub struct PreparedHeaderSyntax {
     /// Logical source paths remain in module symbol metadata and filesystem identities remain in
     /// `SourceDatabase`; neither is reconstructed from retained token ranges.
     pub(crate) source_token_owners: SourceTokenOwners,
-    /// Provider-independent source `#Config` declarations, normalized from top-level constant
+    /// Provider-independent source `$config` contracts, normalized from marked top-level constant
     /// shells before any provider binding or AST expression resolution.
     ///
     /// These shells intentionally do not belong to `ModuleSymbols`, public exports, dependency
@@ -207,7 +208,7 @@ pub struct BoundModuleHeaders {
     pub headers: Vec<Header>,
     /// The same one-owner canonical sources carried through provider binding for AST body adapters.
     pub(crate) source_token_owners: SourceTokenOwners,
-    /// Provider-independent source `#Config` declarations retained through binding for the
+    /// Provider-independent source `$config` contracts retained through binding for the
     /// module-local static-value projection in AST construction.
     pub source_build_config_contracts: Vec<SourceBuildConfigContract>,
     pub top_level_const_fragments: Vec<TopLevelConstFragment>,
@@ -710,7 +711,7 @@ impl HeaderKind {
     ///
     /// WHAT: returns `true` exactly for authored declaration kinds that are exportable after
     /// syntax-only filtering: functions, structs, choices, transparent type aliases, ordinary
-    /// compile-time constants and trait declarations. Source `#Config` constants are contract
+    /// compile-time constants and trait declarations. `$config`-marked constants are contract
     /// shells rather than exported declarations and therefore return `false`.
     /// WHY: the header, AST public-surface and semantic-origin stages all need the same
     /// declaration-kind and contract-shell gate to decide which headers may become public export
@@ -722,7 +723,7 @@ impl HeaderKind {
             | HeaderKind::Choice { .. }
             | HeaderKind::TypeAlias { .. }
             | HeaderKind::Trait { .. } => true,
-            HeaderKind::Constant { declaration } => declaration.config_qualifier.is_none(),
+            HeaderKind::Constant { declaration } => declaration.config_contract.is_none(),
             HeaderKind::StartFunction
             | HeaderKind::ConstTemplate { .. }
             | HeaderKind::TraitConformance { .. }
@@ -1121,9 +1122,8 @@ fn rebind_declaration_source_identity(declaration: &mut DeclarationSyntax, file_
         .initializer_range
         .map(|range| range.rebind_source(file_id));
     rebind_parsed_type_ref_source_identity(&mut declaration.type_annotation, file_id);
-    if let Some(qualifier) = &mut declaration.config_qualifier {
-        rebind_source_span(&mut qualifier.qualifier_span, file_id);
-        rebind_parsed_type_ref_source_identity(&mut qualifier.type_annotation, file_id);
+    if let Some(contract) = &mut declaration.config_contract {
+        contract.marker_span = SourceSpan::new(file_id, contract.marker_span.local());
     }
     // Initializer references are scanned from this declaration's source-owned initializer tokens;
     // preserve each local range while moving it into the finalized source identity.
@@ -2623,9 +2623,8 @@ fn validate_declaration_syntax(
 ) -> Result<(), InfrastructureFailure> {
     validate_source_span(declaration.span, file_id, "declaration shell")?;
     validate_parsed_type_ref(&declaration.type_annotation, file_id)?;
-    if let Some(qualifier) = &declaration.config_qualifier {
-        validate_source_span(qualifier.qualifier_span, file_id, "config qualifier")?;
-        validate_parsed_type_ref(&qualifier.type_annotation, file_id)?;
+    if let Some(contract) = &declaration.config_contract {
+        validate_source_span(Some(contract.marker_span), file_id, "config marker")?;
     }
     validate_source_range(
         declaration.initializer_range,
@@ -2769,6 +2768,13 @@ impl FileFrontendPrepareError {
 pub(super) struct HeaderParseContext<'a> {
     pub file_role: FileRole,
     pub is_config_file: bool,
+    /// Frontend directive definitions used for source-directive recognition.
+    ///
+    /// WHAT: the immutable built-in registry the tokenizer also uses; registry clones share their
+    ///       spec storage.
+    /// WHY: the header walk checks each recognised `$name` token's eligible context without a
+    ///      second directive-name list.
+    pub style_directives: StyleDirectiveRegistry,
     pub string_table: &'a mut StringTable,
     pub path_fork: &'a mut PathInternerFork,
     pub span_builder: &'a mut ExtendedSpanBuilder,

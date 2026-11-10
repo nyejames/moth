@@ -1,12 +1,12 @@
 Call a function by writing its name followed by arguments.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     result = double(21)
 ]
 
 Arguments are positional by default. They can also name their parameter:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     label = describe(subject = "apple")
 ]
 
@@ -14,7 +14,7 @@ Positional arguments come first. Named arguments come afterward.
 
 Mutable parameters need explicit access to an existing mutable value:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count ~= 1
     increment(~count)
     increment(value = ~count)
@@ -23,7 +23,7 @@ Mutable parameters need explicit access to an existing mutable value:
 For a named argument, put `~` before the value. Fresh values and independent
 copies don't use `~`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     increment(1)
     increment(copy count)
 ]

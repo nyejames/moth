@@ -390,7 +390,7 @@ fn declaration_lanes_reject_missing_semantic_records() {
                 span: None,
                 binding_mode: BindingMode::default(),
                 type_annotation: ParsedTypeRef::Inferred,
-                config_qualifier: None,
+                config_contract: None,
                 initializer_range: None,
                 initializer_references: Vec::new(),
             },
@@ -650,7 +650,7 @@ fn declaration(path: &PathId, type_id: TypeId) -> Declaration {
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     }
 }
 

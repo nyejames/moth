@@ -5,7 +5,7 @@
 //!       intermediate value a stage produced rather than only the final outcome.
 //! WHY:  stage-local unit tests can all pass while the handoff between two stages breaks. These
 //!       tests own the handoffs: source identity surviving into diagnostics, declaration ordering
-//!       surviving into lowering, and project-owned style directives reaching header parsing.
+//!       surviving into lowering, and frontend-owned style directives reaching header parsing.
 //!
 //! This harness is NOT the canonical module compilation sequence and must not be read as a model
 //! of it. [`module_compilation::compile_module`](crate::compiler_frontend::module_compilation)
@@ -89,16 +89,13 @@ use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan,
 };
 use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
-use crate::compiler_frontend::style_directives::{
-    StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
-    TemplateHeadCompatibility,
-};
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
     ast_first_error_type_display, tokenize_source_for_test,
 };
-use crate::compiler_frontend::tokenizer::tokens::{TemplateBodyMode, TokenizerEntryMode};
+use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend, FrontendBuildProfile};
 use crate::projects::settings::Config;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
@@ -1069,25 +1066,11 @@ fn frontend_diagnostics_preserve_source_spans() {
 
 #[test]
 fn html_style_directive_available_during_header_parsing() {
-    // WHAT: project-owned style directives (like $html) must be visible during header-owned
-    // parsing paths — specifically constant header expression parsing and template parsing.
+    // WHAT: the frontend-owned `$html` formatter must be visible during header-owned parsing
+    // paths — specifically constant header expression parsing and template parsing.
     // This covers the docs-build failure mode where [$html: ...] templates in exported
     // constants could not be parsed because the directive registry was incomplete.
-    let html_directive = StyleDirectiveSpec::handler(
-        "html",
-        TemplateBodyMode::Normal,
-        TemplateHeadCompatibility::fully_compatible_meaningful(),
-        StyleDirectiveHandlerSpec::new(
-            None,
-            StyleDirectiveEffects {
-                style_id: Some("html"),
-                ..StyleDirectiveEffects::default()
-            },
-            None,
-        ),
-    );
-    let directives = StyleDirectiveRegistry::merged(&[html_directive])
-        .expect("merged directive registry should build");
+    let directives = StyleDirectiveRegistry::built_ins();
 
     let mut project = FrontendProject::new(
         &[("src/@entry.moth", "head #= [$html: <div>Hello</div>]\n")],

@@ -4,7 +4,7 @@ A Moth project is the directory you select. That directory is both the build roo
 
 Config uses two ordinary named records:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     project #= (
         name = "my_site",
     )
@@ -31,7 +31,7 @@ Each source folder can contain `@mod.moth`, `@package.moth` and `@entry.moth`. A
 
 A page appears for every folder with `@entry.moth`. The file can be empty, hold only metadata or hold runtime code:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     #[$in title:Welcome]
 ]
 

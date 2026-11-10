@@ -1,6 +1,6 @@
 A hash map stores values under keys.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     scores ~= {
         "Priya" = 10,
         "Rob" = 12,
@@ -9,7 +9,7 @@ A hash map stores values under keys.
 
 Use `get` to read a value:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     score = scores.get("Priya") catch:
         then 0
     ;
@@ -17,7 +17,7 @@ Use `get` to read a value:
 
 Use `set` and `remove` through a mutable receiver:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     ~scores.set("Emmy", 7) catch:
     ;
 
@@ -30,7 +30,7 @@ Maps remember insertion order.
 
 `length` is a property:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count = scores.length
 ]
 

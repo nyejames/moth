@@ -89,7 +89,7 @@ A `T?` receiver casts to inner `T`, then applies ordinary optional wrapping.
 The recovery handler also produces `T`; it cannot use `then none`. Optional
 source values never unwrap automatically.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     parse_optional |text String| -> I32?:
         value I32 = cast text catch:
             return none

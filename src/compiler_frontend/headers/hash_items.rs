@@ -8,13 +8,8 @@ use crate::compiler_frontend::compiler_errors::InfrastructureFailure;
 use crate::compiler_frontend::compiler_messages::CompilerStage;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::generics_traits_api;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
-use crate::compiler_frontend::compiler_messages::{CommonSyntaxMistakeReason, InvalidConfigReason};
-use crate::compiler_frontend::declaration_syntax::build_config_contract::find_config_qualifier_marker_in_cursor;
 use crate::compiler_frontend::headers::const_fragments::create_top_level_const_template;
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
-use crate::compiler_frontend::headers::start_capture::capture_runtime_template_range_from_cursor;
 use crate::compiler_frontend::headers::types::{
     FileRole, HeaderBuildContext, HeaderParseContext, HeaderParseFailure, TopLevelConstFragment,
 };
@@ -99,14 +94,7 @@ pub(super) fn handle_hash_item(
                 return Err(generics_traits_api::invalid_export_target(Some(current_span)).into());
             }
 
-            handle_top_level_const_template(
-                cursor,
-                file_id,
-                source_file,
-                state,
-                context,
-                current_span,
-            )
+            handle_top_level_const_template(cursor, source_file, state, context, current_span)
         }
 
         _ => record_start_body_token_from_source(state, cursor, file_id, current_index),
@@ -115,7 +103,6 @@ pub(super) fn handle_hash_item(
 
 fn handle_top_level_const_template(
     cursor: &mut TokenCursor<'_>,
-    file_id: crate::compiler_frontend::source::SourceId,
     source_file: PathId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
@@ -132,48 +119,8 @@ fn handle_top_level_const_template(
     }
 
     // A reached foreign facade keeps its declaration surface but owns no start or root runtime
-    // in this compilation. Reject its const templates, after validating that no misplaced
-    // `#Config` marker hides inside the range so the specific config diagnostic wins.
+    // in this compilation.
     if matches!(context.file_role, FileRole::ReachedApiFacadeRoot(_)) {
-        let opening = cursor.current().ok_or_else(|| {
-            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
-                CompilerStage::HeaderParsing,
-                "runtime template opening exceeded its source token owner",
-            ))
-        })?;
-        cursor.advance();
-        let range = capture_runtime_template_range_from_cursor(
-            opening,
-            cursor,
-            file_id,
-            context.string_table,
-        )?;
-        let canonical = cursor.source_tokens();
-        let cursor = canonical.cursor(range).map_err(|error| {
-            HeaderParseFailure::Infrastructure(InfrastructureFailure::internal(
-                CompilerStage::HeaderParsing,
-                format!("reached facade template range exceeds its source token owner: {error:?}",),
-            ))
-        })?;
-        if let Some((marker_span, adjacent)) = find_config_qualifier_marker_in_cursor(
-            cursor,
-            context.string_table,
-            context.span_builder,
-        ) {
-            let diagnostic = if adjacent {
-                project_config::invalid_config_reason(
-                    None,
-                    InvalidConfigReason::ConfigQualifierInvalidPlacement,
-                    Some(marker_span),
-                )
-            } else {
-                token_lexical::common_syntax_mistake(
-                    CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
-                    Some(marker_span),
-                )
-            };
-            return Err(diagnostic.into());
-        }
         return Err(
             names_declarations::invalid_top_level_runtime_statement(Some(current_span)).into(),
         );

@@ -1,6 +1,6 @@
 A struct declares a nominal runtime type with named fields.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Vector2 = |
         x F64,
         y F64 = 0.0,
@@ -25,7 +25,7 @@ values against those exact types; later uses never retag a field. Generic
 nominal shapes follow the bounded numeric-origin rules in
 @../generics (Generics).
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Point = |
         x I32,
         y I32,
@@ -43,7 +43,7 @@ nominal shapes follow the bounded numeric-origin rules in
 
 Struct declarations may introduce declaration-site generic parameters.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Box type A = |
         value A,
     |

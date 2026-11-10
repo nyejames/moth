@@ -2,7 +2,7 @@ When you match a choice with a payload, the field name becomes the local variabl
 
 ### Rename one payload field
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Response ::
         Err | message String |,
         Success | value String |,
@@ -20,7 +20,7 @@ When you match a choice with a payload, the field name becomes the local variabl
 
 ### Why rename?
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     message = "outer message"
 
     if response is:

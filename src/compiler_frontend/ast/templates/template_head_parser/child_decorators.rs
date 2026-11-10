@@ -1,9 +1,9 @@
-//! `$before = ..` and `$after = ..` directive parsing and wrapper normalization.
+//! `$before ..` and `$after ..` directive parsing and wrapper normalization.
 //!
 //! WHAT:
-//! - Parses the assignment form, validates compile-time values and rejects
-//!   default or positional slot occurrences inside the assigned value.
-//! - Normalizes each assigned value into a durable wrapper reference and
+//! - Parses the single bare operand, validates compile-time values and rejects
+//!   default or positional slot occurrences inside that value.
+//! - Normalizes each operand into a durable wrapper reference and
 //!   composes both edges into one direct-child wrapper per owning template.
 //!
 //! WHY:
@@ -12,7 +12,8 @@
 //!   validation here leaves generic style-handler parsing and the TIR wrapper
 //!   machinery unchanged.
 
-use super::head_parser::parse_head_expression;
+use super::directive_args::{reject_attached_call_parenthesis, reject_extra_directive_operand};
+use super::head_parser::parse_directive_operand_expression;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::const_values::store::{
@@ -61,10 +62,10 @@ pub(super) enum ChildDecoratorEdge {
 /// Typed result for the connected child-decorator directive family.
 type ChildDecoratorResult<T> = Result<T, TemplateError>;
 
-/// Parses `$before = <compile-time value>` or `$after = <compile-time value>`.
+/// Parses `$before <compile-time value>` or `$after <compile-time value>`.
 ///
 /// The caller leaves the cursor on the directive token. A successful return
-/// leaves it after the assigned expression so the head parser continues with
+/// leaves it after the operand expression so the head parser continues with
 /// the separator or body boundary, like a slot declaration.
 #[allow(
     clippy::too_many_arguments,
@@ -85,16 +86,19 @@ pub(super) fn parse_child_decorator_directive(
     // The directive owns its token: the head parser only advances after a
     // directive that did not consume trailing tokens itself.
     token_stream.advance();
-    token_stream.skip_newlines();
 
-    if token_stream.current_tag() != TokenTag::ASSIGN {
+    // A decorator never owns a call-argument list; an attached `(` is the removed `$name(...)`
+    // shape, while a whitespace-separated parenthesised value stays an ordinary operand.
+    reject_attached_call_parenthesis(directive_name, token_stream)?;
+
+    // The assignment spelling was removed with no compatibility mode: `$before` and `$after` take
+    // one bare operand on the directive's line.
+    if token_stream.current_tag() == TokenTag::ASSIGN {
         return Err(invalid_child_decorator_value(
             directive_name,
             Some(token_stream.current_span()),
         ));
     }
-    token_stream.advance();
-    token_stream.skip_newlines();
 
     if child_decorator_value_ends_at(token_stream.current_tag()) {
         return Err(invalid_child_decorator_value(
@@ -104,14 +108,15 @@ pub(super) fn parse_child_decorator_directive(
     }
 
     let assignment_span = Some(token_stream.current_span());
-    let expression = match parse_head_expression(
+    // The decorator owns one operand, so its value parse stops before a second operand and this
+    // boundary reports the extra value with the directive name and span.
+    let expression = match parse_directive_operand_expression(
         token_stream,
         context,
         type_interner,
         expression_builder,
         const_values,
         &ValueMode::ImmutableOwned,
-        false,
         string_table,
         path_fork,
     ) {
@@ -126,6 +131,7 @@ pub(super) fn parse_child_decorator_directive(
         }
         Err(error) => return Err(error.into()),
     };
+    reject_extra_directive_operand(directive_name, token_stream)?;
 
     let expression_view = expression_builder.view(expression)?;
     let value_span = expression_view.span().or(assignment_span);

@@ -80,7 +80,7 @@ pub(super) fn restore_generated_local_alias(
         value_mode: ValueMode::ImmutableReference,
         value: DeclarationValue::Shell(DeclarationShell::TypeAlias),
         binding_span: None,
-        config_qualifier: None,
+        config_contract: None,
     };
     let lookups = Rc::get_mut(&mut environment.lookups)
         .expect("AST environment lookups are uniquely owned before materialisation");

@@ -6,7 +6,7 @@ This page describes entry metadata and its relationship to project configuration
 
 `@project` is an explicitly bound immutable namespace. The named `project` configuration record supplies its predefined fields. The grouped-record configuration remains the accepted model.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @project version
 
     footer #= [: v[version]]
@@ -20,7 +20,7 @@ See @#project-config (Project configuration) for the field contract and @#build-
 
 Use direct top-level const inserts in `@entry.moth` to supply document metadata:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     #[$in title:Moth]
     #[$in description:A language for creating reliable software]
     #[$in lang:en]

@@ -3,7 +3,7 @@ use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations::ReservedNameCollisionView;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
-    InvalidStyleDirectiveView, UnescapedImplicitTemplateCloseView,
+    UnescapedImplicitTemplateCloseView, UnknownDirectiveView,
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical::{
     self, CommonSyntaxMistakeCode, InvalidCharacterView, InvalidNumberLiteralView,
@@ -28,10 +28,8 @@ use crate::compiler_frontend::source::line_index::{LineIndex, line_start_offsets
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
 };
-use crate::compiler_frontend::style_directives::{
-    StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
-    TemplateHeadCompatibility,
-};
+use crate::compiler_frontend::style_directives::DirectiveOccurrence;
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -118,15 +116,18 @@ fn tokenize_source_error(source: &str) -> (CompactDiagnosticBagForTest, StringTa
 }
 
 fn assert_invalid_character_at_dollar(source: &str) {
+    assert_invalid_character_after_dollar(source, '$');
+}
+
+fn assert_invalid_character_after_dollar(source: &str, character: char) {
     let (diagnostic, _string_table) = tokenize_source_error(source);
-    let dollar_offset = source
+    let offset = source
         .find('$')
         .expect("the rejected syntax must contain a dollar marker");
     let mut span_builder = ExtendedSpanBuilder::new();
-    let dollar_span = SourceSpan::new(
+    let expected_span = SourceSpan::new(
         SourceId::COMPILATION_ROOT,
-        LocalSpan::exact(dollar_offset as u32, 1, &mut span_builder)
-            .expect("the short test span fits"),
+        LocalSpan::exact(offset as u32, 1, &mut span_builder).expect("the short test span fits"),
     );
 
     let diagnostic = first_diagnostic_view(&diagnostic);
@@ -136,16 +137,31 @@ fn assert_invalid_character_at_dollar(source: &str) {
             .family_view::<InvalidCharacterView>()
             .expect("the diagnostic is an invalid character")
             .character,
-        '$',
+        character,
     );
     let primary_span = match diagnostic.primary_site() {
         SiteRef::Local(span) | SiteRef::Foreign { span, .. } => span,
         SiteRef::Absent => panic!("invalid character diagnostics retain their source position"),
     };
     assert_eq!(
-        primary_span, dollar_span,
+        primary_span, expected_span,
         "the removed marker should retain its exact authored location",
     );
+}
+
+fn assert_unknown_directive(
+    source: &str,
+    expected_name: &str,
+    expected_occurrence: DirectiveOccurrence,
+) {
+    let (diagnostic, string_table) = tokenize_source_error(source);
+    let diagnostic = first_diagnostic_view(&diagnostic);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0010");
+    let facts = diagnostic
+        .family_view::<UnknownDirectiveView>()
+        .expect("the diagnostic is an unknown directive");
+    assert_eq!(string_table.resolve(facts.directive_name), expected_name);
+    assert_eq!(facts.occurrence, expected_occurrence);
 }
 
 fn tokenize_source_with_registry(
@@ -163,32 +179,6 @@ fn tokenize_source_with_registry(
         source_path,
         TokenizerEntryMode::SourceFile,
         style_directives,
-        &mut string_table,
-        &mut path_fork,
-        SourceId::COMPILATION_ROOT,
-        &mut span_builder,
-    )
-    .expect("tokenization should succeed");
-    (lexed, string_table)
-}
-
-fn tokenize_source_with_directives(
-    source: &str,
-    directives: &[StyleDirectiveSpec],
-) -> (LexedSource, StringTable) {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let source_path = path_fork
-        .try_intern_portable_path("test.moth", &mut string_table)
-        .expect("test path fits");
-    let registry = StyleDirectiveRegistry::merged(directives)
-        .expect("test style directives should merge with core directives");
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let lexed = tokenize(
-        source,
-        source_path,
-        TokenizerEntryMode::SourceFile,
-        &registry,
         &mut string_table,
         &mut path_fork,
         SourceId::COMPILATION_ROOT,
@@ -1696,10 +1686,11 @@ fn rejects_legacy_reset_style_directive_name() {
     let diagnostic = first_diagnostic_view(&error);
     assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0010");
     let facts = diagnostic
-        .family_view::<InvalidStyleDirectiveView>()
-        .expect("the diagnostic is an invalid style directive");
+        .family_view::<UnknownDirectiveView>()
+        .expect("the diagnostic is an unknown directive");
     assert_eq!(string_table.resolve(facts.directive_name), "reset");
-    let supported = style_directives.supported_directives_for_diagnostic();
+    let supported =
+        style_directives.supported_directives_for_diagnostic(DirectiveOccurrence::TemplateHead);
     assert_eq!(
         string_table.resolve(facts.supported_directives),
         supported.as_str()
@@ -1719,13 +1710,14 @@ fn rejects_unknown_style_directive_name() {
     let diagnostic = first_diagnostic_view(&error);
     assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0010");
     let facts = diagnostic
-        .family_view::<InvalidStyleDirectiveView>()
-        .expect("the diagnostic is an invalid style directive");
+        .family_view::<UnknownDirectiveView>()
+        .expect("the diagnostic is an unknown directive");
     assert_eq!(
         string_table.resolve(facts.directive_name),
         "unknown_formatter"
     );
-    let supported = StyleDirectiveRegistry::built_ins().supported_directives_for_diagnostic();
+    let supported = StyleDirectiveRegistry::built_ins()
+        .supported_directives_for_diagnostic(DirectiveOccurrence::TemplateHead);
     assert_eq!(
         string_table.resolve(facts.supported_directives),
         supported.as_str()
@@ -1733,35 +1725,51 @@ fn rejects_unknown_style_directive_name() {
 }
 
 #[test]
-fn tokenizes_style_directive_with_template_argument() {
-    let (file_tokens, string_table) = tokenize_source("[$code([:prefix]), $md:\nhello\n]");
+fn rejects_unknown_source_directive_with_source_suggestions() {
+    let (error, string_table) = tokenize_source_error("$does_not_exist\nvalue #I32 = 1\n");
+
+    let diagnostic = first_diagnostic_view(&error);
+    assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0010");
+    let facts = diagnostic
+        .family_view::<UnknownDirectiveView>()
+        .expect("the diagnostic is an unknown directive");
+    assert_eq!(string_table.resolve(facts.directive_name), "does_not_exist");
+    assert_eq!(
+        facts.occurrence,
+        DirectiveOccurrence::Source,
+        "a directive outside a template head is a source-position occurrence"
+    );
+    assert_eq!(
+        string_table.resolve(facts.supported_directives),
+        "'$config'",
+        "source suggestions must not include template-only directives"
+    );
+}
+
+#[test]
+fn tokenizes_style_directive_with_template_operand() {
+    let (file_tokens, string_table) = tokenize_source("[$code [:prefix], $md:\nhello\n]");
     let tokens = file_tokens.tokens.as_ref();
 
     let outer_head = find_token_index(tokens, |token| token.tag() == TokenTag::TEMPLATE_HEAD);
-    let children = find_token_index(tokens, |token| {
+    let directive = find_token_index(tokens, |token| {
         token.tag() == TokenTag::STYLE_DIRECTIVE && token_string_is(token, &string_table, "code")
     });
-    let open_paren = find_token_index(tokens, |token| token.tag() == TokenTag::OPEN_PARENTHESIS);
     let child_template = token_refs(tokens)
         .enumerate()
-        .skip(open_paren + 1)
+        .skip(directive + 1)
         .find_map(|(index, token)| (token.tag() == TokenTag::TEMPLATE_HEAD).then_some(index))
-        .expect("expected child template opener");
+        .expect("expected the bare operand to begin a child template");
     let close = token_refs(tokens)
         .enumerate()
         .skip(child_template + 1)
         .find_map(|(index, token)| (token.tag() == TokenTag::TEMPLATE_CLOSE).then_some(index))
-        .expect("expected the child template to close");
-    let close_paren = token_refs(tokens)
-        .enumerate()
-        .skip(close + 1)
-        .find_map(|(index, token)| (token.tag() == TokenTag::CLOSE_PARENTHESIS).then_some(index))
-        .expect("expected ')' after the child template");
+        .expect("expected the operand template to close");
     let comma = token_refs(tokens)
         .enumerate()
-        .skip(close_paren + 1)
+        .skip(close + 1)
         .find_map(|(index, token)| (token.tag() == TokenTag::COMMA).then_some(index))
-        .expect("expected a comma after the child template");
+        .expect("expected a comma after the operand template");
     let markdown = token_refs(tokens)
         .enumerate()
         .skip(comma + 1)
@@ -1772,12 +1780,10 @@ fn tokenizes_style_directive_with_template_argument() {
         })
         .expect("expected the outer head to continue with '$md'");
 
-    assert!(outer_head < children);
-    assert!(children < open_paren);
-    assert!(open_paren < child_template);
+    assert!(outer_head < directive);
+    assert!(directive < child_template);
     assert!(child_template < close);
-    assert!(close < close_paren);
-    assert!(close_paren < comma);
+    assert!(close < comma);
     assert!(comma < markdown);
 }
 
@@ -1808,14 +1814,62 @@ fn rejects_legacy_style_child_template_prefix_syntax() {
 }
 
 #[test]
-fn rejects_removed_reactive_binding_spellings_as_ordinary_syntax() {
+fn rejects_removed_reactive_binding_spellings_as_unknown_directives() {
     for source in [
         "value $String = \"name\"\n",
-        "value $= \"name\"\n",
         "read_name |value $String| -> String:\n;\n",
     ] {
-        assert_invalid_character_at_dollar(source);
+        assert_unknown_directive(source, "String", DirectiveOccurrence::Source);
     }
+}
+
+#[test]
+fn rejects_removed_reactive_assignment_marker_as_invalid_character() {
+    assert_invalid_character_after_dollar("value $= \"name\"\n", '=');
+}
+
+#[test]
+fn tokenizes_source_directives_outside_template_heads() {
+    let (file_tokens, string_table) = tokenize_source("$config\napi_url #String = \"x\"\n");
+    let directive = find_token_index(file_tokens.tokens.as_ref(), |token| {
+        token.tag() == TokenTag::STYLE_DIRECTIVE && token_string_is(token, &string_table, "config")
+    });
+
+    assert_eq!(
+        token_at(file_tokens.tokens.as_ref(), directive).tag(),
+        TokenTag::STYLE_DIRECTIVE
+    );
+}
+
+#[test]
+fn newline_token_records_a_blank_physical_line() {
+    let blank_line_fact = |source: &str| -> Vec<bool> {
+        let (file_tokens, _string_table) = tokenize_source(source);
+        token_refs(file_tokens.tokens.as_ref())
+            .filter(|token| token.tag() == TokenTag::NEWLINE)
+            .map(|token| token.shape().newline_has_blank_line())
+            .collect()
+    };
+
+    // One whitespace run spanning two line breaks is a blank physical line.
+    assert_eq!(
+        blank_line_fact("$config\n\napi_url #String\n"),
+        [true, false]
+    );
+    // A comment-only line adds its own line-break token but no blank line.
+    assert_eq!(
+        blank_line_fact("$config\n-- note\napi_url #String\n"),
+        [false, false, false]
+    );
+    // A blank line inside a comment run is still blank; indentation is not.
+    assert_eq!(
+        blank_line_fact("$config\n-- note\n\napi_url #String\n"),
+        [false, true, false]
+    );
+    assert_eq!(
+        blank_line_fact("$config\n    api_url #String\n"),
+        [false, false]
+    );
 }
 
 #[test]
@@ -1851,10 +1905,11 @@ fn unknown_style_directives_fail_under_strict_registry() {
     let diagnostic = first_diagnostic_view(&error);
     assert_eq!(diagnostic.descriptor().code, "MOTH-SYNTAX-0010");
     let facts = diagnostic
-        .family_view::<InvalidStyleDirectiveView>()
-        .expect("the diagnostic is an invalid style directive");
+        .family_view::<UnknownDirectiveView>()
+        .expect("the diagnostic is an unknown directive");
     assert_eq!(string_table.resolve(facts.directive_name), "unknown");
-    let supported = style_directives.supported_directives_for_diagnostic();
+    let supported =
+        style_directives.supported_directives_for_diagnostic(DirectiveOccurrence::TemplateHead);
     assert_eq!(
         string_table.resolve(facts.supported_directives),
         supported.as_str()
@@ -1919,7 +1974,7 @@ fn rejects_numeric_slot_directive_prefixes() {
 #[test]
 fn code_template_body_keeps_nested_square_brackets_as_literal_text() {
     let (file_tokens, string_table) =
-        tokenize_source("[$code(\"bst\"):\nconcatenated = [string_slice, a_mutable_string]\n]");
+        tokenize_source("[$code \"bst\":\nconcatenated = [string_slice, a_mutable_string]\n]");
     let tokens = file_tokens.tokens.as_ref();
 
     let template_heads = token_refs(tokens)
@@ -2074,15 +2129,8 @@ fn html_template_body_tokenizes_symbol_wrappers_with_general_template_rules() {
 }
 
 #[test]
-fn custom_balanced_directive_uses_general_balanced_mode() {
-    let directives = vec![StyleDirectiveSpec::handler(
-        "highlight",
-        TemplateBodyMode::Balanced,
-        TemplateHeadCompatibility::fully_compatible_meaningful(),
-        StyleDirectiveHandlerSpec::no_op(),
-    )];
-    let (file_tokens, string_table) =
-        tokenize_source_with_directives("[$highlight:\n[data-kind=\"cta\"]\n]", &directives);
+fn balanced_directive_uses_general_balanced_mode() {
+    let (file_tokens, string_table) = tokenize_html_source("[$css:\n[data-kind=\"cta\"]\n]");
     let tokens = file_tokens.tokens.as_ref();
 
     let template_heads = token_refs(tokens)

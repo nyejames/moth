@@ -5,10 +5,10 @@
 #[$in description:["Current implementation status, coverage and accepted follow-ups for Moth packages and project builders."]]
 #[$in head:[theme_head]]
 
-red #= [$css("inline"): background-color: rgb(239, 112, 112); color: black;]
-pink #= [$css("inline"): background-color: rgb(231, 133, 218); color: black;]
-orange #= [$css("inline"): background-color: rgb(223, 162, 100); color: black;]
-green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
+red #= [$css "inline": background-color: rgb(239, 112, 112); color: black;]
+pink #= [$css "inline": background-color: rgb(231, 133, 218); color: black;]
+orange #= [$css "inline": background-color: rgb(223, 162, 100); color: black;]
+green #= [$css "inline": background-color: rgb(109, 232, 138); color: black;]
 
 #[navbar]
 #[sidebar]
@@ -381,7 +381,7 @@ init_docs_sidebar()!
             [: HTML builder root slots]
             [: Supported]
             [: Direct root routing, metadata-only entries, body interleaving, imported/helper/API-only isolation, unknown and nonconstant target rejection, resource liveness, scalar metadata, favicon sources, title fallback/concat, stylesheet validation and origin dedup, head dedup, and equivalent JavaScript and HTML-Wasm documents.]
-            [: Direct const root inserts in [$html:<code>@entry.moth</code>] supply document metadata, tracked stylesheet resources and additional head HTML. The compiler validates registered destinations without knowing HTML names. Scalar metadata concatenates, an explicit empty value stays supplied, title falls back through route then project name with prefix/postfix, and title/attribute values are escaped. Each [$html:<code>stylesheets</code>] insert must contain one tracked CSS origin; the first origin wins. Complete head contributions deduplicate after URL rendering and are emitted last. Runtime named builder slots are not supported. Reserved [$html:<code>page_*</code>] constants have no implicit effect.]
+            [: Direct const root inserts in [$html:<code>@entry.moth</code>] supply document metadata, tracked stylesheet resources and additional head HTML. The compiler validates registered destinations without knowing HTML names. Scalar metadata concatenates, an explicit empty value stays supplied, title falls back through route then project name with prefix/postfix, and title/attribute values are escaped. Each [$html:<code>stylesheets</code>] insert must contain one tracked CSS origin; the first origin wins. Complete head contributions deduplicate after URL rendering and are emitted last. Runtime named builder slots are not supported. [$html:<code>$required</code>] and [$html:<code>$unique</code>] remain unimplemented candidates, and there is no [$html:<code>$page</code>] directive. Reserved [$html:<code>page_*</code>] constants have no implicit effect.]
         ]
 
         [data:

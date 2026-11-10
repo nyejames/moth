@@ -21,7 +21,7 @@ Trait names are invalid as ordinary:
 
 Use a generic bound for static reuse. Use a choice for runtime heterogeneity.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Static reuse
     render type Item is DISPLAY_TEXT |item Item| -> String
 

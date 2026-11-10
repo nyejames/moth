@@ -173,6 +173,7 @@ fn pending_typed_error_input<'a, 'env, 'tokens>(
         input.trailing_policy,
     );
     deferred_input.stop_at_named_entry = input.stop_at_named_entry;
+    deferred_input.stop_at_adjacent_operand = input.stop_at_adjacent_operand;
     deferred_input.numeric_deferral_owner = input.numeric_deferral_owner;
     deferred_input.retain_pending_numeric_fragment = input.retain_pending_numeric_fragment;
     deferred_input.route_argument_context = input.route_argument_context;
@@ -426,6 +427,7 @@ fn create_expression_until_with_seeded_items_inner(
     inner_input.retain_pending_numeric_fragment = input.retain_pending_numeric_fragment;
     inner_input.route_argument_context = input.route_argument_context;
     inner_input.stop_at_named_entry = input.stop_at_named_entry;
+    inner_input.stop_at_adjacent_operand = input.stop_at_adjacent_operand;
     let mut collected = seed_items;
     let early = collect_expression_fragment_into(&mut inner_input, &mut collected)?;
     // A lone `is:` guard evaluates the seeded scrutinee alone and returns it; the receiver
@@ -1217,6 +1219,18 @@ fn collect_expression_fragment_into(
             }
             break;
         }
+        // A directive operand owns one value. Stop at the token that would begin a second
+        // operand so the directive parser reports the extra operand with its own name; an
+        // ordinary expression position keeps the shared missing-operator diagnostic.
+        if !in_group
+            && input.stop_at_adjacent_operand
+            && expression
+                .last()
+                .is_some_and(ExpressionRpnItem::is_operand_shape)
+            && token.is_operand_start()
+        {
+            break;
+        }
         ast_log!("Parsing expression: ", #token);
         // Inside a group the `)` is always consumed, so a missing `)` reports as a delimiter error.
         // A group is never a receiving boundary and takes expected-result evidence from its own
@@ -1235,6 +1249,7 @@ fn collect_expression_fragment_into(
             retain_pending_numeric_fragment: input.retain_pending_numeric_fragment,
             route_argument_context: input.route_argument_context,
             mismatch_context: input.mismatch_context,
+            stop_at_adjacent_operand: input.stop_at_adjacent_operand && !in_group,
             group_frames: &mut group_frames,
             expression_builder: &mut *input.expression_builder,
             const_values: &mut *input.const_values,

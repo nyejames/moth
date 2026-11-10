@@ -209,7 +209,7 @@ A full-control backend can therefore reclaim every remaining allocation in `R` w
 
 ## Compiler and backend layers
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     source access, copy and declared-region syntax
         -> AST access-mode, placement and freshness validation
         -> validated HIR

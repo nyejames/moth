@@ -1269,7 +1269,6 @@ fn parse_module_headers_with_content_sources(
             path_syntax,
             &mut string_table,
             &mut path_fork,
-            &mut span_builder,
         )
         .expect("template preparation should succeed");
         retained_span_builders.push((file_id_for(path), span_builder));
@@ -1638,7 +1637,6 @@ fn nested_module_content_reference_orders_through_resolved_targets() {
         icon_path_syntax,
         &mut string_table,
         &mut path_fork,
-        &mut icon_span_builder,
     )
     .expect("icon template should prepare");
     retained_span_builders.push((icon_file_id, icon_span_builder));

@@ -81,6 +81,7 @@ fn parse_shell(source: &str) -> Vec<&'static str> {
         name,
         &mut string_table,
         &mut span_builder,
+        None,
     )
     .expect("declaration shell should parse");
     let initializer_range = declaration_syntax
@@ -321,6 +322,7 @@ fn parse_shell_error(source: &str) -> (CompactDiagnosticBagForTest, StringId) {
         name,
         &mut string_table,
         &mut span_builder,
+        None,
     )
     .expect_err("declaration shell should reject the missing initializer");
     let diagnostic = match failure {

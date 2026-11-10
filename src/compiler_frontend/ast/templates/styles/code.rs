@@ -1,12 +1,12 @@
 //! Built-in `$code` template style support.
 //!
-//! The HTML builder registers `$code` as a style directive and the frontend
-//! formatter registry executes it; this module is the HTML-project owner of
-//! the directive implementation.
+//! The frontend registers `$code` as a style directive and executes this
+//! formatter under every builder; this module is the frontend owner of the
+//! directive implementation.
 //!
-//! This module owns both halves of the feature:
-//! - parsing the narrow `$code` / `$code("ext")` directive syntax
-//! - converting compile-time body string runs into safe HTML with optional syntax highlighting
+//! This module owns the formatting half of the feature: converting
+//! compile-time body string runs into safe HTML with optional syntax
+//! highlighting. The template head parser owns the `$code` operand syntax.
 //!
 //! The shared template formatter pipeline owns whitespace normalization before code reaches this
 //! module. This module owns presentation and the `<code>` wrapper; HTML character escaping is
@@ -25,6 +25,7 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterInput, FormatterInputPiece, FormatterOutput, FormatterOutputPiece,
 };
+use crate::compiler_frontend::ast::templates::styles::escape_html::push_escaped_html_text;
 use crate::compiler_frontend::ast::templates::styles::whitespace::TemplateWhitespacePassProfile;
 use crate::compiler_frontend::ast::templates::template::{
     Formatter, FormatterResult, TemplateFormatter,
@@ -32,7 +33,6 @@ use crate::compiler_frontend::ast::templates::template::{
 use crate::compiler_frontend::compiler_messages::DiagnosticBag;
 use crate::compiler_frontend::compiler_messages::diagnostics::diagnostic_string_builder::DiagnosticStringBuilder;
 use crate::compiler_frontend::style_directives::StyleDirectiveArgumentValue;
-use crate::projects::html_project::styles::escape_html::push_escaped_html_text;
 use std::sync::Arc;
 
 #[path = "language_profiles.rs"]
@@ -106,16 +106,11 @@ pub(crate) fn code_formatter_factory(
                 Some(language) => language,
                 None => {
                     return Err(format!(
-                        "Unsupported '$code(...)' language \"{language_name}\". Supported aliases are {}.",
+                        "Unsupported `$code` language \"{language_name}\". Supported aliases are {}.",
                         CodeLanguage::supported_aliases()
                     ));
                 }
             }
-        }
-        Some(_) => {
-            return Err(
-                "The '$code(...)' directive only accepts an optional string argument, for example '$code(\"rust\")'.".to_string(),
-            );
         }
         None => CodeLanguage::Generic,
     };
@@ -193,7 +188,7 @@ fn highlight_code_html_into(source: &str, language: CodeLanguage, output: &mut S
 }
 
 #[cfg(test)]
-#[path = "code_test_support.rs"]
+#[path = "tests/code_test_support.rs"]
 pub(crate) mod test_support;
 
 #[cfg(test)]

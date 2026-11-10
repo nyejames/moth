@@ -5,7 +5,7 @@
 -- the same general palette classes.
 
 #[$md:
-    [codeblock, $code("moth"):
+    [codeblock, $code "moth":
         -- trait declaration
         DISPLAY_TEXT must:
             display |this Label| -> String
@@ -102,24 +102,24 @@
         greeting = [: Hello, [name]! Don't panic -- really]
     ]
 
-    [codeblock, $code("text"):
+    [codeblock, $code "text":
         return! into Dec2 <&>
     ]
 
-    [codeblock, $code("js"):
+    [codeblock, $code "js":
         /* throw <&> */
         try { work(); } catch (error) { throw error; }
         const ready = !done;
     ]
 
-    [codeblock, $code("py"):
+    [codeblock, $code "py":
         try:
             raise ValueError("π")
         except ValueError:
             pass
     ]
 
-    [codeblock, $code("rust"):
+    [codeblock, $code "rust":
         trait Display {
             fn render(&self) -> String;
         }
@@ -130,29 +130,29 @@
         }
     ]
 
-    [codeblock, $code("html"):
+    [codeblock, $code "html":
         <!-- note -->
         <div class="card">text</div>
     ]
 
-    [codeblock, $code("md"):
+    [codeblock, $code "md":
         # Title
 
         Use `code` now.
     ]
 
-    [codeblock, $code("toml"):
+    [codeblock, $code "toml":
         # config
         [server]
         host = "localhost"
         enabled = true
     ]
 
-    [codeblock, $code("json"):
+    [codeblock, $code "json":
         {"name": "Priya", "age": 30, "active": true}
     ]
 
-    [codeblock, $code("yaml"):
+    [codeblock, $code "yaml":
         # config
         name: Priya
         servers:
@@ -161,14 +161,14 @@
         ---
     ]
 
-    [codeblock, $code("css"):
+    [codeblock, $code "css":
         /* note */
         @media screen {
             color: red;
         }
     ]
 
-    [codeblock, $code("c"):
+    [codeblock, $code "c":
         #include <stdio.h>
         int main(void) {
             // note
@@ -177,7 +177,7 @@
         }
     ]
 
-    [codeblock, $code("sql"):
+    [codeblock, $code "sql":
         SELECT name, COUNT(*) FROM users
         WHERE active = true; -- note
     ]

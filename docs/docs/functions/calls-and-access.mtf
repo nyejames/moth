@@ -1,6 +1,6 @@
 Function calls use positional arguments, named arguments or both.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     render_card(title, body)
     render_card(title = title, body = body)
     render_card(title, body = body)
@@ -39,7 +39,7 @@ values) and @../progress (Progress) for the contract and current support.
 A call whose declared contract is `-> !` is valid only as a standalone
 statement:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     fatal |message String| -> !:
         assert(false, message)
     ;
@@ -52,7 +52,7 @@ branches, loops, lexical scopes and root runtime work.
 
 It is invalid in every value-consuming position:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- Invalid: Never call used as a value
     value String = fatal("x")
     return fatal("x")
@@ -95,7 +95,7 @@ Directive values retain their compile-time and specialised category rules.
 
 A shared parameter receives an ordinary argument without `~`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     show |value String|:
         io.line(value)
     ;
@@ -109,7 +109,7 @@ Passing `~value` to a shared parameter is invalid.
 
 An existing mutable place needs explicit `~` at the call site.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     increment |value ~I32|:
         ~value += 1
     ;
@@ -126,7 +126,7 @@ the value, not the parameter name.
 
 A fresh rvalue can satisfy a mutable parameter without source `~`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     increment(1)
 ]
 

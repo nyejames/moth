@@ -1,4 +1,4 @@
-//! Shared HTML-project formatter validation helpers.
+//! Shared frontend formatter validation helpers.
 //!
 //! WHAT:
 //! - Flattens structured formatter input into pass-through output while preserving opaque anchors.

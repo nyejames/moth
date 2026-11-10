@@ -7,7 +7,7 @@ Follow the linked references for ambiguous or detailed rules.
 `:` opens a block and `;` closes it. Semicolons don't end statements. Indentation aids reading but doesn't define scope.
 Statements run in source order.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     if ready:
         io.line("ready")
     else
@@ -27,7 +27,7 @@ Statements run in source order.
 
 Symbolic binary operators and assignment require spaces on both sides. Keep compound tokens together:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count ~= 0
     ~count = left + right
     ~count += 1
@@ -37,7 +37,7 @@ Symbolic binary operators and assignment require spaces on both sides. Keep comp
 
 ## Values, bindings and constants
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     name = "Priya"  -- inferred and immutable
     age I32 = 30    -- explicitly typed
     ready Bool = true
@@ -59,7 +59,7 @@ without forward references or cycles.
 
 Quoted text and templates share the `String` type. Use templates for interpolation and concatenation, rather than `String + String`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     escaped = "Hello\nworld"
     greeting = [: Hello, [name].]
     joined = ["Hello, ", name]
@@ -71,7 +71,7 @@ Strings have no ordering, indexing or in-place character mutation. `Char` suppor
 
 ### Const records
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     settings #= (
         title = "Moth",
         window = (width = 800, height = 600),
@@ -90,7 +90,7 @@ Only Core functions with an explicit constant-evaluation contract can fold calls
 Existing values use shared read-only access when bound, passed, returned or stored. A live shared alias blocks overlapping mutation.
 The compiler follows the *last use*, not just lexical scope.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     items ~= {1, 2}
     view = items    -- shared read-only alias
     size = view.length()
@@ -103,7 +103,7 @@ The compiler follows the *last use*, not just lexical scope.
 A mutable declaration from an existing mutable *place* creates a write-through alias.
 A value returned from a function gets a separate caller binding, even if it shares storage:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     same_items |value {I32}| -> {I32}:
         return value
     ;
@@ -143,7 +143,7 @@ An exact receiver can type a literal directly as `U64`, `F32`, `Dec` or another 
 Annotations, parameters, return types, fields and writes can constrain them before defaults apply.
 Unlike Rust's broader inference, later uses can't retype a completed Moth expression.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     accept_u64 |value U64|:
     ;
 
@@ -170,7 +170,7 @@ Decimal/exponent literals can't initialise integers or `Byte`, even when whole. 
 
 ### Arithmetic and comparison
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     a I8 = 10
     b U8 = 20
     sum I16 = a + b       -- smallest signed type containing both ranges
@@ -214,7 +214,7 @@ See @../numbers (Numbers) for exact operator domains and inference rules.
 `cast` converts between supported types, taking its target from an **immediate typed receiver** such as a declaration, return or parameter.
 The operand keeps its own type. An untyped declaration or later use can't supply a missing cast target.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     octet U8 = 42
     count U64 = cast octet  -- infallible widening
     label String = cast count
@@ -243,7 +243,7 @@ Custom conversions use explicit trait conformance (see **Custom cast conformance
 
 A `T?` cast target casts into `T` then wraps the result. Its handler must supply `T`, not `none`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     parse_optional |text String| -> I32?:
         value I32 = cast text catch:
             return none
@@ -257,7 +257,7 @@ Custom error types need explicit recovery or mapping. Postfix `!` is for declare
 
 ## Functions and calls
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     describe |prefix String = "item", subject String| -> String:
         return [: [prefix]: [subject]]
     ;
@@ -272,7 +272,7 @@ Builtin and host calls use positional arguments. Omit `->` for no success or err
 
 Mutable parameters require `~place` for existing mutable storage, including named arguments. Fresh values and explicit copies stay unmarked:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     increment |value ~I32|:
         ~value += 1
     ;
@@ -288,7 +288,7 @@ Shared parameters reject `~`. Mutable receiver calls require `~` on an existing 
 
 Multiple return slots remain **separate results, not a tuple**:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     pair || -> String, I32:
         return "Priya", 2
     ;
@@ -303,7 +303,7 @@ There is no `Void` type and a no-success function may fall through.
 
 ### Never-returning calls: `-> !`
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     fatal |message String| -> !:
         assert(false, message)
     ;
@@ -329,7 +329,7 @@ their statement or branch and can't be received as values or handled with `!`,
 `T?` holds either `T` or `none`, without an `Option` constructor. `none` requires an immediate optional type context.
 Optional values never unwrap implicitly.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     find_name |id String| -> String?:
         if id is "":
             return none
@@ -346,7 +346,7 @@ Optional values never unwrap implicitly.
 Postfix `?` unwraps or propagates absence. Its function needs exactly one compatible optional success slot. It can't combine with `catch`.
 Inspect or capture a present value with `is`:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     maybe_name String? = "Priya"
     label = if maybe_name is |name| then name else "guest"
 
@@ -367,7 +367,7 @@ Options support equality when their inner type does, but no ordering. There is n
 
 A final `E!` result slot declares typed failure. `return!` returns an error, postfix `!` propagates a compatible error and `catch` handles it.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     load_user |id String| -> String, F64, Error!:
         if id is "":
             return! Error("Missing id", 404)
@@ -397,7 +397,7 @@ Within a module, **private functions can propagate these failures without postfi
 A builtin `Error!` boundary turns them into `Error`. An exported function without an error slot must handle them,
 while a custom `E!` requires local recovery or explicit mapping.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     product |left I32, right I32| -> I32:
         return left * right  -- implicit failure can travel through private calls
     ;
@@ -416,7 +416,7 @@ while a custom `E!` requires local recovery or explicit mapping.
 These boundaries also apply to methods, generic functions and re-exports. Ordinary top-level entry work has a builtin `Error!` contract.
 A transparent alias of `Error` retains builtin behaviour, but a custom wrapper doesn't.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     GeometryError ::
         InvalidDimensions,
     ;
@@ -434,7 +434,7 @@ A transparent alias of `Error` retains builtin behaviour, but a custom wrapper d
 `catch` protects the selected **whole expression**, including nested calls, receivers and arithmetic, rather than only the last operation.
 It evaluates work once, stops at the first failure and preserves earlier side effects. A handler's own failure propagates outward.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     increment_or_zero |value I8| -> I8:
         return value + 1 catch then 0
     ;
@@ -455,7 +455,7 @@ To recover the entire update, compute the replacement and any narrowing cast und
 
 `assert` checks invariants in every build and aborts unrecoverably on failure:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     assert(ready)
     assert(condition = ready, message = "must be ready")
 ]
@@ -469,7 +469,7 @@ Handle failing message expressions first. Assertion messages can't propagate err
 
 Conditions use `Bool`. A statement `else` is optional. Nest an `if` or use matching instead of `else if`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     label = if ready then "ready" else "waiting"
 
     score_label = if score is:
@@ -502,7 +502,7 @@ A compile-time-known `if` selects its branch only after both sides have been che
 
 ## Loops
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count ~= 0
     names = {"Priya", "Rob"}
 
@@ -529,7 +529,7 @@ Inclusive endpoints and descending ranges stop without overflowing. `Byte` and `
 
 ### Repeated option capture
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     loop ~scanner.next_token() is |token|:
         inspect(token)
     ;
@@ -540,7 +540,7 @@ An option-producing header runs before every attempted iteration, binding one im
 
 ### Collection-producing loops
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     positives {I32} = loop {-2, 1, 3} |item|:
         if item > 0:
             then item
@@ -556,7 +556,7 @@ A nested ordinary loop blocks the outer production target. A nested producing lo
 
 ## Structs and receiver methods
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Person = | name String, age I32 = 0 |
 
     birthday |this ~Person|:
@@ -582,7 +582,7 @@ Mutable methods need `~place.method(...)`.
 
 ### Runtime anonymous records
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     show_state |title String|:
         child = (count = 3)
         state ~= (
@@ -607,7 +607,7 @@ Extracted ordinary fields retain their usual types.
 
 ## Choices
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Status ::
         Ready,
         Loading | progress F64 |,
@@ -637,7 +637,7 @@ One unsupported field disables whole-choice equality, including unit variants. C
 
 ## Type aliases and generics
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     UserId as I32
     Names as {String}
     MaybeName as String?
@@ -647,7 +647,7 @@ One unsupported field disables whole-choice equality, including unit variants. C
 Aliases are transparent (`UserId` is `I32`). Named structs and choices have their own identity regardless of matching fields.
 Aliases may chain but not cycle and they create no new constructors.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     identity type A |value A| -> A:
         return value
     ;
@@ -683,7 +683,7 @@ Generic inference uses the declared signature, rather than the callee's body.
 
 Use `of` to name concrete generic types. Nested `of` applications need an alias:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Pair type A, B = | first A, second B |
     StringIntPair as Pair of String, I32
     paired Box of StringIntPair = Box(Pair("count", 3))
@@ -692,7 +692,7 @@ Use `of` to name concrete generic types. Nested `of` applications need an alias:
 `{Box of String}` is valid with a single `of` application. Generic receiver methods use their type's generic parameters.
 Generic values can be passed, stored and returned without bounds:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     make_box type A |value A| -> Box of A:
         return Box(value)
     ;
@@ -704,7 +704,7 @@ Operations that depend on `A`, such as comparing or displaying it, need trait bo
 
 ## Traits and conformance
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     DISPLAY_TEXT must:
         display |This| -> String
     ;
@@ -736,7 +736,7 @@ Traits are resolved statically. Use choices to represent runtime alternatives be
 
 A method alone doesn't enable a user-defined cast. The source type must explicitly conform to a built-in cast trait:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     to_string |this Label| -> String:
         return this.text
     ;
@@ -753,7 +753,7 @@ A source/target pair can conform to only one of the infallible or fallible varia
 
 ## Collections
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     names ~= {"Priya", "Rob"}       -- growable {String}
     empty ~{I32} = {}               -- typed empty collection
     fixed ~{3 I32} = {10, 20}       -- capacity 3
@@ -780,7 +780,7 @@ Use normal `Error!` handling for recoverable collection failures. Live element a
 
 ## Hash maps
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     scores ~{String = I32} = {"Priya" = 10, "Rob" = 8}
     empty_scores ~{String = I32} = {=}
 
@@ -807,7 +807,7 @@ Maps have no square-bracket indexing or collection-loop iteration. Nesting beyon
 Most lifetimes are inferred. Declare a region when allocations need an explicit shared lifetime, particularly for reference cycles or bulk cleanup.
 Only `into name` places newly created storage in a region. Being lexically inside one is not enough.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     request:
         scratch:
             temporary String into scratch = [: temporary]
@@ -833,7 +833,7 @@ Regions are neither values nor types. See @../memory (Memory) for full placement
 Templates produce `String` values. Static content folds at compile time. Dynamic interpolations evaluate at runtime.
 A `:` separates the head from the body.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     content = [$md:
         # Hello [name]
     ]
@@ -845,16 +845,17 @@ A `.mtf` source begins as an implicit compile-time `$md` body exported as `conte
 
 ### Directives and formatting
 
-Directives are compiler or builder-provided operations written `$name` or `$name(arguments)`.
-Some format templates, while others configure projects or mark declarations (see @../directives (Directives)).
+Directives are compiler-defined operations written `$name`, `$name value` or one named `$name key = value` where the directive's contract allows it.
+Builders add no directives. The parenthesised call spelling `$name(...)` is rejected.
+Some format templates, while others mark declarations or declare build inputs (see @../directives (Directives)).
 
 `$md` formats Markdown. `$raw` preserves text and whitespace. `$note`/`$todo` discard content, while `$doc` marks documentation.
-The HTML builder supplies `$html`, `$css` and `$escape_html`. `$code("language")` highlights literal code.
+The compiler provides `$html`, `$css`, `$escape_html` and `$code` (optionally `$code "language"`) under every builder. `$code` highlights literal code.
 Formatters apply to their own templates, and incompatible formatters can't share a head.
 
 ### Slots and wrappers
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     card #= [:
         <h1>[$slot title = "Untitled"]</h1>
         <section>[$slot]</section>
@@ -871,14 +872,14 @@ Formatters apply to their own templates, and incompatible formatters can't share
     image #= [: <img src="[$slot 1]" alt="[$slot]">]
     [image, "logo.png": Moth logo]
 
-    list #= [$before = [:<li>], $after = [:</li>]: <ul>[$slot]</ul>]
+    list #= [$before [:<li>], $after [:</li>]: <ul>[$slot]</ul>]
     [list: [: one] [$fresh: [: two]]]
 ]
 
 `$slot`, `$slot name` and `$slot 1` declare default, named and positional slots. Each occurrence may carry a `= <compile-time String>` default. `$in name:` fills one named slot. Names and positions are bare tokens, so `$in` has no String-expression or positional form.
 A routed contribution, including an explicitly empty one, suppresses the occurrence default. Missing slots without a default render empty, repeated slots replay content, multiple named contributions concatenate and unassigned loose content is an error.
 An application with content closes its own unfilled defaults; a head-only reference stays open for later composition.
-`$before` and `$after` wrap direct children with a compile-time String or constant template. Their values may contain named slots only, and an explicit default or positional slot is rejected. Each directive may appear once per head. `$fresh` skips one parent wrapper. Structurally absent output produces no wrapper, while a selected empty String is wrapped.
+`$before` and `$after` take one bare operand and wrap direct children with a compile-time String or constant template. Their values may contain named slots only, an explicit default or positional slot is rejected, and the removed `$before = value` / `$after = value` spellings are not accepted. Each directive may appear once per head. `$fresh` skips one parent wrapper. Structurally absent output produces no wrapper, while a selected empty String is wrapped.
 Direct top-level const `$in` inserts on an active entry root are builder slots, not ordinary template slots. See Pages and top-level work.
 `$required` and `$unique` are deferred candidates, not implemented directives. Loop-level uniqueness is excluded; const function syntax is outside this work.
 
@@ -886,7 +887,7 @@ Direct top-level const `$in` inserts on an active entry root are builder slots, 
 
 Templates support a single-body `if` and `loop`, written last in the head. More complex decisions belong in ordinary Moth code.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     [card, if maybe_name is |name|:
         Hello [name]
     ]
@@ -910,7 +911,7 @@ Constant loops have a configurable iteration limit.
 Use `$code` for code blocks and `@html` helpers for tables. For HTML projects, import `@html table, th, td` in `.moth` files.
 The same helpers are available automatically in `.mtf` files:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     [table, [th: [: Name] [: Score]]:
         [td: [: Priya] [: 10]]
     ]
@@ -931,7 +932,7 @@ Both are parameter contracts, so a UI or other consumer can decide how to use th
 
 ### Wires
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     read_name |value Wire of String| -> String:
         return value
     ;
@@ -952,7 +953,7 @@ Reading it as `T` uses ordinary **shared read-only** access. Only whole named bi
 A route allows a consumer to turn input into an ordinary choice message. This example shows the parameter interface a UI builder might expose.
 The `text_input` and `button` functions below stand in for UI components. They show route formation, not a built-in event runtime.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     TodoMessage ::
         Rename | id I32, text String |,
         Delete | id I32 |,
@@ -997,7 +998,7 @@ See @https://github.com/nyejames/moth/blob/main/docs/docs/wiring/wiring.mtf (Wir
 
 Moth has no `import` keyword. Use a top-level `@path` to bind names or namespaces:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math sin, cos, PI
     @components render as render_component, Button as UiButton
     @core/text as text
@@ -1025,7 +1026,7 @@ See @../packages (Packages and dependencies).
 
 An explicit-extension file value is an ordinary `String`, not a separate path type:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     logo #= @assets/logo.svg
     image #= [$html:<img src="[logo]" alt="Moth">]
 ]
@@ -1048,7 +1049,7 @@ A directory recognises exactly three optional root files. `@mod.moth` publishes 
 the external project package API and `@entry.moth` owns page runtime work. Any subset works. Other `@*.moth` and `+*.moth` spellings are rejected.
 Helpers in ordinary `.moth` files are shared by every root, while each root keeps its own declarations:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     private_label #= "Moth"
 
     export:
@@ -1077,7 +1078,7 @@ project has no external package API, even with `@mod.moth`.
 
 For example, a project might contain:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     my-site/
       config.moth
       @entry.moth
@@ -1096,7 +1097,7 @@ For example, a project might contain:
 
 From `@entry.moth`, imports can bind:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @tools/format format_title   -- ordinary file, same module
     @pages page_heading          -- child module's exported name
     @shared badge                -- support package's exported name
@@ -1108,7 +1109,7 @@ From `@entry.moth`, imports can bind:
 
 The nested `pages/article/@mod.moth` can import the same support package and Builder packages:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @shared badge
     @html table
 ]
@@ -1121,13 +1122,14 @@ See @../project-structure (Project structure) and @../packages (Package visibili
 
 ## Directives and project configuration
 
-Template-head directives modify their template. A queued source modifier starts its own line and attaches to the next declaration without a blank
-line between. Each directive takes at most one optional compile-time operand. Directives are provided by the compiler, not defined in source.
+Template-head directives modify their template. The source modifier `$config` starts its own line and attaches to the next eligible declaration;
+comment-only lines may intervene, but a blank physical line breaks attachment. Each directive takes at most one optional compile-time operand, which
+starts on the directive line and may continue while balanced. Directives are provided by the compiler, not defined in source.
 
 An authored project-root `config.moth` contains compile-time values and configuration. It uses ordinary named records for the project and the selected
 builder. Source imports, functions and runtime work belong in ordinary modules:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     project #= (
         name = "my_site",
     )
@@ -1141,11 +1143,12 @@ There are no `$project`, `$builder` or `$html_builder` directives.
 
 ### Build inputs
 
-`$config` marks the next **explicitly typed top-level constant** as a build input. The initializer supplies a fallback.
-Without one, an ordinary input is required while an optional input defaults to `none`. The marker is accepted queued design; the current compiler
-spelling is `#Config of T`.
+`$config` marks one **explicitly typed top-level compile-time `#` binding**, in `config.moth` or a selected source module, as a build input.
+The binding name is the input key, its declared type is the receiving contract and the initializer supplies the fallback. Without an initializer,
+an ordinary input is required while an optional input defaults to `none`. `$config` takes no operand and only a marked binding may omit its initializer.
+The retired `#Config of T` input qualifier does not parse; use `$config` with an ordinary `#T` annotation.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     $config
     api_url #String
 
@@ -1160,7 +1163,7 @@ Inputs support `String`, `Bool`, `Char`, exact fixed-width integers, binary floa
 `Byte`, `Dec`, mutable bindings and inferred `#=` declarations can't be inputs.
 Source-module input defaults must be primitive literals or `none`, while `config.moth` may use earlier compile-time helpers.
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     moth build . --input api_url=https://example.com --input analytics=true
     moth build . --input count=4_294_967_296
     moth build . --input 'label="true"'
@@ -1172,7 +1175,7 @@ optionality and fallback. Dependencies resolve their own inputs.
 
 Project metadata is available only through explicit imports:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @project version
     footer #= [: Version [version]]
 ]
@@ -1185,7 +1188,7 @@ See @../project-structure/#project-config (Project configuration), @../project-s
 
 ## Commands and project builders
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     moth new html my-site
     cd my-site
     moth check .
@@ -1207,7 +1210,7 @@ static-only or metadata-only entry still counts. `@mod.moth` and `@package.moth`
 
 For an HTML page:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     #[$in title:Moth]
     #[$in description:A language for creating reliable software]
     #[$in stylesheets:[@styles/site.css]]
@@ -1241,7 +1244,7 @@ See @../project-structure (Pages and entry behaviour) and @../project-structure/
 The prelude exposes `io` from `@core/io`: `io.print`, `io.line`, `io.debug`, `io.warn` and `io.error` accept a single `String`.
 Format other types with templates:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     count = 3
     io.line([: Count: [count]])
 ]
@@ -1250,7 +1253,7 @@ Format other types with templates:
 
 Foreign packages depend on the selected builder and target. For example, the HTML builder can bind JavaScript files to typed Moth functions:
 
-[codeblock, $code("js"):
+[codeblock, $code "js":
     /**
      * @moth.sig emphasize |text String| -> String
      */
@@ -1259,7 +1262,7 @@ Foreign packages depend on the selected builder and target. For example, the HTM
     }
 ]
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @vendor/format.js emphasize
 
     label |text String| -> String:

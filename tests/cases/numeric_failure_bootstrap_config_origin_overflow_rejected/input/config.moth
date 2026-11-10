@@ -1,4 +1,5 @@
-configured_maximum #Config of I32 = 2147483647
+$config
+configured_maximum #I32 = 2147483647
 
 overflow #I32 = configured_maximum + 1
 

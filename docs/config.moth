@@ -1,4 +1,5 @@
-version #Config of String = "0.1.0"
+$config
+version #String = "0.1.0"
 
 project #= (
     name = "html_project",

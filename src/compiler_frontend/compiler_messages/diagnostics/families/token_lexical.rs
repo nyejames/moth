@@ -443,7 +443,6 @@ unit_code! {
         SignatureParenthesisDelimiter = 15,
         SignatureAsKeyword = 16,
         InvalidCompileTimeBindingSpacing = 17,
-        InvalidConfigQualifierSpacing = 18,
         InvalidMutableBindingSpacing = 19,
         InvalidSymbolicSpacing = 20,
         InvalidChoiceVariantSpacing = 21,
@@ -507,9 +506,6 @@ impl CommonSyntaxMistakeCode {
             CommonSyntaxMistakeReason::InvalidCompileTimeBindingSpacing => {
                 (Self::InvalidCompileTimeBindingSpacing, None, None, None)
             }
-            CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing => {
-                (Self::InvalidConfigQualifierSpacing, None, None, None)
-            }
             CommonSyntaxMistakeReason::InvalidMutableBindingSpacing => {
                 (Self::InvalidMutableBindingSpacing, None, None, None)
             }
@@ -561,9 +557,6 @@ impl CommonSyntaxMistakeCode {
             Self::SignatureAsKeyword => CommonSyntaxMistakeReason::SignatureAsKeyword,
             Self::InvalidCompileTimeBindingSpacing => {
                 CommonSyntaxMistakeReason::InvalidCompileTimeBindingSpacing
-            }
-            Self::InvalidConfigQualifierSpacing => {
-                CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing
             }
             Self::InvalidMutableBindingSpacing => {
                 CommonSyntaxMistakeReason::InvalidMutableBindingSpacing

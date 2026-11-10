@@ -712,7 +712,7 @@ fn effective_project_fields_keep_private_input_and_receiving_field_distinct() {
                 input_contract,
                 input_value.as_ref(),
             ),
-            qualifier_span: None,
+            marker_span: None,
             value_location: None,
         });
     let receiving_field_name = string_table.intern("version");

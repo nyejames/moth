@@ -1,6 +1,6 @@
 `{T}` is a growable collection of `T`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     names ~{String} = {}
     values {I32} = {1, 2, 3}
 ]
@@ -19,7 +19,7 @@ Growable `push` is infallible in the accepted source contract and returns no
 value. Allocation exhaustion is unrecoverable and traps rather than entering
 `Error!`, so growable `push` takes neither postfix `!` nor `catch`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     names ~{String} = {}
 
     ~names.push("Priya")
@@ -27,7 +27,7 @@ value. Allocation exhaustion is unrecoverable and traps rather than entering
 
 Handling a growable push is a compile-time error:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     -- INVALID: growable push takes neither handling form
     ~names.push("Priya") catch:
     ;

@@ -6,7 +6,7 @@
 
 Bind individual symbols or the whole namespace:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/time Duration, TimeMark, mark_now, duration_between, as_seconds
 
     @core/time
@@ -117,7 +117,7 @@ All three use the handle ABI. They carry no source-visible fields.
 
 `timestamp_from_iso_string` fails on text outside the accepted ISO format, and on accepted text naming an instant outside the renderable window. `to_iso_string` fails on instants outside that window. Both return through `Error!`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/time Timestamp, timestamp_from_iso_string, timestamp_from_unix_milliseconds
 
     created = timestamp_from_iso_string("not-a-date") catch:

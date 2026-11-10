@@ -10,7 +10,7 @@ roadmap implementation commitment.
 The proposal is a lexical checked scope that could let the compiler use a much
 larger deterministic proof budget for difficult static analysis:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     $checked:
         -- difficult but safe value and alias relationships
     ;
@@ -23,7 +23,7 @@ implementing source syntax prematurely.
 
 A future checked scope would change analysis effort, not the language's safety law.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     ordinary scope
         -> mandatory static proof
         -> normal production proof budget
@@ -51,7 +51,7 @@ This proposal is therefore a proof-budget marker, not a safety mode.
 
 The likely production architecture remains tiered:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     cheap may-analysis
         |
         +-- no candidate conflict -> accept
@@ -89,7 +89,7 @@ The compiler may inspect predecessor facts and future uses outside the lexical b
 
 A useful handoff is:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     normal entry facts
         -> deep checked analysis
         -> compact proven exit facts
@@ -123,7 +123,7 @@ The exact budgets are implementation policy. Source must not select a numeric bu
 
 A limit result is explicit and conservative:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     proof complete and conflict impossible
         -> accept
 
@@ -155,7 +155,7 @@ The bounded operational oracle is independent test infrastructure. It can expose
 
 A strong promotion path is:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     named Boracle experiment
         -> adversarial source and normalized corpus
         -> bounded operational counterexample search

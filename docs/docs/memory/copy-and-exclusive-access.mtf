@@ -2,7 +2,7 @@
 
 `copy` creates an independent value graph. Ordinary assignment and argument passing don't clone existing values. Fresh aggregates built from shared inputs don't implicitly copy those inputs.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     original ~= {1, 2, 3}
     independent ~= copy original
 
@@ -27,7 +27,7 @@
 
 `~place` requests temporary mutation-capable access to an existing mutable place. It excludes conflicting access while active.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     values ~= {1, 2, 3}
     ~values.push(4)
 ]
@@ -40,7 +40,7 @@
 
 A mutable declaration initialised from a fresh value creates an independent mutable slot.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     original ~= 10
     alias ~= original  -- mutable alias
     ~alias = 20        -- writes through to original
@@ -53,7 +53,7 @@ A mutable declaration initialised from a fresh value creates an independent muta
 
 Mutable receiver calls require explicit mutable or exclusive receiver syntax:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     items ~= {1, 2, 3}
     ~items.push(4)     -- valid: explicit mutable access
 

@@ -26,7 +26,7 @@ You lose some "I can invent any abstraction" flexibility. You gain fewer competi
 
 Many ecosystems treat the language and the package tool as strangers. Moth grows them from the same root system.
 
-**Source-backed Builder packages** and **binding-backed platform packages** arrive through the command's capability surface. The active builder declares which source kinds, directives and external interfaces a project may see.
+**Source-backed Builder packages** and **binding-backed platform packages** arrive through the command's capability surface. The active builder declares which source kinds and external interfaces a project may see. Directives stay compiler-owned, so no builder can add or remove them.
 
 **Command-selected capabilities** mean `moth build` does not discover the universe and hope. It selects a builder, a profile, tooling overlays and target intent before config validation begins.
 

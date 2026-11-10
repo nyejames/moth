@@ -4,7 +4,7 @@ A type alias gives an existing type a clearer name. It does not create a new typ
 
 Use a type alias when a type annotation would be repetitive or when a name carries domain meaning.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     UserId as I32
     HtmlFragment as String
     RouteParts as {String}
@@ -14,7 +14,7 @@ Use a type alias when a type annotation would be repetitive or when a name carri
 
 An alias is another spelling of the same type.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     UserId as I32
 
     id UserId = 42
@@ -30,7 +30,7 @@ An alias is another spelling of the same type.
 
 A struct creates a brand new type with its own fields and constructor. An alias does not.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     UserId as I32
 
     User = |
@@ -44,7 +44,7 @@ A struct creates a brand new type with its own fields and constructor. An alias 
 
 An alias can name a collection type.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     Names as {String}
 
     names Names = {"Priya", "Rob"}

@@ -12,7 +12,7 @@ The text doesn't ride along inside the token. The kind carries a small handle in
 
 Take the page dependency clause:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
 @greeting greet
 ]
 
@@ -131,7 +131,7 @@ Some mistakes die at the first cut:
 
 ## Boundary of ownership
 
-Tokenization recognises directive spelling through the supplied registry, locations and delimiter context. It preserves enough metadata for later placement and availability diagnostics; it does not implement directive semantics or silently skip unsupported forms.
+Tokenization recognises directive spelling through the frontend directive registry, locations and delimiter context. It preserves enough metadata for later placement and availability diagnostics; it does not implement directive semantics or silently skip unsupported forms.
 
 It does **not**:
 
@@ -165,7 +165,7 @@ Defer semantic errors to their owning stages. A good lexer stays humble.
 
 - **Accepted design:** located tokens and retained source preparation.
 - **Current implementation:** progress rows for source-kind coverage. The numeric surface includes `Dec`, `DecN` and `Byte`. `moth-lexical` owns lexical facts shared with MON, AST owns semantic typing and HIR owns numeric domains and failure.
-- **Queued work:** `general-directives-plan.md` extends registered directive recognition while preserving lexical modes and diagnostic ownership.
+- **Delivered:** directive recognition is frontend-owned. `$name` tokenizes in every mode, so a directive name is resolved before its context is checked, while lexical modes and diagnostic ownership stay unchanged.
 - **Deferred or outside scope:** tokenization does not infer target support or type identity.
 
 ## Exit state

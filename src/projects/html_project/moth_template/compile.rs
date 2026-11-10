@@ -5,12 +5,12 @@
 //!       publishes the folds' resource associations onto one request-owned registry, plans every
 //!       surviving resource origin onto one request-wide output plan, and packages the rendered
 //!       documents, deferred resource outputs and warnings.
-//! WHY:  source collection, the project's style vocabulary and the output shape are project
-//!       policy. The stage sequence that folds template source into `content` values is
-//!       compiler-owned, so this module composes no frontend stage itself. Resource identity,
-//!       placement and output-path conflicts belong to the shared builder plan, and emission
-//!       stays with the caller: this layer only returns the byte-free destinations and the
-//!       physical source mapping they resolve against.
+//! WHY:  source collection and the output shape are project policy while the compiler owns the
+//!       template directive vocabulary. The stage sequence that folds template source into
+//!       `content` values is compiler-owned, so this module composes no frontend stage itself.
+//!       Resource identity, placement and output-path conflicts belong to the shared builder plan,
+//!       and emission stays with the caller: this layer only returns the byte-free destinations
+//!       and the physical source mapping they resolve against.
 
 use crate::build_system::build::DeferredResourceOutput;
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
@@ -45,7 +45,6 @@ use crate::projects::html_project::moth_template::render::{
 use crate::projects::html_project::resource_output_plan::{
     HtmlResourceOutputPlan, PlannedResourceOutput,
 };
-use crate::projects::html_project::style_directives::html_project_style_directives;
 use std::sync::Arc;
 
 pub(crate) fn compile_moth_template(
@@ -87,12 +86,7 @@ pub(crate) fn compile_moth_template_with_registry(
         Err(failure) => return prepared_failure_to_result(failure, None, string_table),
     };
 
-    let style_directives = match StyleDirectiveRegistry::merged(&html_project_style_directives()) {
-        Ok(style_directives) => style_directives,
-        Err(error) => {
-            return prepared_failure_to_result(PreparedFailure::from(error), None, string_table);
-        }
-    };
+    let style_directives = StyleDirectiveRegistry::built_ins();
 
     let mut documents = Vec::with_capacity(sources.len());
     let mut resource_plan = HtmlResourceOutputPlan::new(DIRECT_TEMPLATE_PROJECT_NAME);

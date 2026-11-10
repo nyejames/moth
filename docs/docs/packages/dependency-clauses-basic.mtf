@@ -2,7 +2,7 @@ Direct-selection clauses bring multiple symbols. Namespace clauses bring a whole
 
 ### Two colliding render symbols
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @blog render as render_blog
     @docs render as render_docs
 ]
@@ -11,7 +11,7 @@ Two modules both export `render`. Aliases keep them apart.
 
 ### A namespace alias
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math as math
 
     result = math.sin(1.0)

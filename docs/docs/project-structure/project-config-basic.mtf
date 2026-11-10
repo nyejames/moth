@@ -1,10 +1,10 @@
-**Current support and accepted design.** `config.moth` uses ordinary named `project` and selected builder-settings records. This remains the accepted configuration model. The queued `$config` directive replaces the current `#Config of T` input spelling, not the named records. See @../progress (Progress).
+**Current support.** `config.moth` uses ordinary named `project` and selected builder-settings records with `$config` input declarations. The named records remain the accepted configuration model. `$config` marks typed inputs and does not replace the records. See @../progress (Progress).
 
 `config.moth` is optional at the selected build root and is one self-contained compile-time source with no source dependencies. A nested config file has no effect on its enclosing build.
 
 ### Project and builder settings
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     project #= (
         name = "my_site",
         version = "1.0.0",
@@ -13,12 +13,13 @@
     html #= ()
 ]
 
-The `project` record is optional. Omitting `name` uses the selected directory name and omitting `version` means unversioned. The active HTML builder section currently requires `html #= ()`, even when all fields take defaults. The command selects the builder; these records never select one. There is no `entry_root` setting.
+The `project` record is optional. Omitting `name` uses the selected directory name and omitting `version` means unversioned. The HTML builder section is also optional and uses defaults when omitted. The command selects the builder; these records never select one. There is no `entry_root` setting.
 
 ### Typed configuration inputs
 
-[codeblock, $code("moth"):
-    version #Config of String = "1.0.0"
+[codeblock, $code "moth":
+    $config
+    version #String = "1.0.0"
 
     project #= (
         version = version,
@@ -27,6 +28,6 @@ The `project` record is optional. Omitting `name` uses the selected directory na
     html #= ()
 ]
 
-The accepted future input marker is `$config` before an explicitly typed top-level constant. The rest of `config.moth` remains ordinary compile-time configuration. `$project`, `$builder` and `$html_builder` are not accepted directives.
+`$config` marks one explicitly typed top-level compile-time `#` binding as a build input. The binding name is the input key, the declared type is the receiving contract and the initializer is the missing-input fallback. Only a marked binding may omit its initializer. The rest of `config.moth` remains ordinary compile-time configuration. `$project`, `$builder` and `$html_builder` are not accepted directives.
 
 See @#project-config (Project config), @#build-inputs (Build configuration values) and @../directives (Directives).

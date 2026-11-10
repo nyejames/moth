@@ -156,8 +156,8 @@ pub(crate) fn parse_type_annotation_cursor(
     context: TypeAnnotationContext,
     string_table: &mut StringTable,
 ) -> TypeParseResult<ParsedTypeRef> {
-    // Only ordinary declaration targets may omit a type. Build-config contracts intentionally use
-    // a required context so `#Config of = value` is rejected at the authored `=` token.
+    // Only ordinary declaration targets may omit a type. Every signature and alias context
+    // requires its annotation, so an omitted type is rejected at the authored token.
     if matches!(context, TypeAnnotationContext::DeclarationTarget)
         && matches!(
             token_stream.current_tag(),

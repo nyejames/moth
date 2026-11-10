@@ -4,7 +4,7 @@ The prelude gives you a few names without a dependency clause. It keeps common o
 
 The `io` namespace comes available in normal source files. It exposes Core IO helpers such as `io.line(...)`.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     io.line("Hello from the prelude")
 ]
 
@@ -14,7 +14,7 @@ The compiler-owned `Error` type also stays available for `Error!` flows.
 
 Most Core packages require explicit dependency clauses:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @core/math sin
     @core/time mark_now
 ]

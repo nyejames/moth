@@ -6,7 +6,7 @@ It exists for compiler developers. It is not a public language feature, a produc
 
 The Cargo feature and validation command use the joke name directly:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     cargo feature: boracle
     validation:    just boracle
 ]
@@ -122,7 +122,7 @@ Agreement is evidence. Agreement is not proof when both solvers consume a malfor
 
 The initial architecture keeps the current checker isolated:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     validated HIR
         |
         +-> current alpha borrow checker
@@ -141,7 +141,7 @@ A future production checker may consume `BorrowProblem` or an accepted evolution
 
 The compiler-owned Boracle source service follows one explicit analysis relationship:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     validated HIR
         -> normalized semantic events and CFG facts
         -> parameter and definition-aware origin propagation
@@ -170,7 +170,7 @@ does not flatten the pieces or reopen filesystem resolution; Stage 0 and AST own
 
 ### Main paths
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     src/compiler_frontend/analysis/borrow_checker/problem/
     src/compiler_frontend/analysis/borrow_checker/last_use/
     src/compiler_frontend/analysis/borrow_checker/boracle/
@@ -178,7 +178,7 @@ does not flatten the pieces or reopen filesystem resolution; Stage 0 and AST own
 
 The shared problem model and common result vocabulary are compiled normally. Boracle's solver, verbose traces, experiment engine and internal command sit behind the `boracle` Cargo feature gate:
 
-[codeblock, $code("rust"):
+[codeblock, $code "rust":
     #[cfg(feature = "boracle")]
 ]
 
@@ -227,7 +227,7 @@ A call can evaluate several arguments from left to right, read index expressions
 
 One acceptable conceptual shape is:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     block entry
         -> argument 0 index read
         -> argument 0 place read
@@ -341,7 +341,7 @@ A source binding is a name and storage cell. It is not a permanent value identit
 
 Consider:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     value ~= make_first()
     old = value
     inspect(old)
@@ -354,7 +354,7 @@ Consider:
 
 The reference model should show:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     first definition of value  -> origin O0
     old                        -> origin O0
 
@@ -399,7 +399,7 @@ A backend may later represent a scalar directly. The abstract origin only distin
 
 Binding or passing an existing value normally preserves its origins.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     alias = source
 ]
 
@@ -409,7 +409,7 @@ The alias does not introduce an independent origin. It may issue or propagate a 
 
 A mutable declaration from an existing place carries mutation-capable access to the same origins.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     writer ~= source
 ]
 
@@ -527,7 +527,7 @@ uncertain origin into an independent generation.
 
 Its two sides are different facts:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     copy source
 
     source access
@@ -543,7 +543,7 @@ The result shares no mutable origin with the source. Existing source aliases rem
 
 Example:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     items ~= {"Priya"}
     shared = items
     snapshot ~= copy items
@@ -554,7 +554,7 @@ Example:
 
 Expected reference explanation:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     items and shared observe O0
     copy reads O0
     copy creates O1
@@ -584,7 +584,7 @@ site. Shared allocation provenance does not merge binding cells.
 
 Loops make this harder because one definition site can execute many times:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     value ~= initial()
 
     loop condition:
@@ -697,7 +697,7 @@ keeping-alive use when one exists; a first syntactic use is not a substitute for
 
 At each access event:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     shared access
         reject if an overlapping exclusive loan is live
 
@@ -764,7 +764,7 @@ Moth has no ordinary mandatory-consuming value operation.
 
 A call, assignment, return or aggregate insertion may receive affine cleanup responsibility only when every relevant path proves no later source use and all other transfer preconditions hold.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     transfer proven
         -> record optional transfer eligibility
 
@@ -783,7 +783,7 @@ the containing point would still observe the final read and give the wrong trans
 
 The same hardened liveness authority can later inform several systems without merging their responsibilities:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     borrow validation
         asks whether a conflicting loan remains usable
 
@@ -808,7 +808,7 @@ Boracle should exploit path separation whenever the source cannot observe confli
 
 Example:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     items ~{String} = {"Priya"}
     shared = items
 
@@ -832,7 +832,7 @@ conservatively keep such aliases active to scope exit.
 
 Boracle should investigate the stronger rule:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     items ~= {"Priya"}
     writer ~= items
 
@@ -842,7 +842,7 @@ Boracle should investigate the stronger rule:
 
 Hypothesis:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     exclusive alias issue is legal
     no future operation observes writer
     writer's loan ends
@@ -873,7 +873,7 @@ A future production fast path may compress these checks. Boracle should keep the
 
 Constructing an aggregate creates a fresh outer value but does not implicitly copy existing child values.
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     item = source
     pair = Pair(first = item, second = item)
 ]
@@ -953,7 +953,7 @@ One function-wide union can over-approximate relationships between separate retu
 
 Boracle should investigate per-result facts such as:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     result 0 -> fresh
     result 1 -> alias of parameter 0
     result 2 -> alias of result 1
@@ -1014,7 +1014,7 @@ Useful witness types include:
 
 Conceptual example:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     mutation rejected at P30
 
     requested
@@ -1129,7 +1129,7 @@ Boracle should borrow the decomposition, not rustc's source lifetime system or i
 
 A useful reference implementation for Moth can ask a more direct question:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     can any future source-semantic operation still observe this loan capability?
 ]
 
@@ -1188,7 +1188,7 @@ A future named experiment may ask whether a set of borrow/last-use facts would b
 Every report and dump records one versioned reference rule-set plus a sorted experiment set. The
 default selection is `boracle-reference-v1` with no experiments.
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     rule-set = boracle-reference-v1
     experiments = none
 ]
@@ -1196,7 +1196,7 @@ default selection is `boracle-reference-v1` with no experiments.
 When experiments are selected, the header keeps the same reference rule-set and prints names in
 sorted order:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     rule-set = boracle-reference-v1
     experiments = dead-exclusive-loan
 ]
@@ -1436,7 +1436,7 @@ is correct.
 
 A build with `boracle` exposes the internal command:
 
-[codeblock, $code("bash"):
+[codeblock, $code "bash":
     cargo run --features boracle -- boracle ./tmp/example.moth --dump relations
 ]
 

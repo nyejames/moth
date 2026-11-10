@@ -286,6 +286,7 @@ pub(crate) fn compact_label_message_text(
         }
         DurableLabelMessage::TraitRequirementSite => "trait requirement".to_owned(),
         DurableLabelMessage::ReceiverMethodSite => "receiver method".to_owned(),
+        DurableLabelMessage::EarlierDirective => "earlier directive here".to_owned(),
         DurableLabelMessage::EarlierTemplateHeadItem => {
             "earlier conflicting head item here".to_owned()
         }

@@ -8,7 +8,7 @@ The entry has built-in `Error!`. Checked numeric failure and compatible top-leve
 
 An empty entry file produces the builder's default page. A metadata-only entry produces a complete document too:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     #[$in title:Welcome]
 ]
 

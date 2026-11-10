@@ -1,2 +1,3 @@
-enabled #Config of Bool = true
+$config
+enabled #Bool = true
 [:namesake [enabled]]

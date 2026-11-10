@@ -15,9 +15,8 @@ use crate::compiler_frontend::compiler_messages::diagnostics::draft::{
 };
 use crate::compiler_frontend::compiler_messages::diagnostics::families::names_declarations;
 use crate::compiler_frontend::compiler_messages::diagnostics::families::project_config;
-use crate::compiler_frontend::compiler_messages::diagnostics::families::token_lexical;
 use crate::compiler_frontend::compiler_messages::{
-    CommonSyntaxMistakeReason, DiagnosticBag, InvalidConfigReason, InvalidDeclarationReason,
+    DiagnosticBag, InvalidConfigReason, InvalidDeclarationReason,
 };
 pub(crate) use crate::compiler_frontend::declaration_syntax::build_config_contract::SourceBuildConfigContract;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
@@ -51,13 +50,11 @@ use crate::compiler_frontend::headers::types::{
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxTable;
 use crate::compiler_frontend::semantic_identity::ModuleRootFiles;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId, SourceSpan};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceDatabase, SourceId};
 use crate::compiler_frontend::source_packages::root_file::file_name_is_config_file;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tokenizer::tokens::{
-    SourceTokens, TokenCursor, TokenRange, TokenTag,
-};
+
 use rustc_hash::FxHashMap;
 use std::mem;
 use std::sync::Arc;
@@ -142,6 +139,8 @@ pub fn parse_file_headers_with_table(
     let mut parse_context = HeaderParseContext {
         file_role,
         is_config_file,
+        style_directives:
+            crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         string_table,
         path_fork,
         span_builder,
@@ -179,7 +178,6 @@ pub fn parse_file_headers_with_table(
             owner,
             source_file,
             path_syntax,
-            file_id,
             end_index,
             &mut parse_context,
             state,
@@ -386,190 +384,7 @@ pub fn prepare_header_syntax(
         module_symbols,
     })
 }
-/// Find a `#Config` marker in source-owned declaration/default ranges.
-///
-/// Declaration shells retain only checked ranges; this pass reads those ranges through the
-/// canonical owner and never recreates a declaration-owned token vector.
-pub(super) fn find_config_qualifier_marker_in_declaration_defaults(
-    header: &Header,
-    source_tokens: &SourceTokens,
-    string_table: &StringTable,
-) -> Result<Option<SourceSpan>, InfrastructureFailure> {
-    fn marker_in_cursor(
-        mut cursor: TokenCursor<'_>,
-        string_table: &StringTable,
-    ) -> Option<SourceSpan> {
-        let mut previous = cursor.advance()?;
-        loop {
-            let crosses_segment = cursor.is_at_segment_start();
-            let Some(current) = cursor.advance() else {
-                break;
-            };
-            if !crosses_segment
-                && previous.tag() == TokenTag::HASH
-                && current.tag() == TokenTag::SYMBOL
-                && current
-                    .string_id()
-                    .is_some_and(|name| string_table.resolve(name) == "Config")
-            {
-                return Some(previous.source_span());
-            }
-            if current.is_eof() {
-                break;
-            }
-            previous = current;
-        }
-        None
-    }
-
-    let marker_in_range =
-        |range: Option<TokenRange>| -> Result<Option<SourceSpan>, InfrastructureFailure> {
-            let Some(range) = range else {
-                return Ok(None);
-            };
-            let cursor = source_tokens.cursor(range).map_err(|error| {
-            InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
-                "declaration marker range could not be resolved through its source owner: {error:?}"
-            ))
-        })?;
-            Ok(marker_in_cursor(cursor, string_table))
-        };
-
-    match &header.kind {
-        HeaderKind::Constant { declaration } => marker_in_range(declaration.initializer_range),
-        HeaderKind::Function { signature, .. } => {
-            for parameter in &signature.parameters {
-                if let Some(marker) = marker_in_range(parameter.default_range)? {
-                    return Ok(Some(marker));
-                }
-            }
-            Ok(None)
-        }
-        HeaderKind::Struct { fields, .. } => {
-            for field in fields {
-                if let Some(marker) = marker_in_range(field.default_range)? {
-                    return Ok(Some(marker));
-                }
-            }
-            Ok(None)
-        }
-        HeaderKind::Choice { variants, .. } => {
-            for variant in variants {
-                let crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayloadSyntax::Record {
-                    fields,
-                } = &variant.payload
-                else {
-                    continue;
-                };
-                for field in fields {
-                    if let Some(marker) = marker_in_range(field.default_range)? {
-                        return Ok(Some(marker));
-                    }
-                }
-            }
-            Ok(None)
-        }
-        HeaderKind::Trait { declaration } => {
-            for requirement in &declaration.requirements {
-                for parameter in &requirement.signature.parameters {
-                    if let Some(marker) = marker_in_range(parameter.default_range)? {
-                        return Ok(Some(marker));
-                    }
-                }
-            }
-            Ok(None)
-        }
-        _ => Ok(None),
-    }
-}
-
-/// Find retained declaration/body `#Config` markers through the canonical source owner.
-///
-/// Contiguous declaration ranges use `Header::tokens`; the active entry body uses its checked
-/// `TokenSequenceId`. No body vector is materialized solely to inspect this two-token marker.
-pub(super) fn find_config_qualifier_marker_in_header(
-    header: &Header,
-    source_tokens: Option<&SourceTokens>,
-    string_table: &StringTable,
-) -> Result<Option<(SourceSpan, bool)>, InfrastructureFailure> {
-    let Some(source_tokens) = source_tokens else {
-        if header.token_sequence.is_some() || !header.tokens.is_empty() {
-            return Err(InfrastructureFailure::internal(
-                CompilerStage::HeaderParsing,
-                "retained header marker scan has no source token owner",
-            ));
-        }
-        return Ok(None);
-    };
-    if header.tokens.source() != source_tokens.source() {
-        return Err(InfrastructureFailure::internal(
-            CompilerStage::HeaderParsing,
-            "retained header marker scan does not match its source token owner",
-        ));
-    }
-
-    if let Some(marker) =
-        find_config_qualifier_marker_in_declaration_defaults(header, source_tokens, string_table)?
-    {
-        return Ok(Some((marker, true)));
-    }
-    let body_cursor = if let Some(sequence) = header.token_sequence {
-        let view = source_tokens.token_sequence(sequence).map_err(|error| {
-            InfrastructureFailure::internal(
-                CompilerStage::HeaderParsing,
-                format!(
-                    "retained header marker scan could not resolve its token sequence: {error:?}"
-                ),
-            )
-        })?;
-        Some(view.cursor().map_err(|error| {
-            InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
-                "retained header marker scan could not construct its token sequence cursor: {error:?}"
-            ))
-        })?)
-    } else if header.tokens.is_empty() {
-        None
-    } else {
-        Some(source_tokens.cursor(header.tokens).map_err(|error| {
-            InfrastructureFailure::internal(CompilerStage::HeaderParsing, format!(
-                "retained header marker scan could not construct its token range cursor: {error:?}"
-            ))
-        })?)
-    };
-
-    fn marker_in_cursor(
-        mut cursor: TokenCursor<'_>,
-        string_table: &StringTable,
-    ) -> Option<SourceSpan> {
-        let mut previous = cursor.advance()?;
-        loop {
-            let crosses_segment = cursor.is_at_segment_start();
-            let Some(current) = cursor.advance() else {
-                break;
-            };
-            if !crosses_segment
-                && previous.tag() == TokenTag::HASH
-                && current.tag() == TokenTag::SYMBOL
-                && current
-                    .string_id()
-                    .is_some_and(|name| string_table.resolve(name) == "Config")
-            {
-                return Some(previous.source_span());
-            }
-            if current.is_eof() {
-                break;
-            }
-            previous = current;
-        }
-        None
-    }
-
-    Ok(body_cursor
-        .and_then(|cursor| marker_in_cursor(cursor, string_table))
-        .map(|marker| (marker, true)))
-}
-
-/// Collect source-owned `#Config` contract shells and reject all non-declaration placements.
+/// Collect `$config` contract shells and reject all non-declaration placements.
 ///
 /// The declaration shell itself remains in `PreparedHeaderSyntax::headers` for the later
 /// config-resolution barrier. This pass only creates the provider-independent contract carrier and
@@ -583,8 +398,8 @@ fn collect_source_build_config_contracts(
     let mut diagnostics = DiagnosticBag::new();
 
     for output in prepared_files {
-        // The config.moth source has its own declaration-owned qualifier consumer. Leaving its
-        // top-level qualifier diagnostics on that path keeps config.moth semantics unchanged.
+        // The config.moth source has its own declaration-owned contract consumer. Leaving its
+        // top-level contract diagnostics on that path keeps config.moth semantics unchanged.
         let is_config_file = path_fork
             .component(output.source_file)
             .is_some_and(|name| file_name_is_config_file(string_table.resolve(name)));
@@ -599,43 +414,17 @@ fn collect_source_build_config_contracts(
             return Err(HeaderPreparationFailure::Infrastructure(
                 InfrastructureFailure::internal(
                     CompilerStage::HeaderParsing,
-                    "config marker scan source token owner does not match its file identity",
+                    "source contract scan source token owner does not match its file identity",
                 )
                 .into(),
             ));
         }
 
         for header in &output.headers {
-            let report_marker = |span: SourceSpan, adjacent: bool| {
-                if adjacent {
-                    project_config::invalid_config_reason(
-                        path_fork.component(header.declaration_path),
-                        InvalidConfigReason::ConfigQualifierInvalidPlacement,
-                        Some(span),
-                    )
-                } else {
-                    token_lexical::common_syntax_mistake(
-                        CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing,
-                        Some(span),
-                    )
-                }
-            };
-
-            if let Some((location, adjacent)) =
-                find_config_qualifier_marker_in_header(header, source_tokens, string_table)
-                    .map_err(|error| HeaderPreparationFailure::Infrastructure(error.into()))?
-            {
-                let mut diagnostic = report_marker(location, adjacent);
-                capture(output.file_id, &mut diagnostic)
-                    .map_err(|error| HeaderPreparationFailure::Infrastructure(error.into()))?;
-                diagnostics.push(diagnostic);
-                continue;
-            }
-
             let HeaderKind::Constant { declaration } = &header.kind else {
                 continue;
             };
-            let Some(qualifier) = &declaration.config_qualifier else {
+            let Some(contract_syntax) = &declaration.config_contract else {
                 continue;
             };
             let Some(name) = path_fork.component(header.declaration_path) else {
@@ -685,7 +474,8 @@ fn collect_source_build_config_contracts(
                     normalize_source_build_config_contract_from_token(
                         name,
                         name_span,
-                        qualifier,
+                        &declaration.type_annotation,
+                        contract_syntax,
                         Some(token),
                         string_table,
                     )
@@ -693,7 +483,7 @@ fn collect_source_build_config_contracts(
                     normalize_source_build_config_contract_non_primitive(
                         name,
                         name_span,
-                        qualifier,
+                        &declaration.type_annotation,
                         token.source_span(),
                         string_table,
                     )
@@ -702,7 +492,8 @@ fn collect_source_build_config_contracts(
                 normalize_source_build_config_contract_from_token(
                     name,
                     name_span,
-                    qualifier,
+                    &declaration.type_annotation,
+                    contract_syntax,
                     None,
                     string_table,
                 )

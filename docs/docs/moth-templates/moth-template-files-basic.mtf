@@ -2,7 +2,7 @@ A `.mtf` file is Markdown that lives inside Moth's template world.
 
 ### Write prose directly
 
-[codeblock, $code("md"):
+[codeblock, $code "md":
     # Getting started
 
     This is **bold** text.
@@ -14,7 +14,7 @@ No dependency clauses, no declarations, no frontmatter. Content only.
 
 ### Bind the result
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     @docs/intro content as intro
 
     [: [intro] ]

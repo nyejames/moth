@@ -319,7 +319,6 @@ fn parse_args_diagnostic(source: &str) -> DiagnosticDraft {
     .expect_err("call arguments should fail");
     match error {
         ExpressionParseError::Diagnostic(diagnostic)
-        | ExpressionParseError::TemplateDirectiveEmptyArguments(diagnostic)
         | ExpressionParseError::NonConstantReferenceInConstant(diagnostic) => diagnostic,
         ExpressionParseError::Infrastructure(error) => {
             panic!("expected user diagnostic, found infrastructure error: {error:?}")

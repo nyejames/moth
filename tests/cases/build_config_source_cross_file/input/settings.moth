@@ -1,4 +1,5 @@
-enabled #Config of Bool = true
+$config
+enabled #Bool = true
 
 configured_result || -> I32:
     result ~= 0

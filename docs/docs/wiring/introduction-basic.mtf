@@ -5,7 +5,7 @@ formation with a target diagnostic.
 The word before `of` chooses the meaning of the following specification. These
 fragments show the syntax, not complete declarations:
 
-[codeblock, $code("text"):
+[codeblock, $code "text":
     Box of String
     value Wire of String
     submit Route of AppMessage
@@ -18,7 +18,7 @@ runtime wrapper types, general values or constructor expressions.
 Several Moth declarations use pipe-delimited lists, but their positions keep
 different contracts:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     show |value String| -> String:
         return value
     ;
@@ -47,7 +47,7 @@ cases and the future channel boundary.
 The receiving type must be immediate. The same boundary rule applies to
 ordinary generic calls, optional values and casts:
 
-[codeblock, $code("moth"):
+[codeblock, $code "moth":
     empty type Item || -> {Item}:
         return {}
     ;

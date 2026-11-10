@@ -417,7 +417,7 @@ pub(crate) fn add_constant_initializer_dependencies(
     // would reject a program the unqualified form accepts.
     for (header_index, header) in headers.iter().enumerate() {
         let constant_shell = match &header.kind {
-            HeaderKind::Constant { declaration } if declaration.config_qualifier.is_none() => true,
+            HeaderKind::Constant { declaration } if declaration.config_contract.is_none() => true,
             HeaderKind::ConstTemplate { .. } => true,
             _ => false,
         };
