@@ -36,4 +36,4 @@ statements) reference and @../templates/#head-and-body (Template head and body).
 
 The annotation supplies the carried type. `reader` and `writer` are
 directional endpoints of one channel. Channel transport, scheduling and
-cancellation are separate from Wiring. See @#wiring (Wiring) for details.
+cancellation are separate from Wiring. See @#wiring-introduction (Wiring reference) for details.
