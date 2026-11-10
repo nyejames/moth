@@ -1741,8 +1741,8 @@ fn rejects_unknown_source_directive_with_source_suggestions() {
     );
     assert_eq!(
         string_table.resolve(facts.supported_directives),
-        "'$config'",
-        "source suggestions must not include template-only directives"
+        "'$export', '$config'",
+        "source suggestions must include source modifiers but not template-only directives"
     );
 }
 

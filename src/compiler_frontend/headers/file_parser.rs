@@ -22,9 +22,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidTemplateDirectiveReason,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
-use crate::compiler_frontend::headers::file_dependency_clauses::{
-    parse_and_record_private_dependency, parse_and_record_public_dependency,
-};
+use crate::compiler_frontend::headers::file_dependency_clauses::parse_and_record_dependency;
 use crate::compiler_frontend::headers::file_state::HeaderFileParseState;
 use crate::compiler_frontend::headers::hash_items::{HashItemRequest, handle_hash_item};
 use crate::compiler_frontend::headers::header_dispatch::{
@@ -130,6 +128,33 @@ fn dangling_source_modifier(name_id: StringId, span: SourceSpan) -> DiagnosticDr
     )
 }
 
+/// Build the diagnostic for a source modifier whose next item cannot accept it.
+fn wrong_target_source_modifier(name_id: StringId, span: SourceSpan) -> DiagnosticDraft {
+    templates::invalid_template_directive(
+        Some(name_id),
+        InvalidTemplateDirectiveReason::WrongTarget,
+        Some(span),
+    )
+}
+
+/// Whether this file may author the modifier's declared target at all.
+///
+/// WHAT: `$export` belongs only to an API facade root; `$config` keeps its existing placement
+///       contract, which its declaration-level target check owns.
+/// WHY: an ineligible file is a placement failure at the directive, not a missing or wrong target
+///      on the next item.
+fn source_modifier_allowed_in_file(
+    target: SourceModifierTarget,
+    context: &HeaderParseContext<'_>,
+) -> bool {
+    match target {
+        SourceModifierTarget::ExplicitTypedCompileTimeBinding => true,
+        SourceModifierTarget::ExportablePublicApiItem => {
+            !context.is_config_file && context.file_role.is_export_capable()
+        }
+    }
+}
+
 /// Resolve one recognised directive token to its source-modifier target.
 ///
 /// WHY: the lexer only emits registered names, and the header walk resolves the name's declared
@@ -177,6 +202,9 @@ fn header_accepts_source_modifier(kind: &HeaderKind, target: SourceModifierTarge
                     if declaration.binding_mode.is_compile_time()
                         && !matches!(declaration.type_annotation, ParsedTypeRef::Inferred)
             )
+        }
+        SourceModifierTarget::ExportablePublicApiItem => {
+            kind.is_authored_public_export_declaration()
         }
     }
 }
@@ -285,18 +313,34 @@ fn parse_headers_in_file_inner(
                 // The next directive is handled by its own arm so a repeated modifier can cite
                 // both authored spans.
                 HeaderFileItem::StyleDirective(_) => {}
+                // Dependency clauses reach their own strict-selection validation. The main walk
+                // checks whether the pending target can attach there.
+                HeaderFileItem::Dependency => {}
                 HeaderFileItem::Symbol(_) => {
                     if !classify_symbol_statement_start_at_source(canonical, follower_index)
                         .starts_header_declaration()
                     {
-                        return Err(diagnostic_failure(dangling_source_modifier(
+                        return Err(diagnostic_failure(wrong_target_source_modifier(
                             pending.name_id,
                             pending.span,
                         )));
                     }
                 }
+                // Declaration kinds that cannot accept a modifier are still real targets, so
+                // attachment reports a wrong target rather than a missing one.
                 HeaderFileItem::BuiltinTypeConformanceTarget(_) => {}
-                _ => {
+                HeaderFileItem::Hash { .. }
+                | HeaderFileItem::RuntimeTemplate
+                | HeaderFileItem::StartBodyToken
+                | HeaderFileItem::ReservedTraitSyntax
+                | HeaderFileItem::Export
+                | HeaderFileItem::ExportBlock => {
+                    return Err(diagnostic_failure(wrong_target_source_modifier(
+                        pending.name_id,
+                        pending.span,
+                    )));
+                }
+                HeaderFileItem::Eof => {
                     return Err(diagnostic_failure(dangling_source_modifier(
                         pending.name_id,
                         pending.span,
@@ -341,7 +385,26 @@ fn parse_headers_in_file_inner(
             }
 
             HeaderFileItem::Dependency => {
-                parse_and_record_private_dependency(cursor, file_id, state, context, current_span)?;
+                let export_mode = match pending_source_modifier.take() {
+                    None => HeaderExportMode::Private,
+                    Some(modifier) => match modifier.target {
+                        SourceModifierTarget::ExportablePublicApiItem => HeaderExportMode::Public,
+                        SourceModifierTarget::ExplicitTypedCompileTimeBinding => {
+                            return Err(diagnostic_failure(wrong_target_source_modifier(
+                                modifier.name_id,
+                                modifier.span,
+                            )));
+                        }
+                    },
+                };
+                parse_and_record_dependency(
+                    cursor,
+                    file_id,
+                    state,
+                    context,
+                    export_mode,
+                    current_span,
+                )?;
             }
 
             HeaderFileItem::Export => {
@@ -382,6 +445,13 @@ fn parse_headers_in_file_inner(
                 // template-only directive that follows `$config` is a wrong-context use, not a
                 // duplicate of the pending source modifier.
                 let target = source_modifier_target_for(context, name_id, current_span)?;
+                if !source_modifier_allowed_in_file(target, context) {
+                    return Err(diagnostic_failure(templates::invalid_template_directive(
+                        Some(name_id),
+                        InvalidTemplateDirectiveReason::DirectiveNotAllowedHere,
+                        Some(current_span),
+                    )));
+                }
 
                 if let Some(previous) = pending_source_modifier {
                     return Err(diagnostic_failure(
@@ -693,9 +763,14 @@ fn parse_export_block_item(
             )
         }
 
-        HeaderFileItem::Dependency => {
-            parse_and_record_public_dependency(cursor, file_id, state, context, current_span)
-        }
+        HeaderFileItem::Dependency => parse_and_record_dependency(
+            cursor,
+            file_id,
+            state,
+            context,
+            HeaderExportMode::Public,
+            current_span,
+        ),
 
         HeaderFileItem::Export | HeaderFileItem::ExportBlock => Err(diagnostic_failure(
             generics_traits_api::invalid_export_target(Some(current_span)),
@@ -767,13 +842,22 @@ fn handle_symbol_item(
     context: &mut HeaderParseContext<'_>,
     symbol: SymbolItemRequest,
 ) -> FileParserResult<()> {
-    let export_mode = state.export_mode;
     let SymbolItemRequest {
         name_id,
         current_span,
         current_index,
         source_modifier,
     } = symbol;
+    // A facade `$export` is the only new public-surface authoring form. The legacy block mode
+    // remains the fallback until its parser is removed, so this slice can migrate sources first.
+    let export_mode = match source_modifier {
+        Some(modifier)
+            if matches!(modifier.target, SourceModifierTarget::ExportablePublicApiItem) =>
+        {
+            HeaderExportMode::Public
+        }
+        _ => state.export_mode,
+    };
     let Some(follower_index) = TokenIndex::try_from_index(cursor.position().index()) else {
         crate::compiler_bug!(
             CompilerStage::HeaderParsing,
@@ -862,7 +946,14 @@ fn handle_symbol_item(
             declaration_span: current_span,
             declaration_order: current_index.index(),
             export_mode,
-            config_input_span: source_modifier.map(|modifier| modifier.span),
+            config_input_span: source_modifier
+                .filter(|modifier| {
+                    matches!(
+                        modifier.target,
+                        SourceModifierTarget::ExplicitTypedCompileTimeBinding
+                    )
+                })
+                .map(|modifier| modifier.span),
         },
         &mut build_context,
         context.span_builder,

@@ -38,6 +38,12 @@ pub(crate) const BEFORE_DIRECTIVE_NAME: &str = "before";
 /// Its assigned value wraps every direct child template on the suffix edge.
 pub(crate) const AFTER_DIRECTIVE_NAME: &str = "after";
 
+/// The `$export` directive name.
+///
+/// It is a source modifier, so the header walk reads the name from here to keep recognition and
+/// file-role checks aligned.
+pub(crate) const EXPORT_DIRECTIVE_NAME: &str = "export";
+
 /// The `$config` directive name.
 ///
 /// It is a source modifier, so the template-head parser and the header walk both read the name
@@ -91,6 +97,8 @@ pub(crate) enum DirectiveOccurrence {
 pub enum SourceModifierTarget {
     /// Exactly one explicitly typed top-level compile-time `#` binding.
     ExplicitTypedCompileTimeBinding,
+    /// One authored public declaration or direct-selection dependency clause.
+    ExportablePublicApiItem,
 }
 
 /// Core language directive behavior handled directly by compiler-owned template parsing.

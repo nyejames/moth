@@ -31,12 +31,6 @@ use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenIndex};
 
 type FileDependencyClauseResult<T> = Result<T, HeaderParseFailure>;
 
-struct DependencyClauseRequest {
-    clause_span: SourceSpan,
-    clause_token_index: TokenIndex,
-    require_selection_clause: bool,
-}
-
 fn dependency_clause_token_index(
     cursor: &TokenCursor<'_>,
 ) -> FileDependencyClauseResult<TokenIndex> {
@@ -54,11 +48,12 @@ fn dependency_clause_token_index(
     })
 }
 
-pub(super) fn parse_and_record_private_dependency(
+pub(super) fn parse_and_record_dependency(
     cursor: &mut TokenCursor<'_>,
     file_id: crate::compiler_frontend::source::SourceId,
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
+    export_mode: HeaderExportMode,
     clause_span: SourceSpan,
 ) -> FileDependencyClauseResult<()> {
     if context.is_config_file {
@@ -72,33 +67,9 @@ pub(super) fn parse_and_record_private_dependency(
         file_id,
         state,
         context,
-        HeaderExportMode::Private,
-        DependencyClauseRequest {
-            clause_span,
-            clause_token_index: dependency_clause_token_index(cursor)?,
-            require_selection_clause: false,
-        },
-    )
-}
-
-pub(super) fn parse_and_record_public_dependency(
-    cursor: &mut TokenCursor<'_>,
-    file_id: crate::compiler_frontend::source::SourceId,
-    state: &mut HeaderFileParseState,
-    context: &mut HeaderParseContext<'_>,
-    clause_span: SourceSpan,
-) -> FileDependencyClauseResult<()> {
-    parse_and_record_dependency_clause(
-        cursor,
-        file_id,
-        state,
-        context,
-        HeaderExportMode::Public,
-        DependencyClauseRequest {
-            clause_span,
-            clause_token_index: dependency_clause_token_index(cursor)?,
-            require_selection_clause: true,
-        },
+        export_mode,
+        clause_span,
+        dependency_clause_token_index(cursor)?,
     )
 }
 
@@ -108,13 +79,9 @@ fn parse_and_record_dependency_clause(
     state: &mut HeaderFileParseState,
     context: &mut HeaderParseContext<'_>,
     export_mode: HeaderExportMode,
-    request: DependencyClauseRequest,
+    clause_span: SourceSpan,
+    clause_token_index: TokenIndex,
 ) -> FileDependencyClauseResult<()> {
-    let DependencyClauseRequest {
-        clause_span,
-        clause_token_index,
-        require_selection_clause,
-    } = request;
     let source_tokens = cursor.source_tokens();
     if source_tokens.source() != file_id {
         return Err(HeaderParseFailure::Infrastructure(
@@ -165,7 +132,7 @@ fn parse_and_record_dependency_clause(
         .into());
     }
 
-    if require_selection_clause
+    if export_mode.is_public()
         && !matches!(
             &parsed.binding,
             ScannedDependencyBinding::DirectSelections { selections } if !selections.is_empty()

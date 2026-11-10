@@ -13,9 +13,9 @@ use crate::compiler_frontend::style_directives::compatibility::{
     TemplateHeadCompatibility, TemplateHeadTag,
 };
 use crate::compiler_frontend::style_directives::specs::{
-    CONFIG_DIRECTIVE_NAME, CoreStyleDirectiveKind, DOC_DIRECTIVE_NAME, INSERT_DIRECTIVE_NAME,
-    SLOT_DIRECTIVE_NAME, SourceModifierTarget, StyleDirectiveArgumentType, StyleDirectiveContexts,
-    StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveSpec,
+    CONFIG_DIRECTIVE_NAME, CoreStyleDirectiveKind, DOC_DIRECTIVE_NAME, EXPORT_DIRECTIVE_NAME,
+    INSERT_DIRECTIVE_NAME, SLOT_DIRECTIVE_NAME, SourceModifierTarget, StyleDirectiveArgumentType,
+    StyleDirectiveContexts, StyleDirectiveEffects, StyleDirectiveHandlerSpec, StyleDirectiveSpec,
 };
 use crate::compiler_frontend::tokenizer::tokens::TemplateBodyMode;
 
@@ -225,6 +225,10 @@ pub(crate) fn frontend_built_in_directives() -> Vec<StyleDirectiveSpec> {
                 },
                 Some(code_formatter_factory),
             ),
+        ),
+        StyleDirectiveSpec::source_modifier(
+            EXPORT_DIRECTIVE_NAME,
+            SourceModifierTarget::ExportablePublicApiItem,
         ),
         StyleDirectiveSpec::source_modifier(
             CONFIG_DIRECTIVE_NAME,

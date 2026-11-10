@@ -1603,7 +1603,7 @@ diagnostic_family! {
         stable: "MOTH-RULE-0080",
         category: DiagnosticCategory::Rule,
         severity: DiagnosticSeverity::Error,
-        title: "`export:` contains an invalid module API item",
+        title: "Invalid public re-export target",
         facts: [],
         labels: [],
         extra: None,

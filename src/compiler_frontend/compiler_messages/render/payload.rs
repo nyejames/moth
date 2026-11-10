@@ -1034,7 +1034,7 @@ fn missing_module_root_public_surface_message(
     context: DiagnosticRenderContext<'_>,
 ) -> String {
     format!(
-        "Cannot bind '{}' because the target module has no public export surface. Depend on a concrete file from inside the same module, or add a module root file with an `export:` block to define the module's public dependency surface.",
+        "Cannot bind '{}' because the target module has no public export surface. Depend on a concrete file from inside the same module, or add `$export` to declarations or direct-selection dependency clauses in the module's `@mod.moth` or `@package.moth` facade.",
         context.render_path(symbol_path)
     )
 }

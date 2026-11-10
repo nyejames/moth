@@ -152,15 +152,15 @@ fn config_modifier_at_eof_is_dangling() {
 }
 
 #[test]
-fn config_modifier_before_a_non_declaration_is_dangling() {
+fn config_modifier_before_a_non_declaration_is_wrong_target() {
     let source = "$config\nvalue = 1\n";
     let errors = expect_header_error(
         parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
-        "a runtime statement is not an eligible directive target",
+        "a runtime statement is a present ineligible directive target",
     );
 
     let diagnostic =
-        assert_directive_reason(&errors, InvalidTemplateDirectiveCode::DanglingModifier);
+        assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
     assert_eq!(
         diagnostic_primary_span(diagnostic),
         Some(source_span_for(source, "$config", 0))
@@ -327,4 +327,484 @@ fn config_modifier_inside_a_block_value_is_wrong_target() {
         Some(source_span_for(source, "$config", 0)),
         "the block-value directive is reported at its own span"
     );
+}
+
+#[test]
+fn export_modifier_marks_only_its_next_declaration_public() {
+    let source = "$export\nButton = | label String |\nprivate_helper || -> String:\n    return \"x\"\n;\n";
+    let headers = expect_header_success(
+        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
+        "a facade should accept per-declaration `$export`",
+    );
+
+    let public_headers: Vec<_> = headers
+        .headers
+        .iter()
+        .filter(|header| header.export_mode == HeaderExportMode::Public)
+        .collect();
+    assert_eq!(public_headers.len(), 1, "only the marked struct is public");
+    assert!(matches!(public_headers[0].kind, HeaderKind::Struct { .. }));
+
+    let private_helper = headers
+        .headers
+        .iter()
+        .find(|header| matches!(header.kind, HeaderKind::Function { .. }))
+        .expect("the unmarked helper should still parse");
+    assert_eq!(private_helper.export_mode, HeaderExportMode::Private);
+}
+
+#[test]
+fn export_modifier_marks_a_direct_selection_dependency_public() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let output = prepare_active_root_with_role(
+        "$export\n@button Button, render as render_button\n",
+        &PathBuf::from("src/@mod.moth"),
+        ModuleRootRole::Normal,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    )
+    .expect("a facade should accept an exported direct-selection clause");
+
+    assert_eq!(output.file_dependency_clauses.len(), 1);
+    assert_eq!(
+        output.file_dependency_clauses[0].export_mode,
+        HeaderExportMode::Public
+    );
+    let selections = output.file_dependency_clauses[0]
+        .selections(&output.dependency_selections)
+        .expect("the exported clause retains its selections");
+    assert_eq!(selections.len(), 2);
+    assert_eq!(string_table.resolve(selections[1].local_name()), "render_button");
+}
+
+#[test]
+fn export_modifier_rejects_a_namespace_dependency() {
+    let source = "$export\n@button\n";
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let failure = match prepare_active_root_with_role(
+        source,
+        &PathBuf::from("src/@mod.moth"),
+        ModuleRootRole::Normal,
+        &mut string_table,
+        &mut span_builder,
+        &mut path_fork,
+    ) {
+        Ok(_) => panic!("a public dependency needs explicit direct selections"),
+        Err(failure) => failure,
+    };
+
+    let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
+        panic!("the extra fixture should diagnose the namespace export");
+    };
+    let diagnostics = diagnostic_view_for_test(error.diagnostic);
+    assert!(diagnostics.views().any(|diagnostic| {
+        diagnostic_has_family::<generics_traits_api::InvalidExportTargetView>(&diagnostic)
+    }));
+}
+
+#[test]
+fn export_modifier_is_rejected_outside_api_facade_roots() {
+    let source = "$export\nvalue #= 1\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
+        "entry roots have no public export surface",
+    );
+
+    let diagnostic =
+        assert_directive_reason(&errors, InvalidTemplateDirectiveCode::DirectiveNotAllowedHere);
+    assert_eq!(
+        diagnostic_primary_span(diagnostic),
+        Some(source_span_for(source, "$export", 0))
+    );
+}
+
+#[test]
+fn export_modifier_does_not_create_a_config_contract() {
+    let source = "$export\napi_url #String = \"https://example.test\"\n";
+    let mut string_table = StringTable::new();
+    let (output, _span_builder) = prepare_api_root_with_fork(
+        source,
+        std::path::Path::new("src/@mod.moth"),
+        &mut string_table,
+        &mut PathInternerFork::empty(),
+    );
+
+    let header = output
+        .headers
+        .iter()
+        .find(|header| matches!(header.kind, HeaderKind::Constant { .. }))
+        .expect("the exported typed constant should parse");
+    let HeaderKind::Constant { declaration } = &header.kind else {
+        panic!("expected a compile-time constant header");
+    };
+    assert!(
+        declaration.config_contract.is_none(),
+        "`$export` must not turn the constant into a build-input contract"
+    );
+    assert!(
+        declaration.initializer_range.is_some(),
+        "the exported typed constant keeps its required initializer"
+    );
+}
+
+#[test]
+fn export_modifier_typed_constant_still_requires_an_initializer() {
+    let source = "$export\napi_url #String\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
+        "`$export` must not admit a missing initializer",
+    );
+
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic
+            .family_view::<names_declarations::MissingDeclarationInitializerView>()
+            .is_some()
+    }));
+}
+
+#[test]
+fn config_modifier_before_a_dependency_is_wrong_target() {
+    let source = "$config\n@button Button\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(source, "src/@entry.moth", "src/@entry.moth"),
+        "`$config` cannot modify a dependency clause",
+    );
+
+    let diagnostic =
+        assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
+    assert_eq!(
+        diagnostic_primary_span(diagnostic),
+        Some(source_span_for(source, "$config", 0))
+    );
+}
+
+#[test]
+fn export_modifier_before_executable_syntax_is_wrong_target() {
+    let source = "$export\nvalue = 1\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
+        "`$export` must not skip an executable statement",
+    );
+
+    let diagnostic =
+        assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
+    assert_eq!(
+        diagnostic_primary_span(diagnostic),
+        Some(source_span_for(source, "$export", 0))
+    );
+}
+
+#[test]
+fn export_modifier_before_a_runtime_template_is_wrong_target() {
+    let source = "$export\n[: hello ]\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
+        "`$export` must not leak past a runtime template",
+    );
+
+    let diagnostic =
+        assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
+    assert_eq!(
+        diagnostic_primary_span(diagnostic),
+        Some(source_span_for(source, "$export", 0))
+    );
+}
+
+#[test]
+fn export_modifier_attaches_across_comments_and_crlf() {
+    let source = "$export\n-- public name\nlabel #= \"x\"\n";
+    let headers = expect_header_success(
+        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
+        "comment-only lines must not break `$export` attachment",
+    );
+    assert!(headers.headers.iter().any(|header| {
+        matches!(header.kind, HeaderKind::Constant { .. })
+            && header.export_mode == HeaderExportMode::Public
+    }));
+
+    let crlf = "$export\r\nlabel #= \"x\"\r\n";
+    let headers = expect_header_success(
+        parse_single_file_headers_with_entry(crlf, "src/@mod.moth", "src/@entry.moth"),
+        "CRLF after `$export` should attach like LF",
+    );
+    assert!(headers.headers.iter().any(|header| {
+        matches!(header.kind, HeaderKind::Constant { .. })
+            && header.export_mode == HeaderExportMode::Public
+    }));
+}
+
+#[test]
+fn blank_line_breaks_export_attachment() {
+    let source = "$export\n\nlabel #= \"x\"\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
+        "a blank physical line has no eligible target",
+    );
+
+    assert_directive_reason(&errors, InvalidTemplateDirectiveCode::DanglingModifier);
+}
+
+#[test]
+fn export_modifier_rejects_operands() {
+    let cases = [
+        ("$export(\"x\")\nvalue #= 1\n", "(", 0),
+        ("$export:\nvalue #= 1\n", ":", 0),
+        ("$export value #= 1\n", "value", 0),
+    ];
+
+    for (source, needle, occurrence) in cases {
+        let errors = expect_header_error(
+            parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
+            "`$export` accepts no same-line operand",
+        );
+        let diagnostic =
+            assert_directive_reason(&errors, InvalidTemplateDirectiveCode::UnexpectedArguments);
+        assert_eq!(
+            diagnostic_primary_span(diagnostic),
+            Some(source_span_for(source, needle, occurrence)),
+            "the operand or block-colon spelling is reported at its own span"
+        );
+    }
+}
+
+#[test]
+fn duplicate_export_modifiers_cite_both_authored_spans() {
+    let source = "$export\n$export\nvalue #= 1\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
+        "a repeated source modifier must be rejected",
+    );
+
+    let diagnostic =
+        assert_directive_reason(&errors, InvalidTemplateDirectiveCode::DuplicateModifier);
+    assert_eq!(
+        diagnostic_primary_span(diagnostic),
+        Some(source_span_for(source, "$export", 1))
+    );
+    assert_eq!(
+        earlier_directive_span(diagnostic),
+        Some(source_span_for(source, "$export", 0)),
+        "the diagnostic labels the first authored modifier"
+    );
+}
+
+#[test]
+fn mixed_source_modifiers_are_duplicates_in_either_order() {
+    for source in [
+        "$config\n$export\nvalue #= 1\n",
+        "$export\n$config\nvalue #= 1\n",
+    ] {
+        let errors = expect_header_error(
+            parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
+            "only one source modifier may attach to an item",
+        );
+        let diagnostic =
+            assert_directive_reason(&errors, InvalidTemplateDirectiveCode::DuplicateModifier);
+        let (first, second) = if source.starts_with("$config") {
+            ("$config", "$export")
+        } else {
+            ("$export", "$config")
+        };
+        assert_eq!(
+            diagnostic_primary_span(diagnostic),
+            Some(source_span_for(source, second, 0)),
+            "the second modifier owns the primary span"
+        );
+        assert_eq!(
+            earlier_directive_span(diagnostic),
+            Some(source_span_for(source, first, 0)),
+            "the first modifier owns the earlier-span label"
+        );
+    }
+}
+
+#[test]
+fn export_modifier_at_eof_is_dangling() {
+    for source in ["$export", "$export\n"] {
+        let errors = expect_header_error(
+            parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
+            "a modifier at end of file has no target",
+        );
+        let diagnostic =
+            assert_directive_reason(&errors, InvalidTemplateDirectiveCode::DanglingModifier);
+        assert_eq!(
+            diagnostic_primary_span(diagnostic),
+            Some(source_span_for(source, "$export", 0))
+        );
+    }
+}
+
+#[test]
+fn export_modifier_marks_every_eligible_declaration_kind_public() {
+    let source = "$export\nrender || -> String:\n    return \"x\"\n;\n\n\
+$export\nButton = | label String |\n\n\
+$export\nStatus :: Ready, Failed;\n\n\
+$export\nUserId as I32\n\n\
+$export\nDISPLAY must:\n    show |This| -> String\n;\n\n\
+$export\ninferred #= 1\n\n\
+$export\ntyped #I32 = 2\n";
+    let headers = expect_header_success(
+        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
+        "every eligible declaration kind should accept `$export`",
+    );
+
+    let public_headers: Vec<_> = headers
+        .headers
+        .iter()
+        .filter(|header| header.export_mode == HeaderExportMode::Public)
+        .collect();
+    assert_eq!(
+        public_headers.len(),
+        7,
+        "function, struct, choice, alias, trait and both constant shapes are public"
+    );
+}
+
+#[test]
+fn export_modifier_rejects_conformance_and_incompatibility() {
+    let cases = [
+        "DISPLAY must:\n    show |This| -> String\n;\n\nBox = | x I32 |\n\n$export\nBox must DISPLAY\n",
+        "DISPLAY must:\n    show |This| -> String\n;\n\nOTHER must:\n    other |This| -> String\n;\n\nBox = | x I32 |\n\n$export\nDISPLAY must not OTHER\n",
+    ];
+
+    for source in cases {
+        let errors = expect_header_error(
+            parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
+            "conformances and incompatibilities are not exportable declarations",
+        );
+        assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
+    }
+}
+
+#[test]
+fn export_modifier_rejects_a_const_template() {
+    let source = "$export\n#[if true: hello]\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
+        "const templates are not exportable declarations",
+    );
+
+    assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
+}
+
+#[test]
+fn export_modifier_rejects_a_receiver_method() {
+    let source = "Box = | x I32 |\n\n$export\nvalue |this Box| -> I32:\n    return this.x\n;\n";
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
+        "receiver methods are not exported independently",
+    );
+
+    assert!(errors.diagnostics.views().any(|diagnostic| {
+        diagnostic_has_family::<generics_traits_api::InvalidReceiverDeclarationView>(&diagnostic)
+    }));
+}
+
+#[test]
+fn export_modifier_is_rejected_in_helper_and_config_files() {
+    for (file_path, entry_path) in [
+        ("src/impl.moth", "src/@entry.moth"),
+        ("src/config.moth", "src/@entry.moth"),
+    ] {
+        let source = "$export\nvalue #= 1\n";
+        let errors = expect_header_error(
+            parse_single_file_headers_with_entry(source, file_path, entry_path),
+            "only an API facade root may author `$export`",
+        );
+        assert_directive_reason(
+            &errors,
+            InvalidTemplateDirectiveCode::DirectiveNotAllowedHere,
+        );
+    }
+}
+
+#[test]
+fn export_modifier_is_allowed_in_a_reached_facade() {
+    let source = "$export\nvalue #= 1\n";
+    let headers = expect_header_success(
+        parse_single_file_headers_with_reached_role(
+            source,
+            "src/plugin/@mod.moth",
+            FileRole::ReachedApiFacadeRoot(ModuleRootRole::Normal),
+        ),
+        "a reached facade keeps its export surface",
+    );
+
+    assert!(headers.headers.iter().any(|header| {
+        matches!(header.kind, HeaderKind::Constant { .. })
+            && header.export_mode == HeaderExportMode::Public
+    }));
+}
+
+#[test]
+fn export_modifier_rejects_invalid_dependency_shapes() {
+    let cases = [
+        ("$export\n@impl as impl_ns\n", InvalidDependencyCode::InvalidExportTarget),
+        (
+            "$export\n@impl Box,\n",
+            InvalidDependencyCode::MissingSelectionAfterComma,
+        ),
+    ];
+
+    for (source, expected) in cases {
+        let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
+        let mut span_builder = ExtendedSpanBuilder::new();
+        let failure = match prepare_active_root_with_role(
+            source,
+            &PathBuf::from("src/@mod.moth"),
+            ModuleRootRole::Normal,
+            &mut string_table,
+            &mut span_builder,
+            &mut path_fork,
+        ) {
+            Ok(_) => panic!("an invalid public dependency must be rejected"),
+            Err(failure) => failure,
+        };
+        let FileFrontendPrepareFailure::Diagnosed(error) = failure else {
+            panic!("the fixture should diagnose the invalid dependency");
+        };
+        let diagnostics = diagnostic_view_for_test(error.diagnostic);
+        let diagnostic = diagnostics
+            .first()
+            .expect("the dependency failure should compact to one record");
+        match expected {
+            InvalidDependencyCode::InvalidExportTarget => assert!(
+                diagnostic_has_family::<generics_traits_api::InvalidExportTargetView>(&diagnostic)
+            ),
+            InvalidDependencyCode::MissingSelectionAfterComma => {
+                let facts = diagnostic
+                    .family_view::<project_config::InvalidDependencyClauseView>()
+                    .expect("trailing comma keeps its dependency-clause diagnostic");
+                assert_eq!(
+                    facts.reason,
+                    InvalidDependencyClauseReason::MissingSelectionAfterComma
+                );
+            }
+        }
+    }
+}
+
+enum InvalidDependencyCode {
+    InvalidExportTarget,
+    MissingSelectionAfterComma,
+}
+
+#[test]
+fn template_head_rejects_export_source_modifier() {
+    let failure = parse_single_file_ast_diagnostic("[: [$export: body] ]");
+    let diagnostic = assert_ast_diagnostic(
+        &failure,
+        "MOTH-SYNTAX-0021",
+        Some("invalid_template_directive.wrong_context"),
+    );
+    let facts = diagnostic
+        .family_view::<InvalidTemplateDirectiveView>()
+        .expect("the template-head directive keeps its typed facts");
+    assert_eq!(facts.reason, InvalidTemplateDirectiveCode::WrongContext);
 }

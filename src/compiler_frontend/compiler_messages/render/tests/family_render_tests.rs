@@ -672,9 +672,10 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
     let fixed_signed_literal = string_table.intern("-129");
     let style_directive = string_table.intern("unknown");
     let supported_directives = string_table.intern("'$html', '$css'");
-    let source_directives = string_table.intern("'$config'");
+    let source_directives = string_table.intern("'$export', '$config'");
     let declaration_name = string_table.intern("Card");
     let template_directive = string_table.intern("insert");
+    let export_directive = string_table.intern("export");
     let namespace_name = string_table.intern("card");
     let cases = [
         (
@@ -735,8 +736,26 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
                 DirectiveOccurrence::Source,
                 None,
             ),
-            "'$unknown' is not a directive. Source directives are '$config'.",
+            "'$unknown' is not a directive. Source directives are '$export', '$config'.",
             "UnknownDirective",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(export_directive),
+                InvalidTemplateDirectiveReason::WrongContext,
+                None,
+            ),
+            "`$export` is a source modifier and cannot appear in a template head.",
+            "WrongContext",
+        ),
+        (
+            templates::invalid_template_directive(
+                Some(export_directive),
+                InvalidTemplateDirectiveReason::DirectiveNotAllowedHere,
+                None,
+            ),
+            "`$export` is only valid in `@mod.moth` or `@package.moth`.",
+            "DirectiveNotAllowedHere",
         ),
         (
             names_declarations::invalid_type_annotation(

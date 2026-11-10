@@ -3,9 +3,9 @@
 ## Status
 
 - Status: ACTIVE on `feature/export-directive`.
-- Current slice: 0 - confirm the branch baseline and inspect the owning parser, directive and diagnostic paths.
-- Blockers: None. Source modifiers, facade roles and public-interface construction are delivered.
-- Next action: Implement the parser and diagnostic changes, migrate executable sources and validate the prepared docs. Retire this plan in the completing implementation commit.
+- Current slice: 2 - migrate first-party Moth export blocks to per-item `$export` and replace obsolete block fixtures.
+- Blockers: None. Source modifiers, facade roles and public-interface construction are delivered. `$export` parser attachment, file-role gating and metadata separation are implemented and audited.
+- Next action: Migrate executable sources and fixtures, then remove the legacy block parser and keyword in slice 3. Retire this plan in the completing implementation commit.
 
 ## Goal
 
