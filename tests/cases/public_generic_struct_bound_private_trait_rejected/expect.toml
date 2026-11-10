@@ -12,5 +12,5 @@ message_contains = [
 code = "MOTH-RULE-0074"
 path = "input/sub/@mod.moth"
 line = 4
-column = 19
+column = 15
 count = 1

@@ -1,3 +1,2 @@
-export:
-    @internal/clock seconds
-;
+$export
+@internal/clock seconds

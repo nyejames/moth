@@ -1,5 +1,4 @@
-export:
-    greet || -> String:
-        return "available"
-    ;
+$export
+greet || -> String:
+    return "available"
 ;

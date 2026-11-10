@@ -34,7 +34,7 @@ fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_s
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let default_line = "limit #I32 = 2147483648";
     let package_source = format!(
-        "$config\n{default_line}\n@warnpkg value\nexport:\n    run || -> I32:\n        return 1\n    ;\n;\n"
+        "$config\n{default_line}\n@warnpkg value\n$export\nrun || -> I32:\n    return 1\n;\n"
     );
     let warning_package_source = "value ~= \"hello\"\nresult ~= \"unset\"\n\nif value is:\n    \"one\" => ~result = \"one\"\n    \"one\" => ~result = \"one\"\n    else => ~result = \"other\"\n;\n";
     let consumer_source = "@broken run\nvalue = run()\n";
@@ -152,7 +152,7 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     .expect("should write project source contract");
     fs::write(
         package.join("@mod.moth"),
-        "$config\nenabled #Bool\nexport:\n    helper || -> I32:\n        return 2\n    ;\n;\n",
+        "$config\nenabled #Bool\n$export\nhelper || -> I32:\n    return 2\n;\n",
     )
     .expect("should write source-package contract");
 
@@ -300,10 +300,7 @@ fn registered_support_only_package_compiles_its_external_surface() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let frontend = successful_compilation_value(compile_registered_package_project(
         "supportpkg",
-        &[(
-            "@package.moth",
-            "export:\n    support_label #= \"support\"\n;\n",
-        )],
+        &[("@package.moth", "$export\nsupport_label #= \"support\"\n")],
         "@supportpkg support_label\n[:[support_label]]\n",
     ));
     assert_eq!(frontend.source_packages.len(), 1);
@@ -346,11 +343,8 @@ fn registered_triple_root_package_keeps_its_entry_dormant() {
     let frontend = successful_compilation_value(compile_registered_package_project(
         "triplepkg",
         &[
-            ("@mod.moth", "export:\n    normal_label #= \"normal\"\n;\n"),
-            (
-                "@package.moth",
-                "export:\n    support_label #= \"support\"\n;\n",
-            ),
+            ("@mod.moth", "$export\nnormal_label #= \"normal\"\n"),
+            ("@package.moth", "$export\nsupport_label #= \"support\"\n"),
             ("@entry.moth", "package_runtime ~= 1\n"),
         ],
         "@triplepkg support_label\n[:[support_label]]\n",
@@ -422,12 +416,12 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     fs::write(dir.join("@entry.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         first_package.join("@mod.moth"),
-        "export:\n    first || -> I32:\n        return missing_first_package_value\n    ;\n;\n",
+        "$export\nfirst || -> I32:\n    return missing_first_package_value\n;\n",
     )
     .expect("should write first diagnosed package");
     fs::write(
         second_package.join("@mod.moth"),
-        "export:\n    second || -> I32:\n        return missing_second_package_value\n    ;\n;\n",
+        "$export\nsecond || -> I32:\n    return missing_second_package_value\n;\n",
     )
     .expect("should write second diagnosed package");
 
@@ -504,12 +498,12 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         .expect("should write blocked project consumer");
     fs::write(
         package.join("@mod.moth"),
-        "export:\n    run || -> I32:\n        return missing_package_value\n    ;\n;\n",
+        "$export\nrun || -> I32:\n    return missing_package_value\n;\n",
     )
     .expect("should write diagnosed source package");
     fs::write(
         warning_package.join("@mod.moth"),
-        "export:\n    warn || -> String:\n        value ~= \"hello\"\n        result ~= \"unset\"\n        if value is:\n            \"one\" => ~result = \"one\"\n            \"one\" => ~result = \"one\"\n            else => ~result = \"other\"\n        ;\n        return result\n    ;\n;\n",
+        "$export\nwarn || -> String:\n    value ~= \"hello\"\n    result ~= \"unset\"\n    if value is:\n        \"one\" => ~result = \"one\"\n        \"one\" => ~result = \"one\"\n        else => ~result = \"other\"\n    ;\n    return result\n;\n",
     )
     .expect("should write successful warning package");
 
@@ -704,7 +698,7 @@ independent type T |value T| -> T:
     .expect("should write shared generic declarations");
     fs::write(
         dir.join("@mod.moth"),
-        "@impl public_helper\n\nexport:\n    @impl public_helper\n;\n",
+        "@impl public_helper\n\n$export\n@impl public_helper\n",
     )
     .expect("should write the API facade");
     fs::write(
@@ -946,9 +940,7 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
         (
             LaneFixture::Unchanged,
             "@utils pass_through\nsame I32 = pass_through(42)\n[: same=[same]]\n",
-            Some(
-                "export:\n    pass_through |value I32| -> I32:\n        return identity(value)\n    ;\n;\n",
-            ),
+            Some("$export\npass_through |value I32| -> I32:\n    return identity(value)\n;\n"),
         ),
         // The sidecar's failure lane splits the block after `sum`. The second add then sits after
         // an unwrapped write, so only the first sum keeps a proof. The published table must match
@@ -1586,7 +1578,7 @@ html #= ()\n",
     )
     .expect("should write config");
     let package_source = format!(
-        "{inner_name} type U |text String, result U| -> U:\n    return result\n;\n\nexport:\n    {function_name} type T |{parameter_name} T| -> I32:\n        if \"one\" is:\n            \"one\" => return 1\n            \"one\" => return 1\n            else => return 1\n        ;\n        return {inner_name}({parameter_name}, 1)\n    ;\n;\n",
+        "{inner_name} type U |text String, result U| -> U:\n    return result\n;\n\n$export\n{function_name} type T |{parameter_name} T| -> I32:\n    if \"one\" is:\n        \"one\" => return 1\n        \"one\" => return 1\n        else => return 1\n    ;\n    return {inner_name}({parameter_name}, 1)\n;\n",
     );
     let project_source = format!("@pkg {function_name}\nvalue I32 = {function_name}(1)\n");
     fs::write(&package_path, &package_source).expect("should write package source");
@@ -1753,10 +1745,9 @@ fn imported_nested_generic_materialisation_preserves_call_site_identity_with_col
     return text
 ;
 
-export:
-    outer type T |value T| -> T:
-        return inner("prefix", value)
-    ;
+$export
+outer type T |value T| -> T:
+    return inner("prefix", value)
 ;
 "#,
     )
@@ -1845,10 +1836,9 @@ fn generated_sidecars_reconstruct_complete_generic_nominal_members() {
     return value
 ;
 
-export:
-    forward type T |value T| -> T:
-        return identity(value)
-    ;
+$export
+forward type T |value T| -> T:
+    return identity(value)
 ;
 "#,
     )
@@ -1872,7 +1862,7 @@ PrivateBox type T = |
     .expect("should write shared nominal declarations");
     fs::write(
         dir.join("@mod.moth"),
-        "@types Box, Maybe, PrivateBox\n\nexport:\n    @types Box, Maybe\n;\n",
+        "@types Box, Maybe, PrivateBox\n\n$export\n@types Box, Maybe\n",
     )
     .expect("should write the API facade");
     fs::write(
@@ -2039,23 +2029,26 @@ fn requester_public_receiver_evidence_preserves_independent_declaration_bounds()
     .expect("should write config");
     fs::write(
         source_root.join("provider/@mod.moth"),
-        r#"export:
-    LEFT_TEXT must:
-        left_text |This| -> String
-    ;
-    RIGHT_TEXT must:
-        right_text |This| -> String
-    ;
-    FIRST_TEXT must:
-        first_text |This| -> String
-    ;
-    SECOND_TEXT must:
-        second_text |This| -> String
-    ;
+        r#"$export
+LEFT_TEXT must:
+    left_text |This| -> String
+;
+$export
+RIGHT_TEXT must:
+    right_text |This| -> String
+;
+$export
+FIRST_TEXT must:
+    first_text |This| -> String
+;
+$export
+SECOND_TEXT must:
+    second_text |This| -> String
+;
 
-    combine type T is FIRST_TEXT and SECOND_TEXT |value T| -> String:
-        return [:[value.first_text()]/[value.second_text()]]
-    ;
+$export
+combine type T is FIRST_TEXT and SECOND_TEXT |value T| -> String:
+    return [:[value.first_text()]/[value.second_text()]]
 ;
 "#,
     )
@@ -2087,7 +2080,7 @@ Box must FIRST_TEXT, SECOND_TEXT
     .expect("should write requester-owned public generic declarations");
     fs::write(
         source_root.join("@mod.moth"),
-        "@impl Label, Box\n\nexport:\n    @impl Label, Box\n;\n",
+        "@impl Label, Box\n\n$export\n@impl Label, Box\n",
     )
     .expect("should write the API facade");
     fs::write(
@@ -2220,14 +2213,14 @@ fn generated_sidecars_remap_inherited_nominals_after_multi_module_publication() 
     .expect("should write config");
     fs::write(
         dir.join("provider/@mod.moth"),
-        r#"export:
-    RemoteMarker = |
-        value I32,
-    |
+        r#"$export
+RemoteMarker = |
+    value I32,
+|
 
-    seed || -> I32:
-        return 1
-    ;
+$export
+seed || -> I32:
+    return 1
 ;
 "#,
     )
@@ -2378,36 +2371,35 @@ fn generated_sidecars_reconstruct_hidden_facade_nominal_closure() {
     .expect("should write config");
     fs::write(
         dir.join("facade/provider/@mod.moth"),
-        r#"export:
-    Hidden = |
-        value I32,
-    |
+        r#"$export
+Hidden = |
+    value I32,
+|
 
-    Wrapper = |
-        hidden Hidden,
-    |
+$export
+Wrapper = |
+    hidden Hidden,
+|
 
-    make || -> Wrapper:
-        return Wrapper(Hidden(42))
-    ;
+$export
+make || -> Wrapper:
+    return Wrapper(Hidden(42))
 ;
 "#,
     )
     .expect("should write provider");
     fs::write(
         dir.join("facade/@mod.moth"),
-        r#"export:
-    @provider Wrapper, make
-;
+        r#"$export
+@provider Wrapper, make
 "#,
     )
     .expect("should write facade");
     fs::write(
         dir.join("generics/@mod.moth"),
-        r#"export:
-    identity type T |value T| -> T:
-        return value
-    ;
+        r#"$export
+identity type T |value T| -> T:
+    return value
 ;
 "#,
     )
@@ -2579,10 +2571,9 @@ fn implicit_failure_later_generated_request_reuses_converged_private_helper_summ
     return left * right
 ;
 
-export:
-    product type T |marker T, left I32, right I32| -> I32, Error!:
-        return multiply(left, right)
-    ;
+$export
+product type T |marker T, left I32, right I32| -> I32, Error!:
+    return multiply(left, right)
 ;
 "#,
     )
@@ -2842,9 +2833,7 @@ fn assert_later_request_rejected(declaring_source: &str, requester_source: &str,
 fn implicit_failure_later_generated_request_rejects_exported_function_without_error_slot() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     assert_later_request_rejected(
-        "multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\n\
-         export:\n    product type T |marker T, left I32, right I32| -> I32:\n        \
-         return multiply(left, right)\n    ;\n;\n",
+        "multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\n$export\nproduct type T |marker T, left I32, right I32| -> I32:\n    return multiply(left, right)\n;\n",
         "@helper product\nresult = product(0, 2, 3)\n",
         "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function",
     );
@@ -2854,10 +2843,7 @@ fn implicit_failure_later_generated_request_rejects_exported_function_without_er
 fn implicit_failure_later_generated_request_rejects_custom_error_function() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     assert_later_request_rejected(
-        "multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\n\
-         export:\n    Failure = |\n        message String,\n    |\n\n    \
-         product type T |marker T, left I32, right I32| -> I32, Failure!:\n        \
-         return multiply(left, right)\n    ;\n;\n",
+        "multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\n$export\nFailure = |\n    message String,\n|\n\n$export\nproduct type T |marker T, left I32, right I32| -> I32, Failure!:\n    return multiply(left, right)\n;\n",
         "@helper product\nresult = product(0, 2, 3) catch then 0\n",
         "invalid_fallible_handling.unhandled_builtin_failure_in_custom_error_function",
     );
@@ -2885,7 +2871,7 @@ fn implicit_failure_private_helper_infallible_to_fallible_changes_exported_calle
     // The export block is byte-identical in both versions: only the private helper
     // body changes. Every public signature text stays the same; only the private
     // helper's semantic failure summary widens from infallible to fallible.
-    const EXPORT_BLOCK: &str = "export:\n    product type T |marker T, left I32, right I32| -> I32:\n        return double(left)\n    ;\n;\n";
+    const EXPORT_BLOCK: &str = "$export\nproduct type T |marker T, left I32, right I32| -> I32:\n    return double(left)\n;\n";
     let infallible_source =
         format!("double |value I32| -> I32:\n    return value\n;\n\n{EXPORT_BLOCK}");
     let fallible_source =
@@ -3032,7 +3018,7 @@ fn exported_private_chain_witness_rendering_is_stable_across_repeated_compilatio
     write_chain(&src, UNRELATED_A, UNRELATED_B);
     fs::write(
         src.join("@mod.moth"),
-        "@chain product\n\nexport:\n    @chain product\n;\n",
+        "@chain product\n\n$export\n@chain product\n",
     )
     .expect("should write the API facade");
     fs::write(
@@ -3110,7 +3096,7 @@ fn source_package_warning_staged_by_frontend_outcome() {
     fs::write(src.join("@entry.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         package.join("@mod.moth"),
-        "export:\n    warn || -> String:\n        value ~= \"hello\"\n        result ~= \"unset\"\n        if value is:\n            \"one\" => ~result = \"one\"\n            \"one\" => ~result = \"one\"\n            else => ~result = \"other\"\n        ;\n        return result\n    ;\n;\n",
+        "$export\nwarn || -> String:\n    value ~= \"hello\"\n    result ~= \"unset\"\n    if value is:\n        \"one\" => ~result = \"one\"\n        \"one\" => ~result = \"one\"\n        else => ~result = \"other\"\n    ;\n    return result\n;\n",
     )
     .expect("should write warning package facade");
 
@@ -3231,7 +3217,7 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
     .expect("should write config");
 
     let project_text = "project_snapshot = 1\n";
-    let package_text = "export:\n    warn || -> String:\n        value ~= \"hello\"\n        result ~= \"unset\"\n        if value is:\n            \"one\" => ~result = \"one\"\n            \"one\" => ~result = \"one\"\n            else => ~result = \"other\"\n        ;\n        return result\n    ;\n;\n";
+    let package_text = "$export\nwarn || -> String:\n    value ~= \"hello\"\n    result ~= \"unset\"\n    if value is:\n        \"one\" => ~result = \"one\"\n        \"one\" => ~result = \"one\"\n        else => ~result = \"other\"\n    ;\n    return result\n;\n";
     fs::write(project_source_root.join("@entry.moth"), project_text)
         .expect("should write project entry module");
     fs::write(package_root.join("@mod.moth"), package_text).expect("should write package module");
@@ -3467,7 +3453,7 @@ fn paired_root_publishes_one_artifact_one_helper_body_and_two_interfaces() {
             ),
             (
                 "@package.moth",
-                "@shared label\n\nexport:\n    support_label || -> String:\n        return label()\n    ;\n;\n",
+                "@shared label\n\n$export\nsupport_label || -> String:\n    return label()\n;\n",
             ),
             (
                 "shared.moth",
@@ -3487,11 +3473,11 @@ fn paired_root_publishes_one_artifact_one_helper_body_and_two_interfaces() {
             ),
             (
                 "@mod.moth",
-                "@shared label\n\nexport:\n    normal_label || -> String:\n        return label()\n    ;\n;\n",
+                "@shared label\n\n$export\nnormal_label || -> String:\n    return label()\n;\n",
             ),
             (
                 "@package.moth",
-                "@shared label\n\nexport:\n    support_label || -> String:\n        return label()\n    ;\n;\n",
+                "@shared label\n\n$export\nsupport_label || -> String:\n    return label()\n;\n",
             ),
             (
                 "shared.moth",

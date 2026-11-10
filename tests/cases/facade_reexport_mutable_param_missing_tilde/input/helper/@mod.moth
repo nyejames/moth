@@ -1,3 +1,2 @@
-export:
-    @internal Counter, bump
-;
+$export
+@internal Counter, bump

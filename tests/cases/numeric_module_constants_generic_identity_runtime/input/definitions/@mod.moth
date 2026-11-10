@@ -1,3 +1,2 @@
-export:
-    @source limit, Box, identity, direct_box
-;
+$export
+@source limit, Box, identity, direct_box

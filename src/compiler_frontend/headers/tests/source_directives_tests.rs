@@ -159,8 +159,7 @@ fn config_modifier_before_a_non_declaration_is_wrong_target() {
         "a runtime statement is a present ineligible directive target",
     );
 
-    let diagnostic =
-        assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
+    let diagnostic = assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
     assert_eq!(
         diagnostic_primary_span(diagnostic),
         Some(source_span_for(source, "$config", 0))
@@ -331,7 +330,8 @@ fn config_modifier_inside_a_block_value_is_wrong_target() {
 
 #[test]
 fn export_modifier_marks_only_its_next_declaration_public() {
-    let source = "$export\nButton = | label String |\nprivate_helper || -> String:\n    return \"x\"\n;\n";
+    let source =
+        "$export\nButton = | label String |\nprivate_helper || -> String:\n    return \"x\"\n;\n";
     let headers = expect_header_success(
         parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
         "a facade should accept per-declaration `$export`",
@@ -377,7 +377,10 @@ fn export_modifier_marks_a_direct_selection_dependency_public() {
         .selections(&output.dependency_selections)
         .expect("the exported clause retains its selections");
     assert_eq!(selections.len(), 2);
-    assert_eq!(string_table.resolve(selections[1].local_name()), "render_button");
+    assert_eq!(
+        string_table.resolve(selections[1].local_name()),
+        "render_button"
+    );
 }
 
 #[test]
@@ -415,8 +418,10 @@ fn export_modifier_is_rejected_outside_api_facade_roots() {
         "entry roots have no public export surface",
     );
 
-    let diagnostic =
-        assert_directive_reason(&errors, InvalidTemplateDirectiveCode::DirectiveNotAllowedHere);
+    let diagnostic = assert_directive_reason(
+        &errors,
+        InvalidTemplateDirectiveCode::DirectiveNotAllowedHere,
+    );
     assert_eq!(
         diagnostic_primary_span(diagnostic),
         Some(source_span_for(source, "$export", 0))
@@ -475,8 +480,7 @@ fn config_modifier_before_a_dependency_is_wrong_target() {
         "`$config` cannot modify a dependency clause",
     );
 
-    let diagnostic =
-        assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
+    let diagnostic = assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
     assert_eq!(
         diagnostic_primary_span(diagnostic),
         Some(source_span_for(source, "$config", 0))
@@ -491,8 +495,7 @@ fn export_modifier_before_executable_syntax_is_wrong_target() {
         "`$export` must not skip an executable statement",
     );
 
-    let diagnostic =
-        assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
+    let diagnostic = assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
     assert_eq!(
         diagnostic_primary_span(diagnostic),
         Some(source_span_for(source, "$export", 0))
@@ -507,8 +510,7 @@ fn export_modifier_before_a_runtime_template_is_wrong_target() {
         "`$export` must not leak past a runtime template",
     );
 
-    let diagnostic =
-        assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
+    let diagnostic = assert_directive_reason(&errors, InvalidTemplateDirectiveCode::WrongTarget);
     assert_eq!(
         diagnostic_primary_span(diagnostic),
         Some(source_span_for(source, "$export", 0))
@@ -744,7 +746,10 @@ fn export_modifier_is_allowed_in_a_reached_facade() {
 #[test]
 fn export_modifier_rejects_invalid_dependency_shapes() {
     let cases = [
-        ("$export\n@impl as impl_ns\n", InvalidDependencyCode::InvalidExportTarget),
+        (
+            "$export\n@impl as impl_ns\n",
+            InvalidDependencyCode::InvalidExportTarget,
+        ),
         (
             "$export\n@impl Box,\n",
             InvalidDependencyCode::MissingSelectionAfterComma,
@@ -774,9 +779,9 @@ fn export_modifier_rejects_invalid_dependency_shapes() {
             .first()
             .expect("the dependency failure should compact to one record");
         match expected {
-            InvalidDependencyCode::InvalidExportTarget => assert!(
-                diagnostic_has_family::<generics_traits_api::InvalidExportTargetView>(&diagnostic)
-            ),
+            InvalidDependencyCode::InvalidExportTarget => assert!(diagnostic_has_family::<
+                generics_traits_api::InvalidExportTargetView,
+            >(&diagnostic)),
             InvalidDependencyCode::MissingSelectionAfterComma => {
                 let facts = diagnostic
                     .family_view::<project_config::InvalidDependencyClauseView>()

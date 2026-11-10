@@ -1,1 +1,2 @@
-export: @mid identity ;
+$export
+@mid identity

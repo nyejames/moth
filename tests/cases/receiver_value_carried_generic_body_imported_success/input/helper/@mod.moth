@@ -1,11 +1,11 @@
-export:
-    Square = |
-        side I32,
-    |
+$export
+Square = |
+    side I32,
+|
 
-    make_square || -> Square:
-        return Square(3)
-    ;
+$export
+make_square || -> Square:
+    return Square(3)
 ;
 
 edge |this Square| -> I32:

@@ -6,8 +6,7 @@ bump |amount U8| -> U8:
     ~total += risky(amount) catch then amount
     return total
 ;
-export:
-    boundary type T |value T, amount U8| -> U8:
-        return bump(amount)
-    ;
+$export
+boundary type T |value T, amount U8| -> U8:
+    return bump(amount)
 ;

@@ -1,3 +1,2 @@
-export:
-    helper_text #= "helper package text"
-;
+$export
+helper_text #= "helper package text"

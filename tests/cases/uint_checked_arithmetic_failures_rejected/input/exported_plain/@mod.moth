@@ -1,5 +1,4 @@
-export:
-    add |a U32, b U32| -> U32:
-        return a + b
-    ;
+$export
+add |a U32, b U32| -> U32:
+    return a + b
 ;

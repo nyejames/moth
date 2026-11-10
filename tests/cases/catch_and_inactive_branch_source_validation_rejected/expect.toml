@@ -33,7 +33,7 @@ column = 18
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0034"
 path = "input/graph_validity/provider/@mod.moth"
-line = 8
+line = 7
 column = 13
 
 [[backends.html.diagnostic_assertions]]

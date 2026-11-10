@@ -1,37 +1,11 @@
 use super::*;
-use crate::compiler_frontend::compiler_messages::DiagnosticToken;
-use crate::compiler_frontend::tokenizer::tokens::TokenTag;
-
-fn expects_colon(diagnostic: DiagnosticView<'_>) -> bool {
-    diagnostic
-        .family_view::<token_lexical::ExpectedTokenView>()
-        .is_some_and(|facts| facts.expected == DiagnosticToken::from_static_tag(TokenTag::COLON))
-}
+use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+    InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView,
+};
 
 // ------------------------------
-//  Export block parsing tests
+//  Export modifier parsing tests
 // ------------------------------
-
-#[test]
-fn export_alone_is_rejected() {
-    let result =
-        parse_single_file_headers_with_entry("export\n", "src/@mod.moth", "src/@entry.moth");
-    let errors = expect_header_error(result, "export without a block colon should be rejected");
-
-    assert!(errors.diagnostics.views().any(expects_colon));
-}
-
-#[test]
-fn legacy_inline_export_declaration_is_rejected() {
-    let result = parse_single_file_headers_with_entry(
-        "export Button = | label String |\n",
-        "src/@mod.moth",
-        "src/@entry.moth",
-    );
-    let errors = expect_header_error(result, "legacy inline export should be rejected");
-
-    assert!(errors.diagnostics.views().any(expects_colon));
-}
 
 #[test]
 fn export_dependency_path_parsed_as_public_surface_dependency() {
@@ -39,7 +13,7 @@ fn export_dependency_path_parsed_as_public_surface_dependency() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let output = prepare_active_root_with_role(
-        "export:\n    @button Button\n;\n",
+        "$export\n@button Button\n",
         &PathBuf::from("src/@mod.moth"),
         ModuleRootRole::Normal,
         &mut string_table,
@@ -65,52 +39,8 @@ fn export_dependency_path_parsed_as_public_surface_dependency() {
 }
 
 #[test]
-fn export_block_accepts_an_item_without_a_following_newline() {
-    let headers = expect_header_success(
-        parse_single_file_headers_with_entry(
-            "export: Button = | label String |\n;\n",
-            "src/@mod.moth",
-            "src/@entry.moth",
-        ),
-        "export block should accept its first item after the colon",
-    );
-
-    assert!(headers.headers.iter().any(|header| {
-        matches!(header.kind, HeaderKind::Struct { .. })
-            && header.export_mode == HeaderExportMode::Public
-    }));
-}
-
-#[test]
-fn legacy_export_path_syntax_is_rejected() {
-    let result = parse_single_file_headers_with_entry(
-        "export @card Card, render as render_card\n",
-        "src/@mod.moth",
-        "src/@entry.moth",
-    );
-    let errors = expect_header_error(result, "legacy export path syntax should be rejected");
-
-    assert!(errors.diagnostics.views().any(expects_colon));
-}
-
-#[test]
-fn export_bare_path_rejected_as_deferred_namespace_export() {
-    let result = parse_single_file_headers_with_entry(
-        "export @layout\n",
-        "src/@mod.moth",
-        "src/@entry.moth",
-    );
-    let errors = expect_header_error(
-        result,
-        "bare namespace export should be rejected as deferred",
-    );
-
-    assert!(errors.diagnostics.views().any(expects_colon));
-}
-
-#[test]
 fn export_before_authored_declaration_marks_header_public() {
-    let source = "export:\n    Button = | label String |\n    render |button Button| -> String:\n        return button.label\n    ;\n;\n";
+    let source = "$export\nButton = | label String |\n$export\nrender |button Button| -> String:\n    return button.label\n;\n";
     let headers = expect_header_success(
         parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
         "headers should parse",
@@ -154,7 +84,7 @@ fn unmarked_authored_declarations_in_module_root_remain_private() {
 #[test]
 fn duplicate_declaration_detection_works_with_exported_declarations() {
     let result = parse_single_file_headers_with_entry(
-        "export:\n    Button = | label String |\n;\nButton = | title String |\n",
+        "$export\nButton = | label String |\nButton = | title String |\n",
         "src/@mod.moth",
         "src/@entry.moth",
     );
@@ -172,7 +102,7 @@ fn duplicate_declaration_detection_works_with_exported_declarations() {
 
 #[test]
 fn export_before_constant_marks_header_public() {
-    let source = "export:\n    theme #= \"dark\"\n    threshold #I32 = 42\n;\n";
+    let source = "$export\ntheme #= \"dark\"\n$export\nthreshold #I32 = 42\n";
     let headers = expect_header_success(
         parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
         "headers should parse",
@@ -196,7 +126,7 @@ fn export_before_constant_marks_header_public() {
 
 #[test]
 fn export_before_type_alias_marks_header_public() {
-    let source = "export:\n    UserId as I32\n;\n";
+    let source = "$export\nUserId as I32\n";
     let headers = expect_header_success(
         parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
         "headers should parse",
@@ -213,7 +143,7 @@ fn export_before_type_alias_marks_header_public() {
 
 #[test]
 fn export_before_choice_marks_header_public() {
-    let source = "export:\n    Status :: Ready, Failed | message String |;\n;\n";
+    let source = "$export\nStatus :: Ready, Failed | message String |;\n";
     let headers = expect_header_success(
         parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
         "headers should parse",
@@ -230,7 +160,7 @@ fn export_before_choice_marks_header_public() {
 
 #[test]
 fn export_before_trait_declaration_marks_header_public() {
-    let source = "export:\n    DISPLAY_TEXT must:\n        display |This| -> String\n    ;\n;\n";
+    let source = "$export\nDISPLAY_TEXT must:\n    display |This| -> String\n;\n";
     let headers = expect_header_success(
         parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@entry.moth"),
         "headers should parse",
@@ -248,14 +178,16 @@ fn export_before_trait_declaration_marks_header_public() {
 #[test]
 fn export_before_runtime_template_is_rejected() {
     let result = parse_single_file_headers_with_entry(
-        "export:\n    [: hello ]\n;\n",
+        "$export\n[: hello ]\n",
         "src/@mod.moth",
         "src/@entry.moth",
     );
     let errors = expect_header_error(result, "export before runtime template should be rejected");
 
     assert!(errors.diagnostics.views().any(|diagnostic| {
-        diagnostic_has_family::<generics_traits_api::InvalidExportTargetView>(&diagnostic)
+        diagnostic
+            .family_view::<InvalidTemplateDirectiveView>()
+            .is_some_and(|facts| facts.reason == InvalidTemplateDirectiveCode::WrongTarget)
     }));
 }
 #[test]
@@ -264,7 +196,7 @@ fn public_dependency_and_private_dependency_keep_distinct_retained_shells() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let output = prepare_active_root_with_role(
-        "@button Button\nexport:\n    @button Button\n;\n",
+        "@button Button\n$export\n@button Button\n",
         &PathBuf::from("src/@mod.moth"),
         ModuleRootRole::Normal,
         &mut string_table,

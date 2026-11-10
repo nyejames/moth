@@ -1,3 +1,2 @@
-export:
-    @internal Point, identity
-;
+$export
+@internal Point, identity

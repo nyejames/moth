@@ -4,18 +4,19 @@ LOCAL_DISPLAY must:
     display |This| -> String
 ;
 
-export:
-    Label = |
-        text String,
-    |
+$export
+Label = |
+    text String,
+|
 
-    Box type T = |
-        value T,
-    |
+$export
+Box type T = |
+    value T,
+|
 
-    outer type T |value T| -> String:
-        return Box(Label("outer-only")).render()
-    ;
+$export
+outer type T |value T| -> String:
+    return Box(Label("outer-only")).render()
 ;
 
 display |this Label| -> String:

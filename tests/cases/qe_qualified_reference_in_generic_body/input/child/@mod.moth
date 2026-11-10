@@ -1,5 +1,4 @@
-export:
-    show type T |value T| -> String:
-        return [: [@settings site_name] ]
-    ;
+$export
+show type T |value T| -> String:
+    return [: [@settings site_name] ]
 ;

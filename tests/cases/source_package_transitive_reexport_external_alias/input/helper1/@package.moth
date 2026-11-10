@@ -1,4 +1,4 @@
-export:
-    @core/math sin, PI
-    @core/time Duration, duration_from_seconds, as_seconds
-;
+$export
+@core/math sin, PI
+$export
+@core/time Duration, duration_from_seconds, as_seconds

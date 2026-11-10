@@ -1,5 +1,4 @@
-export:
-    start || -> String:
-        return "imported"
-    ;
+$export
+start || -> String:
+    return "imported"
 ;

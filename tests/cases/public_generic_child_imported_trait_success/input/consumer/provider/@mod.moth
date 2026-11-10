@@ -1,1 +1,2 @@
-export: @traits PUBLIC_DISPLAY;
+$export
+@traits PUBLIC_DISPLAY

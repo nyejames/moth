@@ -1,3 +1,2 @@
-export:
-    max_value #I32 = 2147483647
-;
+$export
+max_value #I32 = 2147483647

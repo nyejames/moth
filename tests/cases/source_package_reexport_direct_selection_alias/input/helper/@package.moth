@@ -1,4 +1,3 @@
-export:
-    @internal greet as hello,
-        farewell as goodbye
-;
+$export
+@internal greet as hello,
+    farewell as goodbye

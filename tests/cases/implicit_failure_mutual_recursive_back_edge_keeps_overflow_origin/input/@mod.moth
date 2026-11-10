@@ -7,8 +7,7 @@ first |value I32, ready Bool| -> I32:
 second |value I32, ready Bool| -> I32:
     return first(value, ready)
 ;
-export:
-    boundary |value I32, ready Bool| -> I32:
-        return first(value, ready)
-    ;
+$export
+boundary |value I32, ready Bool| -> I32:
+    return first(value, ready)
 ;

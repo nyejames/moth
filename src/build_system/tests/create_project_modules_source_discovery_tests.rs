@@ -1250,8 +1250,7 @@ fn canonical_discovery_preserves_cross_module_root_queuing() {
     // Entry A depends on its direct child module B, which should queue module B's root.
     fs::write(module_a.join("@entry.moth"), "@module_b b\n#[:pageA]\n")
         .expect("should write pageA");
-    fs::write(module_b.join("@mod.moth"), "export:\n    b #= 1\n;\n")
-        .expect("should write module_b root");
+    fs::write(module_b.join("@mod.moth"), "$export\nb #= 1\n").expect("should write module_b root");
     fs::write(module_b.join("impl.moth"), "impl #= 1\n").expect("should write module_b impl");
 
     let mut config = Config::new(root.clone());
@@ -1328,7 +1327,7 @@ fn scoped_support_package_is_visible_by_name_to_owner_and_sibling_descendant() {
         .expect("should write owner root");
     fs::write(
         support.join("@package.moth"),
-        "export:\n    render || -> String:\n        return \"support\"\n    ;\n;\n",
+        "$export\nrender || -> String:\n    return \"support\"\n;\n",
     )
     .expect("should write support root");
     fs::write(pages.join("@entry.moth"), "@markdown render\n#[:page]\n")
@@ -1406,7 +1405,7 @@ fn binding_package_and_local_module_prefix_collision_is_ambiguous() {
     )
     .expect("should write config");
     fs::write(src.join("@entry.moth"), "@core/io input\n#[:page]\n").expect("should write root");
-    fs::write(local_core.join("@mod.moth"), "export:\n    local #= 1\n;\n")
+    fs::write(local_core.join("@mod.moth"), "$export\nlocal #= 1\n")
         .expect("should write colliding local facade");
     fs::write(local_core.join("@entry.moth"), "#[:local core]\n")
         .expect("should write colliding local module entry");
@@ -1511,8 +1510,7 @@ fn direct_child_private_path_bypass_is_rejected() {
     .expect("should write config");
     fs::write(src.join("@entry.moth"), "@child/private value\n#[:page]\n")
         .expect("should write parent root");
-    fs::write(child.join("@mod.moth"), "export:\n    value #= 1\n;\n")
-        .expect("should write child root");
+    fs::write(child.join("@mod.moth"), "$export\nvalue #= 1\n").expect("should write child root");
     fs::write(child.join("private.moth"), "value #= 2\n")
         .expect("should write private child source");
 
@@ -1540,8 +1538,7 @@ fn module_import_through_hidden_directory_reports_hidden_reason() {
     let src = root.join("src");
     let hidden = src.join("_private/child");
     fs::create_dir_all(&hidden).expect("should create hidden child");
-    fs::write(hidden.join("@mod.moth"), "export:\n    value #= 1\n;\n")
-        .expect("should write hidden root");
+    fs::write(hidden.join("@mod.moth"), "$export\nvalue #= 1\n").expect("should write hidden root");
 
     fs::write(
         root.join(settings::CONFIG_FILE_NAME),
@@ -1661,8 +1658,7 @@ fn selected_hidden_root_can_import_its_visible_child_module() {
     )
     .expect("should write config");
     fs::write(selected.join("@entry.moth"), "@visible v\n#[:site]\n").expect("should write root");
-    fs::write(child.join("@mod.moth"), "export:\n    v #= 1\n;\n")
-        .expect("should write child root");
+    fs::write(child.join("@mod.moth"), "$export\nv #= 1\n").expect("should write child root");
 
     let mut config = Config::new(selected.clone());
     let style_directives = test_style_directives();
@@ -2060,8 +2056,7 @@ fn check_only_qualified_occurrence_reaches_the_same_provider_binding_as_a_clause
         "probe || -> I32:\n    result = @child value\n    return result\n;\n",
     )
     .expect("should write occurrence orphan");
-    fs::write(child.join("@mod.moth"), "export:\n    value #= 7\n;\n")
-        .expect("should write child root");
+    fs::write(child.join("@mod.moth"), "$export\nvalue #= 7\n").expect("should write child root");
 
     let mut config = Config::new(root.clone());
     let style_directives = test_style_directives();

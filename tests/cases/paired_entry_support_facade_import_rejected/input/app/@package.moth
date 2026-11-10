@@ -1,6 +1,5 @@
 @lib value
-export:
-    app_value || -> String:
-        return value
-    ;
+$export
+app_value || -> String:
+    return value
 ;

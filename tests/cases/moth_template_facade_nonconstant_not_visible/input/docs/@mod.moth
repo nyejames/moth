@@ -1,11 +1,12 @@
-export:
-    @intro content as intro_content
+$export
+@intro content as intro_content
 
-    LocalCard = |
-        title String,
-    |
+$export
+LocalCard = |
+    title String,
+|
 
-    render_local || -> String:
-        return "runtime"
-    ;
+$export
+render_local || -> String:
+    return "runtime"
 ;

@@ -390,7 +390,7 @@ fn private_dependency_clause_propagates_path_lookup_infrastructure_failure() {
 #[test]
 fn public_dependency_clause_propagates_path_lookup_infrastructure_failure() {
     expect_prepare_infrastructure(
-        prepare_tampered_path_clause("export:\n    @core/math sin\n;\n", "src/@mod.moth"),
+        prepare_tampered_path_clause("$export\n@core/math sin\n", "src/@mod.moth"),
         "public dependency clause",
     );
 }

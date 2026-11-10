@@ -146,7 +146,7 @@ fn dependency_clause_keeps_one_cross_module_edge_for_multiple_selections() {
     .expect("should write page");
     fs::write(
         src.join("child/@mod.moth"),
-        "export:\n    greet || -> String:\n        return \"hi\"\n    ;\n    farewell || -> String:\n        return \"bye\"\n    ;\n;\n",
+        "$export\ngreet || -> String:\n    return \"hi\"\n;\n$export\nfarewell || -> String:\n    return \"bye\"\n;\n",
     )
     .expect("should write child module root");
 
@@ -682,7 +682,7 @@ fn directory_stage0_rejects_missing_targets_under_child_module_roots_without_wat
     fs::write(src.join("child/@entry.moth"), "#[:ok]\n").expect("should write child root");
     fs::write(
         src.join("support/@package.moth"),
-        "export:\n    render || -> String:\n        return \"support\"\n    ;\n;\n",
+        "$export\nrender || -> String:\n    return \"support\"\n;\n",
     )
     .expect("should write support root");
 
@@ -757,7 +757,7 @@ fn directory_stage0_rejects_missing_symlink_ancestors_without_watch() {
     fs::write(child.join("@entry.moth"), "#[:ok]\n").expect("should write child root");
     fs::write(
         support.join("@package.moth"),
-        "export:\n    render || -> String:\n        return \"support\"\n    ;\n;\n",
+        "$export\nrender || -> String:\n    return \"support\"\n;\n",
     )
     .expect("should write support root");
     symlink(_outside_root.path(), src.join("external-alias"))
@@ -1068,7 +1068,7 @@ fn ordinary_synthetic_stage0_rejects_child_and_support_boundaries() {
     fs::write(child.join("existing.mtf"), "template body\n").expect("should write child content");
     fs::write(
         support.join("@package.moth"),
-        "export:\n    render || -> String:\n        return \"support\"\n    ;\n;\n",
+        "$export\nrender || -> String:\n    return \"support\"\n;\n",
     )
     .expect("should write support root");
     fs::write(support.join("existing.svg"), "resource").expect("should write support resource");
@@ -1154,7 +1154,7 @@ fn compile_single_file_frontend_retains_ordinary_boundary_registry() {
     fs::write(child.join("existing.mtf"), "template body\n").expect("should write child content");
     fs::write(
         support.join("@package.moth"),
-        "export:\n    render || -> String:\n        return \"support\"\n    ;\n;\n",
+        "$export\nrender || -> String:\n    return \"support\"\n;\n",
     )
     .expect("should write support root");
     fs::write(support.join("existing.svg"), "resource").expect("should write support resource");

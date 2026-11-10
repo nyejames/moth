@@ -1,3 +1,2 @@
-export:
-    @background-animation.js animate_canvas, observed
-;
+$export
+@background-animation.js animate_canvas, observed

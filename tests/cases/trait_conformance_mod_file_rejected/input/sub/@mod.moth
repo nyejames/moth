@@ -1,7 +1,6 @@
 @model Label
 
-export:
-    @model Label
-;
+$export
+@model Label
 
 Label must DISPLAYABLE

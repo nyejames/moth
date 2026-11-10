@@ -1,8 +1,7 @@
-export:
-    Box type T is TRY_CASTABLE_TO_I32 = |
-        value T,
-    |
-;
+$export
+Box type T is TRY_CASTABLE_TO_I32 = |
+    value T,
+|
 
 try_to_i32 type T is TRY_CASTABLE_TO_I32 |this Box of T| -> I32, Error!:
     return cast this.value

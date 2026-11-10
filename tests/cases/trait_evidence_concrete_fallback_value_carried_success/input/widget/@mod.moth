@@ -1,13 +1,15 @@
 @impl Label, make_label_impl
 
-export:
-    @impl Label
+$export
+@impl Label
 
-    @traits DISPLAY_TEXT
+$export
+@traits DISPLAY_TEXT
 
-    PublicLabel as Label
+$export
+PublicLabel as Label
 
-    make_label |text String| -> PublicLabel:
-        return make_label_impl(text)
-    ;
+$export
+make_label |text String| -> PublicLabel:
+    return make_label_impl(text)
 ;

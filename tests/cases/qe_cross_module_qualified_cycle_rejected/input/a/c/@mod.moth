@@ -1,5 +1,4 @@
 -- A package root cannot name a sibling package. This child facade can, which
 -- closes the Stage 0 cycle with `b/d`.
-export:
-    label #= @b other
-;
+$export
+label #= @b other

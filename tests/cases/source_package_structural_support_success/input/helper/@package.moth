@@ -1,5 +1,4 @@
-export:
-    add |a I32, b I32| -> I32:
-        return a + b catch then 0
-    ;
+$export
+add |a I32, b I32| -> I32:
+    return a + b catch then 0
 ;

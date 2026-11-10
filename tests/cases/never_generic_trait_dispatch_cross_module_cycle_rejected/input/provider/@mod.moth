@@ -1,16 +1,17 @@
-export:
-    STOPPABLE must:
-        stop |This| -> !
-    ;
-
-    abort type T is STOPPABLE |value T| -> !:
-        settle(value)
-    ;
-
-    Other = |
-        code I32,
-    |
+$export
+STOPPABLE must:
+    stop |This| -> !
 ;
+
+$export
+abort type T is STOPPABLE |value T| -> !:
+    settle(value)
+;
+
+$export
+Other = |
+    code I32,
+|
 
 settle type T is STOPPABLE |value T| -> !:
     value.stop()

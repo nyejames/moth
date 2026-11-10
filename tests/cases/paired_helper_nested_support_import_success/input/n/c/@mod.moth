@@ -1,6 +1,5 @@
 @shared helper_value
-export:
-    run || -> String:
-        return helper_value()
-    ;
+$export
+run || -> String:
+    return helper_value()
 ;

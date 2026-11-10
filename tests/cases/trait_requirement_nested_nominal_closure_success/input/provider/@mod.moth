@@ -1,23 +1,26 @@
-export:
-    BOX_SOURCE must:
-        boxed |This| -> Box of Helper
-    ;
+$export
+BOX_SOURCE must:
+    boxed |This| -> Box of Helper
+;
 
-    Helper = |
-        text String,
-    |
+$export
+Helper = |
+    text String,
+|
 
-    Box type T = |
-        value T,
-    |
+$export
+Box type T = |
+    value T,
+|
 
-    Maker = |
-        label String,
-    |
+$export
+Maker = |
+    label String,
+|
 
-    make_maker || -> Maker:
-        return Maker(label = "maker")
-    ;
+$export
+make_maker || -> Maker:
+    return Maker(label = "maker")
 ;
 
 boxed |this Maker| -> Box of Helper:

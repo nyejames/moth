@@ -1,3 +1,2 @@
-export:
-    @internal greet, farewell
-;
+$export
+@internal greet, farewell

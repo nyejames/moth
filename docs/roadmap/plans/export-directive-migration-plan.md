@@ -3,9 +3,9 @@
 ## Status
 
 - Status: ACTIVE on `feature/export-directive`.
-- Current slice: 2 - migrate first-party Moth export blocks to per-item `$export` and replace obsolete block fixtures.
-- Blockers: None. Source modifiers, facade roles and public-interface construction are delivered. `$export` parser attachment, file-role gating and metadata separation are implemented and audited.
-- Next action: Migrate executable sources and fixtures, then remove the legacy block parser and keyword in slice 3. Retire this plan in the completing implementation commit.
+- Current slice: 3 - remove the legacy `export:` block parser, reserved keyword and block-only diagnostics.
+- Blockers: None. Source modifiers, facade roles, public-interface construction, `$export` parser attachment and first-party source/fixture migration are implemented and audited.
+- Next action: Delete the legacy block and keyword machinery, then finish source-directive diagnostics and validation. Retire this plan in the completing implementation commit.
 
 ## Goal
 

@@ -334,20 +334,12 @@ fn binding_names(seed: &DirectExportSeed) -> Vec<&str> {
 }
 
 /// A public surface exercising every directly-defined public declaration category.
-const ALL_CATEGORIES_SOURCE: &str = "\
-export:\n\
-    render |button Button| -> String:\n\
-        return button.label\n\
-    ;\n\
-    Button = | label String |\n\
-    Status :: Ready,\n\
-    ;\n\
-    Shape as I32\n\
-    count #= 1\n\
-    DISPLAYABLE must:\n\
-        show |This| -> String\n\
-    ;\n\
-;\n";
+const ALL_CATEGORIES_SOURCE: &str = "$export\nrender |button Button| -> String:\n    return button.label\n;\n\
+$export\nButton = | label String |\n\
+$export\nStatus :: Ready,\n;\n\
+$export\nShape as I32\n\
+$export\ncount #= 1\n\
+$export\nDISPLAYABLE must:\n    show |This| -> String\n;\n";
 
 #[test]
 fn directly_defined_public_exports_get_export_bindings_with_exact_category() {
@@ -404,7 +396,7 @@ fn directly_defined_public_exports_get_export_bindings_with_exact_category() {
 
 #[test]
 fn directly_defined_public_exports_retain_authored_diagnostic_provenance() {
-    let source = "export:\n    alpha #= 1\n;\n";
+    let source = "$export\nalpha #= 1\n";
     let seed = build_seed(source);
 
     assert_eq!(seed.export_diagnostic_provenance().len(), 1);
@@ -745,10 +737,9 @@ helper |value I32| -> I32:\n\
     return value\n\
 ;\n\
 Inner = | x I32 |\n\
-export:\n\
-    public_fn |x I32| -> I32:\n\
-        return x\n\
-    ;\n\
+$export\n\
+public_fn |x I32| -> I32:\n\
+    return x\n\
 ;\n";
 
     let seed = build_seed(source);
@@ -763,15 +754,15 @@ export:\n\
 #[test]
 fn ordering_is_deterministic_independent_of_declaration_scheduling() {
     let order_one = "\
-export:\n\
-    zebra #= 1\n\
-    alpha #= 2\n\
-;\n";
+$export\n\
+zebra #= 1\n\
+$export\n\
+alpha #= 2\n";
     let order_two = "\
-export:\n\
-    alpha #= 2\n\
-    zebra #= 1\n\
-;\n";
+$export\n\
+alpha #= 2\n\
+$export\n\
+zebra #= 1\n";
 
     let first = build_seed(order_one);
     let second = build_seed(order_two);
@@ -818,7 +809,7 @@ fn active_origin_missing_from_table_fails_internally() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut headers = parse_single_file_headers_with_fork(
-        "export:\n    alpha #= 1\n;\n",
+        "$export\nalpha #= 1\n",
         &mut string_table,
         &mut path_fork,
     );
@@ -873,7 +864,7 @@ fn out_of_range_active_root_file_id_fails_internally() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut headers = parse_single_file_headers_with_fork(
-        "export:\n    alpha #= 1\n;\n",
+        "$export\nalpha #= 1\n",
         &mut string_table,
         &mut path_fork,
     );
@@ -1083,7 +1074,7 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
     // validate its public declaration surface.
     let mut active_span_builder = ExtendedSpanBuilder::new();
     let active_output = prepare_active_root_with_role(
-        "export:\n    Local = | value I32 |\n;\n",
+        "$export\nLocal = | value I32 |\n",
         &active_path,
         ModuleRootRole::Normal,
         &mut string_table,
@@ -1093,7 +1084,7 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
     .expect("a normal facade fixture should accept its export block");
     let mut imported_span_builder = ExtendedSpanBuilder::new();
     let imported_output = prepare_active_root_with_role(
-        "export:\n    Imported = | value I32 |\n;\n",
+        "$export\nImported = | value I32 |\n",
         &imported_path,
         ModuleRootRole::Normal,
         &mut string_table,
@@ -1208,7 +1199,7 @@ fn public_source_nominal_origin_index_rejects_compilation_root_file_id() {
 
     let mut active_span_builder = ExtendedSpanBuilder::new();
     let active_output = prepare_active_root_with_role(
-        "export:\n    Local = | value I32 |\n;\n",
+        "$export\nLocal = | value I32 |\n",
         &active_path,
         ModuleRootRole::Normal,
         &mut string_table,
@@ -1218,7 +1209,7 @@ fn public_source_nominal_origin_index_rejects_compilation_root_file_id() {
     .expect("a normal facade fixture should accept its export block");
     let mut imported_span_builder = ExtendedSpanBuilder::new();
     let imported_output = prepare_active_root_with_role(
-        "export:\n    Imported = | value I32 |\n;\n",
+        "$export\nImported = | value I32 |\n",
         &imported_path,
         ModuleRootRole::Normal,
         &mut string_table,
@@ -1299,7 +1290,7 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
 
     let mut active_span_builder = ExtendedSpanBuilder::new();
     let active_output = prepare_active_root_with_role(
-        "export:\n    Local = | value I32 |\n;\n",
+        "$export\nLocal = | value I32 |\n",
         &active_path,
         ModuleRootRole::Normal,
         &mut string_table,
@@ -1311,7 +1302,7 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
     // origin map, so its table entry is None.
     let mut package_span_builder = ExtendedSpanBuilder::new();
     let package_output = prepare_active_root_with_role(
-        "export:\n    Pkg = | value I32 |\n;\n",
+        "$export\nPkg = | value I32 |\n",
         &package_path,
         ModuleRootRole::Normal,
         &mut string_table,
@@ -1411,7 +1402,7 @@ fn public_source_nominal_origin_index_includes_alias_targeted_normal_file_nomina
     // module-root public export entry targets `Counter`'s canonical source path.
     let mut active_span_builder = ExtendedSpanBuilder::new();
     let active_output = prepare_active_root_with_role(
-        "export:\n    placeholder #= 1\n;\n",
+        "$export\nplaceholder #= 1\n",
         &active_path,
         ModuleRootRole::Normal,
         &mut string_table,
@@ -1512,7 +1503,7 @@ fn public_source_nominal_origin_index_excludes_private_normal_file_nominal_witho
     // with no public export targeting it.
     let mut active_span_builder = ExtendedSpanBuilder::new();
     let active_output = prepare_active_root_with_role(
-        "export:\n    Local = | value I32 |\n;\n",
+        "$export\nLocal = | value I32 |\n",
         &active_path,
         ModuleRootRole::Normal,
         &mut string_table,
@@ -1605,7 +1596,7 @@ fn public_source_trait_origin_index_includes_directly_defined_trait() {
     let file_path = PathBuf::from("src/@mod.moth");
     let mut span_builder = ExtendedSpanBuilder::new();
     let output = prepare_active_root_with_role(
-        "export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n",
+        "$export\nRENDERABLE must:\n    show |This| -> String\n;\n",
         &file_path,
         ModuleRootRole::Normal,
         &mut string_table,
@@ -1671,7 +1662,7 @@ fn public_source_trait_origin_index_includes_imported_provider_trait() {
 
     let mut active_span_builder = ExtendedSpanBuilder::new();
     let active_output = prepare_active_root_with_role(
-        "export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n",
+        "$export\nRENDERABLE must:\n    show |This| -> String\n;\n",
         &active_path,
         ModuleRootRole::Normal,
         &mut string_table,
@@ -1681,7 +1672,7 @@ fn public_source_trait_origin_index_includes_imported_provider_trait() {
     .expect("a normal facade fixture should accept its export block");
     let mut imported_span_builder = ExtendedSpanBuilder::new();
     let imported_output = prepare_active_root_with_role(
-        "export:\n    IMPORTED_TRAIT must:\n        show |This| -> String\n    ;\n;\n",
+        "$export\nIMPORTED_TRAIT must:\n    show |This| -> String\n;\n",
         &imported_path,
         ModuleRootRole::Normal,
         &mut string_table,
@@ -1778,7 +1769,7 @@ fn public_source_trait_origin_index_includes_alias_targeted_normal_file_trait() 
     // retained module-root public export entry targets `DRAWABLE`'s canonical source path.
     let mut active_span_builder = ExtendedSpanBuilder::new();
     let active_output = prepare_active_root_with_role(
-        "export:\n    placeholder #= 1\n;\n",
+        "$export\nplaceholder #= 1\n",
         &active_path,
         ModuleRootRole::Normal,
         &mut string_table,
@@ -1928,7 +1919,7 @@ fn public_source_trait_origin_index_skips_unowned_source_package_trait() {
 
     let mut span_builder = ExtendedSpanBuilder::new();
     let output = prepare_active_root_with_role(
-        "export:\n    PKG_TRAIT must:\n        show |This| -> String\n    ;\n;\n",
+        "$export\nPKG_TRAIT must:\n    show |This| -> String\n;\n",
         &package_path,
         ModuleRootRole::Normal,
         &mut string_table,
@@ -1991,7 +1982,7 @@ fn public_source_trait_origin_index_rejects_unowned_source_identity() {
     let file_path = PathBuf::from("src/@mod.moth");
     let mut span_builder = ExtendedSpanBuilder::new();
     let output = prepare_active_root_with_role(
-        "export:\n    RENDERABLE must:\n        show |This| -> String\n    ;\n;\n",
+        "$export\nRENDERABLE must:\n    show |This| -> String\n;\n",
         &file_path,
         ModuleRootRole::Normal,
         &mut string_table,

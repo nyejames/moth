@@ -1,3 +1,2 @@
-export:
-    @core/math missing
-;
+$export
+@core/math missing

@@ -36,11 +36,11 @@ const PROJECT_ERROR_LIMIT_TWO: &str =
     "project #= (\n    name = \"docs\",\n        max_errors_per_project = 2,\n)\nhtml #= ()\n";
 /// A module root whose body binds a resolved resource before failing, plus an independent body
 /// in an owned sibling file with the same shape.
-const RESOURCE_FAILING_MODULE_ROOT: &str = "@extra later\nexport:\n    probe || -> String:\n        logo = @assets/broken.svg\n        return missing_one\n    ;\n;\n";
+const RESOURCE_FAILING_MODULE_ROOT: &str = "@extra later\n$export\nprobe || -> String:\n    logo = @assets/broken.svg\n    return missing_one\n;\n";
 const RESOURCE_FAILING_MODULE_EXTRA: &str =
     "later || -> String:\n    other = @assets/broken.svg\n    return missing_two\n;\n";
 /// The same two bodies repaired to return their resource bindings.
-const RESOURCE_REPAIRED_MODULE_ROOT: &str = "@extra later\nexport:\n    probe || -> String:\n        logo = @assets/broken.svg\n        return logo\n    ;\n;\n";
+const RESOURCE_REPAIRED_MODULE_ROOT: &str = "@extra later\n$export\nprobe || -> String:\n    logo = @assets/broken.svg\n    return logo\n;\n";
 const RESOURCE_REPAIRED_MODULE_EXTRA: &str =
     "later || -> String:\n    other = @assets/broken.svg\n    return other\n;\n";
 
@@ -511,8 +511,8 @@ fn diagnostic_recovery_project_soft_cutoff_counts_shared_provider_once() {
             ("src/@entry.moth", "@shared broken\n#[:site]\n"),
             (
                 "src/shared/@mod.moth",
-                "export:\n    broken || -> I32:\n        return shared_missing_one\n    ;\n\n\
-                 also_broken || -> I32:\n        return shared_missing_two\n    ;\n;\n",
+                "$export\nbroken || -> I32:\n    return shared_missing_one\n;\n\n\
+                 $export\nalso_broken || -> I32:\n    return shared_missing_two\n;\n",
             ),
         ],
     );
@@ -699,7 +699,7 @@ fn diagnostic_recovery_paired_roots_report_together_before_the_budget_stops_late
         &[
             (
                 "src/@package.moth",
-                "export:\n    support_value || -> I32:\n        return support_missing\n    ;\n;\n",
+                "$export\nsupport_value || -> I32:\n    return support_missing\n;\n",
             ),
             (
                 "src/@entry.moth",
@@ -795,7 +795,7 @@ fn diagnostic_recovery_project_budget_spans_source_package_work() {
             ),
             (
                 "packages/shared/@mod.moth",
-                "export:\n    render || -> String:\n        return shared_missing\n    ;\n;\n",
+                "$export\nrender || -> String:\n    return shared_missing\n;\n",
             ),
         ],
     );
@@ -863,7 +863,7 @@ fn diagnostic_recovery_stopped_check_only_unit_treats_unvisited_provider_as_stop
             ),
             (
                 "src/second/@mod.moth",
-                "export:\n    value || -> I32:\n        return 1\n    ;\n;\n",
+                "$export\nvalue || -> I32:\n    return 1\n;\n",
             ),
             (
                 "src/orphan.moth",
@@ -932,7 +932,7 @@ fn diagnostic_recovery_resource_module_diagnosis_keeps_file_values_isolated() {
             ("src/broken/extra.moth", RESOURCE_FAILING_MODULE_EXTRA),
             (
                 "src/ok/@mod.moth",
-                "export:\n    greeting || -> String:\n        logo = @assets/ok.svg\n        return logo\n    ;\n;\n",
+                "$export\ngreeting || -> String:\n    logo = @assets/ok.svg\n    return logo\n;\n",
             ),
             ("src/broken/assets/broken.svg", "<svg/>"),
             ("src/ok/assets/ok.svg", "<svg/>"),
@@ -1155,11 +1155,11 @@ fn diagnostic_recovery_package_cutoff_leaves_wave_one_root_unvisited() {
             ),
             (
                 "packages/shared/@mod.moth",
-                "@helper value\nexport:\n    render || -> I32:\n        return value()\n    ;\n;\n",
+                "@helper value\n$export\nrender || -> I32:\n    return value()\n;\n",
             ),
             (
                 "packages/shared/helper/@mod.moth",
-                "export:\n    value || -> I32:\n        return 1\n    ;\n;\n",
+                "$export\nvalue || -> I32:\n    return 1\n;\n",
             ),
             (
                 "packages/shared/z_broken/@entry.moth",
@@ -1290,12 +1290,12 @@ fn diagnostic_recovery_package_cutoff_can_diagnose_its_own_root() {
             ),
             (
                 "packages/shared/@mod.moth",
-                "export:\n    a || -> I32:\n        return root_missing_one\n    ;\n\n\
-                 b || -> I32:\n        return root_missing_two\n    ;\n;\n",
+                "$export\na || -> I32:\n    return root_missing_one\n;\n\n\
+                 $export\nb || -> I32:\n    return root_missing_two\n;\n",
             ),
             (
                 "packages/shared/later/@mod.moth",
-                "export:\n    value || -> I32:\n        return 1\n    ;\n;\n",
+                "$export\nvalue || -> I32:\n    return 1\n;\n",
             ),
         ],
     );
@@ -1378,7 +1378,7 @@ fn write_deferred_check_only_package_project(
             ),
             (
                 "packages/shared/@mod.moth",
-                "export:\n    render || -> I32:\n        return 7\n    ;\n;\n",
+                "$export\nrender || -> I32:\n    return 7\n;\n",
             ),
             (
                 "packages/shared/broken/@entry.moth",
@@ -1387,7 +1387,7 @@ fn write_deferred_check_only_package_project(
             ),
             (
                 "packages/shared/z_late/@mod.moth",
-                "export:\n    late_value || -> I32:\n        return 1\n    ;\n;\n",
+                "$export\nlate_value || -> I32:\n    return 1\n;\n",
             ),
             ("packages/shared/a_orphan.moth", first_orphan),
             ("packages/shared/b_orphan.moth", second_orphan),

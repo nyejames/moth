@@ -18,8 +18,7 @@ fourth |left I32, right I32| -> I32:
     return third(left, right)
 ;
 
-export:
-    product |left I32, right I32| -> I32:
-        return fourth(left, right)
-    ;
+$export
+product |left I32, right I32| -> I32:
+    return fourth(left, right)
 ;

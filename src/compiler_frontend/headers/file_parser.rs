@@ -852,7 +852,10 @@ fn handle_symbol_item(
     // remains the fallback until its parser is removed, so this slice can migrate sources first.
     let export_mode = match source_modifier {
         Some(modifier)
-            if matches!(modifier.target, SourceModifierTarget::ExportablePublicApiItem) =>
+            if matches!(
+                modifier.target,
+                SourceModifierTarget::ExportablePublicApiItem
+            ) =>
         {
             HeaderExportMode::Public
         }

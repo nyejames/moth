@@ -1,6 +1,5 @@
 $config
 configured_maximum #I32 = 2147483647
 
-export:
-    maximum #I32 = configured_maximum
-;
+$export
+maximum #I32 = configured_maximum

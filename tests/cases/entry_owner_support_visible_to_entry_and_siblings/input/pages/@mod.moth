@@ -1,6 +1,5 @@
 @lib value
-export:
-    sibling || -> String:
-        return value
-    ;
+$export
+sibling || -> String:
+    return value
 ;

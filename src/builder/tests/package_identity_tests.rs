@@ -21,7 +21,7 @@ const CONFIG_SOURCE: &str = "project #= (\n    name = \"docs\",\n)\n";
 const PAGE_SOURCE: &str = "@ui greet\nmessage = greet()\n";
 
 /// The `@ui` package's only module, exporting `greet`.
-const UI_MODULE_SOURCE: &str = "export:\n    greet || -> I32:\n        return 1\n    ;\n;\n";
+const UI_MODULE_SOURCE: &str = "$export\ngreet || -> I32:\n    return 1\n;\n";
 
 /// Records the compiler-owned package identities that `build` observes.
 struct IdentityRecordingBuilder {

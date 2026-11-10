@@ -1,5 +1,4 @@
-export:
-    @child PublicCard as Card,
-        make_card,
-        render_card
-;
+$export
+@child PublicCard as Card,
+    make_card,
+    render_card

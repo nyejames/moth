@@ -1,8 +1,7 @@
-export:
-    Box type T = |
-        value T,
-    |
-;
+$export
+Box type T = |
+    value T,
+|
 
 helper type T |this Box of T| -> String:
     return "generic nested receiver"

@@ -1,12 +1,14 @@
-export:
-    @circle Circle
-    @square Square
+$export
+@circle Circle
+$export
+@square Square
 
-    make_circle || -> Circle:
-        return Circle(2)
-    ;
+$export
+make_circle || -> Circle:
+    return Circle(2)
+;
 
-    make_square || -> Square:
-        return Square(3)
-    ;
+$export
+make_square || -> Square:
+    return Square(3)
 ;

@@ -1,6 +1,5 @@
-export:
-    Counter = | value I32 |
-;
+$export
+Counter = | value I32 |
 
 scaled |this Counter, factor I32| -> I32:
     return this.value * factor

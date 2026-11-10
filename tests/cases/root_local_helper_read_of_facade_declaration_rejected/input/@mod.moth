@@ -1,3 +1,2 @@
-export:
-    normal_value #= "facade"
-;
+$export
+normal_value #= "facade"

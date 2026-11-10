@@ -359,7 +359,7 @@ fn preparation_related_labels_keep_the_continuation_comma_and_name() {
 #[test]
 fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
     let quoted = "x".repeat(1500);
-    let source = format!("value = \"{quoted}\"\nexport:\n;\n");
+    let source = format!("value = \"{quoted}\"\n$export\n");
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@entry.moth");
@@ -433,8 +433,8 @@ fn diagnosed_header_failure_keeps_source_identity_and_extended_span_owner() {
         diagnostic_span.resolve_with(span_builder.resolver_for(diagnostic_span.source()));
     assert_eq!(
         source.get(diagnostic_range.start() as usize..diagnostic_range.end() as usize),
-        Some("export"),
-        "the empty export diagnostic should cover the authored export keyword"
+        Some("$export"),
+        "the dangling export diagnostic should cover the authored directive keyword"
     );
     let retained_range = long_span.resolve_with(span_builder.resolver_for(source_id));
     assert_eq!(retained_range, expected_range);

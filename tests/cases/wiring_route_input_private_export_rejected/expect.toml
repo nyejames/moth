@@ -11,5 +11,5 @@ diagnostic_codes = ["MOTH-RULE-0082"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0082"
 path = "input/@mod.moth"
-line = 10
+line = 11
 count = 1

@@ -31,7 +31,7 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     .expect("should write second blocked consumer");
     fs::write(
         dir.join("provider/@package.moth"),
-        "export:\n    run || -> I32:\n        return missing_provider_value\n    ;\n;\n",
+        "$export\nrun || -> I32:\n    return missing_provider_value\n;\n",
     )
     .expect("should write diagnosed provider");
     fs::write(
@@ -502,7 +502,7 @@ fn directory_frontend_registers_package_and_project_boundaries() {
     fs::write(dir.join("@entry.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         package_root.join("@mod.moth"),
-        "export:\n    helper || -> I32:\n        return 7\n    ;\n;\n",
+        "$export\nhelper || -> I32:\n    return 7\n;\n",
     )
     .expect("should write package module");
 
@@ -1187,7 +1187,7 @@ fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
         ("collection", "values = {\n    1,\n    2,\n", "}"),
         ("grouping", "value = (\n    1 + 2\n", ")"),
     ] {
-        let facade_source = "export:\n    label #= \"components\"\n;\n";
+        let facade_source = "$export\nlabel #= \"components\"\n";
         let dependency_source = dormant_work.to_owned();
         fs::write(dir.join("src/components/@mod.moth"), facade_source)
             .expect("should write dependency facade");

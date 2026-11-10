@@ -263,17 +263,24 @@ fresh_child #= [$fresh]
 @core/random random_float, random_int
 
 -- module structure
-export:
-    render
-    paint
-    parse
-    total
-    Label
-    Point
-    Maybe
-    Color
-    Status
-;
+$export
+render
+$export
+paint
+$export
+parse
+$export
+total
+$export
+Label
+$export
+Point
+$export
+Maybe
+$export
+Color
+$export
+Status
 
 -- control flow
 if enabled:
@@ -1454,24 +1461,38 @@ compose |a Maybe I32, b Maybe I32| -> Maybe I32:
 @web/canvas Canvas, draw_rect, fill_circle, stroke_line, clear
 
 -- Example: module exports
-export:
-    render
-    paint
-    parse
-    total
-    validate
-    classify
-    format
-    Label
-    Point
-    Maybe
-    Color
-    Status
-    DISPLAY_TEXT
-    SERIALIZABLE
-    COMPARABLE
-    FROZEN
-;
+$export
+render
+$export
+paint
+$export
+parse
+$export
+total
+$export
+validate
+$export
+classify
+$export
+format
+$export
+Label
+$export
+Point
+$export
+Maybe
+$export
+Color
+$export
+Status
+$export
+DISPLAY_TEXT
+$export
+SERIALIZABLE
+$export
+COMPARABLE
+$export
+FROZEN
 
 -- Example: long prose comment block
 -- This fixture intentionally mixes complete current word groups, planned

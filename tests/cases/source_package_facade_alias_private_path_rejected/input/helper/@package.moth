@@ -1,3 +1,2 @@
-export:
-    @greet greet as hello
-;
+$export
+@greet greet as hello

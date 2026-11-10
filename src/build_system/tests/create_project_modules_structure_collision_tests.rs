@@ -892,7 +892,7 @@ fn indexed_module_inventory_excludes_unrelated_module_root_from_markdown_owner()
 
     fs::write(src.join("@entry.moth"), "@intro\n#[:ok]\n").expect("should write entry");
     fs::write(src.join("intro.md"), "hello\n").expect("should write markdown file");
-    fs::write(src.join("other/@mod.moth"), "export:\n    x #= 1\n;\n")
+    fs::write(src.join("other/@mod.moth"), "$export\nx #= 1\n")
         .expect("should write other module root");
 
     let mut config = Config::new(root.clone());

@@ -1,3 +1,2 @@
-export:
-    @impl mixed_add, narrow_add
-;
+$export
+@impl mixed_add, narrow_add

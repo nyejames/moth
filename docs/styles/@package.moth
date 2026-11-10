@@ -18,611 +18,628 @@ Palette = |
 
 palette_instance #= Palette()
 
-export:
-    theme_css #= [docs_font, $css:
+$export
+theme_css #= [docs_font, $css:
+    body {
+        font-family:
+            "Computer Modern Sans",
+            var(--moth-font-family-sans-serif);
+
+        min-height: 100vh;
+
+        background-color:
+            light-dark(
+                hsl(0, 0%, 98%),
+                #080d0c
+            );
+    }
+
+    @media (prefers-color-scheme: dark) {
         body {
-            font-family:
-                "Computer Modern Sans",
-                var(--moth-font-family-sans-serif);
-
-            min-height: 100vh;
-
-            background-color:
-                light-dark(
-                    hsl(0, 0%, 98%),
-                    #080d0c
+            background-image:
+                radial-gradient(
+                    80rem 55rem at 8% -10%,
+                    rgb(48 92 61 / 20%),
+                    transparent 60%
+                ),
+                radial-gradient(
+                    65rem 45rem at 100% 18%,
+                    rgb(25 67 46 / 10%),
+                    transparent 65%
+                ),
+                linear-gradient(
+                    145deg,
+                    #050d1b 0%,
+                    #0a0a17 48%,
+                    #0d1a31 100%
                 );
+
+            background-repeat: no-repeat;
         }
+    }
 
-        @media (prefers-color-scheme: dark) {
-            body {
-                background-image:
-                    radial-gradient(
-                        80rem 55rem at 8% -10%,
-                        rgb(48 92 61 / 20%),
-                        transparent 60%
-                    ),
-                    radial-gradient(
-                        65rem 45rem at 100% 18%,
-                        rgb(25 67 46 / 10%),
-                        transparent 65%
-                    ),
-                    linear-gradient(
-                        145deg,
-                        #050d1b 0%,
-                        #0a0a17 48%,
-                        #0d1a31 100%
-                    );
+    @media (prefers-color-scheme: light) {
+        body {
+            background-image:
+                radial-gradient(
+                    80rem 55rem at 8% -10%,
+                    rgb(0 50 80 / 20%),
+                    transparent 60%
+                ),
+                radial-gradient(
+                    65rem 45rem at 100% 18%,
+                    rgb(0 67 100 / 10%),
+                    transparent 65%
+                ),
+                linear-gradient(
+                    145deg,
+                    #c7e3fc 0%,
+                    #c4d3f2 12%,
+                    #c8d9fb 91%,
+                    #adbfff 100%
+                );
 
-                background-repeat: no-repeat;
-            }
+            background-repeat: no-repeat;
         }
+    }
 
-        @media (prefers-color-scheme: light) {
-            body {
-                background-image:
-                    radial-gradient(
-                        80rem 55rem at 8% -10%,
-                        rgb(0 50 80 / 20%),
-                        transparent 60%
-                    ),
-                    radial-gradient(
-                        65rem 45rem at 100% 18%,
-                        rgb(0 67 100 / 10%),
-                        transparent 65%
-                    ),
-                    linear-gradient(
-                        145deg,
-                        #c7e3fc 0%,
-                        #c4d3f2 12%,
-                        #c8d9fb 91%,
-                        #adbfff 100%
-                    );
+    a {
+        color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
+        transition: color 300ms ease-in-out;
+    }
 
-                background-repeat: no-repeat;
-            }
-        }
+    a:hover {
+        color: light-dark(hsl(204, 100%, 40%), hsl(217, 100%, 79%));
+    }
 
-        a {
-            color: light-dark(hsl(240, 100%, 37%), hsl(225, 82%, 67%));
-            transition: color 300ms ease-in-out;
-        }
+    h1 {
+        color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
+    }
 
-        a:hover {
-            color: light-dark(hsl(204, 100%, 40%), hsl(217, 100%, 79%));
-        }
+    .container {
+        width: 100%;
+        margin-right: auto;
+        margin-left: auto;
+        padding-right: var(--moth-spacing-small);
+        padding-left: var(--moth-spacing-small);
+    }
 
-        h1 {
-            color: light-dark(hsl(208, 63%, 16%), hsl(218, 88%, 80%));
-        }
+    .container code:not(.codeblock) {
+        color: light-dark(hsl(331, 100%, 50%), #f062d4f9);
+        font-family: var(--moth-font-family-monospace);
+        margin-left: 0.2em;
+        margin-right: 0.15em;
+        font-weight: 400;
+    }
 
+    .container pre {
+        max-width: 100%;
+        margin-block: 1.25em;
+        padding: 1em;
+        overflow-x: auto;
+        border-radius: 5px;
+        background-color: #151515e9;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        max-width: 100%;
+    }
+
+    th,
+    td {
+        border: 1px solid;
+        border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
+        padding: 0.5em 1em;
+        vertical-align: top;
+        text-align: left;
+    }
+
+    @media (min-width: 576px) {
         .container {
-            width: 100%;
-            margin-right: auto;
-            margin-left: auto;
-            padding-right: var(--moth-spacing-small);
-            padding-left: var(--moth-spacing-small);
+            max-width: 510px;
+            padding-right: var(--moth-spacing);
+            padding-left: var(--moth-spacing);
+            padding-bottom: var(--moth-spacing);
         }
+    }
 
-        .container code:not(.codeblock) {
-            color: light-dark(hsl(331, 100%, 50%), #f062d4f9);
-            font-family: var(--moth-font-family-monospace);
-            margin-left: 0.2em;
-            margin-right: 0.15em;
-            font-weight: 400;
+    @media (min-width: 768px) {
+        .container {
+            max-width: 700px;
         }
+    }
 
-        .container pre {
-            max-width: 100%;
-            margin-block: 1.25em;
-            padding: 1em;
-            overflow-x: auto;
-            border-radius: 5px;
-            background-color: #151515e9;
+    @media (min-width: 1024px) {
+        .container {
+            max-width: 950px;
         }
 
         table {
-            width: 100%;
-            border-collapse: collapse;
-            max-width: 100%;
+            font-size: 0.8rem;
         }
 
         th,
         td {
-            border: 1px solid;
-            border-color: light-dark(hsl(0, 0%, 75%), hsl(0, 0%, 30%));
-            padding: 0.5em 1em;
-            vertical-align: top;
-            text-align: left;
+            padding: 0.4em;
         }
+    }
 
-        @media (min-width: 576px) {
-            .container {
-                max-width: 510px;
-                padding-right: var(--moth-spacing);
-                padding-left: var(--moth-spacing);
-                padding-bottom: var(--moth-spacing);
-            }
+    @media (min-width: 1280px) {
+        .container {
+            max-width: 1200px;
         }
+    }
 
-        @media (min-width: 768px) {
-            .container {
-                max-width: 700px;
-            }
+    @media (min-width: 1536px) {
+        .container {
+            max-width: 1450px;
         }
+    }
+]
 
-        @media (min-width: 1024px) {
-            .container {
-                max-width: 950px;
-            }
+$export
+red #= palette_instance.red
 
-            table {
-                font-size: 0.8rem;
-            }
+$export
+highlight #= palette_instance.highlight
 
-            th,
-            td {
-                padding: 0.4em;
-            }
-        }
+$export
+theme_head #= [$html:
+    <style>[theme_css]</style>
+]
 
-        @media (min-width: 1280px) {
-            .container {
-                max-width: 1200px;
-            }
-        }
+$export
+language_docs_css #= [$css:
+    .doc-level,
+    .doc-pager {
+        --doc-level-accent: #3d4e8e;
+        --doc-level-accent-hover: #44a0cf;
+        --doc-level-border: #d7d9df;
+        --doc-level-switch-background: #f1f4f5;
+        --doc-level-selected-background: #ffffff;
+        --doc-level-text: #202127;
+        --doc-level-muted: #686971;
+        --doc-level-focus: #28c0d4;
+    }
 
-        @media (min-width: 1536px) {
-            .container {
-                max-width: 1450px;
-            }
-        }
-    ]
+    .doc-level {
+        min-inline-size: 0;
+        margin: 2rem 0;
+        padding: 0;
+        border: 0;
+        color: var(--doc-level-text);
+    }
 
-    red #= palette_instance.red
+    .visually-hidden,
+    .doc-level__input {
+        position: absolute;
+        inline-size: 1px;
+        block-size: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        border: 0;
+    }
 
-    highlight #= palette_instance.highlight
+    .doc-level__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-block-end: 1.25rem;
+    }
 
-    theme_head #= [$html:
-        <style>[theme_css]</style>
-    ]
+    .doc-level__title {
+        margin: 0;
+    }
 
-    language_docs_css #= [$css:
-        .doc-level,
-        .doc-pager {
-            --doc-level-accent: #3d4e8e;
-            --doc-level-accent-hover: #44a0cf;
-            --doc-level-border: #d7d9df;
-            --doc-level-switch-background: #f1f4f5;
-            --doc-level-selected-background: #ffffff;
-            --doc-level-text: #202127;
-            --doc-level-muted: #686971;
-            --doc-level-focus: #28c0d4;
-        }
+    .doc-level__switch {
+        display: inline-grid;
+        grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
+        gap: 0.2rem;
+        flex: none;
+        padding: 0.22rem;
+        border: 1px solid var(--doc-level-border);
+        border-radius: 0.75rem;
+        background: var(--doc-level-switch-background);
+    }
 
-        .doc-level {
-            min-inline-size: 0;
-            margin: 2rem 0;
-            padding: 0;
-            border: 0;
-            color: var(--doc-level-text);
-        }
+    .doc-level__option {
+        padding: 0.42rem 0.8rem;
+        border-radius: 0.55rem;
+        color: var(--doc-level-muted);
+        font-size: 0.875rem;
+        font-weight: 650;
+        line-height: 1.3;
+        text-align: center;
+        cursor: pointer;
+        user-select: none;
 
-        .visually-hidden,
-        .doc-level__input {
-            position: absolute;
-            inline-size: 1px;
-            block-size: 1px;
-            margin: -1px;
-            padding: 0;
-            overflow: hidden;
-            clip-path: inset(50%);
-            white-space: nowrap;
-            border: 0;
-        }
+        transition:
+            color 130ms ease,
+            background-color 130ms ease,
+            box-shadow 130ms ease;
+    }
 
-        .doc-level__header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 1rem;
-            margin-block-end: 1.25rem;
-        }
+    .doc-level__option:hover {
+        color: var(--doc-level-accent-hover);
+    }
 
-        .doc-level__title {
-            margin: 0;
-        }
+    .doc-level__input--basic:checked
+        ~ .doc-level__header
+        .doc-level__option--basic,
+    .doc-level__input--advanced:checked
+        ~ .doc-level__header
+        .doc-level__option--advanced {
+        color: var(--doc-level-accent);
+        background: var(--doc-level-selected-background);
+        box-shadow:
+            0 1px 2px rgb(20 40 24 / 10%),
+            0 0 0 1px rgb(63 143 78 / 8%);
+    }
 
-        .doc-level__switch {
-            display: inline-grid;
-            grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
-            gap: 0.2rem;
-            flex: none;
-            padding: 0.22rem;
-            border: 1px solid var(--doc-level-border);
-            border-radius: 0.75rem;
-            background: var(--doc-level-switch-background);
-        }
+    .doc-level__input--basic:focus-visible
+        ~ .doc-level__header
+        .doc-level__option--basic,
+    .doc-level__input--advanced:focus-visible
+        ~ .doc-level__header
+        .doc-level__option--advanced {
+        outline: 3px solid var(--doc-level-focus);
+        outline-offset: 2px;
+    }
 
-        .doc-level__option {
-            padding: 0.42rem 0.8rem;
-            border-radius: 0.55rem;
-            color: var(--doc-level-muted);
-            font-size: 0.875rem;
-            font-weight: 650;
-            line-height: 1.3;
-            text-align: center;
-            cursor: pointer;
-            user-select: none;
+    .doc-level__panel {
+        display: none;
+    }
 
-            transition:
-                color 130ms ease,
-                background-color 130ms ease,
-                box-shadow 130ms ease;
-        }
+    .doc-level__input--basic:checked
+        ~ .doc-level__panel--basic,
+    .doc-level__input--advanced:checked
+        ~ .doc-level__panel--advanced {
+        display: block;
+    }
 
-        .doc-level__option:hover {
-            color: var(--doc-level-accent-hover);
-        }
+    .doc-pager {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 1rem;
+        margin-block: 3rem 1rem;
+    }
 
-        .doc-level__input--basic:checked
-            ~ .doc-level__header
-            .doc-level__option--basic,
-        .doc-level__input--advanced:checked
-            ~ .doc-level__header
-            .doc-level__option--advanced {
-            color: var(--doc-level-accent);
-            background: var(--doc-level-selected-background);
-            box-shadow:
-                0 1px 2px rgb(20 40 24 / 10%),
-                0 0 0 1px rgb(63 143 78 / 8%);
-        }
+    .doc-pager--single {
+        grid-template-columns: minmax(0, 1fr);
+    }
 
-        .doc-level__input--basic:focus-visible
-            ~ .doc-level__header
-            .doc-level__option--basic,
-        .doc-level__input--advanced:focus-visible
-            ~ .doc-level__header
-            .doc-level__option--advanced {
-            outline: 3px solid var(--doc-level-focus);
-            outline-offset: 2px;
-        }
+    .doc-pager--single .doc-pager__link {
+        width: min(100%, 32rem);
+    }
 
-        .doc-level__panel {
-            display: none;
-        }
+    .doc-pager--single .doc-pager__link--previous {
+        justify-self: start;
+    }
 
+    .doc-pager--single .doc-pager__link--next {
+        justify-self: end;
+    }
+
+    .doc-pager__link {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        min-inline-size: 0;
+        padding: 0.9rem 1rem;
+        border: 1px solid var(--doc-level-border);
+        border-radius: 0.75rem;
+        color: var(--doc-level-text);
+        text-decoration: none;
+        background: var(--doc-level-selected-background);
+
+        transition:
+            color 130ms ease,
+            border-color 130ms ease,
+            box-shadow 130ms ease;
+    }
+
+    .doc-pager__link:hover {
+        color: var(--doc-level-accent-hover);
+        border-color: var(--doc-level-accent);
+        box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
+    }
+
+    .doc-pager__link:focus-visible {
+        outline: 3px solid var(--doc-level-focus);
+        outline-offset: 2px;
+    }
+
+    .doc-pager__link--next {
+        align-items: flex-end;
+        text-align: right;
+    }
+
+    .doc-pager__direction {
+        color: var(--doc-level-muted);
+        font-size: 0.8rem;
+        font-weight: 650;
+        letter-spacing: 0.03rem;
+        text-transform: uppercase;
+    }
+
+    .doc-pager__title {
+        font-size: 1rem;
+        font-weight: 650;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
         .doc-level__input--basic:checked
             ~ .doc-level__panel--basic,
         .doc-level__input--advanced:checked
             ~ .doc-level__panel--advanced {
-            display: block;
+            animation: doc-level-enter 150ms ease-out;
+        }
+
+        @keyframes doc-level-enter {
+            from {
+                opacity: 0;
+                transform: translateY(0.2rem);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    }
+
+    @media (max-width: 36rem) {
+        .doc-level__header {
+            align-items: stretch;
+            flex-direction: column;
+        }
+
+        .doc-level__switch {
+            align-self: flex-start;
         }
 
         .doc-pager {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-            gap: 1rem;
-            margin-block: 3rem 1rem;
-        }
-
-        .doc-pager--single {
             grid-template-columns: minmax(0, 1fr);
         }
 
-        .doc-pager--single .doc-pager__link {
-            width: min(100%, 32rem);
-        }
-
-        .doc-pager--single .doc-pager__link--previous {
-            justify-self: start;
-        }
-
-        .doc-pager--single .doc-pager__link--next {
-            justify-self: end;
-        }
-
-        .doc-pager__link {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
-            min-inline-size: 0;
-            padding: 0.9rem 1rem;
-            border: 1px solid var(--doc-level-border);
-            border-radius: 0.75rem;
-            color: var(--doc-level-text);
-            text-decoration: none;
-            background: var(--doc-level-selected-background);
-
-            transition:
-                color 130ms ease,
-                border-color 130ms ease,
-                box-shadow 130ms ease;
-        }
-
-        .doc-pager__link:hover {
-            color: var(--doc-level-accent-hover);
-            border-color: var(--doc-level-accent);
-            box-shadow: 0 1px 3px rgb(20 40 24 / 10%);
-        }
-
-        .doc-pager__link:focus-visible {
-            outline: 3px solid var(--doc-level-focus);
-            outline-offset: 2px;
-        }
-
         .doc-pager__link--next {
-            align-items: flex-end;
-            text-align: right;
+            align-items: flex-start;
+            text-align: left;
         }
 
-        .doc-pager__direction {
-            color: var(--doc-level-muted);
-            font-size: 0.8rem;
-            font-weight: 650;
-            letter-spacing: 0.03rem;
-            text-transform: uppercase;
+        .doc-pager--single .doc-pager__link {
+            width: 100%;
+            justify-self: stretch;
+        }
+    }
+
+    @media (prefers-color-scheme: dark) {
+        .doc-level,
+        .doc-pager {
+            --doc-level-accent: #aea9f9;
+            --doc-level-accent-hover: #a0b8d9;
+            --doc-level-border: #3a3a49;
+            --doc-level-switch-background: #221d25;
+            --doc-level-selected-background: #353447;
+            --doc-level-text: #edeff2;
+            --doc-level-muted: #a8aab3;
+            --doc-level-focus: #75e1ff;
+        }
+    }
+
+    @media print {
+        .doc-level__input,
+        .doc-level__switch,
+        .doc-pager {
+            display: none;
         }
 
-        .doc-pager__title {
-            font-size: 1rem;
-            font-weight: 650;
+        .doc-level__panel {
+            display: block;
         }
 
-        @media (prefers-reduced-motion: no-preference) {
-            .doc-level__input--basic:checked
-                ~ .doc-level__panel--basic,
-            .doc-level__input--advanced:checked
-                ~ .doc-level__panel--advanced {
-                animation: doc-level-enter 150ms ease-out;
-            }
-
-            @keyframes doc-level-enter {
-                from {
-                    opacity: 0;
-                    transform: translateY(0.2rem);
-                }
-
-                to {
-                    opacity: 1;
-                    transform: translateY(0);
-                }
-            }
+        .doc-level__panel--advanced {
+            margin-block-start: 1.5rem;
+            padding-block-start: 1.5rem;
+            border-block-start: 1px solid;
         }
 
-        @media (max-width: 36rem) {
-            .doc-level__header {
-                align-items: stretch;
-                flex-direction: column;
-            }
-
-            .doc-level__switch {
-                align-self: flex-start;
-            }
-
-            .doc-pager {
-                grid-template-columns: minmax(0, 1fr);
-            }
-
-            .doc-pager__link--next {
-                align-items: flex-start;
-                text-align: left;
-            }
-
-            .doc-pager--single .doc-pager__link {
-                width: 100%;
-                justify-self: stretch;
-            }
+        .doc-level__panel--basic::before,
+        .doc-level__panel--advanced::before {
+            display: block;
+            margin-block-end: 0.75rem;
+            font-weight: 700;
         }
 
-        @media (prefers-color-scheme: dark) {
-            .doc-level,
-            .doc-pager {
-                --doc-level-accent: #aea9f9;
-                --doc-level-accent-hover: #a0b8d9;
-                --doc-level-border: #3a3a49;
-                --doc-level-switch-background: #221d25;
-                --doc-level-selected-background: #353447;
-                --doc-level-text: #edeff2;
-                --doc-level-muted: #a8aab3;
-                --doc-level-focus: #75e1ff;
-            }
+        .doc-level__panel--basic::before {
+            content: "Basic";
         }
 
-        @media print {
-            .doc-level__input,
-            .doc-level__switch,
-            .doc-pager {
-                display: none;
-            }
-
-            .doc-level__panel {
-                display: block;
-            }
-
-            .doc-level__panel--advanced {
-                margin-block-start: 1.5rem;
-                padding-block-start: 1.5rem;
-                border-block-start: 1px solid;
-            }
-
-            .doc-level__panel--basic::before,
-            .doc-level__panel--advanced::before {
-                display: block;
-                margin-block-end: 0.75rem;
-                font-weight: 700;
-            }
-
-            .doc-level__panel--basic::before {
-                content: "Basic";
-            }
-
-            .doc-level__panel--advanced::before {
-                content: "Advanced";
-            }
+        .doc-level__panel--advanced::before {
+            content: "Advanced";
         }
-    ]
+    }
+]
 
-    language_theme_head #= [$html:
-        [theme_head]
-        <style>[language_docs_css]</style>
-    ]
+$export
+language_theme_head #= [$html:
+    [theme_head]
+    <style>[language_docs_css]</style>
+]
 
-    section #= [$html:
-        <section class="container">[$slot]</section>
-    ]
+$export
+section #= [$html:
+    <section class="container">[$slot]</section>
+]
 
-    doc_level #= [$html:
-        <fieldset class="doc-level">
-            <legend class="visually-hidden">
-                Choose the explanation level: [$slot title]
-            </legend>
+$export
+doc_level #= [$html:
+    <fieldset class="doc-level">
+        <legend class="visually-hidden">
+            Choose the explanation level: [$slot title]
+        </legend>
 
-            <input
-                class="doc-level__input doc-level__input--basic"
-                type="radio"
-                name="[$slot key]-level"
-                id="[$slot key]-basic"
-                value="basic"
-                checked
-            >
+        <input
+            class="doc-level__input doc-level__input--basic"
+            type="radio"
+            name="[$slot key]-level"
+            id="[$slot key]-basic"
+            value="basic"
+            checked
+        >
 
-            <input
-                class="doc-level__input doc-level__input--advanced"
-                type="radio"
-                name="[$slot key]-level"
-                id="[$slot key]-advanced"
-                value="advanced"
-            >
+        <input
+            class="doc-level__input doc-level__input--advanced"
+            type="radio"
+            name="[$slot key]-level"
+            id="[$slot key]-advanced"
+            value="advanced"
+        >
 
-            <header class="doc-level__header">
-                <h2 class="doc-level__title" id="[$slot key]">
-                    [$slot title]
-                </h2>
+        <header class="doc-level__header">
+            <h2 class="doc-level__title" id="[$slot key]">
+                [$slot title]
+            </h2>
 
-                <div class="doc-level__switch">
-                    <label
-                        class="doc-level__option doc-level__option--basic"
-                        for="[$slot key]-basic"
-                    >
-                        Basic
-                    </label>
+            <div class="doc-level__switch">
+                <label
+                    class="doc-level__option doc-level__option--basic"
+                    for="[$slot key]-basic"
+                >
+                    Basic
+                </label>
 
-                    <label
-                        class="doc-level__option doc-level__option--advanced"
-                        for="[$slot key]-advanced"
-                    >
-                        Advanced
-                    </label>
-                </div>
-            </header>
-
-            <div class="doc-level__panel doc-level__panel--basic">
-                [$slot]
+                <label
+                    class="doc-level__option doc-level__option--advanced"
+                    for="[$slot key]-advanced"
+                >
+                    Advanced
+                </label>
             </div>
+        </header>
 
-            <div class="doc-level__panel doc-level__panel--advanced">
-                [$slot advanced]
-            </div>
-        </fieldset>
-    ]
-
-    doc_pager #= [$html:
-        <nav class="doc-pager" aria-label="Language documentation">
-            <a
-                class="doc-pager__link doc-pager__link--previous"
-                href="[$slot previous_path]"
-                rel="prev"
-            >
-                <span class="doc-pager__direction">← Previous</span>
-                <span class="doc-pager__title">[$slot previous_title]</span>
-            </a>
-
-            <a
-                class="doc-pager__link doc-pager__link--next"
-                href="[$slot next_path]"
-                rel="next"
-            >
-                <span class="doc-pager__direction">Next →</span>
-                <span class="doc-pager__title">[$slot next_title]</span>
-            </a>
-
+        <div class="doc-level__panel doc-level__panel--basic">
             [$slot]
-        </nav>
-    ]
+        </div>
 
-    doc_pager_previous #= [$html:
-        <nav class="doc-pager doc-pager--single" aria-label="Language documentation">
-            <a
-                class="doc-pager__link doc-pager__link--previous"
-                href="[$slot previous_path]"
-                rel="prev"
-            >
-                <span class="doc-pager__direction">← Previous</span>
-                <span class="doc-pager__title">[$slot previous_title]</span>
-            </a>
+        <div class="doc-level__panel doc-level__panel--advanced">
+            [$slot advanced]
+        </div>
+    </fieldset>
+]
 
-            [$slot]
-        </nav>
-    ]
+$export
+doc_pager #= [$html:
+    <nav class="doc-pager" aria-label="Language documentation">
+        <a
+            class="doc-pager__link doc-pager__link--previous"
+            href="[$slot previous_path]"
+            rel="prev"
+        >
+            <span class="doc-pager__direction">← Previous</span>
+            <span class="doc-pager__title">[$slot previous_title]</span>
+        </a>
 
-    doc_pager_next #= [$html:
-        <nav class="doc-pager doc-pager--single" aria-label="Language documentation">
-            <a
-                class="doc-pager__link doc-pager__link--next"
-                href="[$slot next_path]"
-                rel="next"
-            >
-                <span class="doc-pager__direction">Next →</span>
-                <span class="doc-pager__title">[$slot next_title]</span>
-            </a>
+        <a
+            class="doc-pager__link doc-pager__link--next"
+            href="[$slot next_path]"
+            rel="next"
+        >
+            <span class="doc-pager__direction">Next →</span>
+            <span class="doc-pager__title">[$slot next_title]</span>
+        </a>
 
-            [$slot]
-        </nav>
-    ]
+        [$slot]
+    </nav>
+]
 
-    @navbar navbar
-    @sidebar sidebar, init_docs_sidebar
+$export
+doc_pager_previous #= [$html:
+    <nav class="doc-pager doc-pager--single" aria-label="Language documentation">
+        <a
+            class="doc-pager__link doc-pager__link--previous"
+            href="[$slot previous_path]"
+            rel="prev"
+        >
+            <span class="doc-pager__direction">← Previous</span>
+            <span class="doc-pager__title">[$slot previous_title]</span>
+        </a>
 
-    footer #= [$html:
-        <div></div>
-    ]
+        [$slot]
+    </nav>
+]
 
-    header #= [$html:
-        [$before [$html:<th style="border: 1px solid; padding: 0.5em; text-align: left;">], $after [$html:</th>]:[$slot]]
-    ]
+$export
+doc_pager_next #= [$html:
+    <nav class="doc-pager doc-pager--single" aria-label="Language documentation">
+        <a
+            class="doc-pager__link doc-pager__link--next"
+            href="[$slot next_path]"
+            rel="next"
+        >
+            <span class="doc-pager__direction">Next →</span>
+            <span class="doc-pager__title">[$slot next_title]</span>
+        </a>
 
-    styled_table #= [$html:
-        <table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+        [$slot]
+    </nav>
+]
 
-            [$note: The first row is styled differently to indicate that it is a header row.]
-            <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
-                [$slot 1]
-            </tr>
+$export
+@navbar navbar
+$export
+@sidebar sidebar, init_docs_sidebar
 
-            [$note: Each remaining row is styled with a dotted border to separate the rows visually.]
-            [$before [$html:<tr style="border-bottom: 1px dotted grey;">], $after [$html:</tr>]:
-                [$slot]
-            ]
+$export
+footer #= [$html:
+    <div></div>
+]
 
-        </table>
-    ]
+$export
+header #= [$html:
+    [$before [$html:<th style="border: 1px solid; padding: 0.5em; text-align: left;">], $after [$html:</th>]:[$slot]]
+]
 
-    data #= [$html:
-        [$before [$html: <td style="padding: 0.1em 0.5em; [$slot style]">], $after [$html:</td>]:
+$export
+styled_table #= [$html:
+    <table style="border-collapse: collapse; border: 1px solid; padding: 1em;">
+
+        [$note: The first row is styled differently to indicate that it is a header row.]
+        <tr style="background-color: hsla(192, 100%, 32%, 0.23);">
+            [$slot 1]
+        </tr>
+
+        [$note: Each remaining row is styled with a dotted border to separate the rows visually.]
+        [$before [$html:<tr style="border-bottom: 1px dotted grey;">], $after [$html:</tr>]:
             [$slot]
         ]
-    ]
 
-    codeblock #= [$html:
-        <pre style="
-            padding-left: 1em;
-            border-radius: 5px;
-            max-width: 100%;
-            white-space: pre;
-            overflow-x: auto;
-        ">[$slot]</pre>
-    ]
+    </table>
+]
 
-    title #= [$html: <h1 style="font-size: 2em;[$slot style]">[$slot]</h1>]
-;
+$export
+data #= [$html:
+    [$before [$html: <td style="padding: 0.1em 0.5em; [$slot style]">], $after [$html:</td>]:
+        [$slot]
+    ]
+]
+
+$export
+codeblock #= [$html:
+    <pre style="
+        padding-left: 1em;
+        border-radius: 5px;
+        max-width: 100%;
+        white-space: pre;
+        overflow-x: auto;
+    ">[$slot]</pre>
+]
+
+$export
+title #= [$html: <h1 style="font-size: 2em;[$slot style]">[$slot]</h1>]

@@ -1,5 +1,4 @@
-export:
-    product |left I32, right I32| -> I32:
-        return left * right
-    ;
+$export
+product |left I32, right I32| -> I32:
+    return left * right
 ;

@@ -1,11 +1,11 @@
-export:
-    Card = |
-        text String,
-    |
+$export
+Card = |
+    text String,
+|
 
-    show_box type T is CASTABLE_TO_STRING |value T| -> String:
-        return cast value
-    ;
+$export
+show_box type T is CASTABLE_TO_STRING |value T| -> String:
+    return cast value
 ;
 
 to_string |this Card| -> String:
