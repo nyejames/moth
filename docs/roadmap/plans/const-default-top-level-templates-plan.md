@@ -2,161 +2,123 @@
 
 ## Status
 
-- Status: Ready for implementation on the feature branch
-- Current slice: Plan accepted, implementation not started
-- Blockers: None for the accepted syntax change
-- Next action: Update the header classifier and capture paths, then validate the semantic handoff
+- Status: Queued behind the ongoing `$export` directive work
+- Current slice: Design and implementation plan reviewed, code not started
+- Blockers: The `$export` header/parser change must merge into main before implementation
+- Next action: Refresh this branch from main when requested, inspect the merged header owners and start Phase 0
 
-## Purpose
+## Goal and accepted source contract
 
-Make a direct top-level template in an executable `@entry.moth` root compile-time required by default. Require `~` before a direct top-level template that must execute through the entry runtime.
-
-The ordinary entry page becomes mostly unmarked static composition. Runtime fragment production stands out at the call site instead of static output carrying a marker. This is a language surface change, not a new kind of template or a new rendering strategy.
-
-The migration is deliberately breaking. Replace the old accepted syntax and its documentation and fixtures in the same work. No compatibility parser, transitional warning or dedicated migration diagnostic is permitted.
-
-## Accepted language contract
-
-A direct top-level template in `@entry.moth` has two forms:
+In an executable `@entry.moth`, direct top-level `[...]` is const-required by default. Only `~[...]` requests runtime fragment publication:
 
 ```moth
-@page content as body
+@content content as introduction
 
 [$in title:Moth]
-[$md:
-    # Welcome
-]
-[body]
+[$md:# Welcome]
+[introduction]
 
 name = "Moth"
 ~[: Hello, [name].]
 ```
 
-- `[...]` at the direct entry top level is a **const-required fragment**. The compiler must validate and fold it using the existing constant-template semantics. It contributes compile-time fragment metadata and no runtime fragment slot or template HIR.
-- `~[...]` at that position is a **runtime fragment**. It is evaluated through the existing dormant entry body and published only on successful entry invocation. It retains a runtime fragment slot even if the template could be folded. Normal subexpression folding remains legal.
-- Prefix `~` is consumed by entry header parsing and is not included in the body token range handed to AST. AST sees the ordinary template token stream it already handles.
-- Prefix `~` is valid only when attached to a direct top-level template in the active entry root, at a statement boundary. The canonical spelling is `~[...]` with no space. Horizontal whitespace between the marker and opening bracket on the same statement is accepted. A newline cannot separate them. Use existing tokens and source spans, not a new lexer mode.
-- An unmarked direct template is never silently promoted to runtime because one of its inputs is not constant. It receives the existing constant-evaluation diagnostic at the appropriate authored location.
-- `#[...]` is no longer a valid direct fragment. Do not support it as an alias or add a migration-specific diagnostic. Keep ordinary explicit compile-time bindings such as `name #= value` unchanged.
-- Direct unmarked `$in` templates preserve named builder-slot behavior, including resource and URL facts. Explicit runtime `~[$in ...]` is rejected under the existing unsupported runtime named-slot contract. Nested, assigned and aliased inserts remain normal template composition.
-- Only direct top-level templates in an executable entry root publish page fragments. Ordinary helper files, `@mod.moth`, `@package.moth`, `config.moth` and imported or dormant entry roots keep their existing role restrictions.
-- In ordinary expression positions, functions, declarations, nested templates and `.mtf` source content, `[...]` retains the current compile-time-or-runtime behavior. This change creates no general `~` template expression operator, reactive template marker or inferred entry-phase selection.
-- Documentation-only templates (`$doc`, `$note` and `$todo`) remain semantic non-output categories. Preserve their existing placement and validation contract rather than counting them as page fragments.
+- **Bare direct `[...]`:** Must fold under the existing const-template rules, even when a runtime fallback would be possible. Contributes a compile-time entry fragment or registered builder-root slot. Produces no runtime fragment statement, runtime slot or template HIR.
+- **Explicit `~[...]`:** Contributes a runtime body fragment via the existing entry-start mechanism, even if the content itself can be folded. Const folding within that runtime expression remains permitted. Only the output-producing template's publication *phase* is forced.
+- **Placement:** `~` is a direct entry-fragment prefix, not a general template expression operator or reactive/mutable-template feature. Accept `~[...]` and same-line `~ [...]` (horizontal whitespace only). A newline between `~` and `[` breaks the construct. Recognise this using existing `MUTABLE` and `TEMPLATE_HEAD` tokens at an entry statement boundary.
+- **Removed syntax:** `#[...]` is invalid as a direct entry fragment. Remove its parser path with no alias, warning, migration-specific error or backwards-compatibility layer. Retain ordinary compile-time `#=` bindings and all other supported `#` syntax.
+- **Ordinary templates unchanged:** `[...]` inside function bodies, binding initialisers, expressions, nested templates and `.mtf` sources keeps its current foldable-or-runtime semantics. Only *direct* top-level fragments acquire the const-required default.
+- **Builder slots:** A bare direct `[$in name: ...]` continues to target a compiler-validated, builder-registered destination. `~[$in name: ...]` remains invalid as a runtime named insert. Nested, stored and aliased `$in` remain ordinary composition helpers.
+- **Comment categories:** A direct bare `[$doc: ...]` produces documentation metadata, not body HTML. `[$note: ...]` and `[$todo: ...]` discard their balanced bodies without evaluating them or producing fragments. These semantic categories take precedence over the default const *output* requirement. An explicit runtime marker on a direct comment (`~[$doc: ...]`, `~[$note: ...]` or `~[$todo: ...]`) is invalid because comments cannot publish runtime output. Preserve `$doc` Markdown folding, source order, site-root spelling and resource-text diagnostics.
+- **Root roles:** Only an executable `@entry.moth` (or a valid synthetic entry) may contribute direct output. Ordinary helpers, API-only facades, config and imported/dormant entries preserve their existing rules and diagnostics.
 
-The change does not alter template body syntax, `if`, `loop`, slots, wrappers, formatting, numeric rules, structural String values or constant loop limits.
+Template body syntax, control flow, slots, wrappers, formatters, structural Strings, numeric semantics and const-loop limits do not change.
 
-## Retained runtime and build contracts
+## Invariants and implementation boundaries
 
-- The entry root stays presence-selected, including empty and metadata-only entries. Imported entry bodies remain dormant.
-- Header preparation remains the only owner of direct-fragment classification, fragment counts and const-fragment placement relative to runtime fragments.
-- Constant fragments continue to fold once through AST/TIR and enter `ModuleCompilerMetadata` with their structural resources, destinations, authored spans and runtime insertion indices.
-- Runtime fragments continue through existing start-body AST, `PushStartRuntimeFragment` and HIR lowering. No alternate AST/TIR node, fragment registry or builder-side source parser is needed.
-- Static fragments retain authored source order around runtime slots, remain present on entry startup failure and have no required runtime output machinery in a static-only page.
-- Runtime fragments remain staged until the entry finishes successfully. The change does not add a retry, rollback, error HTML channel, per-request renderer or additional builder lifecycle.
-- Resource tracking, site-root rendering, builder slot deduplication, JS/Wasm assembly, executable reachability and fingerprint domains continue to consume the same compiler facts.
+Stage 2 is the sole owner of direct-fragment recognition, const-header creation, insertion indexes and runtime-fragment counts. Stage 3 retains local declaration ordering. AST/TIR owns template category, validation and folding. HIR only receives runtime fragments. The builder consumes existing fragment and slot metadata without scanning source.
 
-## Authority to read before implementation
+- Keep the existing synthetic `HeaderKind::ConstTemplate`, `TopLevelConstFragment`, `create_top_level_const_template`, TIR preparation/fold authority, `PushStartRuntimeFragment` and runtime insertion-index handoff.
+- Header parsing must **consume the `~` marker**, then retain only the original `TEMPLATE_HEAD`-to-close token range for the implicit start body. Do not fabricate an opening token, copy token streams, retokenize or add a lexer mode. Preserve the original source identity and template span.
+- Count precisely one runtime slot per valid output-producing `~[...]`. Normal runtime statements, static fragments and comments create none. Static/runtime body order and destination routing must match authored order.
+- Explicitly marked runtime fragments keep the existing staged publication rule: publish only after the entry succeeds. Static fragments survive startup failure. The implicit entry remains dormant unless selected, and empty/metadata-only entries remain valid.
+- Constant fragments and builder slots keep structural resource/site-root pieces through metadata and URL rendering. Their existing link, reuse, cache/fingerprint and JS/HTML-Wasm paths must consume unchanged semantic facts. Source edits may legitimately invalidate caches; semantic output and runtime requirements must remain equivalent after source migration.
+- No second fragment representation, parallel comment evaluator, builder-specific source classification, duplicate authority or speculative server/request rendering feature.
 
-Follow `AGENTS.md` and the task-reading guides of the current repository worktree.
+## Required references
 
-- `docs/docs/templates/template-basics.mtf`, `template-directives.mtf` and `template-control-flow.mtf`
-- `docs/docs/constants/const-templates.mtf` and the constant binding/folding references
-- `docs/docs/project-structure/entry-runtime-and-fragments.mtf` and `entry-config.mtf`
-- `docs/compiler-design-overview.md`: module inputs and root roles, Stage 2 header preparation, Stage 3 ordering, Stage 4 constants and TIR, metadata and HIR handoff
-- `docs/build-system-design.md`: entry/root eligibility, direct builder slots, entry assembly, HTML fragment assembly and resource linking
-- `docs/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
-- `docs/docs/cheatsheet/moth-language-cheatsheet.mtf`, the relevant progress matrix and `docs/roadmap/roadmap.md`
+Follow `AGENTS.md` and the current worktree's task-reading guides. Read the canonical unsuffixed references for templates (`template-basics.mtf`, `template-directives.mtf`, `template-control-flow.mtf`), constants (`const-templates.mtf`, constant bindings/folding) and project structure (`entry-runtime-and-fragments.mtf`, `entry-config.mtf`). Read the relevant sections in `docs/compiler-design-overview.md` and `docs/build-system-design.md` for Stage 2 ordering, Stage 4 TIR, compiler metadata, entry activation and HTML output. Read `docs/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`, the cheatsheet, progress matrix and roadmap.
 
-The canonical unsuffixed language references own final observable semantics. Before implementation completes, update those references to this accepted contract. This plan does not become a separate permanent syntax authority.
+The accepted language references are permanent semantic authorities. This file describes implementation work and is deleted when that work lands.
 
-## Current code and ownership map
+## Code ownership and deletion opportunities
 
-Investigated on main before this plan was created. Re-read these owners when the feature branch begins implementation, as concurrent compiler work can change them.
+Inspected on this PR's original base. Recheck after the `$export` branch merges and this branch is refreshed.
 
-- `src/compiler_frontend/headers/top_level_classifier.rs`: `HeaderFileItem` and `classify_tagged_item` currently dispatch a bare `TEMPLATE_HEAD` to `RuntimeTemplate` and distinguish top-level `HASH`.
-- `src/compiler_frontend/headers/file_parser.rs`: `parse_headers_in_file_inner` handles classified items, source modifiers and nesting. `handle_runtime_template_item` captures an ordinary runtime template and increments the runtime fragment counter. Export parsing and non-entry role rejection also pass through here.
-- `src/compiler_frontend/headers/hash_items.rs`: dedicated handler for the old `#[...]` direct const form. Most of this special-case path should become unnecessary. Delete this module if nothing meaningful remains after consolidating the new dispatch.
-- `src/compiler_frontend/headers/const_fragments.rs`: `create_top_level_const_template` already owns synthetic constant headers, dependencies, token range, spans and ordering facts. Reuse this implementation for the new default direct form.
-- `src/compiler_frontend/headers/start_capture.rs`: `capture_runtime_template_range_from_cursor` captures from `TEMPLATE_HEAD`. Reuse it after consuming the explicit `~` marker.
-- `src/compiler_frontend/headers/file_state.rs`, `types.rs` and `parse_file_headers.rs`: preserve `TopLevelConstFragment`, `runtime_fragment_count`, `const_template_count` and insertion-index aggregation.
-- `src/compiler_frontend/ast/templates/top_level_templates.rs` and AST emission/finalisation: already fold const fragments and return them to metadata. Preserve the single TIR authority.
-- `src/compiler_frontend/ast/statements/body_dispatch.rs`: ordinary entry-body template statements already produce `PushStartRuntimeFragment`. The new marker must not leak here.
-- `src/compiler_frontend/tokenizer/lexer.rs`: `~` is already tokenised as `TokenTag::MUTABLE`. Do not introduce an overlapping punctuation token.
-- `src/compiler_frontend/compiler_messages/diagnostics/families/names_declarations.rs` and template diagnostics: retain precise wrong-position and const-required errors. Add a typed reason only if an existing family cannot express a genuinely distinct error.
+| Existing owner | Required action |
+|---|---|
+| `headers/top_level_classifier.rs` | Change `TEMPLATE_HEAD` at a top-level statement boundary to a const-fragment item. Classify `MUTABLE` + immediately following `TEMPLATE_HEAD` as runtime, without accepting a newline. Keep `HASH` as an ordinary token when it is not part of another valid declaration. |
+| `headers/file_parser.rs` | Dispatch both direct forms with the correct pre-advanced cursor position and role checks. Preserve `NestingDepth` handling, source-modifier rules and export-block rejection. |
+| `headers/hash_items.rs` and `headers/mod.rs` | Delete the obsolete hash-item module, `HashItemRequest` and `HeaderFileItem::Hash` branch once the new const dispatch owns its work. Do **not** delete `TokenTag::HASH` or its `#=` declaration classification. |
+| `headers/const_fragments.rs`, `file_state.rs` and `start_capture.rs` | Reuse const-header construction and balanced runtime-template capture. Keep const count, header path, span and runtime insertion index in the existing file-state owner. Prefer placing const-fragment registration alongside its current construction logic rather than introducing another forwarding wrapper. |
+| `ast/module_ast/emission/emitter.rs`, `ast/templates/doc_fragments.rs`, `top_level_templates.rs` and `ast/module_ast/finalization/finalizer.rs` | **Important:** Refactor documentation handling as described below, while continuing to use the one TIR folding path. |
+| `ast/statements/body_dispatch.rs` | Runtime entry parser sees only a plain `TEMPLATE_HEAD` after Stage 2 strips `~`; the existing `PushStartRuntimeFragment` remains the only emitted runtime-fragment node. Reject an explicitly runtime, non-output comment using an authored template diagnostic. |
+| `headers/types.rs`, `parse_file_headers.rs`, `arena/capacity.rs` and downstream assembly | Keep meaningful existing counters and metadata. Inspect template-capacity estimates for redundant counting of const headers/fragments, now more common. Change a heuristic only with an explained sizing rationale or evidence. |
 
-Audit test owners before adding coverage: `src/compiler_frontend/headers/tests/`, `src/compiler_frontend/tests/`, `src/compiler_tests/` and `tests/cases/`. The docs site and CLI scaffold are real consumers of this syntax.
+Do not create a new `~` token, another general prefix parser, a fragment-mode enum threaded to HIR or a parser in the HTML builder. Where specialization is real (const header versus runtime body capture), keep it local.
 
-## Implementation phases
+### Documentation-comment handoff: required correction
 
-### Phase 0 - Inventory and baseline
+The existing `collect_and_strip_comment_templates` walks `PushStartRuntimeFragment` nodes, but the new unmarked `[$doc]` enters `HeaderKind::ConstTemplate` instead. A simple classifier swap would silently lose `AstDocFragment` metadata, while a normal const fold of `$note`/`$todo` would turn non-output categories into empty body-fragment records.
 
-1. Check the branch against the current main tree, including adjacent changes to header parsing, entry assembly, template directives and TIR.
-2. Search for `#[`, bare direct root `[`, builder slot inserts and top-level runtime template fixtures across `src/`, `tests/`, `docs/`, `benchmarks/`, `crates/` and examples. Classify each match by semantic context. A code example inside `$code` is not a direct output template, and an intentionally invalid test should not be rewritten without reviewing its assertion.
-3. Inspect the present focused header/AST tests and the canonical integration manifest. Choose existing primary test owners and identify any required distinct new scenarios.
-4. Record baseline targeted test and documentation-build results when feasible. Do not pin an unstarted baseline commit into this plan.
+Implement **one** documentation metadata path at the AST direct-const-template boundary:
 
-### Phase 1 - Reverse header classification
+1. Parse the default direct template through the existing TIR owner. Classify its finished root by `TemplateType::Comment` versus an output-producing template. Do not reparse the head in Stage 2 or pre-count comments by scanning token text.
+2. For `Doc`, fold its Markdown once using the existing doc folding rules and produce `AstDocFragment`. For `Note`/`Todo`, discard without runtime work or evaluating their bodies. Ordinary output templates use the existing const folding result and builder destination logic.
+3. Return a small semantic outcome representing **body/slot fragment**, **documentation metadata** or **discarded comment**. Key that outcome by the existing synthetic header path, then collect it by the authored `TopLevelConstFragment` order. This preserves docs order and keeps comments out of body fragment lists. Avoid separate spans-to-order sorting and parallel fold maps.
+4. After routing all valid direct documentation through this path, remove the obsolete runtime-body comment-stripping walk and related tests/helpers if they have no other valid caller. If a remaining use exists, identify and justify it before keeping shared code. Reuse its existing Markdown/site-root/resource-text folding logic rather than creating a second implementation.
+5. Diagnose `~[$doc]`, `~[$note]` and `~[$todo]` at AST template-category validation. A failed module publishes no partial counts or metadata. Document why the header-level provisional count is not an output commitment.
 
-1. Make a direct top-level `TEMPLATE_HEAD` classify as a constant fragment where the file role permits entry fragments.
-2. Classify `MUTABLE` followed by `TEMPLATE_HEAD` on the same statement boundary as an explicitly runtime fragment, taking horizontal whitespace and newline handling into account. Keep the check at the existing header classifier/parser owner, without a second scan or lexer mode.
-3. Dispatch an ordinary const fragment through the existing `create_top_level_const_template` owner, recording its true opening token, header path, span and placement. Do not fabricate a `#` token or duplicate the synthetic-header construction logic.
-4. Dispatch the explicit runtime form through the existing balanced template capture routine. Drop only the `~` prefix from the retained runtime body sequence. Keep all authored token locations intact.
-5. Reject inappropriate placements using the existing role, export, nested statement and source-modifier boundaries. Do not turn `~` on a mutable write or a normal expression into a template prefix.
-6. Delete the old `#[...]` dispatch implementation and any unneeded `hash_items` indirection. Keep `HASH` handling only where source language syntax actually needs it. Do not leave a parallel compat path.
+Retain the canonical distinction: an actual empty `String` fragment is still output, while `$doc`, `$note` and `$todo` are non-output categories.
 
-Pay particular attention to the current parser loop's `cursor.advance()` before dispatch, its `NestingDepth` state, reached-facade balancing and source-modifier attachment. No marker may be counted as a runtime statement separate from its template.
+## Implementation sequence
 
-### Phase 2 - Preserve semantic handoffs and build output
+### Phase 0 - Rebase gate and inventory
 
-1. Verify the default direct fragment still creates its synthetic constant declaration, including header ordering against local and provider constants, structural references and full const-required validation.
-2. Confirm its collected value and destination retain the correct fragment insertion index for every sequence of static and runtime templates. Fragment numbering must reflect only actual runtime fragments, not other top-level statements.
-3. Confirm the explicitly marked form retains exactly one runtime fragment slot and the existing startup/error/publication behavior, including when its content is constant.
-4. Confirm direct unmarked `$in` slots still fold and publish metadata with the same resource identities. Runtime named slots stay rejected. No builder output or URL resolution logic should need to be modified merely to detect the marker.
-5. Verify config, helper, facade, synthetic single-file and direct `.mtf` service boundaries still behave as specified. In particular, avoid accidentally treating a standalone `.mtf` body as an entry-level template.
-6. Update internal names and comments that claim bare direct templates are runtime or `#` is required for const fragments. Rename only where doing so makes meaning clearer. Keep existing `TopLevelConstFragment` and runtime handoff structures if their names remain accurate.
-7. Check that static-only entries do not acquire an unnecessary runtime helper, JS companion obligation or altered output fingerprint just because their syntax changed.
+1. **After** the `$export` work merges, refresh this branch from main. Re-read `AGENTS.md`, changed authorities and the export/header integration points. Do not implement against old `export:` or stale `HeaderFileItem` cases.
+2. Search source/templates and fixture strings for direct `#[...]` and bare runtime `[...]` by context. Prioritise `*.moth`/`*.mtf`, `tests/cases`, docs source, scaffold, packages and benchmarks. Avoid treating Rust `#[...]` attributes and quoted code examples as Moth syntax. Preserve intentional invalid cases.
+3. Identify existing primary test owners and record focused baseline results where feasible. This is not a request to introduce a new test framework or pin a pre-implementation commit in the plan.
 
-### Phase 3 - Focused regression coverage
+### Phase 1 - Header and AST cutover
 
-Extend existing tests where possible. New tests must cover distinct failure mechanisms, not repeat one syntactic check under many names.
+1. Reverse direct-template classification at `top_level_classifier`. Remove the old `HASH` item path and `hash_items.rs` rather than moving its wrapper unchanged. Reuse `create_top_level_const_template` and existing state bookkeeping.
+2. Recognise `~` + next-token `TEMPLATE_HEAD` at an actual statement boundary. Make the parser consume the marker and opening, capturing only the balanced template tokens into start-body ranges. Confirm `~foo`, `~=` writes and nested/value-position `~` remain on their existing paths.
+3. Preserve precise role/export/source-modifier diagnostics, file-provider ordering, structural resource discovery and declaration counts. Keep synthetic entry and reached-facade handling aligned with the current merged export implementation.
+4. Implement the doc/comment outcome and deletion above. Keep runtime annotation validation at the existing AST template-category owner, not as a second head parser.
 
-- **Header classification**: adjacent and same-line spaced `~[`, newline-separated `~` and `[`, end of file, CRLF, leading indentation, adjacent statements, nested brackets and the old `#[` spelling.
-- **Roles and contexts**: direct templates permitted in `@entry.moth` and synthetic entry compilation, rejected in helper and facade roots, not confused with bindings, `~=` writes, mutable-access statements or expression-level templates.
-- **Const enforcement**: constant literals, imported folded values, direct resource pieces, constant `if` and `loop`, and a genuinely runtime-dependent interpolation in an unmarked direct fragment that must diagnose rather than emit runtime HIR.
-- **Runtime enforcement**: `~[...]` with runtime interpolation and with wholly static content. Assert correct runtime-fragment count and publication contract in both cases. Check that neither causes a redundant const-fragment record.
-- **Metadata and interleaving**: several const fragments separated by explicit runtime fragments and other root work, including named `$in` slots and repeated resources. Assert body order, static metadata, deduplication and the exact fragment count or authoritative output.
-- **Failure**: a running entry that fails after static fragments and before runtime fragment publication must preserve static content and suppress staged runtime fragments. Keep the existing JS and applicable Wasm output contracts.
-- **Comments and non-output**: direct documentation/comment template categories remain non-output, and nested `$in` continues to mean normal template composition.
+### Phase 2 - Focused tests and migration
 
-Use focused Rust unit tests for token/dispatch invariants, typed diagnostics and fragment metadata. Use a small number of realistic integration cases under `tests/cases/` for semantics, generated HTML, runtime behavior and target parity. Prefer runtime output assertions over snapshots of emitted JS. Do not change test runner infrastructure or duplicate cases just to inflate coverage.
+Use nearby header tests (including `parse_file_headers_entry_runtime_tests.rs` and module-role tests), the existing AST template tests and a small number of real `tests/cases` programs. Extend or consolidate existing scenarios before adding new ones.
 
-### Phase 4 - Migrate every consumer of the old syntax
+| Contract | Regression evidence |
+|---|---|
+| Marker/boundaries | `~[...]`, `~ [...]`, `~\n[...]`, CRLF, leading indent, EOF, adjacent entries, `;~[...]` and nested template brackets. Removed `#[...]` must fail without a migration-only diagnostic. |
+| Entry roles | Active and synthetic entries work. Helper/facade/config/export placements are rejected correctly. Ordinary assigned/nested templates and mutable bindings/writes are unchanged. |
+| Const requirement | Bare direct literal/imported constant, static `if`/`loop`, structural resource and named `$in` fold. Bare direct runtime interpolation diagnoses instead of creating runtime HIR. |
+| Runtime guarantee | `~[...]` with dynamic data and entirely constant content both produce exactly one runtime `PushStartRuntimeFragment` and slot, with no const body record. |
+| Ordering and failure | Interleave static body fragments, builder slots, two runtime fragments and other entry statements. Assert source order, destination content, resources and successful-only runtime publication. A failing entry retains static output and publishes no staged runtime output. |
+| Documentation | `[$doc]` contributes ordered metadata with no HTML/runtime slot, including Markdown/site-root text and an invalid structural-resource observation. `[$note]`/`[$todo]` discard without output. `~[comment]` diagnoses. Keep nonempty versus empty body-fragment semantics distinct. |
+| Targets/builders | Compare appropriate JS and HTML-Wasm output, resource linking and metadata-only/static-only entries. Respect unsupported backend capabilities. |
 
-1. Change real direct entry fragments from `#[...]` to `[...]` and direct runtime fragments from `[...]` to `~[...]`. Do this based on their context, not as a blind global replacement.
-2. Migrate the Moth documentation site's entry files, source-backed page examples, test fixtures, CLI-generated starter projects, package examples and any benchmark input sources that are meant to remain executable.
-3. Fix expected output, diagnostics and test manifests that legitimately changed. Preserve intentional negative tests and update their asserted reason where necessary.
-4. Update canonical reference text and snippets in `const-templates.mtf`, `template-basics.mtf`, `template-directives.mtf`, `entry-runtime-and-fragments.mtf` and `entry-config.mtf`. Update paired Basic references, cheatsheet, other source examples and relevant compiler/build architecture paragraphs that still describe the old syntax. Keep final-design references free of migration status or implementation progress.
-5. Review syntax-highlighting, scaffolding text, tests that inspect source characters and developer tooling for a baked-in `#[` assumption. Change them only where there is a real dependency.
-6. Update the compiler progress matrix if implemented syntax or backend coverage changed. Update `index.md` only if an owning module/file moves or fundamentally changes. Apply the repository's audit-log staleness policy if this work changes the scope of a recorded audit.
-7. Do not hand-edit generated `docs/_release` outputs. Regenerate using the normal builder.
+During migration, change real `#[...]` entry fragments to `[...]` and bare *runtime* entry fragments to `~[...]`. Update documentation site entries, CLI scaffold, package examples, executable benchmarks, tests, expected diagnostics and integration manifests as needed. Change only actual entry syntax, not ordinary expression templates or quoted Rust attributes. Migrate and run focused tests together rather than expecting the pre-migration suite to pass mid-cutover.
 
-### Phase 5 - Validation and final Slice review
+Update canonical unsuffixed template/constant/entry references, paired Basic pages, the cheatsheet and affected compiler/build architecture prose. Replace outdated examples and stale comments. Check syntax highlighting and developer tooling only for actual old-syntax assumptions. Do not edit generated `docs/_release/**` manually. Update progress and `index.md`/audit-log staleness only when the repository rules require it.
 
-During implementation use targeted parser/AST tests and the smallest affected integration selections after each meaningful slice. At the integrated checkpoint run `just validate` plus any relevant tests that routine validation omits. Before merge run `just validate-full` against the final integrated tree, as required by `validation.mtf`.
+### Phase 3 - Integrated validation and Slice review
 
-Also prove the documentation site with `moth check docs --terse` and `moth build docs --release`, or the documented Cargo equivalents when a suitable Moth executable is unavailable. Validate the CLI scaffold by creating and building a generated project. Check JS output and applicable HTML-Wasm target behavior rather than claiming parity for unsupported capabilities.
+Run targeted parser/AST tests and selected runtime integration cases after each coherent slice. At the integrated checkpoint run `just validate` plus affected checks not included in the routine gate. Before merging into main, run `just validate-full` against the final integrated tree as required by `validation.mtf`. Build the docs site with `moth check docs --terse` and `moth build docs --release` (or documented Cargo equivalents). Generate and build a CLI starter project.
 
-Run a focused stale-syntax audit after migration. Search for old `#[` direct fragments and unmarked direct fragments that still require runtime evaluation. Every remaining match must be intentionally non-entry syntax, quoted source, an invalid test or an explained unsupported case. Recheck assertions and sample projects rather than accepting search counts as validation.
+Audit remaining old entry spellings and runtime bare fragments after source migration. Review by semantic context, not raw grep count.
 
-Finish with the required Slice review:
+End with the required Slice review of semantic correctness, explicit stage ownership, no duplicated TIR/documentation paths, deletion of old hash/comment glue, typed diagnostics, meaningful test coverage and documentation consistency. Check that static-heavy pages do not incur newly inflated arena allocations or runtime artifact requirements. Benchmark or profile only when the affected path has a concrete performance hypothesis.
 
-- **Correctness**: each direct template selects one and only one existing const or runtime handoff, with correct spans, ordering and failure behavior.
-- **Complexity**: no new token kind, parsing pipeline, TIR representation, runtime fragment model, builder-specific detection or syntax compatibility shim.
-- **Deletion**: remove obsolete hash-template handlers, dead branches, stale comments and duplicated tests where no longer justified.
-- **Ownership**: Stage 2 classifies, Stage 3 orders, AST/TIR validates and folds, HIR carries runtime work, and builders consume metadata and executable facts.
-- **Diagnostics**: authored invalid syntax follows typed diagnostic lanes and never panics. No migration-only warning or special error.
-- **Tests**: each retained new test catches a distinct credible regression, and all changed existing tests retain their original useful assertions.
-- **Docs**: canonical references, cheatsheet, starter, examples, roadmap/status and generated site agree with delivered behavior.
-- **Performance**: avoid a second scan or added allocation on common const entries. If hot-path code changes materially, compare focused frontend/documentation build evidence before claiming an improvement.
-
-The implementation is complete only when the new syntax is the sole accepted direct top-level surface and every supported project sample builds. In the same final implementation commit, delete this plan and remove its roadmap entry instead of leaving a completed plan behind.
+Completion means the new spelling is the sole accepted direct top-level output syntax and all supported examples and backend contracts are validated. Delete this plan **and** its roadmap entry in the same final implementation commit.
