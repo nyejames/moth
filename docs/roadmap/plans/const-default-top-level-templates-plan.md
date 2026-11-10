@@ -54,15 +54,12 @@ The accepted language references are permanent semantic authorities. This file d
 
 Inspected on this PR's original base. Recheck after the `$export` branch merges and this branch is refreshed.
 
-| Existing owner | Required action |
-|---|---|
-| `headers/top_level_classifier.rs` | Change `TEMPLATE_HEAD` at a top-level statement boundary to a const-fragment item. Classify `MUTABLE` + immediately following `TEMPLATE_HEAD` as runtime, without accepting a newline. Keep `HASH` as an ordinary token when it is not part of another valid declaration. |
-| `headers/file_parser.rs` | Dispatch both direct forms with the correct pre-advanced cursor position and role checks. Preserve `NestingDepth` handling, source-modifier rules and export-block rejection. |
-| `headers/hash_items.rs` and `headers/mod.rs` | Delete the obsolete hash-item module, `HashItemRequest` and `HeaderFileItem::Hash` branch once the new const dispatch owns its work. Do **not** delete `TokenTag::HASH` or its `#=` declaration classification. |
-| `headers/const_fragments.rs`, `file_state.rs` and `start_capture.rs` | Reuse const-header construction and balanced runtime-template capture. Keep const count, header path, span and runtime insertion index in the existing file-state owner. Prefer placing const-fragment registration alongside its current construction logic rather than introducing another forwarding wrapper. |
-| `ast/module_ast/emission/emitter.rs`, `ast/templates/doc_fragments.rs`, `top_level_templates.rs` and `ast/module_ast/finalization/finalizer.rs` | **Important:** Refactor documentation handling as described below, while continuing to use the one TIR folding path. |
-| `ast/statements/body_dispatch.rs` | Runtime entry parser sees only a plain `TEMPLATE_HEAD` after Stage 2 strips `~`; the existing `PushStartRuntimeFragment` remains the only emitted runtime-fragment node. Reject an explicitly runtime, non-output comment using an authored template diagnostic. |
-| `headers/types.rs`, `parse_file_headers.rs`, `arena/capacity.rs` and downstream assembly | Keep meaningful existing counters and metadata. Inspect template-capacity estimates for redundant counting of const headers/fragments, now more common. Change a heuristic only with an explained sizing rationale or evidence. |
+- **Classify and dispatch:** `headers/top_level_classifier.rs` turns a direct `TEMPLATE_HEAD` into a const item and `MUTABLE` immediately followed by `TEMPLATE_HEAD` into a runtime item. `headers/file_parser.rs` dispatches with the correct cursor position, `NestingDepth`, role checks, source modifiers and export-block rejection.
+- **Delete old indirection:** Remove `headers/hash_items.rs`, its `HashItemRequest`, the `HeaderFileItem::Hash` variant and the registration in `headers/mod.rs`. Keep `TokenTag::HASH` and `#=` declaration classification. Other unmatched `HASH` tokens follow the ordinary start-body/error path.
+- **Reuse fragment owners:** `headers/const_fragments.rs` owns const-header construction and preferably registration. `file_state.rs` retains counts, header path, spans and runtime insertion indexes. `start_capture.rs` retains balanced runtime-template capture. Avoid an extra forwarding wrapper.
+- **Consolidate documentation:** `ast/module_ast/emission/emitter.rs`, `ast/templates/doc_fragments.rs`, `top_level_templates.rs` and `ast/module_ast/finalization/finalizer.rs` should use the single AST/TIR document path described below.
+- **Keep runtime body simple:** `ast/statements/body_dispatch.rs` sees only `TEMPLATE_HEAD` after the marker is stripped and continues to emit `PushStartRuntimeFragment`. Reject runtime-marked non-output comments with an authored diagnostic.
+- **Check counts and allocation:** Preserve `headers/types.rs` and `parse_file_headers.rs` metadata. Review `arena/capacity.rs` for double-counting const headers and fragment counts now that static fragments are common. Change heuristics only with an explicit sizing rationale or evidence.
 
 Do not create a new `~` token, another general prefix parser, a fragment-mode enum threaded to HIR or a parser in the HTML builder. Where specialization is real (const header versus runtime body capture), keep it local.
 
@@ -99,15 +96,13 @@ Retain the canonical distinction: an actual empty `String` fragment is still out
 
 Use nearby header tests (including `parse_file_headers_entry_runtime_tests.rs` and module-role tests), the existing AST template tests and a small number of real `tests/cases` programs. Extend or consolidate existing scenarios before adding new ones.
 
-| Contract | Regression evidence |
-|---|---|
-| Marker/boundaries | `~[...]`, `~ [...]`, `~\n[...]`, CRLF, leading indent, EOF, adjacent entries, `;~[...]` and nested template brackets. Removed `#[...]` must fail without a migration-only diagnostic. |
-| Entry roles | Active and synthetic entries work. Helper/facade/config/export placements are rejected correctly. Ordinary assigned/nested templates and mutable bindings/writes are unchanged. |
-| Const requirement | Bare direct literal/imported constant, static `if`/`loop`, structural resource and named `$in` fold. Bare direct runtime interpolation diagnoses instead of creating runtime HIR. |
-| Runtime guarantee | `~[...]` with dynamic data and entirely constant content both produce exactly one runtime `PushStartRuntimeFragment` and slot, with no const body record. |
-| Ordering and failure | Interleave static body fragments, builder slots, two runtime fragments and other entry statements. Assert source order, destination content, resources and successful-only runtime publication. A failing entry retains static output and publishes no staged runtime output. |
-| Documentation | `[$doc]` contributes ordered metadata with no HTML/runtime slot, including Markdown/site-root text and an invalid structural-resource observation. `[$note]`/`[$todo]` discard without output. `~[comment]` diagnoses. Keep nonempty versus empty body-fragment semantics distinct. |
-| Targets/builders | Compare appropriate JS and HTML-Wasm output, resource linking and metadata-only/static-only entries. Respect unsupported backend capabilities. |
+- **Marker and boundary:** `~[...]`, `~ [...]`, `~\n[...]`, CRLF, indentation, EOF, adjacent entries, `;~[...]` and nested brackets. Removed `#[...]` fails without a migration-specific error.
+- **Context:** Active and synthetic entries work. Helper, facade, config and export placements reject appropriately. Ordinary assigned/nested templates and mutable reads/writes retain existing behavior.
+- **Const enforcement:** Bare direct literals, imported constants, static `if`/`loop`, resources and named `$in` fold. A runtime-dependent interpolation in bare direct output diagnoses instead of creating HIR.
+- **Runtime guarantee:** Both dynamic and completely foldable `~[...]` produce exactly one `PushStartRuntimeFragment` and runtime slot without const-body metadata.
+- **Interleaving and failures:** Mix static body fragments, builder slots, two runtime fragments and other statements. Assert order, destinations, resources and success-only runtime publication. A failing entry keeps static output and publishes no staged runtime fragments.
+- **Comments:** `[$doc]` produces ordered metadata without HTML or a runtime slot, including Markdown/site-root handling and resource-observation diagnostics. `[$note]`/`[$todo]` discard. `~[$doc]` and other runtime-marked comments reject. Distinguish empty output from no output.
+- **Builder parity:** Exercise JS, relevant HTML-Wasm capabilities, resource linking and metadata-only/static-only entries without claiming support for unavailable targets.
 
 During migration, change real `#[...]` entry fragments to `[...]` and bare *runtime* entry fragments to `~[...]`. Update documentation site entries, CLI scaffold, package examples, executable benchmarks, tests, expected diagnostics and integration manifests as needed. Change only actual entry syntax, not ordinary expression templates or quoted Rust attributes. Migrate and run focused tests together rather than expecting the pre-migration suite to pass mid-cutover.
 
