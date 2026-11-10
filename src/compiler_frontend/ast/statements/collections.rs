@@ -502,22 +502,6 @@ fn side_expectation(
     }
 }
 
-/// Whether the current curly-literal entry begins a logical block line.
-///
-/// WHAT: a directive preceded by `{` or a line break starts a block entry; after a comma on the
-///       same line it remains an expression position.
-fn starts_curly_block_entry(token_stream: &AstCursor) -> bool {
-    let Some(previous_index) = token_stream.position().checked_sub(1) else {
-        return true;
-    };
-    matches!(
-        token_stream
-            .token_ref_at(previous_index)
-            .map(|token| token.tag()),
-        Some(TokenTag::NEWLINE | TokenTag::OPEN_CURLY)
-    )
-}
-
 /// Parses one literal entry, retaining a pending numeric fragment instead of failing.
 ///
 /// WHAT: a parsed entry is `Ready`. A child that defers numeric completion (`NumericDeferral`) is
@@ -539,11 +523,10 @@ fn parse_curly_entry(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> CollectionParseResult<DeferredLiteralValue> {
-    // A directive can never begin a curly-literal block entry. Route it to the shared typed
-    // wrong-target diagnostic instead of the generic expression unexpected-token path.
-    if token_stream.current_tag() == TokenTag::STYLE_DIRECTIVE
-        && starts_curly_block_entry(token_stream)
-    {
+    // A directive is never a value, so it can never begin a curly-literal entry. Route it to the
+    // shared typed wrong-target diagnostic instead of the generic expression unexpected-token
+    // path; the authored span is the directive token regardless of the preceding comma or newline.
+    if token_stream.current_tag() == TokenTag::STYLE_DIRECTIVE {
         return Err(source_directive_wrong_target_error(
             token_stream,
             string_table,

@@ -12,7 +12,8 @@
 //!   validation here leaves generic style-handler parsing and the TIR wrapper
 //!   machinery unchanged.
 
-use super::head_parser::parse_head_expression;
+use super::directive_args::{reject_attached_call_parenthesis, reject_extra_directive_operand};
+use super::head_parser::parse_directive_operand_expression;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::const_values::store::{
@@ -86,6 +87,10 @@ pub(super) fn parse_child_decorator_directive(
     // directive that did not consume trailing tokens itself.
     token_stream.advance();
 
+    // A decorator never owns a call-argument list; an attached `(` is the removed `$name(...)`
+    // shape, while a whitespace-separated parenthesised value stays an ordinary operand.
+    reject_attached_call_parenthesis(directive_name, token_stream)?;
+
     // The assignment spelling was removed with no compatibility mode: `$before` and `$after` take
     // one bare operand on the directive's line.
     if token_stream.current_tag() == TokenTag::ASSIGN {
@@ -103,14 +108,15 @@ pub(super) fn parse_child_decorator_directive(
     }
 
     let assignment_span = Some(token_stream.current_span());
-    let expression = match parse_head_expression(
+    // The decorator owns one operand, so its value parse stops before a second operand and this
+    // boundary reports the extra value with the directive name and span.
+    let expression = match parse_directive_operand_expression(
         token_stream,
         context,
         type_interner,
         expression_builder,
         const_values,
         &ValueMode::ImmutableOwned,
-        false,
         string_table,
         path_fork,
     ) {
@@ -125,6 +131,7 @@ pub(super) fn parse_child_decorator_directive(
         }
         Err(error) => return Err(error.into()),
     };
+    reject_extra_directive_operand(directive_name, token_stream)?;
 
     let expression_view = expression_builder.view(expression)?;
     let value_span = expression_view.span().or(assignment_span);

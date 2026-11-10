@@ -449,16 +449,16 @@ pub(crate) fn invalid_template_directive_message(
         }
         InvalidTemplateDirectiveReason::UnexpectedArguments => match name {
             "slot" => {
-                "`$slot` uses a bare name or positive position, not parentheses.\n                 Use `$slot`, `$slot title`, or `$slot 1`.".to_owned()
+                "`$slot` takes one name or position and at most one compile-time default.\n                 Use `$slot`, `$slot title`, `$slot title = \"Untitled\"`, or `$slot 1`; remove parentheses or a second value.".to_owned()
             }
             "in" => {
-                "`$in` uses a bare slot name, not parentheses.\n                 Use `$in title: ...`.".to_owned()
+                "`$in` takes one bare slot name and no other value.\n                 Use `$in title: ...`; remove parentheses or an extra value.".to_owned()
             }
             "before" => {
-                "`$before` takes exactly one bare compile-time operand.\n                 Write `$before [: <tr> ]`, not `$before = ...`.".to_owned()
+                "`$before` takes exactly one bare compile-time operand.\n                 Write `$before [: <tr> ]`; remove parentheses or a second value.".to_owned()
             }
             "after" => {
-                "`$after` takes exactly one bare compile-time operand.\n                 Write `$after [: </tr> ]`, not `$after = ...`.".to_owned()
+                "`$after` takes exactly one bare compile-time operand.\n                 Write `$after [: </tr> ]`; remove parentheses or a second value.".to_owned()
             }
             "code" => {
                 "`$code` takes at most one bare language operand.\n                 Write `$code \"rust\": ...`, never `$code(\"rust\")` or a second value.".to_owned()

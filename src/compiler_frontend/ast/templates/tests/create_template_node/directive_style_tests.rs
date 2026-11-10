@@ -525,6 +525,51 @@ fn slot_declaration_invalid_string_target_retains_exact_multibyte_span() {
 }
 
 #[test]
+fn slot_default_rejects_a_second_operand_at_its_own_span() {
+    let source = "[$slot title = \"a\" \"b\"]";
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let file_tokens =
+        directive_tokens(source, &mut string_table, &mut span_builder, &mut path_fork);
+    let directive_name = string_table.intern("slot");
+    let canonical_owner = file_tokens.canonical_owner();
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut cursor = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    cursor
+        .set_position(file_tokens.opener_index + 1)
+        .expect("test token stream position must remain in canonical range");
+    let diagnostic = parse_slot_declaration_for_test(
+        directive_name,
+        &mut cursor,
+        file_tokens.source_path,
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("a slot default takes one value");
+    let first = diagnostic
+        .first()
+        .expect("extra-operand diagnostic should compact to one record");
+    let DirectiveStyleTestDiagnosticKind::InvalidTemplateDirective { reason, .. } = &first.kind
+    else {
+        panic!("extra-operand rejection should retain directive facts");
+    };
+    assert_eq!(*reason, InvalidTemplateDirectiveCode::UnexpectedArguments);
+    let DirectiveStyleTestSite::Local(primary_span) = first.primary_site else {
+        panic!("extra-operand rejection should keep its local authored span");
+    };
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!(
+        &source[range.start() as usize..range.end() as usize],
+        "\"b\"",
+        "the diagnostic must anchor at the second operand"
+    );
+}
+
+#[test]
 fn slot_declaration_negative_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();

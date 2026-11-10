@@ -9,8 +9,8 @@
 //!   control flow belongs in one dedicated module.
 
 use super::child_decorators::{ChildDecoratorEdge, parse_child_decorator_directive};
-use super::directive_args::reject_directive_operand;
-use super::head_parser::parse_head_expression_with_resources;
+use super::directive_args::{reject_directive_operand, reject_extra_directive_operand};
+use super::head_parser::parse_directive_operand_expression_with_resources;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::store::{
     ConstValueId, ConstValuePayload, ConstValueStore,
@@ -307,8 +307,10 @@ fn parse_slot_default(
     }
 
     let fallback_span = token_stream.current_span();
-    let expression = match parse_head_expression_with_resources(
-        ExpressionParseResources {
+    // A slot default is the directive's one operand. The parse keeps the caller's explicit
+    // receiving type and stops before a second operand so this boundary owns that diagnostic.
+    let expression =
+        match parse_directive_operand_expression_with_resources(ExpressionParseResources {
             token_stream,
             scope_context,
             type_interner,
@@ -319,22 +321,21 @@ fn parse_slot_default(
             value_mode,
             string_table,
             path_fork,
-        },
-        false,
-    ) {
-        Ok(expression) => expression,
-        // A slot default must be fully known here, so a body-root numeric
-        // deferral is an invalid default rather than a retainable fragment.
-        Err(ExpressionParseError::NumericDeferral(deferral)) => {
-            return Err(templates::invalid_template_directive(
-                Some(directive_name),
-                InvalidTemplateDirectiveReason::InvalidSlotDefault,
-                Some(deferral.span.unwrap_or(fallback_span)),
-            )
-            .into());
-        }
-        Err(error) => return Err(error.into()),
-    };
+        }) {
+            Ok(expression) => expression,
+            // A slot default must be fully known here, so a body-root numeric
+            // deferral is an invalid default rather than a retainable fragment.
+            Err(ExpressionParseError::NumericDeferral(deferral)) => {
+                return Err(templates::invalid_template_directive(
+                    Some(directive_name),
+                    InvalidTemplateDirectiveReason::InvalidSlotDefault,
+                    Some(deferral.span.unwrap_or(fallback_span)),
+                )
+                .into());
+            }
+            Err(error) => return Err(error.into()),
+        };
+    reject_extra_directive_operand(directive_name, token_stream)?;
 
     let expression = expression_builder.view_owned(expression)?;
     let span = expression.span().or(Some(fallback_span));

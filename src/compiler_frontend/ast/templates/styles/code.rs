@@ -188,7 +188,7 @@ fn highlight_code_html_into(source: &str, language: CodeLanguage, output: &mut S
 }
 
 #[cfg(test)]
-#[path = "code_test_support.rs"]
+#[path = "tests/code_test_support.rs"]
 pub(crate) mod test_support;
 
 #[cfg(test)]

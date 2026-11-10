@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::display::display_type_with_resolver;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, start_function_body,
@@ -42,6 +43,45 @@ use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 ///      the exact `I32` identity.
 fn i32_value(value: i64) -> FixedScalarValue {
     FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32")
+}
+
+#[test]
+fn directive_in_a_curly_entry_reports_the_wrong_target_in_every_position() {
+    use crate::compiler_frontend::compiler_messages::diagnostics::families::templates::{
+        InvalidTemplateDirectiveCode, InvalidTemplateDirectiveView,
+    };
+
+    // The directive token is the diagnostic's own site in every position; the integration case
+    // `directive_in_collection_entry_failure` pins the authored line and column of each.
+    for source in [
+        "render ||:\n    xs = {$config, \"a\"}\n;\n",
+        "render ||:\n    xs = {\"a\", $config}\n;\n",
+        "render ||:\n    xs = {\"a\",\n        $config}\n;\n",
+        "render ||:\n    xs = {\"a\", $code}\n;\n",
+    ] {
+        let failure = parse_single_file_ast_diagnostic(source);
+        let diagnostic = assert_ast_diagnostic(
+            &failure,
+            "MOTH-SYNTAX-0021",
+            Some("invalid_template_directive.wrong_target"),
+        );
+        let facts = diagnostic
+            .family_view::<InvalidTemplateDirectiveView>()
+            .expect("a directive entry keeps typed directive facts");
+        assert_eq!(
+            facts.reason,
+            InvalidTemplateDirectiveCode::WrongTarget,
+            "{source}"
+        );
+        let SiteRef::Local(primary_span) = diagnostic.primary_site() else {
+            panic!("wrong-target rejection should keep its local authored span: {source}");
+        };
+        assert_eq!(
+            primary_span.source(),
+            SourceId::COMPILATION_ROOT,
+            "{source}"
+        );
+    }
 }
 
 #[test]

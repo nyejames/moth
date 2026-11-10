@@ -1,0 +1,9 @@
+one || -> String:
+    xs = {"a", $config}
+    return "x"
+;
+two || -> String:
+    ys = {"a",
+        $code}
+    return "y"
+;

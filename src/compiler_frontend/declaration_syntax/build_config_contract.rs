@@ -28,7 +28,7 @@ use moth_lexical::numeric::grammar::NumericLiteralSign;
 /// The binding's ordinary declaration owns its type annotation and initializer, and absence is
 /// derived by the consuming contract stage: header normalization for selected sources, AST resolution for the config source. This value only preserves the authored
 /// `$config` span, so the declaration never carries a second copy of either fact.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct BuildConfigContractSyntax {
     /// Authored span of the `$config` directive that marked this binding.
     pub(crate) marker_span: SourceSpan,

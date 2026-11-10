@@ -459,7 +459,7 @@ pub fn resolve_declaration_syntax(
         string_table,
         path_fork,
     } = tables;
-    let config_contract = declaration_syntax.config_contract.clone();
+    let config_contract = declaration_syntax.config_contract;
     let config_constant_context = matches!(context.kind, ContextKind::ConstantHeader);
     let has_config_resolution = context.shared.config_resolution.is_some();
     let config_resolution_context = config_constant_context && has_config_resolution;

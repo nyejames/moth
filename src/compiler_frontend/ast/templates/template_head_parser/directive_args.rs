@@ -150,6 +150,60 @@ pub(crate) fn parse_optional_directive_operand(
     Ok(Some(expression.id()))
 }
 
+/// Rejects a second operand written after a structural directive's own value.
+///
+/// WHAT: the same operand-boundary test that `parse_optional_directive_operand` applies, exposed
+///       for the directives whose operand is parsed by a dedicated entry (`$before`, `$after`,
+///       `$slot` defaults).
+/// WHY: every directive owns exactly one operand, so a second value must report the directive's
+///      own extra-operand diagnostic instead of the expression parser's missing operator.
+pub(super) fn reject_extra_directive_operand(
+    directive_name: StringId,
+    token_stream: &AstCursor,
+) -> DirectiveArgsResult<()> {
+    if directive_operand_ends_at(token_stream.current_tag()) {
+        return Ok(());
+    }
+
+    Err(with_current_token_span(
+        token_stream,
+        templates::invalid_template_directive(
+            Some(directive_name),
+            InvalidTemplateDirectiveReason::UnexpectedArguments,
+            None,
+        ),
+    )
+    .into())
+}
+
+/// Rejects the removed call shape `$name(...)` when the attached `(` is already the current token.
+///
+/// WHAT: the same `(`-attachment test `parse_optional_directive_operand` applies before an
+///       operand, for directives that advance past their own name first.
+/// WHY: a directive never owns a parenthesised argument list, and a whitespace-separated value
+///      may still be a legitimate grouped operand.
+pub(super) fn reject_attached_call_parenthesis(
+    directive_name: StringId,
+    token_stream: &AstCursor,
+) -> DirectiveArgsResult<()> {
+    let attached = token_stream
+        .token_ref_at_offset(0)
+        .is_some_and(|token| token.shape().open_parenthesis_is_attached());
+    if token_stream.current_tag() != TokenTag::OPEN_PARENTHESIS || !attached {
+        return Ok(());
+    }
+
+    Err(with_current_token_span(
+        token_stream,
+        templates::invalid_template_directive(
+            Some(directive_name),
+            InvalidTemplateDirectiveReason::UnexpectedArguments,
+            None,
+        ),
+    )
+    .into())
+}
+
 /// Reports whether the `(` after the directive name is written as a call.
 fn parenthesis_attaches_to_directive(token_stream: &AstCursor) -> bool {
     token_stream

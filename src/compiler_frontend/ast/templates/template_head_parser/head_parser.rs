@@ -1310,12 +1310,15 @@ fn parse_head_expression_with_boundary(
     )
 }
 
-/// Parses a head expression with the caller's receiving context, if any.
-pub(super) fn parse_head_expression_with_resources(
+/// Parses the single operand of a structural directive from prepared resources.
+///
+/// WHY: a `$slot` default keeps its explicit receiving `String` and immutable value mode, so the
+///      caller's own resources reach the shared head expression parser unchanged while the
+///      directive's one-operand boundary still applies.
+pub(super) fn parse_directive_operand_expression_with_resources(
     resources: ExpressionParseResources<'_, '_, '_>,
-    consume_closing_parenthesis: bool,
 ) -> Result<OwnedExpr, ExpressionParseError> {
-    parse_head_expression_with_resources_and_boundary(resources, consume_closing_parenthesis, false)
+    parse_head_expression_with_resources_and_boundary(resources, false, true)
 }
 
 fn parse_head_expression_with_resources_and_boundary(

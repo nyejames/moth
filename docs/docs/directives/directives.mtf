@@ -29,7 +29,7 @@ Source directives use their own line. The next eligible construct must follow wi
     api_url #String = "https://example.com"
 ]
 
-An empty line, even one containing only spaces, breaks attachment. A directive also cannot cross another declaration, a scope boundary or the end of a file. Multiple compatible modifiers can appear together without blank lines. A directive at the beginning of a file still modifies the following construct.
+An empty line, even one containing only spaces, breaks attachment. A directive also cannot cross another declaration, a scope boundary or the end of a file. At most one source modifier attaches to a construct today; a future second modifier would follow the same contiguous attachment rule, because an empty line always ends attachment. A directive at the beginning of a file still modifies the following construct.
 
 ### Compile-time operands
 

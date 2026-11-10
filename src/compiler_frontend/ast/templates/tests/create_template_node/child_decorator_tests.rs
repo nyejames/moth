@@ -551,6 +551,98 @@ fn before_directive_rejects_runtime_values() {
     );
 }
 
+/// Directive facts and authored site of the first rejected decorator source.
+///
+/// WHY: the operand-boundary tests differ only in the source text and the expected span, so one
+///      helper keeps the parse-and-compact setup out of each assertion.
+fn decorator_directive_diagnostic(
+    source: &str,
+    span_builder: &mut ExtendedSpanBuilder,
+) -> (InvalidTemplateDirectiveCode, SourceSpan) {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let file_tokens =
+        template_tokens_from_source(source, &mut string_table, span_builder, &mut path_fork);
+    let source_path = file_tokens.source_path;
+    let canonical_owner = file_tokens.canonical_owner();
+    let canonical_range = canonical_owner
+        .full_range()
+        .expect("test token stream must expose canonical source range");
+    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
+        .expect("test token stream must expose an AST cursor");
+    token_stream
+        .set_position(file_tokens.opener_index)
+        .expect("test token stream position must remain in canonical range");
+    let context = new_constant_context(source_path, &path_fork);
+
+    let error = Template::new(
+        &mut token_stream,
+        source_path,
+        &context,
+        &mut expression_builder,
+        &mut const_values,
+        vec![],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("the fixture must be rejected at the decorator");
+    let error = expect_template_diagnostic(error);
+    let first = error
+        .first()
+        .expect("decorator diagnostic should compact to one record");
+    let facts = first
+        .family_view::<InvalidTemplateDirectiveView>()
+        .expect("decorator rejection should retain directive facts");
+    let SiteRef::Local(primary_span) = first.primary_site() else {
+        panic!("decorator rejection should keep its local authored span");
+    };
+    (facts.reason, primary_span)
+}
+
+#[test]
+fn before_directive_rejects_a_second_operand_at_its_own_span() {
+    let source = "[$before \"a\" \"b\": [: child]]";
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (reason, primary_span) = decorator_directive_diagnostic(source, &mut span_builder);
+    assert_eq!(reason, InvalidTemplateDirectiveCode::UnexpectedArguments);
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!(
+        &source[range.start() as usize..range.end() as usize],
+        "\"b\"",
+        "the diagnostic must anchor at the second operand"
+    );
+}
+
+#[test]
+fn after_directive_rejects_a_value_after_a_template_operand() {
+    let source = "[$after [:suffix] \"extra\": [: child]]";
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (reason, primary_span) = decorator_directive_diagnostic(source, &mut span_builder);
+    assert_eq!(reason, InvalidTemplateDirectiveCode::UnexpectedArguments);
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!(
+        &source[range.start() as usize..range.end() as usize],
+        "\"extra\"",
+        "the diagnostic must anchor at the value after the template operand"
+    );
+}
+
+#[test]
+fn before_directive_rejects_the_attached_call_shape() {
+    let source = "[$before(\"a\"): [: child]]";
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let (reason, primary_span) = decorator_directive_diagnostic(source, &mut span_builder);
+    assert_eq!(reason, InvalidTemplateDirectiveCode::UnexpectedArguments);
+    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!(
+        &source[range.start() as usize..range.end() as usize],
+        "(",
+        "the diagnostic must anchor at the attached parenthesis"
+    );
+}
+
 #[test]
 fn before_directive_rejects_non_string_values() {
     let error = template_parse_error("[$before 42: [: child]]");

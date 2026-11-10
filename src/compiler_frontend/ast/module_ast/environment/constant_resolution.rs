@@ -247,7 +247,7 @@ impl ConstantResolutionSession {
                         .id(),
                 ),
                 binding_span: None,
-                config_contract: declaration.config_contract.clone(),
+                config_contract: declaration.config_contract,
             },
             Some(SyntheticContentPayload::MothTemplate { markdown_directive }) => {
                 let owner = file_owner.ok_or_else(|| {
@@ -375,7 +375,7 @@ impl ConstantResolutionSession {
                     value_mode: expression_builder.view_owned(value)?.value_mode(),
                     value: DeclarationValue::Initializer(value.id()),
                     binding_span: None,
-                    config_contract: declaration.config_contract.clone(),
+                    config_contract: declaration.config_contract,
                 }
             }
             None => {

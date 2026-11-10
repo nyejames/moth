@@ -122,7 +122,7 @@ fn compile_single_file_for_filesystem_test(
     super::compilation::compile_single_file_frontend_with_inputs(
         config,
         crate::compiler_frontend::FrontendBuildProfile::Dev,
-        &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::default(),
+        &crate::compiler_frontend::style_directives::StyleDirectiveRegistry::built_ins(),
         builder_surface,
         extension,
         &mut warning_owner,

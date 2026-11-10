@@ -19513,3 +19513,9 @@ tags = ["integration", "language", "dependencies", "diagnostics", "expression-qu
 contract = "language.dependencies.cross_module_qualified_cycle_is_rejected"
 role = "primary"
 
+[[case]]
+id = "directive_in_collection_entry_failure"
+path = "directive_in_collection_entry_failure"
+tags = ["integration", "directives", "diagnostics", "collections"]
+contract = "language.directives.directive_in_a_collection_entry_is_a_wrong_target"
+role = "primary"

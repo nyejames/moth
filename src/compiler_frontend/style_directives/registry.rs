@@ -23,7 +23,7 @@ static BUILT_IN_SPECS: LazyLock<Arc<[StyleDirectiveSpec]>> =
 /// The directive list is immutable once built, so it is held behind an `Arc` and cloning the
 /// registry is a refcount bump. Every environment-time `ScopeContext` clones one into its
 /// `ScopeShared`, so a `Vec` here deep-cloned every directive spec per scope.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct StyleDirectiveRegistry {
     ordered: Arc<[StyleDirectiveSpec]>,
 }
