@@ -21,6 +21,8 @@ Use the [Packages and Builders Progress Matrix](../docs/progress/packages-and-bu
 
 ## Ongoing in parallel 
 
+- [Explicit Markdown section markers](./plans/explicit-markdown-section-markers-plan.md) - **IN PROGRESS, PARALLEL**. Replace automatic $md heading IDs with explicit @#id markers for Markdown-owned blocks and standalone spans. Independent of $export.
+
 - [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md). Partially complete and underway. **PAUSED**
 
 - [Boracle research](./plans/boracle-next-research-plans) and [production borrow checker development](./plans/production-borrow-checker.md): Research precision and migration wait for the merged typed-expression/native-result capabilities and explicit activation. Current status, accepted implementation decisions and borrow/Boracle issues live in the production companion. **ONGOING, RESEARCH RESTART PAUSED**
