@@ -4,7 +4,7 @@
 
 Top-level runtime code in `@entry.moth` becomes a dormant entry. It runs once when that module becomes a page entry. Helper files provide declarations and never own an entry.
 
-The entry has built-in `Error!`. Checked numeric failure and compatible top-level postfix `!` can propagate to the generated terminal handler. Custom errors still need explicit recovery. See @../progress (Progress) for current compiler support.
+The entry has built-in `Error!`. Checked numeric failure and compatible top-level postfix `!` can propagate to the generated terminal handler. Custom errors still need explicit recovery.
 
 An empty entry file produces the builder's default page. A metadata-only entry produces a complete document too:
 
@@ -12,7 +12,7 @@ An empty entry file produces the builder's default page. A metadata-only entry p
     #[$in title:Welcome]
 ]
 
-A nested or aliased insert remains ordinary template composition. Runtime named builder slots are not supported.
+A nested or aliased insert remains ordinary template composition.
 
 `$doc`, `$note` and `$todo` templates are documentation or comment processing. They produce no page output, but the file still creates the page.
 

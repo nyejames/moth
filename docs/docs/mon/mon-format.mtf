@@ -8,12 +8,7 @@ when the compiler could fold them. Rejection happens before expression
 evaluation, not after evaluating and inspecting a result.
 
 The standalone Rust crate `moth_mon` owns the codec. The compiler provides the
-same API and Rust types through the convenience re-export `moth::mon`. Full
-standalone-use examples belong in the crate documentation rather than this
-format reference. Compiled Moth programs currently have no runtime codec support.
-Moth-native operations, automatic schema extraction and the static project
-builder remain deferred separately. See @../progress (Progress) for current
-support.
+same API and Rust types through the convenience re-export `moth::mon`. Full standalone-use examples belong in the crate documentation rather than this format reference.
 
 ### One root record
 
@@ -370,17 +365,3 @@ reserved universal version field or automatic schema discovery. Applications
 may declare an ordinary `format_version` field with explicit migrations.
 Closed schemas never silently fall back to another version or repair
 mismatches.
-
-### Deferred source and builder surfaces
-
-MON text has no file IO, module imports, schema discovery, command, builder
-registration, output write or runtime opcode. Compiled Moth programs currently
-have no encoder or decoder calls. Compiler `$mon` convenience,
-with its invocation syntax still undecided, belongs to later Moth-native
-integration, as do Moth-side encode and decode operations, automatic schema
-extraction from ordinary Moth types and the static `.mon` project builder.
-
-MON's local escape decoder adds no source-language syntax. The `{=}` empty-map
-distinction, Unicode escapes and contextual `::Variant` construction remain
-deferred source parity unless another authorised syntax change has already
-delivered them.

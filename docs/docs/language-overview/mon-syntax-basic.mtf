@@ -1,7 +1,3 @@
-MON syntax is implemented for supplied arguments and compile-time anonymous
-const records. Runtime anonymous records remain deferred. The Rust-only
-`moth_mon` codec implements the MON format. Moth-native integration remains deferred.
-
 MON means Moth Object Notation. MON syntax gives supplied arguments and record
 values a common notation. Pipes declare fields or parameters. Parentheses supply
 values or group an expression.
@@ -37,7 +33,4 @@ reader never evaluates Moth expressions, including foldable ones.
 @../mon/#mon-format (MON format) owns the serialised literal-data contract.
 This page owns the shared notation only.
 
-Independent Rust callers use `moth_mon`. Compiler clients may use the same API
-through `moth::mon`. Moth-native `$mon`, automatic schema extraction and the
-static project builder remain deferred separately. This syntax alone does not
-turn a record into text or make every Moth value serialisable.
+MON syntax alone does not turn a record into serialised text or make every Moth value serialisable.

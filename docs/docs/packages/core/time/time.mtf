@@ -286,7 +286,7 @@ Every `F64` reaching this package is already finite, because `NaN` and the infin
 
 `Duration`, `TimeMark` and `Timestamp` support no equality, no ordering and no use as map keys. Compare durations through `as_milliseconds` and timestamps through `unix_milliseconds`.
 
-Every failure this package itself detects is observable in Moth as a returned `Error!`. The one failure it delegates is a non-finite `F64` result at the shared external boundary. That Moth-owned check is a fatal integrity guard, not implicit built-in failure: it halts unless a declared builtin `Error!` contract returns it. Safety-catch eligibility does not turn this guard into a recoverable failure. No function in this package throws a host error of its own. See @../../../progress (Progress) for current support.
+Every failure this package itself detects is observable in Moth as a returned `Error!`. The one failure it delegates is a non-finite `F64` result at the shared external boundary. That Moth-owned check is a fatal integrity guard, not implicit built-in failure: it halts unless a declared builtin `Error!` contract returns it. Safety-catch eligibility does not turn this guard into a recoverable failure. No function in this package throws a host error of its own. 
 
 ### Access and return contracts
 
@@ -306,9 +306,9 @@ HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (pro
 - Do not inspect opaque type fields directly.
 - The package does not expose receiver methods.
 
-### Deferred surfaces
+### API boundaries
 
-Calendar date types, time zones, local-time conversion, locale-aware formatting, timers, sleep, intervals, animation callbacks and non-JS lowerings remain deferred. Browser animation-frame integration belongs in a future web-specific package rather than `@core/time`. See @../../../progress (progress matrix) for current status.
+Calendar date types, time zones, local-time conversion, locale-aware formatting, timers, sleep, intervals and animation callbacks are outside the `@core/time` API. Animation-frame integration belongs in a web-specific package.
 
 ### Related concepts
 
