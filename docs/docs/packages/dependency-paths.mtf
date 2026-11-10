@@ -55,7 +55,7 @@ A qualified reference creates an early provider-dependency fact, not a dependenc
 - A bare explicit-extension clause requires `as` or at least one direct selection. An explicit-extension clause with no registered provider gets a targeted diagnostic.
 - A recognised source extension used with an explicit extension gets an extensionless-source diagnostic. `@docs/intro.mtf content` stays invalid as a clause even though `@docs/intro.mtf` is a valid file value in expression position.
 - Moth template `.mtf` and plain Markdown `.md` content files both expose generated `content` constants. See @../moth-templates/#content-dependencies (Moth template content dependencies) and @../markdown/#markdown-dependencies (Markdown dependencies).
-- The bound public surface of a module comes from its `export:` block in `@mod.moth` or `@package.moth`. See @#module-visibility (Module visibility).
+- The public surface comes from `$export` declarations and direct-selection clauses in the applicable facade. See @#module-visibility (Module visibility).
 
 ### Same-module dependencies
 
@@ -68,8 +68,6 @@ Dependency clauses that cross into another module boundary can only access what 
 ### Content-file dependencies
 
 Moth template and plain Markdown content files are bound with the same extensionless syntax. Their dependency shape is covered by the Moth template and Plain Markdown pages, not here.
-
-`export:` remains the current module-boundary marker. A later `$export` migration will replace it rather than create a permanent dual syntax. The future spelling stays restricted to `@mod.moth` and `@package.moth`. It does not change module-root-relative path resolution.
 
 ### Concepts related to dependency paths
 

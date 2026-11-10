@@ -36,7 +36,7 @@ A configurable value uses `$config` before one explicitly typed top-level `#` bi
 
 ### Directory roles
 
-- The selected directory is the only build root and the top of the discoverable source tree.
+- The selected directory is the build root and the top of the discoverable source tree.
 - `config.moth` is optional. When present, only the one at the selected root applies. It is not module source.
 - A directory named `src/` is ordinary source content. There is no configured entry directory or `entry_root`.
 - `_dev/` and `_release/` are hidden generated output folders, not source folders. The build system manages them through manifests.

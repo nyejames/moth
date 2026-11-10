@@ -6,13 +6,13 @@ One optional `@package.moth` at the selected project directory is the external p
 
 The directory may also contain `@mod.moth`, `@entry.moth` and `config.moth`. The project can be an application and a package at the same time.
 
-The support root defines and exports its own API-only declarations: functions, structs, choices, type aliases, traits and compile-time constants. Helpers are shared with the other roots, but no root can import another root's local declarations.
+The support root may publish functions, structs, choices, type aliases, traits, compile-time constants and direct-selection re-exports with `$export`. Helpers are shared with the other roots, but no root can import another root's local declarations.
 
 ### Facade restrictions
 
 The facade:
 
-- never bypasses an `export:` boundary
+- publishes only declarations marked with `$export`
 - is invisible to internal project modules
 - cannot depend on `@project`
 - cannot expose a semantic fact that depends on project-private context
