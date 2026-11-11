@@ -1,4 +1,4 @@
-`@project` and HTML builder slots are implemented. `@entry.moth` is the entry root, selected by its presence. Runtime `io.set_title` remains queued. See @../progress (Progress).
+`@project` supplies project fields and HTML builder slots supply entry metadata. `@entry.moth` is selected by file presence. See @../progress (Progress) for implemented syntax and runtime `io.set_title` status.
 
 ### Using `@project`
 
@@ -14,19 +14,19 @@ Bind `@project` to read predefined project fields:
 
 ### HTML metadata
 
-Direct const inserts in `@entry.moth` set document metadata:
+Bare direct const inserts in `@entry.moth` set document metadata, without a `#` prefix:
 
 [codeblock, $code "moth":
-    #[$in title:About]
-    #[$in stylesheets:[@styles/site.css]]
-    #[: <main>About this site</main>]
+    [$in title:About]
+    [$in stylesheets:[@styles/site.css]]
+    [: <main>About this site</main>]
 ]
 
 HTML also accepts `description`, `lang`, `favicon`, `body_style` and `head`. Repeated scalar contributions concatenate. A supplied empty value differs from an absent slot. An absent title uses the route and then the project name with the configured prefix and postfix. Absent description emits nothing and the other values use builder defaults. The builder escapes title text and attribute values. Each stylesheet insert needs one tracked CSS resource. The builder keeps the first contribution for each resource origin and renders its URL relative to the output page.
 
 `head` inserts raw HTML after built-in head content. Identical complete head contributions render once. Old `page_*` constants have no implicit metadata effect. JavaScript and HTML-Wasm documents use the same slot plan.
 
-A metadata-only entry still produces a page. Runtime top-level templates contribute only to the body. Runtime named builder slots are not supported. Only direct inserts in `@entry.moth` reach the builder. API facades, helper files and imported modules cannot contribute.
+A metadata-only entry still produces a page. Explicit `~[...]` runtime top-level templates contribute only to the body; bare direct `[...]` must fold. Runtime named builder slots are not supported. Only direct inserts in `@entry.moth` reach the builder. API facades, helper files and imported modules cannot contribute.
 
 ### Entry selection
 

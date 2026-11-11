@@ -8,15 +8,17 @@ A constant template is finished during compilation.
     ]
 ]
 
-Direct top-level const templates contribute to `@entry.moth`. The file's
-presence selects the page. A direct const root `$in` insert supplies builder
+A bare direct `[...]` in `@entry.moth` must fold at compile time. An
+explicit `~[...]` instead creates a runtime body fragment, even if foldable.
+The removed direct `#[...]` spelling is invalid. The entry file's presence
+selects the page. A direct const root `$in` insert supplies builder
 metadata, while an ordinary const fragment renders into the body.
 
 [codeblock, $code "moth":
-    #[$in title:About]
-    #[$in stylesheets:[@styles/site.css]]
+    [$in title:About]
+    [$in stylesheets:[@styles/site.css]]
 
-    #[$md:
+    [$md:
         # Compile-time heading
     ]
 ]

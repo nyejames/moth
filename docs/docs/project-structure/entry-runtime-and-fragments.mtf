@@ -14,11 +14,19 @@ Entry assembly activates the selected module-owned entry exactly once. Loading a
 
 Only a direct top-level const `$in` on the entry reaches the builder. A nested or aliased insert remains ordinary template composition, and runtime top-level templates still contribute only to the default body lane. Runtime named builder slots are not supported.
 
-### Comment and documentation templates
+### Documentation and comments
 
-Semantically classified `$doc`, `$note` and `$todo` templates are documentation or comment processing. They produce no page fragment. This follows the template's semantic category, not whether its rendered output happens to be empty. The entry remains eligible because the file exists.
+`$doc value` attaches a compile-time String to a following declaration as
+documentation metadata. `$todo value` annotates a following declaration or
+executable statement and is validated without generating runtime work. Both are
+source directives, not template fragments. Only `$note` is a template-comment
+directive. A direct `[$note: ...]` discards its balanced body and contributes
+no output or runtime slot, unlike an ordinary template that emits an empty
+String. `~[$note: ...]` is invalid because a note cannot publish runtime output.
 
-Assigned or returned template values are ordinary values, not direct output. Their containing runtime code follows the normal entry placement rules.
+Assigned or returned template values remain ordinary values, not direct output.
+Their containing runtime code follows normal entry placement rules. See
+@../directives (Directives) for source attachment and stacking.
 
 ### Entry-activated root runtime
 
@@ -28,8 +36,13 @@ The entry file's top-level runtime code becomes a dormant compiler-owned entry. 
 
 Two forms of direct top-level template in `@entry.moth` become page fragments:
 
-- A const fragment uses the `#` prefix before the opening bracket. It folds at compile time and is emitted as static HTML.
-- A runtime fragment uses the plain bracket form without `#`. The entry evaluates it when assembly activates the module, and publication waits until that invocation succeeds.
+- A bare direct `[...]` is a const-required fragment. It must fold and is emitted as static HTML; runtime-dependent content is an error, not a fallback.
+- An explicitly marked direct `~[...]` is a runtime body fragment. It reserves a runtime slot even when its content happens to fold. The entry evaluates it on activation, then publishes it only on success.
+
+`~ [...]` may include horizontal space after `~`, but no newline may separate
+its marker from `[`. The old direct `#[...]` syntax is removed. These fragment
+rules apply only to direct top-level entry templates, not ordinary expression
+or nested templates. Runtime named `$in` destinations are unsupported.
 
 The builder preserves source order between static and runtime fragments. Static fragments remain in the document even when startup fails. Runtime fragments use generated slots, and the entry boundary fills those slots only after successful startup. Failure publishes none of that invocation's runtime fragments. This is not rewind: other side effects do not roll back.
 

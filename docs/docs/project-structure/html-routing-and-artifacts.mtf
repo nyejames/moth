@@ -17,7 +17,7 @@ The root module maps to the project index. A nested directory maps to a nested i
 A directory becomes an HTML entry when it contains `@entry.moth`. An empty file, a static-only file and a metadata-only file all count. A direct named builder contribution is a direct const fragment, so this entry still produces a complete document:
 
 [codeblock, $code "moth":
-    #[$in title:Welcome]
+    [$in title:Welcome]
 ]
 
 One entry directory produces at most one directory-derived route. `@mod.moth` and `@package.moth` never become entries. Imported entries stay dormant.

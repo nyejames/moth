@@ -19,19 +19,23 @@ returned from a function remains a value and does not become a page fragment by 
 
 ### Direct top-level const fragments
 
-Direct const-template fragments are valid in `@entry.moth`. The file's presence already makes the directory entry-eligible, so a metadata-only entry produces a complete page.
+Every bare direct `[...]` fragment in `@entry.moth` is const-required by default.
+It must fold even if an ordinary template expression in the same position would
+be runtime-dependent. Use direct `~[...]` to request a runtime body fragment.
+The file's presence makes its directory entry-eligible, so metadata-only pages
+remain valid. The removed direct `#[...]` spelling has no compatibility alias.
 
 [codeblock, $code "moth":
-    #[$md:
+    [$md:
         # Compile-time heading
     ]
 ]
 
-The direct form in the entry file:
+The bare direct form in the entry file:
 
 - is valid only as top-level entry fragment syntax
-- must fully fold
-- records its position relative to runtime fragments
+- must fully fold, reporting a constant-required diagnostic for runtime dependence
+- records its position relative to explicit `~[...]` runtime fragments
 - is handed to the project builder
 - never becomes HIR runtime code
 
@@ -43,14 +47,14 @@ The HTML builder registers `title`, `description`, `lang`, `favicon`,
 render into the body. A metadata-only `@entry.moth` still produces a complete page.
 
 [codeblock, $code "moth":
-    #[$in title:Moth]
-    #[$in description:A language for creating reliable software]
-    #[$in lang:en]
-    #[$in favicon:[@assets/favicon.svg]]
-    #[$in stylesheets:[@styles/site.css]]
-    #[$in head:<meta name="theme-color" content="#ffffff">]
+    [$in title:Moth]
+    [$in description:A language for creating reliable software]
+    [$in lang:en]
+    [$in favicon:[@assets/favicon.svg]]
+    [$in stylesheets:[@styles/site.css]]
+    [$in head:<meta name="theme-color" content="#ffffff">]
 
-    #[:<main>Hello Moth</main>]
+    [:<main>Hello Moth</main>]
 ]
 
 The HTML destinations are:
@@ -64,7 +68,8 @@ The HTML destinations are:
 - `head`: raw additional head HTML, appended after the builder's dedicated head content
 - the implicit default destination: ordered body fragments
 
-A direct named insert must fold to a compile-time value. A nonconstant
+A direct named insert must fold to a compile-time value. `~[$in name: ...]`
+is not a runtime named builder contribution. A nonconstant
 contribution and a name the builder has not registered are diagnosed at their
 authored source. Nested, stored and aliased inserts remain ordinary template
 composition and never become builder messages. Ordinary template slots are
@@ -97,7 +102,7 @@ Named contributions keep their structural resources live, including on a page wi
 ### Const template `if`
 
 [codeblock, $code "moth":
-    #[if show_heading:
+    [if show_heading:
         Visible heading
     ]
 ]
@@ -114,7 +119,7 @@ body contributes output.
 ### Const template loops
 
 [codeblock, $code "moth":
-    #[loop items |item|:
+    [loop items |item|:
         [item]
     ]
 ]
