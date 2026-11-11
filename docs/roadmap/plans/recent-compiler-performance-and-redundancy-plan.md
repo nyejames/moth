@@ -4,9 +4,9 @@
 
 ```text
 STATUS: ACTIVE - dedicated performance branch
-CURRENT_SLICE: 0 - comparable baseline and ownership review
+CURRENT_SLICE: 1 - one-pass ordering and range work
 BLOCKERS: none
-NEXT_ACTION: measure the current compiler on unchanged inputs, then execute the smallest confirmed cleanup slices
+NEXT_ACTION: implement P1 from the rebased occurrence index, then evaluate P2 and P3 against measured work
 ```
 
 Branch: `perf/recent-compiler-performance`

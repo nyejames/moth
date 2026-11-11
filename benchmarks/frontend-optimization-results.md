@@ -7299,3 +7299,61 @@ from benchmark history, so those historical comparisons do not establish a speed
 The generated fixtures and raw measurements live in ignored `tmp/wrapper-cost/` and
 `tmp/discovery-experiment/`; they are not reproduced by a checked-in harness.
 
+
+## Recent Compiler Performance and Redundancy Follow-up (2026-11-11)
+
+### Baseline identity
+
+- Branch `perf/recent-compiler-performance`, baseline commit `d7fcf7b28`, clean worktree.
+- Host macOS Apple Silicon `6D851D` (Apple M1 Pro, 10 cores, 16 GiB), Darwin `27.0.0` ARM64.
+- Rust `1.99.0` (`b940084d7`), LLVM `23.1.1`, host `aarch64-apple-darwin`.
+- CLI suite builds the release `moth` compiler with `--features timers` and runs with
+  `MOTH_TIMERS=bench`, `MOTH_COUNTERS=off` and `RAYON_NUM_THREADS` unset (default threads).
+- Frontend suite runs in-process in the dev-built xtask with the same timer and counter settings.
+- Read-only evidence schema `moth_benchmark_read_only_v1`, benchmark protocol 4, timing schema 2,
+  one preflight warmup and ten measured iterations per case.
+- Commands: `just bench-check`, `just bench-frontend-check` and `just bench-scaling`. None wrote
+  history or summaries.
+
+### Baseline results
+
+- CLI suite: 74 cases, suite average 23.20 ms, case spread 35.84 ms.
+- Frontend suite: 76 cases, suite average 137.76 ms on `frontend_total_ms`.
+- Scaling: all 14 declared series within budget. The numeric series fitted `n^0.67` to `n^0.97`
+  and generic materialisation fitted `n^1.09` against its `n^1.70` budget.
+
+Representative per-case stage means in milliseconds. Stage metrics are nested and not additive.
+
+| Case | Median | prepare | bind | order | AST | emit | finalise | HIR | borrow initial | borrow converge |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `speed_test_check` | 17.84 | 0.05 | 0.10 | 0.05 | 5.35 | 2.03 | 1.10 | 0.92 | 1.41 | 2.35 |
+| `docs_check` | 161.86 | 19.84 | 12.16 | 0.55 | 89.27 | 23.56 | 3.26 | 1.58 | 0.97 | 0.08 |
+| `template_stress_check` | 9.71 | 0.04 | 0.07 | 0.02 | 1.32 | 0.44 | 0.22 | 0.20 | 0.28 | 0.43 |
+| `default_parameters_32_check` | 9.02 | 0.03 | 0.05 | 0.02 | 1.11 | 0.47 | 0.26 | 0.32 | 0.30 | 0.34 |
+| `import_fanout_check` | 12.73 | 0.68 | 0.49 | 0.04 | 1.40 | 0.39 | 0.24 | 0.35 | 0.31 | 0.26 |
+| `module_graph_check` | 10.20 | 0.48 | 0.22 | 0.02 | 0.98 | 0.23 | 0.14 | 0.21 | 0.19 | 0.20 |
+
+The docs workload is dominated by AST environment construction (62.16 ms), of which constant
+header resolution is 55.79 ms. Header ordering and range work is a small part of `bind` and is not
+a credible explanation for a suite-wide regression.
+
+### Historical comparison
+
+The `2026-11-11T13:52` recorded run on `84923ba4` remains historical evidence; it is not a
+reproducible benchmark claim. It used the same host, protocol and timing schema.
+
+- `f94100ae` to `84923ba4`: 24 of 74 cases changed source fingerprints, covering 18 of 68
+  workloads. The 50 comparable cases moved from a 21.33 ms to a 23.05 ms suite average, with
+  2 faster and 48 slower per-case medians, a +1.07 ms median delta and a +96.09 ms sum of
+  median deltas. This reproduces the reported regression shape against that earlier checkpoint.
+- `84923ba4` to `d7fcf7b28`: 73 of 74 workload fingerprints match; only `docs` source bytes
+  changed, so its case is excluded. The suite average moved from 23.05 ms to 23.20 ms. Per-case
+  medians gave 29 faster and 44 slower, a +0.093 ms median delta and a +20.39 ms sum. One case
+  exceeded twice the combined standard deviation: `numeric_generic_failure_chain_512_check`
+  (+8.54 ms), dominated by `frontend.borrow.converge` (+8.25 ms). Other apparent movements,
+  including `speed_test_check` (+1.57 ms with 2.45 ms standard deviation), are within noise.
+
+The small reported regression is therefore not reproducible at suite level on the current
+checkpoint. The only two-sigma movement belongs to borrow convergence on a synthetic generic
+failure chain, which the production borrow performance owner tracks. Confirmed cleanups in this
+follow-up are work and data-movement reductions; a wall-time win is not claimed for them.
