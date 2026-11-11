@@ -41,23 +41,10 @@ above is complete.
 
 ### Keep local slots local
 
-[codeblock, $code "moth":
-    card #= [$html:
-        <article class="card">
-            <h2>[$slot title]</h2>
-            <div>[$slot]</div>
-        </article>
-    ]
-
-    introduction #= [card:
-        [$in title:Introduction]
-        Learn how to define a function.
-    ]
-]
-
-Here `title` belongs to the `card` receiving template. An imported or
-reused card does not gain permission to insert into an enclosing page's
-builder slots. This keeps deeply nested composition predictable.
+The Basic example's `card` owns its named `title` slot. An imported
+or reused card cannot reach an enclosing page's builder slots. That
+parent-only routing rule keeps deep composition predictable and prevents
+an intermediate component from silently changing where inserts go.
 
 Const functions can compose several finished `HtmlPart` values across
 file and module boundaries. They evaluate under the compiler's constant

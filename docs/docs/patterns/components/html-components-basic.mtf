@@ -57,15 +57,52 @@ A small page can skip `html_page()` and write its main content directly:
 Use the abstraction where it saves work. A component system should not make
 a simple page harder to read.
 
-### Reuse a component
+### Construct a component
 
-A sidebar component can return the same markup for many pages with different
-headings. Its implementation lives in a shared package, alongside
-`sidebar.css`. The stylesheet is a tracked resource, not a string URL
-assembled by the component.
+The sidebar can be a const function in the shared component package.
+Its return type says what the page receives:
 
-Components may also contain local templates with named `$slot`s. A
-`$in` contribution fills the receiving template's immediate slots. It
-does not search ancestors or send implicit builder messages.
+[codeblock, $code "moth":
+    -- components/sidebar.moth
+    -- Proposed @html type and const function
 
-See @../../templates (Templates) for slot and wrapper composition.
+    @html HtmlPart
+
+    docs_sidebar #|heading String| -> HtmlPart:
+        return HtmlPart(
+            body = [$html:
+                <aside class="docs-sidebar">
+                    <h2>[$escape_html:[heading]]</h2>
+                </aside>
+            ],
+            stylesheets = [@sidebar.css]
+        )
+    ;
+]
+
+A different page can call `docs_sidebar("Reference")` without repeating
+the CSS dependency or rendering logic. The returned stylesheet is a
+tracked resource, not a guessed URL.
+
+### Use named template slots
+
+A smaller helper can stay a template rather than become a new type:
+
+[codeblock, $code "moth":
+    card #= [$html:
+        <article class="card">
+            <h2>[$slot title]</h2>
+            [$slot]
+        </article>
+    ]
+
+    [card:
+        [$in title:Functions]
+        Body content
+    ]
+]
+
+The `title` insert fills the card's immediate receiver. It does not
+search ancestor templates or send a builder message.
+
+See @../../templates (Templates) for other slot and wrapper forms.
